@@ -1,32 +1,39 @@
-# Vertical-Lander-GNC 
+Vertical-Lander-GNC
+一个基于 C++ 的物理模拟和飞行控制系统，用于垂直火箭着陆，灵感来自 SpaceX 星舰 (Starship)。
 
-A C++ based physics simulation and flight control system for vertical rocket landing, inspired by SpaceX Starship.
+项目概览
+本项目模拟了火箭助推器着陆所需的 制导、导航与控制 (GNC) 逻辑。它实现了：
 
-##  Project Overview
-This project simulates the **Guidance, Navigation, and Control (GNC)** logic required to land a rocket booster. It implements:
-* **Physics Engine:** Simulates gravity, atmospheric pressure, variable mass (fuel consumption), and thrust.
-* **PID Control:** Uses Proportional Control loop for the "Fine Landing" phase.
-* **Suicide Burn Algorithm:** Calculates real-time stopping distance for efficient deceleration.
-* **State Machine:** Manages flight stages (Ascend, Coast, Suicide Burn, Soft Landing).
+物理引擎： 模拟重力、大气压、变质量（燃料消耗）和推力。
 
-## 🛠️ Technology Stack
-* **Language:** C++ (Standard 11/17)
-* **Core Concepts:** Kinematics, Control Theory, OOP.
-* **Zero Dependencies:** Pure C++ implementation, runs on any console.
+PID 控制： 在“精准着陆”阶段使用比例控制 (Proportional Control) 回路。
 
-## 📉 The Journey (Failures & Fixes)
-Development wasn't a straight line. Here is how the algorithm evolved:
+自杀燃烧 (Suicide Burn) 算法： 实时计算停止距离以实现高效减速。
 
-### Attempt 1: The "Too Late" Burn 
-* **Issue:** Calculated braking distance without considering thrust-to-weight ratio changes due to pressure.
-* **Result:** Impact at -415 m/s (RUD).
+状态机： 管理飞行阶段（上升、滑行、自杀燃烧、软着陆）。
 
-### Attempt 2: The "Oscillation" 
-* **Issue:** Bang-Bang control (Full throttle / Zero throttle) caused severe oscillation near the ground.
-* **Result:** Impact at -32 m/s.
+🛠️ 技术栈
+语言： C++ (标准 11/17)
 
-### Final Success: The "Kiss Landing" 
-* **Solution:** Implemented continuous throttle modulation (P-Control) targeting specific descent velocities based on altitude.
-* **Result:** Touchdown velocity **-0.49 m/s**.
+核心概念： 运动学、控制理论、面向对象编程 (OOP)。
 
+零依赖： 纯 C++ 实现，可在任何控制台上运行。
+
+📉 开发历程（失败与修复）
+开发过程并非一帆风顺。以下是算法的演变过程：
+
+尝试 1：“太晚”的燃烧
+问题： 在计算制动距离时，未考虑因气压变化导致的推重比变化。
+
+结果： 以 -415 m/s 的速度撞击（RUD/计划外快速拆解）。
+
+尝试 2：“震荡”
+问题： 使用 Bang-Bang 控制（全油门 / 零油门）导致在接近地面时产生剧烈震荡。
+
+结果： 以 -32 m/s 的速度撞击。
+
+最终成功：“亲吻式”着陆
+解决方案： 实施了连续油门调节（P-Control），根据高度瞄准特定的下降速度。
+
+结果： 着陆速度 -0.49 m/s。
 
