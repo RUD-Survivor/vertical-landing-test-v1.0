@@ -29,7 +29,4 @@ Development wasn't a straight line. Here is how the algorithm evolved:
 * **Solution:** Implemented continuous throttle modulation (P-Control) targeting specific descent velocities based on altitude.
 * **Result:** Touchdown velocity **-0.49 m/s**.
 
-##  How to Run
-```bash
-g++ main.cpp -o starship
-./starship
+
