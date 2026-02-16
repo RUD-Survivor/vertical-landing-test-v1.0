@@ -3,5 +3,5 @@
     <Platform Name="x64" />
     <Platform Name="x86" />
   </Configurations>
-  <Project Path="vertical-landing-test v1.0/vertical-landing-test v1.0.vcxproj" />
+  <Project Path="vertical-landing-test v1.0/vertical-landing-test v1.0.vcxproj" Id="b35344e8-01dd-4e75-b1e6-b8129927f6fa" />
 </Solution>

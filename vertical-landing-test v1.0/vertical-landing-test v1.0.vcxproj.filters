@@ -15,7 +15,10 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="..\..\2026-2-15 C++ prac\2026-2-15 C++ prac\project.cpp">
+    <ClCompile Include="..\src\project.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\glad.c">
       <Filter>源文件</Filter>
     </ClCompile>
   </ItemGroup>
