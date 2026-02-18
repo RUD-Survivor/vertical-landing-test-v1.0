@@ -388,6 +388,36 @@ public:
         else {
             altitude = current_alt;
         }
+        // ... 在 Burn 函数末尾 ...
+
+        // 角运动 (I * alpha = Torque)
+         moment_of_inertia = 50000.0;
+
+        // 【物理升级】力矩不再是凭空产生的，而是推力矢量产生的
+        // 假设喷管最大能偏转 5度 (0.087 rad)
+        // PID 输出的 torque_cmd 现在代表“喷管偏转百分比 (-1.0 到 1.0)”
+
+        // 如果引擎没开 (thrust_power=0)，就没有控制力矩 (RCS除外)
+        // 这里模拟：主引擎推力 * 力臂(20米) * sin(喷管角度)
+        double gimbal_torque = 0;
+        if (thrust_power > 0) {
+            // 限制 PID 输出在 -1 到 1 之间作为喷管指令
+            double gimbal_cmd = max(-1.0, min(1.0, torque_cmd / 10000.0)); // 归一化
+            double max_gimbal_angle = 0.1; // 约 5.7度
+
+            // 力矩 = 推力 * sin(偏转角) * 质心距离
+            gimbal_torque = thrust_power * sin(gimbal_cmd * max_gimbal_angle) * (height / 2);
+        }
+
+        // 如果想保留原来的简单逻辑，直接用下面这一行覆盖上面的 if 块：
+        // double final_torque = torque_cmd; 
+
+        // 使用简单逻辑（直接改大PID）是最快见效的：
+        double final_torque = torque_cmd;
+
+        ang_accel = (final_torque + aero_torque) / moment_of_inertia;
+        ang_vel += ang_accel * dt;
+        angle += ang_vel * dt;
     }
 
     bool is_Flying() {
@@ -531,6 +561,7 @@ public:
 
     // 手动发射
     void ManualLaunch() { if (status == PRE_LAUNCH) { status = ASCEND; } }
+
 };
 
 // ==========================================
