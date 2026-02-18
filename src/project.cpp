@@ -137,6 +137,24 @@ public:
             addVertex(cx + radius * cos(theta2), cy + radius * sin(theta2), r, g, b);
         }
     }
+
+    void addEarthWithContinents(float cx, float cy, float radius, float cam_angle) {
+        int segments = 120;
+        for (int i = 0; i < segments; i++) {
+            // 2. 在这里加上 cam_angle 偏移！
+            float theta1 = 2.0f * PI * float(i) / float(segments) + cam_angle;
+            float theta2 = 2.0f * PI * float(i + 1) / float(segments) + cam_angle;
+
+            float r, g, b;
+            if ((i / 10) % 2 == 0) { r = 0.1f; g = 0.4f; b = 0.8f; } // 海洋
+            else { r = 0.2f; g = 0.6f; b = 0.2f; } // 大陆
+
+            addVertex(cx, cy, r, g, b);
+            addVertex(cx + radius * cos(theta1), cy + radius * sin(theta1), r, g, b);
+            addVertex(cx + radius * cos(theta2), cy + radius * sin(theta2), r, g, b);
+        }
+    }
+    
     void endFrame() {
         if (vertices.empty()) return;
         glUseProgram(shaderProgram); glBindVertexArray(VAO); glBindBuffer(GL_ARRAY_BUFFER, VBO);
@@ -225,7 +243,28 @@ public:
     double getAltitude() const { return altitude; }
     double getThrust() const { return thrust_power; }
     double getVelocityMag() const { return sqrt(vx * vx + vy * vy); }
+    // 实时计算远地点(Apoapsis)和近地点(Periapsis)
+    void getOrbitParams(double& apoapsis, double& periapsis) {
+        double r = sqrt(px * px + py * py);
+        double v_sq = vx * vx + vy * vy;
+        double mu = G0 * EARTH_RADIUS * EARTH_RADIUS; // 标准引力参数
 
+        double energy = v_sq / 2.0 - mu / r; // 轨道比能
+        double h = px * vy - py * vx;        // 比角动量
+
+        double e_sq = 1.0 + 2.0 * energy * h * h / (mu * mu); // 离心率平方
+        double e = (e_sq > 0) ? sqrt(e_sq) : 0;
+
+        if (energy >= 0) { // 逃逸轨道 (已经飞出地球引力了)
+            apoapsis = 999999999;
+            periapsis = (h * h / mu) / (1.0 + e) - EARTH_RADIUS;
+        }
+        else { // 闭合椭圆轨道
+            double a = -mu / (2.0 * energy); // 半长轴
+            apoapsis = a * (1.0 + e) - EARTH_RADIUS;
+            periapsis = a * (1.0 - e) - EARTH_RADIUS;
+        }
+    }
     // --- 物理计算 ---
     // 1. 重力随高度变化 (平方反比定律)
     double get_gravity(double r) {
@@ -245,7 +284,8 @@ public:
 
     void Report_Status()
     {
-      
+        double apo, peri;
+        getOrbitParams(apo, peri);
         cout << "\n----------------------------------" << endl;
         cout << ">>> [MISSION CONTROL]: " << mission_msg << " <<<" << endl;
         cout << "----------------------------------" << endl;
@@ -254,6 +294,8 @@ public:
         cout << "[Angle]: " << angle * 180.0 / PI << " deg | [Throttle]: " << throttle * 100 << "%" << endl;
         cout << "[Ground_Horz_Vel]: " << local_vx << " m/s | [Orbit_Vel]: " << getVelocityMag() << " m/s" << endl;
         cout << "[Thrust]: " << thrust_power / 1000 << " kN | [Fuel]: " << fuel << " kg" << endl;
+        cout << "[Apoapsis]: " << apo / 1000.0 << " km | [Periapsis]: " << peri / 1000.0 << " km" << endl;
+        cout << "[Ground_Horz_Vel]: " << local_vx << " m/s | [Orbit_Vel]: " << getVelocityMag() << " m/s" << endl;
         cout << "[Status]: " << status << endl;
     }
 
@@ -476,7 +518,8 @@ public:
             if (mission_phase == 0) {
                 // 阶段 0：发射与重力转弯 (Gravity Turn)
                 throttle = 1.0;
-
+                double apo, peri;
+                getOrbitParams(apo, peri);
                 // 根据高度平滑控制倾角：1km起偏，100km时完全压平(-90度)
                 double target_pitch = 0;
                 if (altitude > 1000 && altitude < 100000) {
@@ -488,7 +531,7 @@ public:
                 torque_cmd = pid_att.update(target_pitch, angle, dt);
 
                 // 判断是否达成第一宇宙速度 (7.9 km/s)
-                if (altitude > 100000 && getVelocityMag() > 7900) {
+                if (altitude > 100000 && peri > 100000) {
                     mission_phase = 1;
                     mission_msg= "ORBIT ACHIEVED! MECO." ;
                 }
@@ -500,7 +543,7 @@ public:
 
                 mission_timer += dt;
                 // 滑行 40 秒 (足够让你欣赏地球弯曲的弧线和巨大的物理距离)
-                if (mission_timer > 40.0) {
+                if (mission_timer > 4000) {
                     mission_phase = 2;
                     mission_msg= "DE-ORBIT SEQUENCE START." ;
                 }
@@ -746,8 +789,9 @@ int main()
             return (float)((ry - rocket_r) * scale + cy); // 相对火箭平移
             };
 
-        // 1. 画地球核心圆
-        renderer->addCircle(toScreenX(0, 0), toScreenY(0, 0), EARTH_RADIUS * scale, 0.1f, 0.4f, 0.8f);
+       
+        // 找到这行，把 cam_angle 传进去
+        renderer->addEarthWithContinents(toScreenX(0, 0), toScreenY(0, 0), EARTH_RADIUS * scale, cam_angle);
 
         // 2. 画局部平坦地表 (解决低空多边形间隙，永远在火箭正下方)
         float ground_y = (float)((EARTH_RADIUS - rocket_r) * scale + cy);
