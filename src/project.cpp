@@ -434,7 +434,7 @@ public:
                 altitude = 0; px = 0; py = EARTH_RADIUS;
 
                 if (status != PRE_LAUNCH) {
-                    if (abs(velocity) > 10 || abs(vx) > 10) {
+                    if (abs(velocity) > 10 || abs(local_vx) > 10) {
                         status = CRASHED;
                         cout << ">> CRASH! Impact Vel: " << velocity << endl;
                     }
@@ -506,72 +506,94 @@ public:
         double current_total_mass = mass + fuel;
         double current_g = get_gravity(sqrt(px * px + py * py));
 
-        // 关键改动 A：计算刹车距离时，假设引擎效率打折 (0.75)
         // 因为我们预判接下来会大幅侧身，垂直分力不足 100%
-        double conservative_thrust = max_thrust_vac * 0.75;
+        double conservative_thrust = max_thrust_vac * 0.95;
         double max_accel_avail = (conservative_thrust / current_total_mass) - current_g;
 
         // 2. 状态机逻辑
 
       
+        
         if (status == ASCEND) {
+            double apo, peri;
+            getOrbitParams(apo, peri); // 获取实时开普勒轨道参数
+
             if (mission_phase == 0) {
-                // 阶段 0：发射与重力转弯 (Gravity Turn)
+                // 阶段 0：上升与重力转弯 (抬高远地点)
                 throttle = 1.0;
-                double apo, peri;
-                getOrbitParams(apo, peri);
-                // 根据高度平滑控制倾角：1km起偏，100km时完全压平(-90度)
+                // 平滑重力转弯
                 double target_pitch = 0;
-                if (altitude > 1000 && altitude < 100000) {
-                    target_pitch = -(altitude - 1000) / 99000.0 * (PI / 2.0);
-                }
-                else if (altitude >= 100000) {
-                    target_pitch = -PI / 2.0; // 水平冲刺轨道速度
+                if (altitude > 1000) {
+                    target_pitch = -min(1.2, (altitude - 1000) / 80000.0 * 1.57);
                 }
                 torque_cmd = pid_att.update(target_pitch, angle, dt);
 
-                // 判断是否达成第一宇宙速度 (7.9 km/s)
-                if (altitude > 100000 && peri > 100000) {
+                // 目标远地点 150km 达成，立刻关机！
+                if (apo > 150000) {
                     mission_phase = 1;
-                    mission_msg= "ORBIT ACHIEVED! MECO." ;
+                    mission_msg = "MECO! COASTING TO APOAPSIS.";
                 }
             }
             else if (mission_phase == 1) {
-                // 阶段 1：在轨滑行 (Coast)
+                // 阶段 1：无动力滑行至远地点
                 throttle = 0;
-                torque_cmd = pid_att.update(-PI / 2.0, angle, dt); // 保持水平姿态
+                torque_cmd = pid_att.update(-PI / 2.0, angle, dt); // 飞船改平
 
-                mission_timer += dt;
-                // 滑行 40 秒 (足够让你欣赏地球弯曲的弧线和巨大的物理距离)
-                if (mission_timer > 4000) {
+                // 当火箭爬升到接近远地点 (垂直速度极小) 时，准备圆轨
+                if (altitude > 130000 && velocity < 50) {
                     mission_phase = 2;
-                    mission_msg= "DE-ORBIT SEQUENCE START." ;
+                    mission_msg = "CIRCULARIZATION BURN STARTED!";
                 }
+                // 保底：如果还没到 130km 就往下掉了，强行切入圆轨
+                if (velocity < -50) mission_phase = 2;
             }
             else if (mission_phase == 2) {
-                // 阶段 2：脱轨点火 (De-orbit Burn)
-                // 精准的逆向喷射 (Retrograde)：把屁股对准当前速度方向
+                // 阶段 2：远地点圆轨点火 (拉高近地点)
+                throttle = 1.0;
+                torque_cmd = pid_att.update(-PI / 2.0, angle, dt); // 死死按住水平方向喷射
+
+                // 当近地点突破 140km，说明轨道完美变圆！
+                if (peri > 140000) {
+                    mission_phase = 3;
+                    mission_timer = 0;
+                    mission_msg = "ORBIT CIRCULARIZED! CRUISING.";
+                }
+            }
+            else if (mission_phase == 3) {
+                // 阶段 3：在轨巡航
+                throttle = 0;
+                torque_cmd = pid_att.update(-PI / 2.0, angle, dt);
+
+                mission_timer += dt;
+                // 绕轨巡航 6000 秒 (可开 1000倍速 快进)
+                if (mission_timer > 6000.0) {
+                    mission_phase = 4;
+                    mission_msg = "DE-ORBIT SEQUENCE START.";
+                }
+            }
+            else if (mission_phase == 4) {
+                // 阶段 4：脱轨点火 (降低近地点)
                 double vel_angle = atan2(vy, vx);
-                double align_angle = (vel_angle + PI) - atan2(py, px);
+                double align_angle = (vel_angle + PI) - atan2(py, px); // 逆向对准
                 while (align_angle > PI) align_angle -= 2 * PI;
                 while (align_angle < -PI) align_angle += 2 * PI;
 
                 torque_cmd = pid_att.update(align_angle, angle, dt);
 
-                // 只有当姿态大致对准时，才猛烈开火减速
                 if (abs(angle - align_angle) < 0.1) throttle = 1.0;
                 else throttle = 0.0;
 
-                // 速度降到 3000 m/s 以下，说明已经切入大气层弹道
-                if (getVelocityMag() < 6000) {
+                // 目标脱轨轨道：让近地点砸进 30km 的浓密大气层
+                if (peri < 30000) {
                     throttle = 0;
-                    status = DESCEND; // 关键移交：交接给下降降落算法
+                    status = DESCEND; // 移交着陆系统
                     pid_vert.reset();
-                    mission_msg= ">>  RE-ENTRY CONFIRMED. HANDOVER TO LANDING SYSTEM.";
+                    mission_msg = ">> RE-ENTRY BURN COMPLETE. AEROBRAKING INITIATED.";
                 }
             }
             return;
         }
+       
         
 
         // --- 下落阶段 ---
@@ -579,16 +601,16 @@ public:
 
         // 计算刹车距离
         double stop_dist = 0;
+        double total_v = getVelocityMag();
         if (velocity < 0) {
-            // 使用打折后的加速度计算，这会让火箭更早点火！
-            stop_dist = (velocity * velocity) / (2 * max_accel_avail);
+            stop_dist = (total_v * total_v) / (2 * max_accel_avail);
         }
 
         // 触发逻辑
         bool need_burn = false;
         if (suicide_burn_locked) need_burn = true;
-        // 安全系数可以回调到 1.1 了，因为 max_accel 已经很保守了
-        else if (altitude < stop_dist * 1.1 + 30.0 && velocity < -10&&altitude<15000) {
+       
+        else if (altitude < stop_dist * 1.0 + 10.0 && velocity < -10&&altitude<3500) {
             suicide_burn_locked = true;
             need_burn = true;
             cout << ">> [AUTOPILOT] IGNITION! Dist: " << altitude << " (StopDist: " << stop_dist << ")" << endl;
@@ -608,11 +630,21 @@ public:
 
             // --- 1. 垂直油门 (能量制导) ---
             if (altitude > 10.0) {
-                double target_depth = 2.0;
-                double required_decel = (velocity * velocity) / (2.0 * (altitude + target_depth));
-                // 这里恢复用 100% 推力去执行，如果还需要更猛，PID会补救
-                double required_thrust = current_total_mass * (current_g * 1.05 + required_decel);
-                throttle = required_thrust / max_thrust_vac;
+             
+                    // 实时计算当前速度下，引擎需要的真实刹车距离
+                    double current_ideal_dist = (total_v * total_v) / (2.0 * max_accel_avail);
+
+                    // 【关键逻辑】：如果速度反向朝上了，或者由于空气阻力导致高度“富裕”太多
+                    if (velocity >= 0 || altitude > current_ideal_dist + 5.0) {
+                        throttle = 0.0; // 绝对不浪费燃料！立刻关火，让它往下掉！
+                    }
+                    else {
+                        // 贴近生死线，踩死油门
+                        double required_decel = (total_v * total_v) / (2.0 * max(1.0, altitude));
+                        double required_thrust = current_total_mass * (current_g + required_decel);
+                        throttle = required_thrust / max_thrust_vac;
+                    }
+              
             }
             else {
                 // 末端软着陆
@@ -639,16 +671,22 @@ public:
                 // 高度 200m 以上：允许 45度 (0.8)
                 // 高度 0m：允许 0度
                 // 中间线性过渡
-                double max_tilt_limit = 0.8; // 默认最大
-                if (altitude < 200.0) {
-                    // 随着高度降低，像漏斗一样收紧角度限制
-                    // alt=200 -> limit=0.8
-                    // alt=0   -> limit=0.0
-                    max_tilt_limit = (altitude / 200.0) * 0.8;
+                double max_tilt_limit = 0.8; // 默认最大 45度
+                if (altitude < 50.0) {
+                    // 基础收紧
+                    max_tilt_limit = (altitude / 50.0) * 0.8;
+                    // 【关键修改】：如果横向速度还很大，允许火箭突破限制，大角度救场！
+                    max_tilt_limit += abs(local_vx) * 0.03;
+                    if (max_tilt_limit > 0.8) max_tilt_limit = 0.8;
                 }
 
-                // 确保至少留一点点控制权 (5度)，否则没法最后修正
-                if (max_tilt_limit < 0.08 && altitude > 2.0) max_tilt_limit = 0.08;
+                // 确保至少留一点点控制权
+                if (max_tilt_limit < 0.08 && altitude > 5.0) max_tilt_limit = 0.08;
+
+                // 只有到了最后 10 米，才真正开始强行立正 (防止着陆腿折断)
+                if (altitude < 10.0) {
+                    max_tilt_limit = min(max_tilt_limit, 0.15); // 最大不到 8度
+                }
 
                 // 应用限制
                 target_angle = raw_target;
@@ -688,6 +726,69 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
 
 Renderer* renderer;
 
+// 根据当前状态，计算并画出预测轨道
+void drawOrbit(Renderer* renderer, double px, double py, double vx, double vy, double scale, float cx, float cy, double cam_angle) {
+    double r_mag = sqrt(px * px + py * py);
+    double mu = 9.80665 * 6371000.0 * 6371000.0; // 地球标准引力参数
+
+    double h = px * vy - py * vx; // 轨道角动量
+    if (abs(h) < 1.0) return;
+
+    // 计算偏心率矢量 (e)
+    double ex = (vy * h) / mu - px / r_mag;
+    double ey = (-vx * h) / mu - py / r_mag;
+    double e_mag = sqrt(ex * ex + ey * ey);
+
+    double p = (h * h) / mu; // 半通径
+    double omega = atan2(ey, ex); // 近地点幅角
+
+    int segments = 200; // 轨道分段渲染
+    float prev_x = 0, prev_y = 0;
+    bool first = true;
+
+    double sin_c = sin(cam_angle);
+    double cos_c = cos(cam_angle);
+
+    for (int i = 0; i <= segments; i++) {
+        double nu = 2.0 * PI * i / segments; // 真近点角
+        double denom = 1.0 + e_mag * cos(nu - omega);
+        if (denom <= 0.05) continue; // 忽略逃逸轨道的无限远端
+
+        double r_nu = p / denom;
+        if (r_nu > EARTH_RADIUS * 5) continue; // 太远的就不画了
+
+        double x_orb = r_nu * cos(nu);
+        double y_orb = r_nu * sin(nu);
+
+        // 旋转映射到摄像机屏幕
+        double rx = x_orb * cos_c - y_orb * sin_c;
+        double ry = x_orb * sin_c + y_orb * cos_c;
+        float screen_x = (float)(rx * scale + cx);
+        float screen_y = (float)((ry - r_mag) * scale + cy);
+
+        if (!first) {
+            // 大气层内或地下显示红色警告，安全轨道显示为黄色
+            float r_col = 1.0f, g_col = 0.8f, b_col = 0.0f;
+            if (r_nu < EARTH_RADIUS + 80000.0) { r_col = 1.0f; g_col = 0.0f; b_col = 0.0f; }
+
+            // 画出预测轨迹线
+            float thickness = max(0.002f, (float)(2000.0 * scale));
+            float dx = screen_x - prev_x, dy = screen_y - prev_y;
+            float len = sqrt(dx * dx + dy * dy);
+            if (len > 0) {
+                float nx = -dy / len * thickness, ny = dx / len * thickness;
+                renderer->addVertex(prev_x + nx, prev_y + ny, r_col, g_col, b_col);
+                renderer->addVertex(prev_x - nx, prev_y - ny, r_col, g_col, b_col);
+                renderer->addVertex(screen_x + nx, screen_y + ny, r_col, g_col, b_col);
+
+                renderer->addVertex(screen_x + nx, screen_y + ny, r_col, g_col, b_col);
+                renderer->addVertex(prev_x - nx, prev_y - ny, r_col, g_col, b_col);
+                renderer->addVertex(screen_x - nx, screen_y - ny, r_col, g_col, b_col);
+            }
+        }
+        prev_x = screen_x; prev_y = screen_y; first = false;
+    }
+}
 int main()
 {
     glfwInit();
@@ -790,9 +891,8 @@ int main()
             };
 
        
-        // 找到这行，把 cam_angle 传进去
         renderer->addEarthWithContinents(toScreenX(0, 0), toScreenY(0, 0), EARTH_RADIUS * scale, cam_angle);
-
+        drawOrbit(renderer, baba1.px, baba1.py, baba1.vx, baba1.vy, scale, cx, cy, cam_angle);
         // 2. 画局部平坦地表 (解决低空多边形间隙，永远在火箭正下方)
         float ground_y = (float)((EARTH_RADIUS - rocket_r) * scale + cy);
         renderer->addRect(cx, ground_y - 2000.0f * scale, 100000.0f * scale, 4000.0f * scale, 0.2f, 0.6f, 0.2f);
