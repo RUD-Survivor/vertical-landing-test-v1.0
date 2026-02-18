@@ -32,24 +32,23 @@ struct PID {
     double integral = 0;
     double prev_error = 0;
 
-    // 增加积分限幅，防止油门锁死
+
     double integral_limit = 50.0;
 
     double update(double target, double current, double dt) {
         double error = target - current;
         integral += error * dt;
 
-        // --- 抗饱和 (Anti-Windup) ---
         if (integral > integral_limit) integral = integral_limit;
         if (integral < -integral_limit) integral = -integral_limit;
-        // ---------------------------
+        
 
         double derivative = (error - prev_error) / dt;
         prev_error = error;
         return kp * error + ki * integral + kd * derivative;
     }
 
-    // 增加重置函数，着陆瞬间清空误差
+    
     void reset() { integral = 0; prev_error = 0; }
 };
 
@@ -96,7 +95,6 @@ public:
 
         glGenVertexArrays(1, &VAO); glGenBuffers(1, &VBO);
         glBindVertexArray(VAO); glBindBuffer(GL_ARRAY_BUFFER, VBO);
-        // 预分配更大的显存以支持圆形地球绘制
         glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 20000, NULL, GL_DYNAMIC_DRAW);
         glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
         glEnableVertexAttribArray(0);
@@ -141,7 +139,7 @@ public:
     void addEarthWithContinents(float cx, float cy, float radius, float cam_angle) {
         int segments = 120;
         for (int i = 0; i < segments; i++) {
-            // 2. 在这里加上 cam_angle 偏移！
+           
             float theta1 = 2.0f * PI * float(i) / float(segments) + cam_angle;
             float theta2 = 2.0f * PI * float(i + 1) / float(segments) + cam_angle;
 
@@ -205,7 +203,7 @@ public:
 
 public:
     enum State { PRE_LAUNCH, ASCEND, DESCEND, LANDED, CRASHED } status;
-    string mission_msg = "SYSTEM READY"; // 新增：持久化任务消息
+    string mission_msg = "SYSTEM READY"; 
     int stages;
     int mission_phase = 0; // 记录当前太空任务阶段
     double mission_timer = 0; // 任务计时器
@@ -227,11 +225,11 @@ public:
         this->height = height;
         this->stages = stages;
         this->specific_impulse = specific_impulse;
-        // 注意：传入的 fuel_consumption_rate 视为“满油门消耗率”
+        
         this->cosrate = fuel_consumption_rate;
         this->nozzle_area = nozzle_area;
 
-        this->fuel_consumption_rate = 0; // 初始油门为0
+        this->fuel_consumption_rate = 0; 
         this->thrust_power = 0;
         this->throttle = 0;
         this->torque_cmd = 0;
@@ -255,7 +253,7 @@ public:
         double e_sq = 1.0 + 2.0 * energy * h * h / (mu * mu); // 离心率平方
         double e = (e_sq > 0) ? sqrt(e_sq) : 0;
 
-        if (energy >= 0) { // 逃逸轨道 (已经飞出地球引力了)
+        if (energy >= 0) { // 逃逸轨道 
             apoapsis = 999999999;
             periapsis = (h * h / mu) / (1.0 + e) - EARTH_RADIUS;
         }
@@ -403,7 +401,7 @@ public:
         ang_vel += ang_accel * dt;
         angle += ang_vel * dt;
 
-        // D. 更新兼容旧变量
+    
        
    
         // 1. 真实垂直速度 (径向，正为向上)
@@ -420,10 +418,10 @@ public:
         double current_alt = current_r - EARTH_RADIUS;
 
         if (current_alt <= 0.0) {
-            // 撞地了，但要看看是不是在发射
+            
             if (status == ASCEND) {
                 // 如果是上升状态，说明只是推力还没把火箭推起来 (TWR < 1)
-                // 此时强制锁在地面，不判输
+                // 此时强制锁在地面
                 px = 0; py = EARTH_RADIUS;
                 vx = 0; vy = 0;
                 altitude = 0;
@@ -468,17 +466,17 @@ public:
         double gimbal_torque = 0;
         if (thrust_power > 0) {
             // 限制 PID 输出在 -1 到 1 之间作为喷管指令
-            double gimbal_cmd = max(-1.0, min(1.0, torque_cmd / 10000.0)); // 归一化
+            double gimbal_cmd = max(-1.0, min(1.0, torque_cmd / 10000.0)); 
             double max_gimbal_angle = 0.1; // 约 5.7度
 
             // 力矩 = 推力 * sin(偏转角) * 质心距离
             gimbal_torque = thrust_power * sin(gimbal_cmd * max_gimbal_angle) * (height / 2);
         }
 
-        // 如果想保留原来的简单逻辑，直接用下面这一行覆盖上面的 if 块：
+     
         // double final_torque = torque_cmd; 
 
-        // 使用简单逻辑（直接改大PID）是最快见效的：
+        
         double final_torque = torque_cmd;
 
         ang_accel = (final_torque + aero_torque) / moment_of_inertia;
@@ -663,7 +661,7 @@ public:
                 max_safe_tilt = min(max_safe_tilt, base_tilt + rescue_tilt);
             }
 
-            // 只有当高度极低 (<2米) 且横向速度已经被杀干净 (<1m/s) 时，才真正立正触地！
+            // 只有当高度<2米且横向速度<1m/s 时，才真正立正触地！
             if (altitude < 2.0 && abs(local_vx) < 1.0) max_safe_tilt = 0.0;
 
             if (target_angle > max_safe_tilt) target_angle = max_safe_tilt;
@@ -871,19 +869,19 @@ int main()
        
         renderer->addEarthWithContinents(toScreenX(0, 0), toScreenY(0, 0), EARTH_RADIUS * scale, cam_angle);
         drawOrbit(renderer, baba1.px, baba1.py, baba1.vx, baba1.vy, scale, cx, cy, cam_angle);
-        // 2. 画局部平坦地表 (解决低空多边形间隙，永远在火箭正下方)
+        // 2. 画局部平坦地表 (永远在火箭正下方)
         float ground_y = (float)((EARTH_RADIUS - rocket_r) * scale + cy);
         renderer->addRect(cx, ground_y - 2000.0f * scale, 100000.0f * scale, 4000.0f * scale, 0.2f, 0.6f, 0.2f);
 
-        // 3. 画原发射台 (注意：它现在会绕着地球转动，且自身也会倾斜)
+        // 3. 画原发射台 
         renderer->addRotatedRect(toScreenX(0, EARTH_RADIUS), toScreenY(0, EARTH_RADIUS),
             100.0f * scale, 50.0f * scale, (float)-cam_angle, 0.8f, 0.8f, 0.8f);
 
-        // 4. 画火箭主体 (尺寸动态限制，防止高空缩成原子)
+        // 4. 画火箭主体 
         float w = max(0.015f, (float)(10.0 * scale));
         float h = max(0.06f, (float)(40.0 * scale));
 
-        // 因为宇宙已经旋转了，火箭的局部姿态角 (angle) 就可以直接用于屏幕渲染！
+        // 因为宇宙已经旋转，火箭的局部姿态角可以用于屏幕渲染
         renderer->addRotatedRect(cx, cy, w, h, (float)baba1.angle, 0.9f, 0.9f, 0.9f);
 
         // 5. 鼻锥
