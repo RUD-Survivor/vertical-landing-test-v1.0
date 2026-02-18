@@ -112,21 +112,21 @@ public:
         addVertex(x - w / 2, y - h / 2, r, g, b); addVertex(x + w / 2, y - h / 2, r, g, b); addVertex(x + w / 2, y + h / 2, r, g, b);
         addVertex(x + w / 2, y + h / 2, r, g, b); addVertex(x - w / 2, y + h / 2, r, g, b); addVertex(x - w / 2, y - h / 2, r, g, b);
     }
-    // 【新增】旋转矩形
+    // 旋转矩形
     void addRotatedRect(float cx, float cy, float w, float h, float angle, float r, float g, float b) {
         Vec2 p1 = { -w / 2, -h / 2 }, p2 = { w / 2, -h / 2 }, p3 = { w / 2, h / 2 }, p4 = { -w / 2, h / 2 };
-        p1 = rotateVec(p1.x, p1.y, -angle); p2 = rotateVec(p2.x, p2.y, -angle);
-        p3 = rotateVec(p3.x, p3.y, -angle); p4 = rotateVec(p4.x, p4.y, -angle);
+        p1 = rotateVec(p1.x, p1.y, angle); p2 = rotateVec(p2.x, p2.y, angle);
+        p3 = rotateVec(p3.x, p3.y, angle); p4 = rotateVec(p4.x, p4.y, angle);
         addVertex(cx + p1.x, cy + p1.y, r, g, b); addVertex(cx + p2.x, cy + p2.y, r, g, b); addVertex(cx + p3.x, cy + p3.y, r, g, b);
         addVertex(cx + p3.x, cy + p3.y, r, g, b); addVertex(cx + p4.x, cy + p4.y, r, g, b); addVertex(cx + p1.x, cy + p1.y, r, g, b);
     }
-    // 【新增】旋转三角形
+    // 旋转三角形
     void addRotatedTri(float cx, float cy, float w, float h, float angle, float r, float g, float b) {
         Vec2 p1 = { 0, h / 2 }, p2 = { -w / 2, -h / 2 }, p3 = { w / 2, -h / 2 };
-        p1 = rotateVec(p1.x, p1.y, -angle); p2 = rotateVec(p2.x, p2.y, -angle); p3 = rotateVec(p3.x, p3.y, -angle);
+        p1 = rotateVec(p1.x, p1.y, angle); p2 = rotateVec(p2.x, p2.y, angle); p3 = rotateVec(p3.x, p3.y, angle);
         addVertex(cx + p1.x, cy + p1.y, r, g, b); addVertex(cx + p2.x, cy + p2.y, r, g, b); addVertex(cx + p3.x, cy + p3.y, r, g, b);
     }
-    // 【新增】画圆形地球
+    // 画圆形地球
     void addCircle(float cx, float cy, float radius, float r, float g, float b) {
         int segments = 120; // 120个多边形拟合圆
         for (int i = 0; i < segments; i++) {
@@ -154,14 +154,14 @@ const double SLP = 1013.25;
 class Explorer
 {
 private:
-    // --- 原有参数保留 ---
+    
     double fuel;
     double mass; // 干重
     double diameter;
     double height;
     bool suicide_burn_locked = false;
-    double altitude; // 兼容旧逻辑：代表海拔高度
-    double velocity; // 兼容旧逻辑：代表垂直速度 (径向速度)
+    double altitude; // 海拔高度
+    double velocity; // 垂直速度 (径向速度)
     double specific_impulse;
     double fuel_consumption_rate; // 当前油门下的消耗率
     double thrust_power;
@@ -169,9 +169,10 @@ private:
     double cosrate; // 满油门消耗率
     double nozzle_area;
 
-    // --- 新增 2D 物理参数 ---
+   
     // 坐标系：地心为原点 (0,0)。发射点(北极)为 (0, EARTH_RADIUS)
 public:
+    double local_vx;     // 真实的相对地表水平速度 (切向速度)
     double px, py;       // 2D 位置
     double vx, vy;       // 2D 速度
     double angle;        // 姿态角 (0=垂直向上/径向, 正=向左倾斜, 负=向右倾斜)
@@ -186,8 +187,10 @@ public:
 
 public:
     enum State { PRE_LAUNCH, ASCEND, DESCEND, LANDED, CRASHED } status;
+    string mission_msg = "SYSTEM READY"; // 新增：持久化任务消息
     int stages;
-
+    int mission_phase = 0; // 记录当前太空任务阶段
+    double mission_timer = 0; // 任务计时器
     Explorer(double fuel, double mass, double diameter, double height, int stages, double specific_impulse, double fuel_consumption_rate, double nozzle_area)
     {
         // 2D 初始化：放在地球北极
@@ -218,7 +221,7 @@ public:
         status = PRE_LAUNCH;
     }
 
-    // --- Getters ---
+   
     double getAltitude() const { return altitude; }
     double getThrust() const { return thrust_power; }
     double getVelocityMag() const { return sqrt(vx * vx + vy * vy); }
@@ -242,11 +245,14 @@ public:
 
     void Report_Status()
     {
-        // 增加水平数据的显示
+      
+        cout << "\n----------------------------------" << endl;
+        cout << ">>> [MISSION CONTROL]: " << mission_msg << " <<<" << endl;
         cout << "----------------------------------" << endl;
         cout << "[Alt]: " << altitude << " m | [Vert_Vel]: " << velocity << " m/s" << endl;
         cout << "[Pos_X]: " << px << " m | [Horz_Vel]: " << vx << " m/s" << endl;
         cout << "[Angle]: " << angle * 180.0 / PI << " deg | [Throttle]: " << throttle * 100 << "%" << endl;
+        cout << "[Ground_Horz_Vel]: " << local_vx << " m/s | [Orbit_Vel]: " << getVelocityMag() << " m/s" << endl;
         cout << "[Thrust]: " << thrust_power / 1000 << " kN | [Fuel]: " << fuel << " kg" << endl;
         cout << "[Status]: " << status << endl;
     }
@@ -262,7 +268,7 @@ public:
 
         // A. 基础状态计算
         double r = sqrt(px * px + py * py); // 距地心距离
-        altitude = r - EARTH_RADIUS;    // 更新旧变量
+        altitude = r - EARTH_RADIUS;   
 
         // B. 受力分析
         double total_mass = mass + fuel;
@@ -356,11 +362,18 @@ public:
         angle += ang_vel * dt;
 
         // D. 更新兼容旧变量
-        // 垂直速度 = 速度在局部垂直方向的投影
+       
+   
+        // 1. 真实垂直速度 (径向，正为向上)
         velocity = vx * cos(local_up_angle) + vy * sin(local_up_angle);
-        acceleration = sqrt(ax * ax + ay * ay); // 标量加速度
 
-        // E. 碰撞检测 (双重保险版)
+        // 2. 真实水平速度 (切向，正为顺时针飞行)
+        // 利用向量点乘切向单位向量 (-sin, cos) 算出
+        local_vx = -vx * sin(local_up_angle) + vy * cos(local_up_angle);
+
+        acceleration = sqrt(ax * ax + ay * ay);
+
+        // E. 碰撞检测 
         double current_r = sqrt(px * px + py * py);
         double current_alt = current_r - EARTH_RADIUS;
 
@@ -399,7 +412,7 @@ public:
         else {
             altitude = current_alt;
         }
-        // ... 在 Burn 函数末尾 ...
+      
 
         // 角运动 (I * alpha = Torque)
          moment_of_inertia = 50000.0;
@@ -441,7 +454,7 @@ public:
     }
 
   
-    // --- 完美着陆版 AutoPilot (动态倾角限制 + 效率预判) ---
+    // ---  AutoPilot  ---
     void AutoPilot(double dt)
     {
         if (status == PRE_LAUNCH || status == LANDED || status == CRASHED) return;
@@ -458,18 +471,65 @@ public:
 
         // 2. 状态机逻辑
 
-        // --- 上升阶段 (保持不变) ---
+      
         if (status == ASCEND) {
-            throttle = 1.0;
-            double launch_tilt = -0.3; // 17度发射
-            torque_cmd = pid_att.update(launch_tilt, angle, dt);
+            if (mission_phase == 0) {
+                // 阶段 0：发射与重力转弯 (Gravity Turn)
+                throttle = 1.0;
 
-            if (altitude > 10000 || velocity < -10) {
-                status = DESCEND;
-                pid_vert.reset();
+                // 根据高度平滑控制倾角：1km起偏，100km时完全压平(-90度)
+                double target_pitch = 0;
+                if (altitude > 1000 && altitude < 100000) {
+                    target_pitch = -(altitude - 1000) / 99000.0 * (PI / 2.0);
+                }
+                else if (altitude >= 100000) {
+                    target_pitch = -PI / 2.0; // 水平冲刺轨道速度
+                }
+                torque_cmd = pid_att.update(target_pitch, angle, dt);
+
+                // 判断是否达成第一宇宙速度 (7.9 km/s)
+                if (altitude > 100000 && getVelocityMag() > 7900) {
+                    mission_phase = 1;
+                    mission_msg= "ORBIT ACHIEVED! MECO." ;
+                }
+            }
+            else if (mission_phase == 1) {
+                // 阶段 1：在轨滑行 (Coast)
+                throttle = 0;
+                torque_cmd = pid_att.update(-PI / 2.0, angle, dt); // 保持水平姿态
+
+                mission_timer += dt;
+                // 滑行 40 秒 (足够让你欣赏地球弯曲的弧线和巨大的物理距离)
+                if (mission_timer > 40.0) {
+                    mission_phase = 2;
+                    mission_msg= "DE-ORBIT SEQUENCE START." ;
+                }
+            }
+            else if (mission_phase == 2) {
+                // 阶段 2：脱轨点火 (De-orbit Burn)
+                // 精准的逆向喷射 (Retrograde)：把屁股对准当前速度方向
+                double vel_angle = atan2(vy, vx);
+                double align_angle = (vel_angle + PI) - atan2(py, px);
+                while (align_angle > PI) align_angle -= 2 * PI;
+                while (align_angle < -PI) align_angle += 2 * PI;
+
+                torque_cmd = pid_att.update(align_angle, angle, dt);
+
+                // 只有当姿态大致对准时，才猛烈开火减速
+                if (abs(angle - align_angle) < 0.1) throttle = 1.0;
+                else throttle = 0.0;
+
+                // 速度降到 3000 m/s 以下，说明已经切入大气层弹道
+                if (getVelocityMag() < 6000) {
+                    throttle = 0;
+                    status = DESCEND; // 关键移交：交接给下降降落算法
+                    pid_vert.reset();
+                    mission_msg= ">>  RE-ENTRY CONFIRMED. HANDOVER TO LANDING SYSTEM.";
+                }
             }
             return;
         }
+        
 
         // --- 下落阶段 ---
         status = DESCEND;
@@ -485,7 +545,7 @@ public:
         bool need_burn = false;
         if (suicide_burn_locked) need_burn = true;
         // 安全系数可以回调到 1.1 了，因为 max_accel 已经很保守了
-        else if (altitude < stop_dist * 1.1 + 30.0 && velocity < -10) {
+        else if (altitude < stop_dist * 1.1 + 30.0 && velocity < -10&&altitude<15000) {
             suicide_burn_locked = true;
             need_burn = true;
             cout << ">> [AUTOPILOT] IGNITION! Dist: " << altitude << " (StopDist: " << stop_dist << ")" << endl;
@@ -553,7 +613,7 @@ public:
                 if (target_angle < -max_tilt_limit) target_angle = -max_tilt_limit;
 
                 // 速度极小时回正
-                if (abs(vx) < 0.2) target_angle = 0;
+                if (abs(local_vx) < 0.2) target_angle = 0;
 
                 // 推力补偿
                 if (abs(throttle) > 0.01) throttle /= max(0.5, cos(target_angle));
@@ -601,7 +661,7 @@ int main()
     renderer = new Renderer();
 
     // 初始化：放在地球北极，干重10吨，燃料50吨
-    Explorer baba1(50000, 10000, 3.7, 50, 1, 800, 500, 0.5);
+    Explorer baba1(100000, 10000, 3.7, 50, 1, 1500, 100, 0.5);
 
     cout << ">> SYSTEM READY." << endl;
     cout << ">> PRESS [SPACE] TO LAUNCH!" << endl;
@@ -616,6 +676,22 @@ int main()
             glfwSetWindowShouldClose(window, true);
         if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
             baba1.ManualLaunch();
+
+        // --- 时间加速逻辑 ---
+        static int time_warp = 1;
+        if (glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS) time_warp = 1;     // 正常速度
+        if (glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS) time_warp = 10;    // 10 倍速
+        if (glfwGetKey(window, GLFW_KEY_3) == GLFW_PRESS) time_warp = 100;   // 100 倍速
+        if (glfwGetKey(window, GLFW_KEY_4) == GLFW_PRESS) time_warp = 1000;  // 1000倍速 (轨道用)
+
+        // --- 物理更新 (循环执行实现加速) ---
+        for (int i = 0; i < time_warp; i++) {
+            baba1.AutoPilot(dt);
+            baba1.Burn(dt);
+
+            // 如果撞地了，立刻打断时间加速，防止越界
+            if (!baba1.is_Flying()) break;
+        }
 
         // --- 物理更新 (多次迭代增加稳定性) ---
         // 自动驾驶和物理计算分离，PID计算可以慢一点，物理积分要快
@@ -644,37 +720,61 @@ int main()
         // 相机始终对准火箭，但火箭保持在屏幕下方 1/3 处
         // 随着高度增加，视野缩放 (Zoom out)
        
-        // 动态无极缩放公式：高度越大，视野越广。+200.0防止地面时除以0
+
+
+        // 动态无极缩放公式
         double scale = 1.0 / (baba1.getAltitude() * 1.5 + 200.0);
-
         float cx = 0.0f;
-        float cy = 0.0f; // 缩放后，把火箭放在屏幕正中心最好看
+        float cy = 0.0f; // 火箭永远在屏幕正中央
 
-        auto toScreenX = [&](double wx) { return (float)((wx - baba1.px) * scale + cx); };
-        auto toScreenY = [&](double wy) { return (float)((wy - baba1.py) * scale + cy); };
+        // 计算局部垂直角度
+        double rocket_r = sqrt(baba1.px * baba1.px + baba1.py * baba1.py);
+        double rocket_theta = atan2(baba1.py, baba1.px);
 
-        // 画地球：中心在绝对坐标 (0,0)
-        renderer->addCircle(toScreenX(0), toScreenY(0), EARTH_RADIUS * scale, 0.1f, 0.4f, 0.8f);
+        // 让相机旋转，使得火箭永远朝上 (屏幕正上方)
+        double cam_angle = PI / 2.0 - rocket_theta;
+        double sin_c = sin(cam_angle);
+        double cos_c = cos(cam_angle);
 
-        // --- 替换结束 ---
-        // 发射台标记
-        renderer->addRect(toScreenX(0), toScreenY(EARTH_RADIUS), 0.1f, 0.05f, 0.8f, 0.8f, 0.8f);
+        // 带有旋转矩阵的坐标映射器
+        auto toScreenX = [&](double wx, double wy) {
+            double rx = wx * cos_c - wy * sin_c; // 旋转
+            return (float)(rx * scale + cx);
+            };
+        auto toScreenY = [&](double wx, double wy) {
+            double ry = wx * sin_c + wy * cos_c; // 旋转
+            return (float)((ry - rocket_r) * scale + cy); // 相对火箭平移
+            };
 
-        // 2. 画火箭 (旋转)
-        float w = 0.1f; float h = 0.4f;
-        // 注意：addRotatedRect 需要屏幕坐标，且角度是火箭的 angle
+        // 1. 画地球核心圆
+        renderer->addCircle(toScreenX(0, 0), toScreenY(0, 0), EARTH_RADIUS * scale, 0.1f, 0.4f, 0.8f);
+
+        // 2. 画局部平坦地表 (解决低空多边形间隙，永远在火箭正下方)
+        float ground_y = (float)((EARTH_RADIUS - rocket_r) * scale + cy);
+        renderer->addRect(cx, ground_y - 2000.0f * scale, 100000.0f * scale, 4000.0f * scale, 0.2f, 0.6f, 0.2f);
+
+        // 3. 画原发射台 (注意：它现在会绕着地球转动，且自身也会倾斜)
+        renderer->addRotatedRect(toScreenX(0, EARTH_RADIUS), toScreenY(0, EARTH_RADIUS),
+            100.0f * scale, 50.0f * scale, (float)-cam_angle, 0.8f, 0.8f, 0.8f);
+
+        // 4. 画火箭主体 (尺寸动态限制，防止高空缩成原子)
+        float w = max(0.015f, (float)(10.0 * scale));
+        float h = max(0.06f, (float)(40.0 * scale));
+
+        // 因为宇宙已经旋转了，火箭的局部姿态角 (angle) 就可以直接用于屏幕渲染！
         renderer->addRotatedRect(cx, cy, w, h, (float)baba1.angle, 0.9f, 0.9f, 0.9f);
-        // 鼻锥
-        // 鼻锥位置需要根据角度手动旋转一点偏移
-        Vec2 nose_offset = { 0, h / 2 + w / 2 }; // 局部偏移
-        nose_offset = rotateVec(nose_offset.x, nose_offset.y, -baba1.angle);
+
+        // 5. 鼻锥
+        Vec2 nose_offset = { 0, h / 2 + w / 2 };
+        nose_offset = rotateVec(nose_offset.x, nose_offset.y, baba1.angle);
         renderer->addRotatedTri(cx + nose_offset.x, cy + nose_offset.y, w, w, (float)baba1.angle, 1.0f, 0.2f, 0.2f);
 
-        // 3. 画火焰
+  
+        // 6. 画火焰
         if (baba1.getThrust() > 1000) {
             float flameLen = (baba1.getThrust() / 3000000.0) * 0.3f;
             Vec2 flame_offset = { 0, -h / 2 - flameLen / 2 };
-            flame_offset = rotateVec(flame_offset.x, flame_offset.y, -baba1.angle);
+            flame_offset = rotateVec(flame_offset.x, flame_offset.y, baba1.angle);
             renderer->addRotatedTri(cx + flame_offset.x, cy + flame_offset.y, w * 0.8f, flameLen, (float)baba1.angle, 1.0f, 0.6f, 0.0f);
         }
 
