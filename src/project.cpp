@@ -126,6 +126,17 @@ public:
         p1 = rotateVec(p1.x, p1.y, -angle); p2 = rotateVec(p2.x, p2.y, -angle); p3 = rotateVec(p3.x, p3.y, -angle);
         addVertex(cx + p1.x, cy + p1.y, r, g, b); addVertex(cx + p2.x, cy + p2.y, r, g, b); addVertex(cx + p3.x, cy + p3.y, r, g, b);
     }
+    // 【新增】画圆形地球
+    void addCircle(float cx, float cy, float radius, float r, float g, float b) {
+        int segments = 120; // 120个多边形拟合圆
+        for (int i = 0; i < segments; i++) {
+            float theta1 = 2.0f * PI * float(i) / float(segments);
+            float theta2 = 2.0f * PI * float(i + 1) / float(segments);
+            addVertex(cx, cy, r, g, b); // 圆心
+            addVertex(cx + radius * cos(theta1), cy + radius * sin(theta1), r, g, b);
+            addVertex(cx + radius * cos(theta2), cy + radius * sin(theta2), r, g, b);
+        }
+    }
     void endFrame() {
         if (vertices.empty()) return;
         glUseProgram(shaderProgram); glBindVertexArray(VAO); glBindBuffer(GL_ARRAY_BUFFER, VBO);
@@ -590,7 +601,7 @@ int main()
     renderer = new Renderer();
 
     // 初始化：放在地球北极，干重10吨，燃料50吨
-    Explorer baba1(50000, 10000, 3.7, 50, 1, 300, 500, 0.5);
+    Explorer baba1(50000, 10000, 3.7, 50, 1, 800, 500, 0.5);
 
     cout << ">> SYSTEM READY." << endl;
     cout << ">> PRESS [SPACE] TO LAUNCH!" << endl;
@@ -609,6 +620,7 @@ int main()
         // --- 物理更新 (多次迭代增加稳定性) ---
         // 自动驾驶和物理计算分离，PID计算可以慢一点，物理积分要快
         baba1.AutoPilot(dt);
+
         baba1.Burn(dt);
 
         // 只有每隔一定帧数才打印，防止控制台看不清
@@ -631,19 +643,20 @@ int main()
         // 坐标转换：世界坐标 -> 屏幕坐标
         // 相机始终对准火箭，但火箭保持在屏幕下方 1/3 处
         // 随着高度增加，视野缩放 (Zoom out)
-        double scale = 0.005; // 基础缩放 
-        if (baba1.getAltitude() > 2000) scale = 0.001; // 高空视野变大
+       
+        // 动态无极缩放公式：高度越大，视野越广。+200.0防止地面时除以0
+        double scale = 1.0 / (baba1.getAltitude() * 1.5 + 200.0);
 
-        float cx = 0.0f; // 屏幕中心 X
-        float cy = -0.4f; // 屏幕中心 Y 偏下
+        float cx = 0.0f;
+        float cy = 0.0f; // 缩放后，把火箭放在屏幕正中心最好看
 
         auto toScreenX = [&](double wx) { return (float)((wx - baba1.px) * scale + cx); };
         auto toScreenY = [&](double wy) { return (float)((wy - baba1.py) * scale + cy); };
 
-        // 1. 画地面 (一段巨大的圆弧，模拟地球表面)
-        // 在局部范围内，可以用一堆矩形或者一个大矩形模拟
-        // 这里简单画一个跟随 x 坐标的大绿色块
-        renderer->addRect(toScreenX(baba1.px), toScreenY(EARTH_RADIUS) - 200.0f, 1000.0f, 400.0f, 0.2f, 0.6f, 0.2f);
+        // 画地球：中心在绝对坐标 (0,0)
+        renderer->addCircle(toScreenX(0), toScreenY(0), EARTH_RADIUS * scale, 0.1f, 0.4f, 0.8f);
+
+        // --- 替换结束 ---
         // 发射台标记
         renderer->addRect(toScreenX(0), toScreenY(EARTH_RADIUS), 0.1f, 0.05f, 0.8f, 0.8f, 0.8f);
 
