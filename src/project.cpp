@@ -512,8 +512,8 @@ public:
 
         // 2. 状态机逻辑
 
-      
-        
+
+
         if (status == ASCEND) {
             double apo, peri;
             getOrbitParams(apo, peri); // 获取实时开普勒轨道参数
@@ -565,7 +565,7 @@ public:
                 torque_cmd = pid_att.update(-PI / 2.0, angle, dt);
 
                 mission_timer += dt;
-                // 绕轨巡航 6000 秒 (可开 1000倍速 快进)
+                // 绕轨巡航 6000 秒 
                 if (mission_timer > 6000.0) {
                     mission_phase = 4;
                     mission_msg = "DE-ORBIT SEQUENCE START.";
@@ -593,32 +593,46 @@ public:
             }
             return;
         }
-       
-        
-
         // --- 下落阶段 ---
         status = DESCEND;
 
-        // 计算刹车距离
-        double stop_dist = 0;
-        double total_v = getVelocityMag();
-        if (velocity < 0) {
-            stop_dist = (total_v * total_v) / (2 * max_accel_avail);
-        }
+        // 1. 独立计算 Y 轴绝对保命推力 (最低限度抗重力 + 垂直减速)
+        double req_a_y = (velocity * velocity) / (2.0 * max(1.0, altitude));
+        if (velocity > 0) req_a_y = 0; // 防反弹
+        double req_F_y = current_total_mass * (current_g + req_a_y);
 
-        // 触发逻辑
-        bool need_burn = false;
-        if (suicide_burn_locked) need_burn = true;
-       
-        else if (altitude < stop_dist * 1.0 + 10.0 && velocity < -10&&altitude<3500) {
+   
+        // 2. 独立计算 X 轴消除速度所需推力 (【核心升级】：时间同步刹车)
+        // 让水平和垂直速度在触地时“同时”归零！
+        // 假设落地时间 T = 2 * 高度 / 垂直下落速度
+        // 需要的水平加速度 a_x = v_x / T = (v_x * v_y) / (2 * 高度)
+        double ref_vel = max(2.0, abs(velocity));
+        double req_a_x = (-local_vx * ref_vel) / (2.0 * max(1.0, altitude));
+        req_a_x += -local_vx * 0.5;
+        double req_F_x = current_total_mass * req_a_x;
+
+        // 3. 矢量合成与点火判断
+        double req_thrust = sqrt(req_F_x * req_F_x + req_F_y * req_F_y);
+        bool need_burn = suicide_burn_locked;
+
+        // 3. 触发逻辑：当总需求推力达到引擎上限的 95%，且高度逼近低空时，极限点火！
+        if (!need_burn && req_thrust > max_thrust_vac * 0.95 && altitude < 4000) {
             suicide_burn_locked = true;
             need_burn = true;
-            cout << ">> [AUTOPILOT] IGNITION! Dist: " << altitude << " (StopDist: " << stop_dist << ")" << endl;
+            mission_msg = ">> SYNCHRONIZED HOVERSLAM IGNITION!";
+        }
+
+        // 4. 防悬停锁：如果空气阻力极其给力，导致需求推力甚至连重力的 80% 都不到了
+        // 坚决关机，白嫖自由落体！不到低空绝不悬停！
+        if (suicide_burn_locked && altitude > 100.0 && req_thrust < current_total_mass * current_g * 0.8) {
+            suicide_burn_locked = false;
+            need_burn = false;
+            mission_msg = ">> AEROBRAKING COAST... WAITING.";
         }
 
         if (!need_burn) {
             throttle = 0;
-            // 自由落体时预瞄准：屁股对准速度反方向
+            // 自由落体时，保持逆气流方向减阻
             double vel_angle = atan2(vy, vx);
             double align_angle = (vel_angle + PI) - atan2(py, px);
             while (align_angle > PI) align_angle -= 2 * PI;
@@ -626,89 +640,53 @@ public:
             torque_cmd = pid_att.update(align_angle, angle, dt);
         }
         else {
-            // === 核心着陆逻辑 ===
+           
 
-            // --- 1. 垂直油门 (能量制导) ---
-            if (altitude > 10.0) {
-             
-                    // 实时计算当前速度下，引擎需要的真实刹车距离
-                    double current_ideal_dist = (total_v * total_v) / (2.0 * max_accel_avail);
+        // 理论最完美的侧滑角
+            double target_angle = atan2(req_F_x, req_F_y);
 
-                    // 【关键逻辑】：如果速度反向朝上了，或者由于空气阻力导致高度“富裕”太多
-                    if (velocity >= 0 || altitude > current_ideal_dist + 5.0) {
-                        throttle = 0.0; // 绝对不浪费燃料！立刻关火，让它往下掉！
-                    }
-                    else {
-                        // 贴近生死线，踩死油门
-                        double required_decel = (total_v * total_v) / (2.0 * max(1.0, altitude));
-                        double required_thrust = current_total_mass * (current_g + required_decel);
-                        throttle = required_thrust / max_thrust_vac;
-                    }
-              
+            // 防撞地绝对极限倾角
+            double max_safe_tilt = 1.5;
+            if (req_F_y < max_thrust_vac) {
+                max_safe_tilt = acos(req_F_y / max_thrust_vac);
             }
             else {
-                // 末端软着陆
-                double target_vel = -2.0;
-                if (altitude < 0.2) { throttle = 0; target_vel = 0; }
-                else {
-                    double hover_throttle = (current_total_mass * current_g) / max_thrust_vac;
-                    double error = target_vel - velocity;
-                    throttle = hover_throttle + (error * 2.0);
-                }
+                max_safe_tilt = 0.0;
             }
 
-            // --- 2. 水平姿态 (动态限制) ---
-            double target_angle = 0;
-
-            if (altitude > 1.0) {
-                // 计算逆向角
-                double vel_angle = atan2(vy, vx);
-                double raw_target = (vel_angle + PI) - atan2(py, px);
-                while (raw_target > PI) raw_target -= 2 * PI;
-                while (raw_target < -PI) raw_target += 2 * PI;
-
-                // 关键改动 B：动态最大倾角 (Linear Tapering)
-                // 高度 200m 以上：允许 45度 (0.8)
-                // 高度 0m：允许 0度
-                // 中间线性过渡
-                double max_tilt_limit = 0.8; // 默认最大 45度
-                if (altitude < 50.0) {
-                    // 基础收紧
-                    max_tilt_limit = (altitude / 50.0) * 0.8;
-                    // 【关键修改】：如果横向速度还很大，允许火箭突破限制，大角度救场！
-                    max_tilt_limit += abs(local_vx) * 0.03;
-                    if (max_tilt_limit > 0.8) max_tilt_limit = 0.8;
-                }
-
-                // 确保至少留一点点控制权
-                if (max_tilt_limit < 0.08 && altitude > 5.0) max_tilt_limit = 0.08;
-
-                // 只有到了最后 10 米，才真正开始强行立正 (防止着陆腿折断)
-                if (altitude < 10.0) {
-                    max_tilt_limit = min(max_tilt_limit, 0.15); // 最大不到 8度
-                }
-
-                // 应用限制
-                target_angle = raw_target;
-                if (target_angle > max_tilt_limit) target_angle = max_tilt_limit;
-                if (target_angle < -max_tilt_limit) target_angle = -max_tilt_limit;
-
-                // 速度极小时回正
-                if (abs(local_vx) < 0.2) target_angle = 0;
-
-                // 推力补偿
-                if (abs(throttle) > 0.01) throttle /= max(0.5, cos(target_angle));
+            
+            if (altitude < 100.0) {
+                // 基础允许倾角随高度降低而逐渐减小
+                double base_tilt = (altitude / 100.0) * 0.5;
+                // 只要横向速度没消完，就允许借用倾角去疯狂刹车！(每1m/s侧滑借用约1.5度)
+                double rescue_tilt = abs(local_vx) * 0.025;
+                max_safe_tilt = min(max_safe_tilt, base_tilt + rescue_tilt);
             }
-            else {
-                target_angle = 0;
-            }
+
+            // 只有当高度极低 (<2米) 且横向速度已经被杀干净 (<1m/s) 时，才真正立正触地！
+            if (altitude < 2.0 && abs(local_vx) < 1.0) max_safe_tilt = 0.0;
+
+            if (target_angle > max_safe_tilt) target_angle = max_safe_tilt;
+            if (target_angle < -max_safe_tilt) target_angle = -max_safe_tilt;
 
             torque_cmd = pid_att.update(target_angle, angle, dt);
 
-            if (throttle > 1.0) throttle = 1.0;
-            if (throttle < 0.0) throttle = 0.0;
+            // 最终油门计算
+            if (altitude > 2.0) {
+                double final_thrust = req_F_y / max(0.1, cos(target_angle));
+                throttle = final_thrust / max_thrust_vac;
+            }
+            else {
+                // 最后 2 米触地段，同样需要姿态补偿！
+                double hover_throttle = (current_total_mass * current_g) / max_thrust_vac;
+                throttle = hover_throttle + ((-1.5 - velocity) * 2.0);
+                throttle /= max(0.8, cos(target_angle));
+            }
         }
-    } 
+
+        if (throttle > 1.0) throttle = 1.0;
+        if (throttle < 0.0) throttle = 0.0;
+    }
     
 
     // 手动发射
@@ -772,7 +750,7 @@ void drawOrbit(Renderer* renderer, double px, double py, double vx, double vy, d
             if (r_nu < EARTH_RADIUS + 80000.0) { r_col = 1.0f; g_col = 0.0f; b_col = 0.0f; }
 
             // 画出预测轨迹线
-            float thickness = max(0.002f, (float)(2000.0 * scale));
+            float thickness = max(0.00001f, (float)(2000.0 * scale));
             float dx = screen_x - prev_x, dy = screen_y - prev_y;
             float len = sqrt(dx * dx + dy * dy);
             if (len > 0) {
