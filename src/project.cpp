@@ -98,7 +98,7 @@ public:
             glGenVertexArrays(1, &VAO); glGenBuffers(1, &VBO);
             glBindVertexArray(VAO); glBindBuffer(GL_ARRAY_BUFFER, VBO);
             // 预分配更大的显存
-            glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 40000, NULL, GL_DYNAMIC_DRAW);
+            glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 5000000, NULL, GL_DYNAMIC_DRAW);
 
             // 【核心修改】：步长从 5 改为 6，因为多了 Alpha 通道
             // 位置属性 (location=0): 偏移 0
@@ -726,7 +726,7 @@ void drawOrbit(Renderer* renderer, double px, double py, double vx, double vy, d
     double p = (h * h) / mu; // 半通径
     double omega = atan2(ey, ex); // 近地点幅角
 
-    int segments = 200; // 轨道分段渲染
+    int segments = 20000; // 轨道分段渲染
     float prev_x = 0, prev_y = 0;
     bool first = true;
 
@@ -780,6 +780,9 @@ int main()
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
+    // 请求一个包含 4倍多重采样 的帧缓冲
+    glfwWindowHint(GLFW_SAMPLES, 4);
+
     GLFWwindow* window = glfwCreateWindow(1000, 800, "2D Rocket Sim", NULL, NULL);
     if (!window) { glfwTerminate(); return -1; }
     glfwMakeContextCurrent(window);
@@ -789,6 +792,8 @@ int main()
     //：开启透明度混合
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    // 激活硬件级多重采样抗锯齿
+    glEnable(GL_MULTISAMPLE);
     renderer = new Renderer();
 
     // 初始化：放在地球北极，干重10吨，燃料50吨
@@ -836,10 +841,10 @@ int main()
 
         this_thread::sleep_for(chrono::milliseconds(20)); // 限制帧率
 
-        // 【修复 1：找回画面刷新】
+        // 画面刷新
         float t = (float)min(baba1.getAltitude() / 50000.0, 1.0);
         glClearColor(my_lerp(0.5f, 0.0f, t), my_lerp(0.7f, 0.0f, t), my_lerp(1.0f, 0.0f, t), 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT); // 就是少了这一句核心代码！
+        glClear(GL_COLOR_BUFFER_BIT);
 
         renderer->beginFrame();
        
