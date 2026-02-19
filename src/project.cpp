@@ -114,9 +114,9 @@ public:
         vertices.insert(vertices.end(), { x, y, r, g, b ,a});
     }
     // 普通矩形
-    void addRect(float x, float y, float w, float h, float r, float g, float b) {
-        addVertex(x - w / 2, y - h / 2, r, g, b, 1.0f); addVertex(x + w / 2, y - h / 2, r, g, b, 1.0f); addVertex(x + w / 2, y + h / 2, r, g, b,1.0f);
-        addVertex(x + w / 2, y + h / 2, r, g, b, 1.0f); addVertex(x - w / 2, y + h / 2, r, g, b, 1.0f); addVertex(x - w / 2, y - h / 2, r, g, b, 1.0f);
+    void addRect(float x, float y, float w, float h, float r, float g, float b,float a=1.0f) {
+        addVertex(x - w / 2, y - h / 2, r, g, b, a); addVertex(x + w / 2, y - h / 2, r, g, b, a); addVertex(x + w / 2, y + h / 2, r, g, b,a);
+        addVertex(x + w / 2, y + h / 2, r, g, b, a); addVertex(x - w / 2, y + h / 2, r, g, b, a); addVertex(x - w / 2, y - h / 2, r, g, b, a);
     }
     // 旋转矩形
     void addRotatedRect(float cx, float cy, float w, float h, float angle, float r, float g, float b,float a = 1.0f) {
@@ -301,7 +301,6 @@ public:
         cout << "[Ground_Horz_Vel]: " << local_vx << " m/s | [Orbit_Vel]: " << getVelocityMag() << " m/s" << endl;
         cout << "[Thrust]: " << thrust_power / 1000 << " kN | [Fuel]: " << fuel << " kg" << endl;
         cout << "[Apoapsis]: " << apo / 1000.0 << " km | [Periapsis]: " << peri / 1000.0 << " km" << endl;
-        cout << "[Ground_Horz_Vel]: " << local_vx << " m/s | [Orbit_Vel]: " << getVelocityMag() << " m/s" << endl;
         cout << "[Status]: " << status << endl;
     }
 
@@ -963,6 +962,82 @@ int main()
         Vec2 nose_offset = { 0, h / 2 + w / 2 };
         nose_offset = rotateVec(nose_offset.x, nose_offset.y, baba1.angle);
         renderer->addRotatedTri(cx + nose_offset.x, cy + nose_offset.y, w, w, (float)baba1.angle, 1.0f, 0.2f, 0.2f);
+        // ... (前面的代码：画地球、轨道、地面、特效、火箭主体、鼻锥等) ...
+
+        // =================【新增功能：专业航天 HUD 仪表盘】=================
+        // 使用标准化设备坐标 (NDC, 范围 -1.0 到 1.0) 直接在屏幕上绘制 GUI
+        // 这些元素将固定在屏幕窗口上，不会随相机移动或缩放
+
+        // --- HUD 配置 ---
+        float hud_opacity = 0.8f;        // 整体不透明度
+        float gauge_h = 0.6f;            // 仪表盘总高度 (NDC)
+        float gauge_w = 0.03f;           // 仪表盘宽度 (NDC)
+        float gauge_y_center = 0.4f;     // 仪表盘中心 Y 坐标 (偏屏幕上方)
+        float gauge_vel_x = -0.92f;      // 速度计中心 X 坐标 (屏幕最左侧)
+        float gauge_alt_x = -0.84f;      // 高度计中心 X 坐标 (紧挨着速度计)
+
+        // --- 1. 速度计 (Velocity Gauge) ---
+        // 设计：垂直条，随速度增加从绿色渐变为黄色再到红色
+        double current_vel = baba1.getVelocityMag();
+        float max_gauge_vel = 3000.0f; // 设定 3km/s 为满格 (约第一宇宙速度)
+        float vel_ratio = (float)min(1.0, current_vel / max_gauge_vel);
+
+        // 1.1 绘制背景槽 (半透明深灰)
+        renderer->addRect(gauge_vel_x, gauge_y_center, gauge_w * 1.2f, gauge_h + 0.02f, 0.1f, 0.1f, 0.1f, 0.5f * hud_opacity);
+
+        // 1.2 计算动态颜色渐变 (绿 -> 黄 -> 红)
+        float r_vel = vel_ratio * 2.0f; if (r_vel > 1.0f) r_vel = 1.0f;
+        float g_vel = (1.0f - vel_ratio) * 2.0f; if (g_vel > 1.0f) g_vel = 1.0f;
+        float b_vel = 0.0f;
+
+        // 1.3 绘制填充条
+        float fill_h_vel = gauge_h * vel_ratio;
+        // 【数学技巧】：addRect 的 Y 是中心点。为了让进度条从底部往上涨，
+        // 中心点需要向下偏移：偏移量 = (总高度 - 填充高度) / 2
+        float fill_y_offset_vel = (gauge_h - fill_h_vel) / 2.0f;
+        renderer->addRect(gauge_vel_x, gauge_y_center - fill_y_offset_vel, gauge_w * 0.8f, fill_h_vel,
+            r_vel, g_vel, b_vel, hud_opacity);
+
+
+        // --- 2. 高度计 (Altitude Gauge) ---
+        // 设计：垂直条，随高度增加从深蓝渐变为亮白，模拟大气层
+        double current_alt = baba1.getAltitude();
+        float max_gauge_alt = 100000.0f; // 设定 100km (卡门线) 为满格
+        float alt_ratio = (float)min(1.0, current_alt / max_gauge_alt);
+
+        // 2.1 绘制背景槽
+        renderer->addRect(gauge_alt_x, gauge_y_center, gauge_w * 1.2f, gauge_h + 0.02f, 0.1f, 0.1f, 0.1f, 0.5f * hud_opacity);
+
+        // 2.2 绘制填充条 (蓝 -> 白 渐变)
+        float fill_h_alt = gauge_h * alt_ratio;
+        float fill_y_offset_alt = (gauge_h - fill_h_alt) / 2.0f;
+        renderer->addRect(gauge_alt_x, gauge_y_center - fill_y_offset_alt, gauge_w * 0.8f, fill_h_alt,
+            alt_ratio * 0.8f, 0.3f + alt_ratio * 0.7f, 1.0f, hud_opacity); // 颜色计算公式
+
+
+        // --- 3. 装饰性刻度线与标签框 ---
+        int num_ticks = 10;
+        for (int i = 0; i <= num_ticks; i++) {
+            float tick_ratio = (float)i / num_ticks;
+            float tick_y = (gauge_y_center - gauge_h / 2.0f) + gauge_h * tick_ratio;
+            float tick_w = 0.02f; float tick_h = 0.003f;
+            // 主刻度线更长更亮
+            float alpha = (i % 5 == 0) ? 0.8f : 0.4f;
+            if (i % 5 == 0) tick_w *= 1.5f;
+
+            // 速度刻度 (在左侧)
+            renderer->addRect(gauge_vel_x - gauge_w, tick_y, tick_w, tick_h, 1.0f, 1.0f, 1.0f, alpha * hud_opacity);
+            // 高度刻度 (在右侧)
+            renderer->addRect(gauge_alt_x + gauge_w, tick_y, tick_w, tick_h, 1.0f, 1.0f, 1.0f, alpha * hud_opacity);
+        }
+
+        // 简单的底部标签框 (代替文字)
+        renderer->addRect(gauge_vel_x, gauge_y_center - gauge_h / 2.0f - 0.03f, gauge_w * 2.0f, 0.03f, 0.8f, 0.2f, 0.2f, hud_opacity); // 红框标示 VEL
+        renderer->addRect(gauge_alt_x, gauge_y_center - gauge_h / 2.0f - 0.03f, gauge_w * 2.0f, 0.03f, 0.2f, 0.5f, 0.9f, hud_opacity); // 蓝框标示 ALT
+        // ========================================================================
+
+        renderer->endFrame(); // 这里是你原来的代码
+        glfwSwapBuffers(window);
         renderer->endFrame();
         glfwSwapBuffers(window);
     }
