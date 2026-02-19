@@ -17,6 +17,35 @@ const double PI = 3.14159265358979323846;
 const double G0 = 9.80665;              // 海平面标准重力
 const double EARTH_RADIUS = 6371000.0;  // 地球半径 (米)
 
+// --- 真正的全球曲面树木系统 ---
+struct TreeData {
+    double angle;      // 树在地球上的真实绝对极角 (0 ~ 2PI)
+    float size_scale;  // 大小随机变化
+};
+
+std::vector<TreeData> all_trees;
+
+
+// 在 main() 之前调用一次
+void generateGlobalTrees() {
+    srand(42);
+    // 爆兵：在发射点周边集中生成 10 万棵树！
+    for (int i = 0; i < 100000; ++i) {
+        // 【核心修复】：完美绕过 RAND_MAX 限制，生成 -1.0 到 1.0 的均匀随机小数
+        double random_offset = ((double)rand() / RAND_MAX) * 2.0 - 1.0;
+
+        // 范围缩小：集中在 PI/2 附近 ±0.05 弧度 (约 ±300 公里) 内，密度极其恐怖！
+        double angle = PI / 2.0 + random_offset * 0.05;
+
+        // 缩小避让区：保留发射台方圆 80 米的安全区
+        double diff = abs(angle - PI / 2.0);
+        if (diff < 0.000012) continue;
+
+        // 随机尺寸 (0.5倍 到 1.5倍)
+        float s = 0.5f + ((double)rand() / RAND_MAX) * 1.0f;
+        all_trees.push_back({ angle, s });
+    }
+}
 // 简单的二维向量工具
 struct Vec2 { double x, y; };
 Vec2 rotateVec(double x, double y, double angle) {
@@ -134,7 +163,7 @@ public:
     }
     // 画圆形地球
     void addCircle(float cx, float cy, float radius, float r, float g, float b) {
-        int segments = 120; // 120个多边形拟合圆
+        int segments = 36000; // 120个多边形拟合圆
         for (int i = 0; i < segments; i++) {
             float theta1 = 2.0f * PI * float(i) / float(segments);
             float theta2 = 2.0f * PI * float(i + 1) / float(segments);
@@ -145,14 +174,14 @@ public:
     }
 
     void addEarthWithContinents(float cx, float cy, float radius, float cam_angle) {
-        int segments = 120;
+        int segments = 36000;
         for (int i = 0; i < segments; i++) {
            
             float theta1 = 2.0f * PI * float(i) / float(segments) + cam_angle;
             float theta2 = 2.0f * PI * float(i + 1) / float(segments) + cam_angle;
 
             float r, g, b;
-            if ((i / 10) % 2 == 0) { r = 0.1f; g = 0.4f; b = 0.8f; } // 海洋
+            if ((i / 3000) % 2 == 0) { r = 0.1f; g = 0.4f; b = 0.8f; } // 海洋
             else { r = 0.2f; g = 0.6f; b = 0.2f; } // 大陆
 
             addVertex(cx, cy, r, g, b, 1.0f);
@@ -249,6 +278,7 @@ public:
     double getAltitude() const { return altitude; }
     double getThrust() const { return thrust_power; }
     double getVelocityMag() const { return sqrt(vx * vx + vy * vy); }
+    double getFuel() const { return fuel; }
     // 实时计算远地点(Apoapsis)和近地点(Periapsis)
     void getOrbitParams(double& apoapsis, double& periapsis) {
         double r = sqrt(px * px + py * py);
@@ -774,6 +804,7 @@ void drawOrbit(Renderer* renderer, double px, double py, double vx, double vy, d
 }
 int main()
 {
+    generateGlobalTrees();
     glfwInit();
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
@@ -794,6 +825,7 @@ int main()
     // 激活硬件级多重采样抗锯齿
     glEnable(GL_MULTISAMPLE);
     renderer = new Renderer();
+
 
     // 初始化：放在地球北极，干重10吨，燃料50吨
     Explorer baba1(100000, 10000, 3.7, 50, 1, 1500, 100, 0.5);
@@ -887,13 +919,62 @@ int main()
         // 1. 画地球 (加上 y_offset)
         renderer->addEarthWithContinents(toScreenX(0, 0), toScreenY(0, 0) + y_offset, EARTH_RADIUS * scale, cam_angle);
         drawOrbit(renderer, baba1.px, baba1.py, baba1.vx, baba1.vy, scale, cx, cy, cam_angle);
-        // 2. 画平坦地表 (加上 y_offset)
-        float ground_y = (float)((EARTH_RADIUS - rocket_r) * scale + cy) + y_offset;
-        renderer->addRect(cx, ground_y - 2000.0f * scale, 100000.0f * scale, 4000.0f * scale, 0.2f, 0.6f, 0.2f);
+        
         // 3. 画发射台 (放在地表，加上 y_offset)
         renderer->addRotatedRect(toScreenX(0, EARTH_RADIUS), toScreenY(0, EARTH_RADIUS) + y_offset - 25.0f * scale,
             100.0f * scale, 50.0f * scale, (float)-cam_angle, 0.5f, 0.5f, 0.5f);
 
+        // =================【新增功能：全球曲面植被渲染系统】=================
+           // 高度限制：只在 20km (20000米) 以下渲染树木
+        if (baba1.getAltitude() < 20000.0) {
+            // 【核心修复】：将树木尺寸放大，变成红杉巨树，增加低空机动的速度压迫感！
+            float baseTrunkW = 5.0f;
+            float baseTrunkH = 15.0f;
+            float baseLeafW = 18.0f;
+            float baseLeafH = 28.0f;
+
+            // 获取火箭极角，用于计算视野
+            double rocket_theta = atan2(baba1.py, baba1.px);
+
+            for (const auto& tree : all_trees) {
+                // 【核心：曲面视锥剔除】只渲染火箭夹角正负 2 度范围内的树 (视距约 200公里)
+                double angle_diff = tree.angle - rocket_theta;
+                while (angle_diff > PI) angle_diff -= 2 * PI;
+                while (angle_diff < -PI) angle_diff += 2 * PI;
+
+                if (abs(angle_diff) > 0.03) continue; // 超出视野的树直接剔除，保护显卡！
+
+                // 1. 计算树根在完美地球圆弧上的绝对世界坐标
+                double wx = EARTH_RADIUS * cos(tree.angle);
+                double wy = EARTH_RADIUS * sin(tree.angle);
+
+                // 2. 转换为屏幕坐标 (加上 y_offset 让它与地球地表完美贴合)
+                float screenX = toScreenX(wx, wy);
+                float screenY = toScreenY(wx, wy) + y_offset;
+
+                float finalScale = (float)scale * tree.size_scale;
+                float tW = baseTrunkW * finalScale;
+                float tH = baseTrunkH * finalScale;
+                float lW = baseLeafW * finalScale;
+                float lH = baseLeafH * finalScale;
+
+                // 3. 计算法线倾斜角：沿着地球圆心向外生长
+                // 【核心修复】：删掉了前面的负号，保证两边的树都正确地背离地心生长
+                float screen_normal_angle = (float)-angle_diff;
+
+                // 4. 计算偏移向量 (必须用 + 号，因为 OpenGL 里 +Y 是屏幕上方)
+                Vec2 trunk_offset = { 0, tH / 2.0f };
+                trunk_offset = rotateVec(trunk_offset.x, trunk_offset.y, screen_normal_angle);
+
+                Vec2 leaf_offset = { 0, tH + lH / 2.0f };
+                leaf_offset = rotateVec(leaf_offset.x, leaf_offset.y, screen_normal_angle);
+
+                // 绘制树干和树冠 (加上偏移，使得树根正好扎在地表)
+                renderer->addRotatedRect(screenX + trunk_offset.x, screenY + trunk_offset.y, tW, tH, screen_normal_angle, 0.4f, 0.25f, 0.1f);
+                renderer->addRotatedTri(screenX + leaf_offset.x, screenY + leaf_offset.y, lW, lH, screen_normal_angle, 0.1f, 0.6f, 0.2f);
+            }
+        }
+        // =================================================================
         // ================= 特效 1: 再入等离子激波 =================
         // 触发条件：高度小于 70km 且速度大于 2000 m/s
         double speed = baba1.getVelocityMag();
@@ -962,82 +1043,76 @@ int main()
         Vec2 nose_offset = { 0, h / 2 + w / 2 };
         nose_offset = rotateVec(nose_offset.x, nose_offset.y, baba1.angle);
         renderer->addRotatedTri(cx + nose_offset.x, cy + nose_offset.y, w, w, (float)baba1.angle, 1.0f, 0.2f, 0.2f);
-        // ... (前面的代码：画地球、轨道、地面、特效、火箭主体、鼻锥等) ...
+       
 
+       
         // =================【新增功能：专业航天 HUD 仪表盘】=================
         // 使用标准化设备坐标 (NDC, 范围 -1.0 到 1.0) 直接在屏幕上绘制 GUI
-        // 这些元素将固定在屏幕窗口上，不会随相机移动或缩放
 
         // --- HUD 配置 ---
         float hud_opacity = 0.8f;        // 整体不透明度
-        float gauge_h = 0.6f;            // 仪表盘总高度 (NDC)
-        float gauge_w = 0.03f;           // 仪表盘宽度 (NDC)
-        float gauge_y_center = 0.4f;     // 仪表盘中心 Y 坐标 (偏屏幕上方)
-        float gauge_vel_x = -0.92f;      // 速度计中心 X 坐标 (屏幕最左侧)
-        float gauge_alt_x = -0.84f;      // 高度计中心 X 坐标 (紧挨着速度计)
+        float gauge_h = 0.6f;            // 仪表盘总高度
+        float gauge_w = 0.03f;           // 仪表盘宽度
+        float gauge_y_center = 0.4f;     // 仪表盘中心 Y 坐标
+        float gauge_vel_x = -0.92f;      // 速度计中心 X 坐标
+        float gauge_alt_x = -0.84f;      // 高度计中心 X 坐标
+        float gauge_fuel_x = -0.76f;     // 燃油计中心 X 坐标 
 
         // --- 1. 速度计 (Velocity Gauge) ---
-        // 设计：垂直条，随速度增加从绿色渐变为黄色再到红色
         double current_vel = baba1.getVelocityMag();
-        float max_gauge_vel = 3000.0f; // 设定 3km/s 为满格 (约第一宇宙速度)
+        float max_gauge_vel = 3000.0f;
         float vel_ratio = (float)min(1.0, current_vel / max_gauge_vel);
-
-        // 1.1 绘制背景槽 (半透明深灰)
         renderer->addRect(gauge_vel_x, gauge_y_center, gauge_w * 1.2f, gauge_h + 0.02f, 0.1f, 0.1f, 0.1f, 0.5f * hud_opacity);
-
-        // 1.2 计算动态颜色渐变 (绿 -> 黄 -> 红)
         float r_vel = vel_ratio * 2.0f; if (r_vel > 1.0f) r_vel = 1.0f;
         float g_vel = (1.0f - vel_ratio) * 2.0f; if (g_vel > 1.0f) g_vel = 1.0f;
-        float b_vel = 0.0f;
-
-        // 1.3 绘制填充条
         float fill_h_vel = gauge_h * vel_ratio;
-        // 【数学技巧】：addRect 的 Y 是中心点。为了让进度条从底部往上涨，
-        // 中心点需要向下偏移：偏移量 = (总高度 - 填充高度) / 2
-        float fill_y_offset_vel = (gauge_h - fill_h_vel) / 2.0f;
-        renderer->addRect(gauge_vel_x, gauge_y_center - fill_y_offset_vel, gauge_w * 0.8f, fill_h_vel,
-            r_vel, g_vel, b_vel, hud_opacity);
-
+        renderer->addRect(gauge_vel_x, gauge_y_center - (gauge_h - fill_h_vel) / 2.0f, gauge_w * 0.8f, fill_h_vel,
+            r_vel, g_vel, 0.0f, hud_opacity);
 
         // --- 2. 高度计 (Altitude Gauge) ---
-        // 设计：垂直条，随高度增加从深蓝渐变为亮白，模拟大气层
         double current_alt = baba1.getAltitude();
-        float max_gauge_alt = 100000.0f; // 设定 100km (卡门线) 为满格
+        float max_gauge_alt = 100000.0f;
         float alt_ratio = (float)min(1.0, current_alt / max_gauge_alt);
-
-        // 2.1 绘制背景槽
         renderer->addRect(gauge_alt_x, gauge_y_center, gauge_w * 1.2f, gauge_h + 0.02f, 0.1f, 0.1f, 0.1f, 0.5f * hud_opacity);
-
-        // 2.2 绘制填充条 (蓝 -> 白 渐变)
         float fill_h_alt = gauge_h * alt_ratio;
-        float fill_y_offset_alt = (gauge_h - fill_h_alt) / 2.0f;
-        renderer->addRect(gauge_alt_x, gauge_y_center - fill_y_offset_alt, gauge_w * 0.8f, fill_h_alt,
-            alt_ratio * 0.8f, 0.3f + alt_ratio * 0.7f, 1.0f, hud_opacity); // 颜色计算公式
+        renderer->addRect(gauge_alt_x, gauge_y_center - (gauge_h - fill_h_alt) / 2.0f, gauge_w * 0.8f, fill_h_alt,
+            alt_ratio * 0.8f, 0.3f + alt_ratio * 0.7f, 1.0f, hud_opacity);
 
+        // --- 3. 燃油计 (Fuel Gauge) ---
+        double current_fuel = baba1.getFuel();
+        float max_gauge_fuel = 100000.0f; // 对应火箭初始化时的 100 吨满载燃料
+        float fuel_ratio = (float)max(0.0, min(1.0, current_fuel / max_gauge_fuel));
 
-        // --- 3. 装饰性刻度线与标签框 ---
+        // 背景槽
+        renderer->addRect(gauge_fuel_x, gauge_y_center, gauge_w * 1.2f, gauge_h + 0.02f, 0.1f, 0.1f, 0.1f, 0.5f * hud_opacity);
+
+        // 动态颜色：满燃料为绿，耗尽前变红
+        float r_fuel = (1.0f - fuel_ratio) * 2.0f; if (r_fuel > 1.0f) r_fuel = 1.0f;
+        float g_fuel = fuel_ratio * 2.0f;          if (g_fuel > 1.0f) g_fuel = 1.0f;
+
+        float fill_h_fuel = gauge_h * fuel_ratio;
+        renderer->addRect(gauge_fuel_x, gauge_y_center - (gauge_h - fill_h_fuel) / 2.0f, gauge_w * 0.8f, fill_h_fuel,
+            r_fuel, g_fuel, 0.1f, hud_opacity);
+
+        // --- 4. 装饰性刻度线与标签框 ---
         int num_ticks = 10;
         for (int i = 0; i <= num_ticks; i++) {
             float tick_ratio = (float)i / num_ticks;
             float tick_y = (gauge_y_center - gauge_h / 2.0f) + gauge_h * tick_ratio;
             float tick_w = 0.02f; float tick_h = 0.003f;
-            // 主刻度线更长更亮
             float alpha = (i % 5 == 0) ? 0.8f : 0.4f;
             if (i % 5 == 0) tick_w *= 1.5f;
 
-            // 速度刻度 (在左侧)
             renderer->addRect(gauge_vel_x - gauge_w, tick_y, tick_w, tick_h, 1.0f, 1.0f, 1.0f, alpha * hud_opacity);
-            // 高度刻度 (在右侧)
             renderer->addRect(gauge_alt_x + gauge_w, tick_y, tick_w, tick_h, 1.0f, 1.0f, 1.0f, alpha * hud_opacity);
+            renderer->addRect(gauge_fuel_x + gauge_w, tick_y, tick_w, tick_h, 1.0f, 1.0f, 1.0f, alpha * hud_opacity);
         }
 
-        // 简单的底部标签框 (代替文字)
-        renderer->addRect(gauge_vel_x, gauge_y_center - gauge_h / 2.0f - 0.03f, gauge_w * 2.0f, 0.03f, 0.8f, 0.2f, 0.2f, hud_opacity); // 红框标示 VEL
-        renderer->addRect(gauge_alt_x, gauge_y_center - gauge_h / 2.0f - 0.03f, gauge_w * 2.0f, 0.03f, 0.2f, 0.5f, 0.9f, hud_opacity); // 蓝框标示 ALT
+        // 底部颜色标签框
+        renderer->addRect(gauge_vel_x, gauge_y_center - gauge_h / 2.0f - 0.03f, gauge_w * 2.0f, 0.03f, 0.8f, 0.2f, 0.2f, hud_opacity); // 红: VEL
+        renderer->addRect(gauge_alt_x, gauge_y_center - gauge_h / 2.0f - 0.03f, gauge_w * 2.0f, 0.03f, 0.2f, 0.5f, 0.9f, hud_opacity); // 蓝: ALT
+        renderer->addRect(gauge_fuel_x, gauge_y_center - gauge_h / 2.0f - 0.03f, gauge_w * 2.0f, 0.03f, 0.9f, 0.6f, 0.1f, hud_opacity); // 橙: FUEL
         // ========================================================================
-
-        renderer->endFrame(); // 这里是你原来的代码
-        glfwSwapBuffers(window);
         renderer->endFrame();
         glfwSwapBuffers(window);
     }
