@@ -17,34 +17,12 @@ const double PI = 3.14159265358979323846;
 const double G0 = 9.80665;              // 海平面标准重力
 const double EARTH_RADIUS = 6371000.0;  // 地球半径 (米)
 
-// --- 真正的全球曲面树木系统 ---
-struct TreeData {
-    double angle;      // 树在地球上的真实绝对极角 (0 ~ 2PI)
-    float size_scale;  // 大小随机变化
-};
-
-std::vector<TreeData> all_trees;
-
-
-// 在 main() 之前调用一次
-void generateGlobalTrees() {
-    srand(42);
-    // 爆兵：在发射点周边集中生成 10 万棵树！
-    for (int i = 0; i < 100000; ++i) {
-        // 【核心修复】：完美绕过 RAND_MAX 限制，生成 -1.0 到 1.0 的均匀随机小数
-        double random_offset = ((double)rand() / RAND_MAX) * 2.0 - 1.0;
-
-        // 范围缩小：集中在 PI/2 附近 ±0.05 弧度 (约 ±300 公里) 内，密度极其恐怖！
-        double angle = PI / 2.0 + random_offset * 0.05;
-
-        // 缩小避让区：保留发射台方圆 80 米的安全区
-        double diff = abs(angle - PI / 2.0);
-        if (diff < 0.000012) continue;
-
-        // 随机尺寸 (0.5倍 到 1.5倍)
-        float s = 0.5f + ((double)rand() / RAND_MAX) * 1.0f;
-        all_trees.push_back({ angle, s });
-    }
+// 引擎底层：无状态伪随机哈希函数
+// 输入一个整数网格索引，输出一个极其均匀的 0.0 到 1.0 的浮点数
+float hash11(int n) {
+    n = (n << 13) ^ n;
+    int nn = (n * (n * n * 60493 + 19990303) + 1376312589) & 0x7fffffff;
+    return ((float)nn / (float)0x7fffffff);
 }
 // 简单的二维向量工具
 struct Vec2 { double x, y; };
@@ -601,7 +579,7 @@ public:
 
                 mission_timer += dt;
                 // 绕轨巡航 6000 秒 
-                if (mission_timer > 6000.0) {
+                if (mission_timer > 5000.0) {
                     mission_phase = 4;
                     mission_msg = "DE-ORBIT SEQUENCE START.";
                 }
@@ -804,7 +782,7 @@ void drawOrbit(Renderer* renderer, double px, double py, double vx, double vy, d
 }
 int main()
 {
-    generateGlobalTrees();
+    
     glfwInit();
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
@@ -924,52 +902,74 @@ int main()
         renderer->addRotatedRect(toScreenX(0, EARTH_RADIUS), toScreenY(0, EARTH_RADIUS) + y_offset - 25.0f * scale,
             100.0f * scale, 50.0f * scale, (float)-cam_angle, 0.5f, 0.5f, 0.5f);
 
-        // =================【新增功能：全球曲面植被渲染系统】=================
-           // 高度限制：只在 20km (20000米) 以下渲染树木
+        // =================【新增功能：无限程序化生成植被系统】=================
+          // 高度限制：只在 20km (20000米) 以下渲染树木，内存占用 O(1)！
         if (baba1.getAltitude() < 20000.0) {
-            // 【核心修复】：将树木尺寸放大，变成红杉巨树，增加低空机动的速度压迫感！
             float baseTrunkW = 5.0f;
             float baseTrunkH = 15.0f;
             float baseLeafW = 18.0f;
             float baseLeafH = 28.0f;
 
-            // 获取火箭极角，用于计算视野
+            // 1. 获取火箭当前的绝对极角 (0 ~ 2PI)
             double rocket_theta = atan2(baba1.py, baba1.px);
+            if (rocket_theta < 0) rocket_theta += 2.0 * PI;
 
-            for (const auto& tree : all_trees) {
-                // 【核心：曲面视锥剔除】只渲染火箭夹角正负 2 度范围内的树 (视距约 200公里)
-                double angle_diff = tree.angle - rocket_theta;
-                while (angle_diff > PI) angle_diff -= 2 * PI;
-                while (angle_diff < -PI) angle_diff += 2 * PI;
+            // 2. 定义视距：只计算火箭前后各 0.03 弧度 (约 200 公里范围)
+            double view_range = 0.03;
 
-                if (abs(angle_diff) > 0.03) continue; // 超出视野的树直接剔除，保护显卡！
+            // 3. 将整个地球划分为无数个 15 米宽的虚拟网格
+            double grid_step = 15.0 / EARTH_RADIUS;
+            int total_grids = (int)ceil((2.0 * PI) / grid_step); // 地球一圈总网格数
 
-                // 1. 计算树根在完美地球圆弧上的绝对世界坐标
-                double wx = EARTH_RADIUS * cos(tree.angle);
-                double wy = EARTH_RADIUS * sin(tree.angle);
+            // 计算视野内覆盖了哪些网格索引
+            int start_idx = (int)floor((rocket_theta - view_range) / grid_step);
+            int end_idx = (int)ceil((rocket_theta + view_range) / grid_step);
 
-                // 2. 转换为屏幕坐标 (加上 y_offset 让它与地球地表完美贴合)
+            for (int i = start_idx; i <= end_idx; ++i) {
+                // 解决绕地球一圈后的索引越界问题
+                int wrapped_i = (i % total_grids + total_grids) % total_grids;
+
+                // 【核心魔法】：用网格索引算命！
+                float random_presence = hash11(wrapped_i * 12345);
+                // 只有 35% 的概率这个槽位会有一棵树，形成错落有致的森林
+                if (random_presence > 0.35f) continue;
+
+                // 通过索引反推这棵树在地球上的真实物理极角
+                double tree_angle = wrapped_i * grid_step;
+
+                // 【海洋剔除】：同步地球渲染地貌逻辑！绝不在蓝色海洋里种树！
+                int earth_segment = (int)(tree_angle / (2.0 * PI) * 36000.0);
+                if ((earth_segment / 3000) % 2 == 0) continue; // 偶数区是海洋，直接跳过！
+
+                // 发射台避让区 (PI/2 附近 80 米范围)
+                if (abs(tree_angle - PI / 2.0) < 0.000012) continue;
+
+                // 计算随机大小 (0.5 ~ 1.5 倍)
+                float random_size = 0.5f + hash11(wrapped_i * 54321) * 1.0f;
+
+                // 计算坐标
+                double wx = EARTH_RADIUS * cos(tree_angle);
+                double wy = EARTH_RADIUS * sin(tree_angle);
                 float screenX = toScreenX(wx, wy);
                 float screenY = toScreenY(wx, wy) + y_offset;
 
-                float finalScale = (float)scale * tree.size_scale;
+                float finalScale = (float)scale * random_size;
                 float tW = baseTrunkW * finalScale;
                 float tH = baseTrunkH * finalScale;
                 float lW = baseLeafW * finalScale;
                 float lH = baseLeafH * finalScale;
 
-                // 3. 计算法线倾斜角：沿着地球圆心向外生长
-                // 【核心修复】：删掉了前面的负号，保证两边的树都正确地背离地心生长
-                float screen_normal_angle = (float)-angle_diff;
+                // 计算法线角度：让树木向外生长，同时考虑视角的相对旋转
+                double angle_diff = tree_angle - (rocket_theta > PI ? rocket_theta - 2 * PI : rocket_theta);
+                if (angle_diff > PI) angle_diff -= 2 * PI;
+                if (angle_diff < -PI) angle_diff += 2 * PI;
+                float screen_normal_angle = (float)angle_diff;
 
-                // 4. 计算偏移向量 (必须用 + 号，因为 OpenGL 里 +Y 是屏幕上方)
                 Vec2 trunk_offset = { 0, tH / 2.0f };
                 trunk_offset = rotateVec(trunk_offset.x, trunk_offset.y, screen_normal_angle);
-
                 Vec2 leaf_offset = { 0, tH + lH / 2.0f };
                 leaf_offset = rotateVec(leaf_offset.x, leaf_offset.y, screen_normal_angle);
 
-                // 绘制树干和树冠 (加上偏移，使得树根正好扎在地表)
                 renderer->addRotatedRect(screenX + trunk_offset.x, screenY + trunk_offset.y, tW, tH, screen_normal_angle, 0.4f, 0.25f, 0.1f);
                 renderer->addRotatedTri(screenX + leaf_offset.x, screenY + leaf_offset.y, lW, lH, screen_normal_angle, 0.1f, 0.6f, 0.2f);
             }
