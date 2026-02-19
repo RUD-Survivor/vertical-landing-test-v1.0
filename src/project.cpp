@@ -58,8 +58,8 @@ struct PID {
 const char* vertexShaderSource = R"(
     #version 330 core
     layout (location = 0) in vec2 aPos;
-    layout (location = 1) in vec3 aColor;
-    out vec3 ourColor;
+    layout (location = 1) in vec4 aColor;
+    out vec4 ourColor;
     void main() {
         gl_Position = vec4(aPos.x, aPos.y, 0.0, 1.0);
         ourColor = aColor;
@@ -69,9 +69,9 @@ const char* vertexShaderSource = R"(
 const char* fragmentShaderSource = R"(
     #version 330 core
     out vec4 FragColor;
-    in vec3 ourColor;
+    in vec4 ourColor;
     void main() {
-        FragColor = vec4(ourColor, 1.0);
+        FragColor = ourColor;
     }
 )";
 
@@ -91,38 +91,46 @@ public:
         unsigned int f = compileShader(GL_FRAGMENT_SHADER, fragmentShaderSource);
         shaderProgram = glCreateProgram();
         glAttachShader(shaderProgram, v); glAttachShader(shaderProgram, f);
-        glLinkProgram(shaderProgram); glDeleteShader(v); glDeleteShader(f);
+        
+           
+            glLinkProgram(shaderProgram); glDeleteShader(v); glDeleteShader(f);
 
-        glGenVertexArrays(1, &VAO); glGenBuffers(1, &VBO);
-        glBindVertexArray(VAO); glBindBuffer(GL_ARRAY_BUFFER, VBO);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 20000, NULL, GL_DYNAMIC_DRAW);
-        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
-        glEnableVertexAttribArray(0);
-        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(2 * sizeof(float)));
-        glEnableVertexAttribArray(1);
+            glGenVertexArrays(1, &VAO); glGenBuffers(1, &VBO);
+            glBindVertexArray(VAO); glBindBuffer(GL_ARRAY_BUFFER, VBO);
+            // 预分配更大的显存
+            glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 40000, NULL, GL_DYNAMIC_DRAW);
+
+            // 【核心修改】：步长从 5 改为 6，因为多了 Alpha 通道
+            // 位置属性 (location=0): 偏移 0
+            glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
+            glEnableVertexAttribArray(0);
+            // 颜色属性 (location=1): 偏移 2个float，读取 4个float (RGBA)
+            glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(2 * sizeof(float)));
+            glEnableVertexAttribArray(1);
+        
     }
     void beginFrame() { vertices.clear(); }
-    void addVertex(float x, float y, float r, float g, float b) {
-        vertices.insert(vertices.end(), { x, y, r, g, b });
+    void addVertex(float x, float y, float r, float g, float b,float a) {
+        vertices.insert(vertices.end(), { x, y, r, g, b ,a});
     }
     // 普通矩形
     void addRect(float x, float y, float w, float h, float r, float g, float b) {
-        addVertex(x - w / 2, y - h / 2, r, g, b); addVertex(x + w / 2, y - h / 2, r, g, b); addVertex(x + w / 2, y + h / 2, r, g, b);
-        addVertex(x + w / 2, y + h / 2, r, g, b); addVertex(x - w / 2, y + h / 2, r, g, b); addVertex(x - w / 2, y - h / 2, r, g, b);
+        addVertex(x - w / 2, y - h / 2, r, g, b, 1.0f); addVertex(x + w / 2, y - h / 2, r, g, b, 1.0f); addVertex(x + w / 2, y + h / 2, r, g, b,1.0f);
+        addVertex(x + w / 2, y + h / 2, r, g, b, 1.0f); addVertex(x - w / 2, y + h / 2, r, g, b, 1.0f); addVertex(x - w / 2, y - h / 2, r, g, b, 1.0f);
     }
     // 旋转矩形
-    void addRotatedRect(float cx, float cy, float w, float h, float angle, float r, float g, float b) {
+    void addRotatedRect(float cx, float cy, float w, float h, float angle, float r, float g, float b,float a = 1.0f) {
         Vec2 p1 = { -w / 2, -h / 2 }, p2 = { w / 2, -h / 2 }, p3 = { w / 2, h / 2 }, p4 = { -w / 2, h / 2 };
         p1 = rotateVec(p1.x, p1.y, angle); p2 = rotateVec(p2.x, p2.y, angle);
         p3 = rotateVec(p3.x, p3.y, angle); p4 = rotateVec(p4.x, p4.y, angle);
-        addVertex(cx + p1.x, cy + p1.y, r, g, b); addVertex(cx + p2.x, cy + p2.y, r, g, b); addVertex(cx + p3.x, cy + p3.y, r, g, b);
-        addVertex(cx + p3.x, cy + p3.y, r, g, b); addVertex(cx + p4.x, cy + p4.y, r, g, b); addVertex(cx + p1.x, cy + p1.y, r, g, b);
+        addVertex(cx + p1.x, cy + p1.y, r, g, b, 1.0f); addVertex(cx + p2.x, cy + p2.y, r, g, b, 1.0f); addVertex(cx + p3.x, cy + p3.y, r, g, b, 1.0f);
+        addVertex(cx + p3.x, cy + p3.y, r, g, b, 1.0f); addVertex(cx + p4.x, cy + p4.y, r, g, b, 1.0f); addVertex(cx + p1.x, cy + p1.y, r, g, b, 1.0f);
     }
     // 旋转三角形
-    void addRotatedTri(float cx, float cy, float w, float h, float angle, float r, float g, float b) {
+    void addRotatedTri(float cx, float cy, float w, float h, float angle, float r, float g, float b,float a=1.0f) {
         Vec2 p1 = { 0, h / 2 }, p2 = { -w / 2, -h / 2 }, p3 = { w / 2, -h / 2 };
         p1 = rotateVec(p1.x, p1.y, angle); p2 = rotateVec(p2.x, p2.y, angle); p3 = rotateVec(p3.x, p3.y, angle);
-        addVertex(cx + p1.x, cy + p1.y, r, g, b); addVertex(cx + p2.x, cy + p2.y, r, g, b); addVertex(cx + p3.x, cy + p3.y, r, g, b);
+        addVertex(cx + p1.x, cy + p1.y, r, g, b, 1.0f); addVertex(cx + p2.x, cy + p2.y, r, g, b, 1.0f); addVertex(cx + p3.x, cy + p3.y, r, g, b, 1.0f);
     }
     // 画圆形地球
     void addCircle(float cx, float cy, float radius, float r, float g, float b) {
@@ -130,9 +138,9 @@ public:
         for (int i = 0; i < segments; i++) {
             float theta1 = 2.0f * PI * float(i) / float(segments);
             float theta2 = 2.0f * PI * float(i + 1) / float(segments);
-            addVertex(cx, cy, r, g, b); // 圆心
-            addVertex(cx + radius * cos(theta1), cy + radius * sin(theta1), r, g, b);
-            addVertex(cx + radius * cos(theta2), cy + radius * sin(theta2), r, g, b);
+            addVertex(cx, cy, r, g, b, 1.0f); // 圆心
+            addVertex(cx + radius * cos(theta1), cy + radius * sin(theta1), r, g, b, 1.0f);
+            addVertex(cx + radius * cos(theta2), cy + radius * sin(theta2), r, g, b, 1.0f);
         }
     }
 
@@ -147,9 +155,9 @@ public:
             if ((i / 10) % 2 == 0) { r = 0.1f; g = 0.4f; b = 0.8f; } // 海洋
             else { r = 0.2f; g = 0.6f; b = 0.2f; } // 大陆
 
-            addVertex(cx, cy, r, g, b);
-            addVertex(cx + radius * cos(theta1), cy + radius * sin(theta1), r, g, b);
-            addVertex(cx + radius * cos(theta2), cy + radius * sin(theta2), r, g, b);
+            addVertex(cx, cy, r, g, b, 1.0f);
+            addVertex(cx + radius * cos(theta1), cy + radius * sin(theta1), r, g, b, 1.0f);
+            addVertex(cx + radius * cos(theta2), cy + radius * sin(theta2), r, g, b, 1.0f);
         }
     }
     
@@ -157,7 +165,7 @@ public:
         if (vertices.empty()) return;
         glUseProgram(shaderProgram); glBindVertexArray(VAO); glBindBuffer(GL_ARRAY_BUFFER, VBO);
         glBufferSubData(GL_ARRAY_BUFFER, 0, vertices.size() * sizeof(float), vertices.data());
-        glDrawArrays(GL_TRIANGLES, 0, vertices.size() / 5);
+        glDrawArrays(GL_TRIANGLES, 0, vertices.size() / 6);
     }
     ~Renderer() { glDeleteVertexArrays(1, &VAO); glDeleteBuffers(1, &VBO); glDeleteProgram(shaderProgram); }
 };
@@ -731,7 +739,7 @@ void drawOrbit(Renderer* renderer, double px, double py, double vx, double vy, d
         if (denom <= 0.05) continue; // 忽略逃逸轨道的无限远端
 
         double r_nu = p / denom;
-        if (r_nu > EARTH_RADIUS * 5) continue; // 太远的就不画了
+        if (r_nu > EARTH_RADIUS * 5) { first = true; continue; }; // 太远的就不画了
 
         double x_orb = r_nu * cos(nu);
         double y_orb = r_nu * sin(nu);
@@ -748,18 +756,18 @@ void drawOrbit(Renderer* renderer, double px, double py, double vx, double vy, d
             if (r_nu < EARTH_RADIUS + 80000.0) { r_col = 1.0f; g_col = 0.0f; b_col = 0.0f; }
 
             // 画出预测轨迹线
-            float thickness = max(0.00001f, (float)(2000.0 * scale));
+            float thickness = 0.005f;
             float dx = screen_x - prev_x, dy = screen_y - prev_y;
             float len = sqrt(dx * dx + dy * dy);
             if (len > 0) {
                 float nx = -dy / len * thickness, ny = dx / len * thickness;
-                renderer->addVertex(prev_x + nx, prev_y + ny, r_col, g_col, b_col);
-                renderer->addVertex(prev_x - nx, prev_y - ny, r_col, g_col, b_col);
-                renderer->addVertex(screen_x + nx, screen_y + ny, r_col, g_col, b_col);
+                renderer->addVertex(prev_x + nx, prev_y + ny, r_col, g_col, b_col, 1.0f);
+                renderer->addVertex(prev_x - nx, prev_y - ny, r_col, g_col, b_col, 1.0f);
+                renderer->addVertex(screen_x + nx, screen_y + ny, r_col, g_col, b_col, 1.0f);
 
-                renderer->addVertex(screen_x + nx, screen_y + ny, r_col, g_col, b_col);
-                renderer->addVertex(prev_x - nx, prev_y - ny, r_col, g_col, b_col);
-                renderer->addVertex(screen_x - nx, screen_y - ny, r_col, g_col, b_col);
+                renderer->addVertex(screen_x + nx, screen_y + ny, r_col, g_col, b_col, 1.0f);
+                renderer->addVertex(prev_x - nx, prev_y - ny, r_col, g_col, b_col, 1.0f);
+                renderer->addVertex(screen_x - nx, screen_y - ny, r_col, g_col, b_col, 1.0f);
             }
         }
         prev_x = screen_x; prev_y = screen_y; first = false;
@@ -772,12 +780,15 @@ int main()
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-    GLFWwindow* window = glfwCreateWindow(1000, 800, "2D Rocket Suicide Burn Sim", NULL, NULL);
+    GLFWwindow* window = glfwCreateWindow(1000, 800, "2D Rocket Sim", NULL, NULL);
     if (!window) { glfwTerminate(); return -1; }
     glfwMakeContextCurrent(window);
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
 
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) return -1;
+    //：开启透明度混合
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     renderer = new Renderer();
 
     // 初始化：放在地球北极，干重10吨，燃料50吨
@@ -825,16 +836,13 @@ int main()
 
         this_thread::sleep_for(chrono::milliseconds(20)); // 限制帧率
 
-        // --- 渲染 ---
-        // 天空颜色随高度变化
+        // 【修复 1：找回画面刷新】
         float t = (float)min(baba1.getAltitude() / 50000.0, 1.0);
-        float r = my_lerp(0.5f, 0.0f, t);
-        float g = my_lerp(0.7f, 0.0f, t);
-        float b = my_lerp(1.0f, 0.0f, t);
-        glClearColor(r, g, b, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
+        glClearColor(my_lerp(0.5f, 0.0f, t), my_lerp(0.7f, 0.0f, t), my_lerp(1.0f, 0.0f, t), 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT); // 就是少了这一句核心代码！
 
         renderer->beginFrame();
+       
 
         // 坐标转换：世界坐标 -> 屏幕坐标
         // 相机始终对准火箭，但火箭保持在屏幕下方 1/3 处
@@ -867,37 +875,89 @@ int main()
             };
 
        
-        renderer->addEarthWithContinents(toScreenX(0, 0), toScreenY(0, 0), EARTH_RADIUS * scale, cam_angle);
-        drawOrbit(renderer, baba1.px, baba1.py, baba1.vx, baba1.vy, scale, cx, cy, cam_angle);
-        // 2. 画局部平坦地表 (永远在火箭正下方)
-        float ground_y = (float)((EARTH_RADIUS - rocket_r) * scale + cy);
-        renderer->addRect(cx, ground_y - 2000.0f * scale, 100000.0f * scale, 4000.0f * scale, 0.2f, 0.6f, 0.2f);
-
-        // 3. 画原发射台 
-        renderer->addRotatedRect(toScreenX(0, EARTH_RADIUS), toScreenY(0, EARTH_RADIUS),
-            100.0f * scale, 50.0f * scale, (float)-cam_angle, 0.8f, 0.8f, 0.8f);
-
+       
         // 4. 画火箭主体 
         float w = max(0.015f, (float)(10.0 * scale));
         float h = max(0.06f, (float)(40.0 * scale));
+        float y_offset = -h / 2.0f;
+        // 1. 画地球 (加上 y_offset)
+        renderer->addEarthWithContinents(toScreenX(0, 0), toScreenY(0, 0) + y_offset, EARTH_RADIUS * scale, cam_angle);
+        drawOrbit(renderer, baba1.px, baba1.py, baba1.vx, baba1.vy, scale, cx, cy, cam_angle);
+        // 2. 画平坦地表 (加上 y_offset)
+        float ground_y = (float)((EARTH_RADIUS - rocket_r) * scale + cy) + y_offset;
+        renderer->addRect(cx, ground_y - 2000.0f * scale, 100000.0f * scale, 4000.0f * scale, 0.2f, 0.6f, 0.2f);
+        // 3. 画发射台 (放在地表，加上 y_offset)
+        renderer->addRotatedRect(toScreenX(0, EARTH_RADIUS), toScreenY(0, EARTH_RADIUS) + y_offset - 25.0f * scale,
+            100.0f * scale, 50.0f * scale, (float)-cam_angle, 0.5f, 0.5f, 0.5f);
 
-        // 因为宇宙已经旋转，火箭的局部姿态角可以用于屏幕渲染
+        // ================= 特效 1: 再入等离子激波 =================
+        // 触发条件：高度小于 70km 且速度大于 2000 m/s
+        double speed = baba1.getVelocityMag();
+        double alt = baba1.getAltitude();
+        if (alt < 70000.0 && speed > 2000.0) {
+            float intensity = (float)min(1.0, (speed - 2000.0) / 3000.0) * (float)(1.0 - alt / 70000.0);
+            float plasmaW = w * 4.0f;
+            float plasmaH = h * 1.5f;
+
+            // 【修复 4：绝对真实的运动方向预测】
+            double svx = baba1.vx * cos_c - baba1.vy * sin_c;
+            double svy = baba1.vx * sin_c + baba1.vy * cos_c;
+            // 计算屏幕绝对运动角 (0指向正上方)
+            double move_angle = atan2(svx, svy);
+
+            // 放置在运动方向的正前方
+            float offset_dist = h / 2.0f + plasmaH / 4.0f;
+            float px = cx + sin(move_angle) * offset_dist;
+            float py = cy + cos(move_angle) * offset_dist;
+
+            // 尖端向前：渲染角度加上 PI (180度翻转)，让锥尖完美迎着空气！
+            float render_angle = (float)(move_angle + PI);
+
+            renderer->addRotatedTri(px, py, plasmaW * 1.5f, plasmaH, render_angle,
+                1.0f, 0.1f, 0.0f, 0.3f * intensity);
+            renderer->addRotatedTri(px, py, plasmaW, plasmaH * 0.8f, render_angle,
+                1.0f, 0.5f, 0.2f, 0.6f * intensity);
+        }
+        // ================= 特效 2 & 3: 高级引擎尾焰 & 着陆烟尘 =================
+        double thrust_kN = baba1.getThrust() / 1000.0;
+        if (thrust_kN > 10.0) { // 有推力就显示
+            float throttle_factor = (float)(baba1.throttle);
+            float flameLen = (thrust_kN / 3000.0f) * h * 2.5f; // 火焰随屏幕高度等比缩放
+            float flameW = w * 0.9f;
+
+            // --- A. 主焰 (橙红色渐变) ---
+            // 【核心修复】：先在局部坐标算好火焰几何中心，再做矩阵旋转！
+            Vec2 flame_center1 = { 0, -h / 2.0f - flameLen / 2.0f };
+            flame_center1 = rotateVec(flame_center1.x, flame_center1.y, baba1.angle);
+            renderer->addRotatedTri(cx + flame_center1.x, cy + flame_center1.y, flameW, flameLen, (float)baba1.angle,
+                1.0f, 0.3f, 0.0f, 0.7f * throttle_factor);
+
+            Vec2 flame_center2 = { 0, -h / 2.0f - flameLen * 0.8f / 2.0f };
+            flame_center2 = rotateVec(flame_center2.x, flame_center2.y, baba1.angle);
+            renderer->addRotatedTri(cx + flame_center2.x, cy + flame_center2.y, flameW * 0.7f, flameLen * 0.8f, (float)baba1.angle,
+                1.0f, 0.6f, 0.1f, 0.8f * throttle_factor);
+
+            // --- B. 马赫环 (Shock Diamonds) ---
+            // 【核心修复】：加入油门阈值，油门小于 10% 坚决不画马赫环，防止关机残留
+            if (throttle_factor > 0.1f) {
+                int num_diamonds = max(1, (int)(throttle_factor * 5));
+                float diamond_spacing = flameLen / (num_diamonds + 1);
+                for (int i = 1; i <= num_diamonds; i++) {
+                    Vec2 diamond_pos = { 0, -h / 2.0f - diamond_spacing * i };
+                    diamond_pos = rotateVec(diamond_pos.x, diamond_pos.y, baba1.angle);
+                    renderer->addRotatedRect(cx + diamond_pos.x, cy + diamond_pos.y, flameW * 0.5f, flameW * 0.5f,
+                        (float)baba1.angle + PI / 4.0f,
+                        1.0f, 0.9f, 0.7f, 0.9f * throttle_factor);
+                }
+            }
+        }
+        // ====================================================================
+         // 因为宇宙已经旋转，火箭的局部姿态角可以用于屏幕渲染
         renderer->addRotatedRect(cx, cy, w, h, (float)baba1.angle, 0.9f, 0.9f, 0.9f);
-
         // 5. 鼻锥
         Vec2 nose_offset = { 0, h / 2 + w / 2 };
         nose_offset = rotateVec(nose_offset.x, nose_offset.y, baba1.angle);
         renderer->addRotatedTri(cx + nose_offset.x, cy + nose_offset.y, w, w, (float)baba1.angle, 1.0f, 0.2f, 0.2f);
-
-  
-        // 6. 画火焰
-        if (baba1.getThrust() > 1000) {
-            float flameLen = (baba1.getThrust() / 3000000.0) * 0.3f;
-            Vec2 flame_offset = { 0, -h / 2 - flameLen / 2 };
-            flame_offset = rotateVec(flame_offset.x, flame_offset.y, baba1.angle);
-            renderer->addRotatedTri(cx + flame_offset.x, cy + flame_offset.y, w * 0.8f, flameLen, (float)baba1.angle, 1.0f, 0.6f, 0.0f);
-        }
-
         renderer->endFrame();
         glfwSwapBuffers(window);
     }
