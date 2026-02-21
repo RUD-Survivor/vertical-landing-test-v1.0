@@ -222,6 +222,8 @@ public:
     int stages;
     int mission_phase = 0; // 记录当前太空任务阶段
     double mission_timer = 0; // 任务计时器
+    bool auto_mode = true;    // true=自动驾驶 false=手动控制
+    double leg_deploy_progress = 0.0; // 着陆腿展开进度 0~1
     Explorer(double fuel, double mass, double diameter, double height, int stages, double specific_impulse, double fuel_consumption_rate, double nozzle_area)
     {
         // 2D 初始化：放在地球北极
@@ -410,11 +412,9 @@ public:
         px += vx * dt;
         py += vy * dt;
 
-        // 角运动 (I * alpha = Torque)
+        // 角运动在下方统一计算（已修复重复积分 bug）
         double moment_of_inertia = 50000.0; // 假定转动惯量
-        double ang_accel = (torque_cmd + aero_torque) / moment_of_inertia;
-        ang_vel += ang_accel * dt;
-        angle += ang_vel * dt;
+        double ang_accel = 0; // 此处仅声明，后续统一积分
 
     
        
@@ -705,6 +705,46 @@ public:
     // 手动发射
     void ManualLaunch() { if (status == PRE_LAUNCH) { status = ASCEND; } }
 
+    // --- 手动控制模式 ---
+    void ManualControl(GLFWwindow* window, double dt)
+    {
+        if (status == PRE_LAUNCH || status == LANDED || status == CRASHED) return;
+
+        // 油门控制
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS)
+            throttle = min(1.0, throttle + 1.5 * dt);
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS)
+            throttle = max(0.0, throttle - 1.5 * dt);
+        if (glfwGetKey(window, GLFW_KEY_Z) == GLFW_PRESS)
+            throttle = 1.0;
+        if (glfwGetKey(window, GLFW_KEY_X) == GLFW_PRESS)
+            throttle = 0.0;
+
+        // 姿态控制 (施加力矩)
+        torque_cmd = 0;
+        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS)
+            torque_cmd = 30000.0;   // 逆时针 (向左倾)
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS)
+            torque_cmd = -30000.0;  // 顺时针 (向右倾)
+
+        // 维持 status 更新
+        if (status == ASCEND && velocity < 0 && altitude > 1000) status = DESCEND;
+    }
+
+    // 切换控制模式
+    void ToggleMode() {
+        auto_mode = !auto_mode;
+        if (auto_mode) {
+            // 切回自动：重置 PID 积分项，防止积分饱和
+            pid_vert.reset();
+            pid_pos.reset();
+            pid_att.reset();
+            mission_msg = ">> AUTOPILOT ENGAGED";
+        } else {
+            mission_msg = ">> MANUAL CONTROL ACTIVE";
+        }
+    }
+
 };
 
 // ==========================================
@@ -810,9 +850,12 @@ int main()
 
     cout << ">> SYSTEM READY." << endl;
     cout << ">> PRESS [SPACE] TO LAUNCH!" << endl;
-    cout << ">> SIT BACK AND WATCH THE AUTO-LANDING." << endl;
+    cout << ">> [TAB] Toggle Auto/Manual | [WASD] Thrust & Attitude" << endl;
+    cout << ">> [Z] Full Throttle | [X] Kill Throttle | [1-4] Time Warp" << endl;
 
     double dt = 0.02; // 50Hz 物理步长
+
+    static bool tab_was_pressed = false; // Tab 防抖
 
     while (baba1.is_Flying() && !glfwWindowShouldClose(window))
     {
@@ -822,26 +865,38 @@ int main()
         if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
             baba1.ManualLaunch();
 
+        // --- Tab 键切换模式（带防抖）---
+        if (glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS) {
+            if (!tab_was_pressed) { baba1.ToggleMode(); tab_was_pressed = true; }
+        } else { tab_was_pressed = false; }
+
         // --- 时间加速逻辑 ---
         static int time_warp = 1;
-        if (glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS) time_warp = 1;     // 正常速度
-        if (glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS) time_warp = 10;    // 10 倍速
-        if (glfwGetKey(window, GLFW_KEY_3) == GLFW_PRESS) time_warp = 100;   // 100 倍速
-        if (glfwGetKey(window, GLFW_KEY_4) == GLFW_PRESS) time_warp = 1000;  // 1000倍速 (轨道用)
+        // 手动模式下禁止时间加速
+        if (baba1.auto_mode) {
+            if (glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS) time_warp = 1;
+            if (glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS) time_warp = 10;
+            if (glfwGetKey(window, GLFW_KEY_3) == GLFW_PRESS) time_warp = 100;
+            if (glfwGetKey(window, GLFW_KEY_4) == GLFW_PRESS) time_warp = 1000;
+        } else {
+            time_warp = 1; // 手动模式强制 1x 速度
+        }
 
         // --- 物理更新 (循环执行实现加速) ---
         for (int i = 0; i < time_warp; i++) {
-            baba1.AutoPilot(dt);
+            if (baba1.auto_mode)
+                baba1.AutoPilot(dt);
+            else
+                baba1.ManualControl(window, dt);
             baba1.Burn(dt);
-
-            // 如果撞地了，立刻打断时间加速，防止越界
             if (!baba1.is_Flying()) break;
         }
 
-        // --- 物理更新 (多次迭代增加稳定性) ---
-        // 自动驾驶和物理计算分离，PID计算可以慢一点，物理积分要快
-        baba1.AutoPilot(dt);
-
+        // --- 额外一步物理更新 ---
+        if (baba1.auto_mode)
+            baba1.AutoPilot(dt);
+        else
+            baba1.ManualControl(window, dt);
         baba1.Burn(dt);
 
         // 只有每隔一定帧数才打印，防止控制台看不清
@@ -856,7 +911,20 @@ int main()
         glClear(GL_COLOR_BUFFER_BIT);
 
         renderer->beginFrame();
-       
+
+        // =================【新增特效：太空背景星空】=================
+        // 高度 > 5000m 时渐显
+        if (baba1.getAltitude() > 5000.0) {
+            float star_alpha = (float)min(1.0, (baba1.getAltitude() - 5000.0) / 45000.0);
+            for (int i = 0; i < 200; i++) {
+                float sx = hash11(i * 7919) * 2.0f - 1.0f;  // -1 ~ 1
+                float sy = hash11(i * 6271) * 2.0f - 1.0f;
+                float brightness = 0.5f + hash11(i * 3571) * 0.5f;
+                float star_size = 0.002f + hash11(i * 4219) * 0.003f;
+                renderer->addRect(sx, sy, star_size, star_size,
+                    brightness, brightness, brightness * 0.9f, star_alpha * brightness);
+            }
+        }
 
         // 坐标转换：世界坐标 -> 屏幕坐标
         // 相机始终对准火箭，但火箭保持在屏幕下方 1/3 处
@@ -1043,8 +1111,77 @@ int main()
         Vec2 nose_offset = { 0, h / 2 + w / 2 };
         nose_offset = rotateVec(nose_offset.x, nose_offset.y, baba1.angle);
         renderer->addRotatedTri(cx + nose_offset.x, cy + nose_offset.y, w, w, (float)baba1.angle, 1.0f, 0.2f, 0.2f);
-       
 
+        // =================【新增特效：RCS 侧推喷射火焰】=================
+        // 条件：太空中 (>80km) 且有力矩指令
+        if (baba1.getAltitude() > 80000.0 && abs(baba1.torque_cmd) > 1000.0) {
+            float rcs_len = w * 0.6f;
+            float rcs_w = w * 0.3f;
+            float rcs_alpha = (float)min(1.0, abs(baba1.torque_cmd) / 30000.0) * 0.8f;
+
+            // 上部RCS位置 (火箭顶部侧面)
+            Vec2 rcs_top_offset = { (baba1.torque_cmd > 0 ? -w / 2.0f : w / 2.0f), h * 0.35f };
+            rcs_top_offset = rotateVec(rcs_top_offset.x, rcs_top_offset.y, baba1.angle);
+            float rcs_angle_top = (float)baba1.angle + (baba1.torque_cmd > 0 ? (float)PI / 2.0f : -(float)PI / 2.0f);
+            renderer->addRotatedTri(cx + rcs_top_offset.x, cy + rcs_top_offset.y,
+                rcs_w, rcs_len, rcs_angle_top, 1.0f, 0.9f, 0.7f, rcs_alpha);
+
+            // 底部RCS位置 (火箭底部反向)
+            Vec2 rcs_bot_offset = { (baba1.torque_cmd > 0 ? w / 2.0f : -w / 2.0f), -h * 0.35f };
+            rcs_bot_offset = rotateVec(rcs_bot_offset.x, rcs_bot_offset.y, baba1.angle);
+            float rcs_angle_bot = (float)baba1.angle + (baba1.torque_cmd > 0 ? -(float)PI / 2.0f : (float)PI / 2.0f);
+            renderer->addRotatedTri(cx + rcs_bot_offset.x, cy + rcs_bot_offset.y,
+                rcs_w, rcs_len, rcs_angle_bot, 1.0f, 0.9f, 0.7f, rcs_alpha);
+        }
+
+        // =================【新增特效：着陆腿展开动画】=================
+        if (baba1.status == Explorer::DESCEND && baba1.getAltitude() < 5000.0) {
+            // 展开进度 0~1 动画
+            baba1.leg_deploy_progress = min(1.0, baba1.leg_deploy_progress + 0.02);
+        }
+        if (baba1.leg_deploy_progress > 0.01) {
+            float leg_angle_max = (float)(PI / 4.0); // 最大展开 45度
+            float leg_current = leg_angle_max * (float)baba1.leg_deploy_progress;
+            float leg_len = h * 0.35f;
+            float leg_w_px = w * 0.12f;
+
+            // 左腿
+            Vec2 leg_base_L = { -w * 0.3f, -h / 2.0f };
+            leg_base_L = rotateVec(leg_base_L.x, leg_base_L.y, baba1.angle);
+            float leg_angle_L = (float)baba1.angle - leg_current;
+            Vec2 leg_ext_L = { 0, -leg_len / 2.0f };
+            leg_ext_L = rotateVec(leg_ext_L.x, leg_ext_L.y, (double)leg_angle_L);
+            renderer->addRotatedRect(cx + leg_base_L.x + leg_ext_L.x, cy + leg_base_L.y + leg_ext_L.y,
+                leg_w_px, leg_len, leg_angle_L, 0.4f, 0.4f, 0.4f);
+
+            // 右腿
+            Vec2 leg_base_R = { w * 0.3f, -h / 2.0f };
+            leg_base_R = rotateVec(leg_base_R.x, leg_base_R.y, baba1.angle);
+            float leg_angle_R = (float)baba1.angle + leg_current;
+            Vec2 leg_ext_R = { 0, -leg_len / 2.0f };
+            leg_ext_R = rotateVec(leg_ext_R.x, leg_ext_R.y, (double)leg_angle_R);
+            renderer->addRotatedRect(cx + leg_base_R.x + leg_ext_R.x, cy + leg_base_R.y + leg_ext_R.y,
+                leg_w_px, leg_len, leg_angle_R, 0.4f, 0.4f, 0.4f);
+        }
+
+        // =================【新增特效：着陆烟尘】=================
+        if (baba1.getThrust() > 0 && baba1.getAltitude() < 200.0 && baba1.getAltitude() > 0.5) {
+            float dust_intensity = (float)(1.0 - baba1.getAltitude() / 200.0) * (float)(baba1.throttle);
+            float dust_spread = w * 3.0f * dust_intensity;
+            float dust_h = h * 0.15f;
+
+            // 左右两团烟尘
+            Vec2 dust_base = { 0, -h / 2.0f - dust_h };
+            dust_base = rotateVec(dust_base.x, dust_base.y, baba1.angle);
+
+            renderer->addRotatedRect(cx + dust_base.x - dust_spread, cy + dust_base.y,
+                dust_spread * 1.5f, dust_h, (float)baba1.angle, 0.6f, 0.5f, 0.4f, 0.4f * dust_intensity);
+            renderer->addRotatedRect(cx + dust_base.x + dust_spread, cy + dust_base.y,
+                dust_spread * 1.5f, dust_h, (float)baba1.angle, 0.6f, 0.5f, 0.4f, 0.4f * dust_intensity);
+            // 中心热浪
+            renderer->addRotatedRect(cx + dust_base.x, cy + dust_base.y - dust_h * 0.5f,
+                dust_spread * 0.8f, dust_h * 2.0f, (float)baba1.angle, 0.8f, 0.6f, 0.3f, 0.2f * dust_intensity);
+        }
        
         // =================【新增功能：专业航天 HUD 仪表盘】=================
         // 使用标准化设备坐标 (NDC, 范围 -1.0 到 1.0) 直接在屏幕上绘制 GUI
@@ -1112,6 +1249,34 @@ int main()
         renderer->addRect(gauge_vel_x, gauge_y_center - gauge_h / 2.0f - 0.03f, gauge_w * 2.0f, 0.03f, 0.8f, 0.2f, 0.2f, hud_opacity); // 红: VEL
         renderer->addRect(gauge_alt_x, gauge_y_center - gauge_h / 2.0f - 0.03f, gauge_w * 2.0f, 0.03f, 0.2f, 0.5f, 0.9f, hud_opacity); // 蓝: ALT
         renderer->addRect(gauge_fuel_x, gauge_y_center - gauge_h / 2.0f - 0.03f, gauge_w * 2.0f, 0.03f, 0.9f, 0.6f, 0.1f, hud_opacity); // 橙: FUEL
+
+        // --- 5. 控制模式指示器 (HUD 右上角) ---
+        float mode_x = 0.85f;
+        float mode_y = 0.85f;
+        // 背景框
+        renderer->addRect(mode_x, mode_y, 0.22f, 0.06f, 0.05f, 0.05f, 0.05f, 0.7f);
+        if (baba1.auto_mode) {
+            // 绿色 AUTO 指示
+            renderer->addRect(mode_x, mode_y, 0.20f, 0.04f, 0.1f, 0.8f, 0.2f, 0.9f);
+        } else {
+            // 橙色 MANUAL 指示
+            renderer->addRect(mode_x, mode_y, 0.20f, 0.04f, 1.0f, 0.6f, 0.1f, 0.9f);
+        }
+
+        // --- 6. 油门指示条 (HUD 底部中央) ---
+        float thr_bar_x = 0.0f;
+        float thr_bar_y = -0.92f;
+        float thr_bar_w = 0.5f;
+        float thr_bar_h = 0.025f;
+        // 背景
+        renderer->addRect(thr_bar_x, thr_bar_y, thr_bar_w + 0.02f, thr_bar_h + 0.01f, 0.1f, 0.1f, 0.1f, 0.5f * hud_opacity);
+        // 填充
+        float thr_fill = thr_bar_w * (float)baba1.throttle;
+        float thr_fill_x = thr_bar_x - thr_bar_w / 2.0f + thr_fill / 2.0f;
+        float thr_r = (float)baba1.throttle > 0.8f ? 1.0f : 0.3f + (float)baba1.throttle * 0.7f;
+        float thr_g = (float)baba1.throttle < 0.5f ? 0.8f : 0.8f - ((float)baba1.throttle - 0.5f) * 1.6f;
+        renderer->addRect(thr_fill_x, thr_bar_y, thr_fill, thr_bar_h, thr_r, thr_g, 0.1f, hud_opacity);
+
         // ========================================================================
         renderer->endFrame();
         glfwSwapBuffers(window);
