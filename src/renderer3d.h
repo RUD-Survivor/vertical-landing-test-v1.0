@@ -208,14 +208,28 @@ class Renderer3D {
 public:
   GLuint program3d = 0;
   GLuint earthProgram = 0;
+  GLuint billboardProg = 0;
+  GLuint atmoProg = 0;
+  GLuint billboardVAO = 0, billboardVBO = 0;
   GLint u_mvp = -1, u_model = -1, u_lightDir = -1, u_viewPos = -1;
   GLint u_baseColor = -1, u_ambientStr = -1;
-  // Earth shader uniforms
   GLint ue_mvp = -1, ue_model = -1, ue_lightDir = -1, ue_viewPos = -1;
+  // Billboard uniforms
+  GLint ub_vp = -1, ub_proj = -1, ub_pos = -1, ub_size = -1, ub_color = -1;
+  // Atmosphere uniforms
+  GLint ua_mvp = -1, ua_model = -1, ua_lightDir = -1, ua_viewPos = -1;
 
   Mat4 view, proj;
   Vec3 camPos;
   Vec3 lightDir;
+
+  // Ribbon Renderer properties
+  GLuint ribbonProg, ribbonVAO, ribbonVBO;
+  GLint ur_mvp, ur_color;
+
+  // Lens Flare properties
+  GLuint lensFlareProg, lfVAO, lfVBO;
+  GLint ulf_sunScreenPos, ulf_aspect, ulf_color, ulf_intensity;
 
   Renderer3D() {
     // --- Standard 3D Shader (Phong) ---
@@ -381,7 +395,7 @@ public:
 
         // Lighting
         float diff = max(dot(N, L), 0.0);
-        float ambient = 0.08;
+        float ambient = 0.20; // Increased ambient for dark scenes
 
         // Atmosphere rim glow
         float rim = 1.0 - max(dot(N, V), 0.0);
@@ -394,7 +408,7 @@ public:
         if (diff < 0.05) {
           float city = noise3d(texCoord * 10.0);
           if (continent > 0.48 && city > 0.7) {
-            result += vec3(1.0, 0.8, 0.3) * 0.1 * (1.0 - diff / 0.05);
+            result += vec3(1.0, 0.8, 0.3) * 0.8 * (1.0 - diff / 0.05); // Brighter city lights
           }
         }
 
@@ -409,6 +423,201 @@ public:
     ue_viewPos = glGetUniformLocation(earthProgram, "uViewPos");
 
     lightDir = Vec3(0.5f, 0.8f, 0.3f).normalized();
+
+    // --- Billboard Shader (fire/glow particles, markers) ---
+    const char* bbVertSrc = R"(
+      #version 330 core
+      layout(location=0) in vec2 aOffset;
+      // Need View and Proj separately precisely for billboarding
+      uniform mat4 uView;
+      uniform mat4 uProj;
+      uniform vec3 uCenter;
+      uniform vec2 uSize;
+      out vec2 vUV;
+      void main() {
+        vUV = aOffset * 0.5 + 0.5;
+        // Exact spherical billboarding: extract camera right and up from View Matrix
+        // uView[0][0], uView[1][0], uView[2][0] is the right vector
+        // uView[0][1], uView[1][1], uView[2][1] is the up vector
+        vec3 right = vec3(uView[0][0], uView[1][0], uView[2][0]);
+        vec3 up    = vec3(uView[0][1], uView[1][1], uView[2][1]);
+        
+        // Compute world position of this vertex
+        vec3 worldPos = uCenter + right * aOffset.x * uSize.x + up * aOffset.y * uSize.y;
+        
+        // Project to screen
+        gl_Position = uProj * uView * vec4(worldPos, 1.0);
+      }
+    )";
+    const char* bbFragSrc = R"(
+      #version 330 core
+      in vec2 vUV;
+      uniform vec4 uColor;
+      out vec4 FragColor;
+      void main() {
+        float d = distance(vUV, vec2(0.5));
+        float alpha = smoothstep(0.5, 0.0, d);
+        FragColor = vec4(uColor.rgb, uColor.a * alpha);
+      }
+    )";
+    billboardProg = compileProgram(bbVertSrc, bbFragSrc);
+    ub_vp = glGetUniformLocation(billboardProg, "uView"); // Actually uView now
+    ub_proj = glGetUniformLocation(billboardProg, "uProj");
+    ub_pos = glGetUniformLocation(billboardProg, "uCenter");
+    ub_size = glGetUniformLocation(billboardProg, "uSize");
+    ub_color = glGetUniformLocation(billboardProg, "uColor");
+
+    // Billboard quad VAO
+    float quad[] = { -1,-1,  1,-1,  -1,1,  1,1 };
+    glGenVertexArrays(1, &billboardVAO);
+    glGenBuffers(1, &billboardVBO);
+    glBindVertexArray(billboardVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, billboardVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(quad), quad, GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, 0);
+    glEnableVertexAttribArray(0);
+    glBindVertexArray(0);
+
+    // --- Atmosphere Shader ---
+    const char* atmoFragSrc = R"(
+      #version 330 core
+      in vec3 vWorldPos;
+      in vec3 vNormal;
+      in vec2 vUV;
+      in vec4 vColor;
+      uniform vec3 uLightDir;
+      uniform vec3 uViewPos;
+      out vec4 FragColor;
+      void main() {
+        vec3 N = normalize(vNormal);
+        vec3 V = normalize(uViewPos - vWorldPos);
+        vec3 L = normalize(uLightDir);
+        // Rim intensity (edge-on = bright)
+        float rim = 1.0 - abs(dot(N, V));
+        rim = pow(rim, 2.5);
+        // Rayleigh scattering color
+        vec3 scatter = vec3(0.3, 0.55, 1.0); // blue
+        // Sunset at terminator
+        float sunAngle = dot(N, L);
+        float terminator = smoothstep(-0.1, 0.15, sunAngle);
+        vec3 sunset = vec3(1.0, 0.4, 0.1);
+        vec3 atmoColor = mix(sunset * 0.5, scatter, terminator);
+        // Only visible on lit side + terminator
+        float visibility = smoothstep(-0.3, 0.0, sunAngle) + 0.15;
+        float alpha = rim * visibility * 0.7;
+        FragColor = vec4(atmoColor, alpha);
+      }
+    )";
+    atmoProg = compileProgram(vertSrc, atmoFragSrc);
+    ua_mvp = glGetUniformLocation(atmoProg, "uMVP");
+    ua_model = glGetUniformLocation(atmoProg, "uModel");
+    ua_lightDir = glGetUniformLocation(atmoProg, "uLightDir");
+    ua_viewPos = glGetUniformLocation(atmoProg, "uViewPos");
+
+    // --- Ribbon Shader (Trajectory Trails) ---
+    const char* ribbonVertSrc = R"(
+      #version 330 core
+      layout(location=0) in vec3 aPos;
+      uniform mat4 uMVP;
+      void main() {
+        gl_Position = uMVP * vec4(aPos, 1.0);
+      }
+    )";
+    const char* ribbonFragSrc = R"(
+      #version 330 core
+      uniform vec4 uColor;
+      out vec4 FragColor;
+      void main() {
+        FragColor = uColor;
+      }
+    )";
+    ribbonProg = compileProgram(ribbonVertSrc, ribbonFragSrc);
+    ur_mvp = glGetUniformLocation(ribbonProg, "uMVP");
+    ur_color = glGetUniformLocation(ribbonProg, "uColor");
+
+    glGenVertexArrays(1, &ribbonVAO);
+    glGenBuffers(1, &ribbonVBO);
+    glBindVertexArray(ribbonVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, ribbonVBO);
+    // Allocate an initial buffer size (e.g., 2000 points * 2 edges * sizeof(Vec3))
+    glBufferData(GL_ARRAY_BUFFER, sizeof(Vec3) * 4000, nullptr, GL_DYNAMIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vec3), (void*)0);
+    glEnableVertexAttribArray(0);
+    glBindVertexArray(0);
+
+    // --- Lens Flare Shader (Procedural 2D Screen-Space) ---
+    const char* lfVertSrc = R"(
+      #version 330 core
+      layout(location=0) in vec2 aPos;
+      
+      uniform vec2 uSunScreenPos; // Position of sun in NDC (-1 to 1)
+      uniform float uAspect;      // Screen aspect ratio
+      uniform vec2 uScale;        // Scale of this specific flare element
+      uniform vec2 uOffset;       // Screen-space offset relative to sun or center
+      
+      out vec2 vUV;
+      
+      void main() {
+        vUV = aPos * 0.5 + 0.5; // 0 to 1 UVs
+        // Base quad is -1 to 1. Scale it.
+        vec2 pos = aPos * uScale;
+        // Fix aspect ratio so circles are round
+        pos.x /= uAspect;
+        // Apply offset (center of the element)
+        gl_Position = vec4(pos + uOffset, 0.0, 1.0);
+      }
+    )";
+    const char* lfFragSrc = R"(
+      #version 330 core
+      in vec2 vUV;
+      
+      uniform vec4 uColor;
+      uniform float uIntensity;
+      uniform int uShapeType; // 0 = soft circle, 1 = anamorphic streak, 2 = hexagon bokeh
+      
+      out vec4 FragColor;
+      
+      float hexDist(vec2 p) {
+        p = abs(p);
+        float c = dot(p, normalize(vec2(1.0, 1.73205081)));
+        return max(c, p.x);
+      }
+      
+      void main() {
+        vec2 rUV = vUV * 2.0 - 1.0; // -1 to 1
+        float alpha = 0.0;
+        
+        if (uShapeType == 0) {
+           // Soft core / Glow
+           float d = length(rUV);
+           alpha = pow(max(0.0, 1.0 - d), 2.0);
+        } else if (uShapeType == 1) {
+           // Anamorphic horizontal streak
+           float dx = abs(rUV.x);
+           float dy = abs(rUV.y);
+           // very sharp falloff vertically, gradual horizontally
+           alpha = pow(max(0.0, 1.0 - dx), 3.0) * pow(max(0.0, 1.0 - dy*20.0), 3.0);
+        } else if (uShapeType == 2) {
+           // Hexagonal/Polygonal Bokeh Ring
+           float d = hexDist(rUV);
+           // Ring shape: sharp outside, softer inside
+           float ring = smoothstep(1.0, 0.85, d) * smoothstep(0.6, 0.8, d);
+           alpha = ring * 0.5 + smoothstep(1.0, 0.9, d) * 0.1; 
+        }
+        
+        FragColor = vec4(uColor.rgb, uColor.a * alpha * uIntensity);
+      }
+    )";
+    
+    lensFlareProg = compileProgram(lfVertSrc, lfFragSrc);
+    ulf_sunScreenPos = glGetUniformLocation(lensFlareProg, "uSunScreenPos");
+    ulf_aspect = glGetUniformLocation(lensFlareProg, "uAspect");
+    ulf_color = glGetUniformLocation(lensFlareProg, "uColor");
+    ulf_intensity = glGetUniformLocation(lensFlareProg, "uIntensity");
+
+    // Re-use billboard VAO/VBO for Lens Flare since both are just 2D quads
+    lfVAO = billboardVAO;
+    lfVBO = billboardVBO;
   }
 
   void beginFrame(const Mat4& viewMat, const Mat4& projMat, const Vec3& cameraPos) {
@@ -436,6 +645,112 @@ public:
     mesh.draw();
   }
 
+  // ==== Procedural Screen Space Lens Flare (Feature 5) ====
+  void drawSunAndFlare(const Vec3& sunWorldPos, const Vec3& earthPos, float earthRadius, int screenW, int screenH) {
+     // 1. Ray-Sphere Occlusion Test against Earth (is the sun behind the planet?)
+     Vec3 rayDir = (sunWorldPos - camPos).normalized();
+     Vec3 oc = camPos - earthPos;
+     float b = 2.0f * oc.dot(rayDir);
+     float c = oc.dot(oc) - earthRadius * earthRadius;
+     float discriminant = b * b - 4 * c;
+     float occlusionFade = 1.0f;
+     float distToLimb = 1000000.0f;
+     
+     // Closest distance point along the ray
+     float t_closest = -oc.dot(rayDir);
+     
+     if (t_closest < 0) {
+         // The earth is strictly BEHIND the camera; no occlusion possible.
+         occlusionFade = 1.0f;
+     } else {
+         if (discriminant > 0) {
+             float t1 = t_closest - sqrtf(discriminant) / 2.0f;
+             float sunDist = (sunWorldPos - camPos).length();
+             if (t1 > 0 && t1 < sunDist) {
+                 occlusionFade = 0.0f; // Eclipsed entirely by earth core
+                 distToLimb = 0.0f;
+             }
+         } else {
+             // Ray clears earth. How close did it get to the surface?
+             float passDist = oc.cross(rayDir).length();
+             distToLimb = passDist - earthRadius;
+             // Fade smoothly through the thin upper atmosphere
+             if (distToLimb >= 0.0f && distToLimb < earthRadius * 0.05f) {
+                 occlusionFade *= distToLimb / (earthRadius * 0.05f);
+             }
+         }
+     }
+
+     if (occlusionFade <= 0.01f) return; // Completely hidden
+
+     // 2. Compute Screen Space (NDC) position of the sun
+     // We manually multiply the 4D vector to avoid needing a Vec4 class
+     Mat4 vp = proj * view;
+     float cx = vp.m[0]*sunWorldPos.x + vp.m[4]*sunWorldPos.y + vp.m[8]*sunWorldPos.z + vp.m[12];
+     float cy = vp.m[1]*sunWorldPos.x + vp.m[5]*sunWorldPos.y + vp.m[9]*sunWorldPos.z + vp.m[13];
+     float cz = vp.m[2]*sunWorldPos.x + vp.m[6]*sunWorldPos.y + vp.m[10]*sunWorldPos.z + vp.m[14];
+     float cw = vp.m[3]*sunWorldPos.x + vp.m[7]*sunWorldPos.y + vp.m[11]*sunWorldPos.z + vp.m[15];
+     
+     if (cw <= 0.0f) return; // Behind camera
+     
+     Vec3 ndcPos = Vec3(cx / cw, cy / cw, cz / cw);
+     
+     // If far off screen, do not draw flares (increased bounds to prevent sudden popping)
+     if (fabs(ndcPos.x) > 3.5f || fabs(ndcPos.y) > 3.5f) return;
+
+     // 3. Render Setup
+     glUseProgram(lensFlareProg);
+     glUniform2f(ulf_sunScreenPos, ndcPos.x, ndcPos.y);
+     float aspect = (float)screenW / (float)screenH;
+     glUniform1f(ulf_aspect, aspect);
+     
+     glBlendFunc(GL_SRC_ALPHA, GL_ONE); // Additive blending for light
+     glDepthMask(GL_FALSE);
+     glDisable(GL_DEPTH_TEST);
+     glDisable(GL_CULL_FACE);
+
+     glBindVertexArray(lfVAO);
+     glBindBuffer(GL_ARRAY_BUFFER, lfVBO);
+     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, (void*)0);
+     glEnableVertexAttribArray(0);
+
+     // Define a helper to draw one flare element
+     // Let's get locations inside the lambda for safety
+     auto drawFlare = [&](int shape, float scaleX, float scaleY, float ndcOffsetMult, 
+                              float r, float g, float b, float aFactor) {
+          glUniform1i(glGetUniformLocation(lensFlareProg, "uShapeType"), shape);
+          glUniform2f(glGetUniformLocation(lensFlareProg, "uScale"), scaleX, scaleY);
+          glUniform2f(glGetUniformLocation(lensFlareProg, "uOffset"), ndcPos.x * ndcOffsetMult, ndcPos.y * ndcOffsetMult);
+          glUniform4f(ulf_color, r, g, b, 1.0f);
+          glUniform1f(ulf_intensity, aFactor * occlusionFade);
+          glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+     };
+
+     // Core Sun
+     drawFlare(0, 0.25f, 0.25f, 1.0f,  1.0f, 0.9f, 0.8f, 2.0f); // Main Glow
+     drawFlare(0, 0.60f, 0.60f, 1.0f,  0.5f, 0.4f, 0.6f, 0.5f); // Outer Halo
+
+     // Anamorphic Streak (wide horizontal line)
+     drawFlare(1, 3.0f, 0.05f, 1.0f,   0.3f, 0.6f, 1.0f, 1.2f); // Blue Streak
+     drawFlare(1, 1.2f, 0.02f, 1.0f,   1.0f, 1.0f, 1.0f, 1.0f); // White Core Streak
+
+     // Bokeh Ghosts (mirrored across center 0,0 by negative multipliers)
+     // The further the sun is from center, the further the ghosts spread
+     drawFlare(2, 0.15f, 0.15f, -0.3f, 0.2f, 0.8f, 0.4f, 0.3f); // Green hex
+     drawFlare(2, 0.30f, 0.30f, -0.6f, 0.8f, 0.2f, 0.6f, 0.2f); // Pink hex
+     drawFlare(2, 0.08f, 0.08f, -1.2f, 0.1f, 0.5f, 0.9f, 0.5f); // Blue hex
+     
+     // Some soft blob ghosts
+     drawFlare(0, 0.4f, 0.4f,  0.5f,  0.5f, 0.2f, 0.2f, 0.15f); // Reddish blob
+     drawFlare(0, 0.2f, 0.2f, -0.9f,  0.2f, 0.2f, 0.8f, 0.15f); // Blueish blob
+
+     glBindVertexArray(0);
+
+     glEnable(GL_DEPTH_TEST);
+     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+     glDepthMask(GL_TRUE);
+  }
+
   // 用地球专用着色器绘制
   void drawEarth(const Mesh& mesh, const Mat4& model) {
     glUseProgram(earthProgram);
@@ -445,6 +760,128 @@ public:
     glUniform3f(ue_lightDir, lightDir.x, lightDir.y, lightDir.z);
     glUniform3f(ue_viewPos, camPos.x, camPos.y, camPos.z);
     mesh.draw();
+  }
+
+  // 火焰/发光 Billboard (面向相机的面片)
+  void drawBillboard(const Vec3& worldPos, float size,
+                     float cr, float cg, float cb, float ca) {
+    glUseProgram(billboardProg);
+    
+    // Provide View and Proj separately
+    glUniformMatrix4fv(ub_vp, 1, GL_FALSE, view.m);
+    glUniformMatrix4fv(ub_proj, 1, GL_FALSE, proj.m);
+    
+    glUniform3f(ub_pos, worldPos.x, worldPos.y, worldPos.z);
+    glUniform2f(ub_size, size, size);
+    glUniform4f(ub_color, cr, cg, cb, ca);
+    
+    // 加法混合 (火焰发光)
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+    glDepthMask(GL_FALSE);
+    glDisable(GL_CULL_FACE); // 防止视口翻转导致背面剔除
+    
+    glBindVertexArray(billboardVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, billboardVBO);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, (void*)0);
+    glEnableVertexAttribArray(0);
+
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    
+    glBindVertexArray(0);
+    glEnable(GL_CULL_FACE);
+    glDepthMask(GL_TRUE);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+  }
+
+  // 大气层散射壳
+  void drawAtmosphere(const Mesh& sphereMesh, float radius) {
+    glUseProgram(atmoProg);
+    Mat4 model = Mat4::scale(Vec3(radius, radius, radius));
+    Mat4 mvp = proj * view * model;
+    glUniformMatrix4fv(ua_mvp, 1, GL_FALSE, mvp.m);
+    glUniformMatrix4fv(ua_model, 1, GL_FALSE, model.m);
+    glUniform3f(ua_lightDir, lightDir.x, lightDir.y, lightDir.z);
+    glUniform3f(ua_viewPos, camPos.x, camPos.y, camPos.z);
+    // 加法混合 (大气光晕)
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+    glDepthMask(GL_FALSE);
+    glCullFace(GL_FRONT); // 只绘制内表面
+    glEnable(GL_CULL_FACE);
+    sphereMesh.draw();
+    glDisable(GL_CULL_FACE);
+    glDepthMask(GL_TRUE);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+  }
+
+  // Camera-facing dynamic ribbon (trajectory trail)
+  void drawRibbon(const std::vector<Vec3>& points, float width, float r, float g, float b, float a) {
+    if (points.size() < 2) return;
+
+    std::vector<Vec3> stripVerts;
+    stripVerts.reserve(points.size() * 2);
+
+    for (size_t i = 0; i < points.size(); ++i) {
+      Vec3 p = points[i];
+      
+      // forward vector along the path
+      Vec3 forward;
+      if (i < points.size() - 1) {
+        forward = (points[i+1] - p);
+      } else {
+        forward = (p - points[i-1]);
+      }
+      if (forward.length() < 1e-6f) forward = Vec3(0.0f, 1.0f, 0.0f); else forward = forward.normalized();
+
+      // Vector from point to camera
+      Vec3 toCam = (camPos - p);
+      if (toCam.length() < 1e-6f) toCam = Vec3(1.0f, 0.0f, 0.0f); else toCam = toCam.normalized();
+
+      // Right vector (perpendicular to path and facing camera)
+      Vec3 right = forward.cross(toCam);
+      if (right.length() < 1e-6f) {
+          // Fallback if aligned with camera
+          right = forward.cross(Vec3(0.0f, 1.0f, 0.0f));
+          if (right.length() < 1e-6f) right = forward.cross(Vec3(1.0f, 0.0f, 0.0f));
+      }
+      right = right.normalized();
+
+      float halfW = width * 0.5f;
+      // Zigzag for triangle strip: first left, then right
+      stripVerts.push_back(p + right * halfW); 
+      stripVerts.push_back(p - right * halfW);
+    }
+
+    glUseProgram(ribbonProg);
+    Mat4 mvp = proj * view; // No model matrix needed, points are in world space
+    glUniformMatrix4fv(ur_mvp, 1, GL_FALSE, mvp.m);
+    glUniform4f(ur_color, r, g, b, a);
+
+    // Buffer dynamic data
+    glBindVertexArray(ribbonVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, ribbonVBO);
+    if (stripVerts.size() * sizeof(Vec3) > sizeof(Vec3) * 1000 * 2) {
+      // Reallocate if somehow we exceed initial buffer size
+      glBufferData(GL_ARRAY_BUFFER, stripVerts.size() * sizeof(Vec3), stripVerts.data(), GL_DYNAMIC_DRAW);
+    } else {
+      glBufferSubData(GL_ARRAY_BUFFER, 0, stripVerts.size() * sizeof(Vec3), stripVerts.data());
+    }
+
+    // Force re-bind attribute pointer just in case another mesh corrupted our VAO state
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vec3), (void*)0);
+    glEnableVertexAttribArray(0);
+
+    // Glow blending
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+    glDepthMask(GL_FALSE); // Disable depth write so trails don't occlude themselves
+    glDisable(GL_CULL_FACE); // Ensure triangle strips are never culled
+
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, stripVerts.size());
+
+    // Restore
+    glEnable(GL_CULL_FACE);
+    glDepthMask(GL_TRUE);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glBindVertexArray(0);
   }
 
   void endFrame() {
