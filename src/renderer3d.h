@@ -247,6 +247,7 @@ public:
       out vec3 vNormal;
       out vec2 vUV;
       out vec4 vColor;
+      out vec3 vLocalPos;
 
       void main() {
         vec4 worldPos = uModel * vec4(aPos, 1.0);
@@ -254,6 +255,7 @@ public:
         vNormal = mat3(transpose(inverse(uModel))) * aNormal;
         vUV = aUV;
         vColor = aColor;
+        vLocalPos = aPos;
         gl_Position = uMVP * vec4(aPos, 1.0);
       }
     )";
@@ -301,6 +303,7 @@ public:
       in vec3 vNormal;
       in vec2 vUV;
       in vec4 vColor;
+      in vec3 vLocalPos;
 
       uniform vec3 uLightDir;
       uniform vec3 uViewPos;
@@ -352,7 +355,7 @@ public:
         vec3 V = normalize(uViewPos - vWorldPos);
 
         // Use normal as 3D coordinate for procedural texture
-        vec3 texCoord = normalize(vWorldPos) * 3.0;
+        vec3 texCoord = normalize(vLocalPos) * 3.0;
         float continent = fbm(texCoord * 1.5);
 
         // Latitude for ice caps
@@ -794,9 +797,8 @@ public:
   }
 
   // 大气层散射壳
-  void drawAtmosphere(const Mesh& sphereMesh, float radius) {
+  void drawAtmosphere(const Mesh& sphereMesh, const Mat4& model) {
     glUseProgram(atmoProg);
-    Mat4 model = Mat4::scale(Vec3(radius, radius, radius));
     Mat4 mvp = proj * view * model;
     glUniformMatrix4fv(ua_mvp, 1, GL_FALSE, mvp.m);
     glUniformMatrix4fv(ua_model, 1, GL_FALSE, model.m);

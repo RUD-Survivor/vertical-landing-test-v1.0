@@ -1,0 +1,2135 @@
+﻿diff --git a/build.cmd b/build.cmd
+new file mode 100644
+index 0000000..fa317c8
+--- /dev/null
++++ b/build.cmd
+@@ -0,0 +1,8 @@
++@echo off
++set "VCVARS=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"
++if not exist "%VCVARS%" (
++    echo Cannot find vcvars64.bat
++    exit /b 1
++)
++call "%VCVARS%"
++cl /EHsc /MD /O2 src/project.cpp dependencires/library/glad.c -I dependencires/include /link /LIBPATH:dependencires/library glfw3dll.lib opengl32.lib /OUT:space_game.exe
+diff --git a/src/math3d.h b/src/math3d.h
+new file mode 100644
+index 0000000..9010694
+--- /dev/null
++++ b/src/math3d.h
+@@ -0,0 +1,241 @@
++#pragma once
++// ==========================================================
++// math3d.h 鈥?Header-only 3D math library
++// Vec3, Quat (quaternion), Mat4
++// Zero external dependencies, MSVC compatible
++// ==========================================================
++
++#include <cmath>
++#include <algorithm>
++
++// ==========================================================
++// Vec3
++// ==========================================================
++struct Vec3 {
++  float x, y, z;
++
++  Vec3() : x(0), y(0), z(0) {}
++  Vec3(float x, float y, float z) : x(x), y(y), z(z) {}
++  explicit Vec3(double x, double y, double z) : x((float)x), y((float)y), z((float)z) {}
++
++  Vec3 operator+(const Vec3& b) const { return Vec3(x + b.x, y + b.y, z + b.z); }
++  Vec3 operator-(const Vec3& b) const { return Vec3(x - b.x, y - b.y, z - b.z); }
++  Vec3 operator*(float s) const { return Vec3(x * s, y * s, z * s); }
++  Vec3 operator/(float s) const { float inv = 1.0f / s; return Vec3(x * inv, y * inv, z * inv); }
++  Vec3 operator-() const { return Vec3(-x, -y, -z); }
++  Vec3& operator+=(const Vec3& b) { x += b.x; y += b.y; z += b.z; return *this; }
++  Vec3& operator-=(const Vec3& b) { x -= b.x; y -= b.y; z -= b.z; return *this; }
++  Vec3& operator*=(float s) { x *= s; y *= s; z *= s; return *this; }
++
++  float dot(const Vec3& b) const { return x * b.x + y * b.y + z * b.z; }
++  Vec3 cross(const Vec3& b) const {
++    return Vec3(y * b.z - z * b.y, z * b.x - x * b.z, x * b.y - y * b.x);
++  }
++
++  float length() const { return sqrtf(x * x + y * y + z * z); }
++  float lengthSq() const { return x * x + y * y + z * z; }
++
++  Vec3 normalized() const {
++    float len = length();
++    if (len < 1e-12f) return Vec3(0.0f, 0.0f, 0.0f);
++    return *this / len;
++  }
++
++  static Vec3 lerp(const Vec3& a, const Vec3& b, float t) {
++    return a + (b - a) * t;
++  }
++};
++
++inline Vec3 operator*(float s, const Vec3& v) { return v * s; }
++
++// ==========================================================
++// Quat 鈥?鍥涘厓鏁?(w, x, y, z) 琛ㄧず鏃嬭浆
++// ==========================================================
++struct Quat {
++  float w, x, y, z;
++
++  Quat() : w(1), x(0), y(0), z(0) {}
++  Quat(float w, float x, float y, float z) : w(w), x(x), y(y), z(z) {}
++
++  static Quat fromAxisAngle(const Vec3& axis, float angle) {
++    float half = angle * 0.5f;
++    float s = sinf(half);
++    return Quat(cosf(half), axis.x * s, axis.y * s, axis.z * s);
++  }
++
++  static Quat fromEuler(float pitch, float yaw, float roll) {
++    Quat qx = fromAxisAngle(Vec3(1.0f, 0.0f, 0.0f), pitch);
++    Quat qy = fromAxisAngle(Vec3(0.0f, 1.0f, 0.0f), yaw);
++    Quat qz = fromAxisAngle(Vec3(0.0f, 0.0f, 1.0f), roll);
++    return qy * qx * qz;
++  }
++
++  Quat operator*(const Quat& q) const {
++    return Quat(
++      w * q.w - x * q.x - y * q.y - z * q.z,
++      w * q.x + x * q.w + y * q.z - z * q.y,
++      w * q.y - x * q.z + y * q.w + z * q.x,
++      w * q.z + x * q.y - y * q.x + z * q.w
++    );
++  }
++
++  Quat conjugate() const { return Quat(w, -x, -y, -z); }
++
++  Quat normalized() const {
++    float len = sqrtf(w * w + x * x + y * y + z * z);
++    if (len < 1e-12f) return Quat(1, 0, 0, 0);
++    float inv = 1.0f / len;
++    return Quat(w * inv, x * inv, y * inv, z * inv);
++  }
++
++  Vec3 rotate(const Vec3& v) const {
++    Vec3 u(x, y, z);
++    float s = w;
++    return 2.0f * u.dot(v) * u + (s * s - u.dot(u)) * v + 2.0f * s * u.cross(v);
++  }
++
++  Vec3 forward() const { return rotate(Vec3(0.0f, 1.0f, 0.0f)); }
++  Vec3 right()   const { return rotate(Vec3(1.0f, 0.0f, 0.0f)); }
++  Vec3 up()      const { return rotate(Vec3(0.0f, 0.0f, 1.0f)); }
++
++  static Quat slerp(const Quat& a, const Quat& b, float t) {
++    float d = a.w * b.w + a.x * b.x + a.y * b.y + a.z * b.z;
++    Quat b2 = b;
++    if (d < 0) {
++      b2 = Quat(-b.w, -b.x, -b.y, -b.z);
++      d = -d;
++    }
++    if (d > 0.9995f) {
++      return Quat(
++        a.w + t * (b2.w - a.w),
++        a.x + t * (b2.x - a.x),
++        a.y + t * (b2.y - a.y),
++        a.z + t * (b2.z - a.z)
++      ).normalized();
++    }
++    float theta = acosf(d);
++    float sin_t = sinf(theta);
++    float wa = sinf((1.0f - t) * theta) / sin_t;
++    float wb = sinf(t * theta) / sin_t;
++    return Quat(
++      wa * a.w + wb * b2.w,
++      wa * a.x + wb * b2.x,
++      wa * a.y + wb * b2.y,
++      wa * a.z + wb * b2.z
++    );
++  }
++
++  void toMat4(float* m) const {
++    float xx = x * x, yy = y * y, zz = z * z;
++    float xy = x * y, xz = x * z, yz = y * z;
++    float wx = w * x, wy = w * y, wz = w * z;
++
++    m[0]  = 1 - 2 * (yy + zz); m[4]  = 2 * (xy - wz);     m[8]  = 2 * (xz + wy);     m[12] = 0;
++    m[1]  = 2 * (xy + wz);     m[5]  = 1 - 2 * (xx + zz); m[9]  = 2 * (yz - wx);     m[13] = 0;
++    m[2]  = 2 * (xz - wy);     m[6]  = 2 * (yz + wx);     m[10] = 1 - 2 * (xx + yy); m[14] = 0;
++    m[3]  = 0;                  m[7]  = 0;                  m[11] = 0;                  m[15] = 1;
++  }
++};
++
++// ==========================================================
++// Mat4 鈥?4x4 鐭╅樀 (鍒椾富搴? OpenGL 鍏煎)
++// ==========================================================
++struct Mat4 {
++  float m[16];
++
++  Mat4() {
++    for (int i = 0; i < 16; i++) m[i] = 0;
++    m[0] = m[5] = m[10] = m[15] = 1;
++  }
++
++  Mat4 operator*(const Mat4& b) const {
++    Mat4 r;
++    for (int i = 0; i < 16; i++) r.m[i] = 0;
++    for (int col = 0; col < 4; col++)
++      for (int row = 0; row < 4; row++)
++        for (int k = 0; k < 4; k++)
++          r.m[col * 4 + row] += m[k * 4 + row] * b.m[col * 4 + k];
++    return r;
++  }
++
++  Vec3 transformPoint(const Vec3& v) const {
++    float rx = m[0]*v.x + m[4]*v.y + m[8]*v.z  + m[12];
++    float ry = m[1]*v.x + m[5]*v.y + m[9]*v.z  + m[13];
++    float rz = m[2]*v.x + m[6]*v.y + m[10]*v.z + m[14];
++    float rw = m[3]*v.x + m[7]*v.y + m[11]*v.z + m[15];
++    if (fabsf(rw) > 1e-12f) { rx /= rw; ry /= rw; rz /= rw; }
++    return Vec3(rx, ry, rz);
++  }
++
++  Vec3 transformDir(const Vec3& v) const {
++    return Vec3(
++      m[0]*v.x + m[4]*v.y + m[8]*v.z,
++      m[1]*v.x + m[5]*v.y + m[9]*v.z,
++      m[2]*v.x + m[6]*v.y + m[10]*v.z
++    );
++  }
++
++  static Mat4 perspective(float fovY_rad, float aspect, float zNear, float zFar) {
++    Mat4 r;
++    for (int i = 0; i < 16; i++) r.m[i] = 0;
++    float f = 1.0f / tanf(fovY_rad * 0.5f);
++    r.m[0]  = f / aspect;
++    r.m[5]  = f;
++    r.m[10] = (zFar + zNear) / (zNear - zFar);
++    r.m[11] = -1.0f;
++    r.m[14] = (2.0f * zFar * zNear) / (zNear - zFar);
++    return r;
++  }
++
++  static Mat4 ortho(float left, float right, float bottom, float top,
++                    float zNear, float zFar) {
++    Mat4 r;
++    for (int i = 0; i < 16; i++) r.m[i] = 0;
++    r.m[0]  = 2.0f / (right - left);
++    r.m[5]  = 2.0f / (top - bottom);
++    r.m[10] = -2.0f / (zFar - zNear);
++    r.m[12] = -(right + left) / (right - left);
++    r.m[13] = -(top + bottom) / (top - bottom);
++    r.m[14] = -(zFar + zNear) / (zFar - zNear);
++    r.m[15] = 1.0f;
++    return r;
++  }
++
++  static Mat4 lookAt(const Vec3& eye, const Vec3& target, const Vec3& worldUp) {
++    Vec3 f = (target - eye).normalized();
++    Vec3 r = f.cross(worldUp).normalized();
++    Vec3 u = r.cross(f);
++
++    Mat4 result;
++    result.m[0] = r.x;  result.m[4] = r.y;  result.m[8]  = r.z;  result.m[12] = -r.dot(eye);
++    result.m[1] = u.x;  result.m[5] = u.y;  result.m[9]  = u.z;  result.m[13] = -u.dot(eye);
++    result.m[2] = -f.x; result.m[6] = -f.y; result.m[10] = -f.z; result.m[14] = f.dot(eye);
++    result.m[3] = 0;    result.m[7] = 0;    result.m[11] = 0;    result.m[15] = 1;
++    return result;
++  }
++
++  static Mat4 translate(const Vec3& t) {
++    Mat4 r;
++    r.m[12] = t.x; r.m[13] = t.y; r.m[14] = t.z;
++    return r;
++  }
++
++  static Mat4 scale(const Vec3& s) {
++    Mat4 r;
++    r.m[0] = s.x; r.m[5] = s.y; r.m[10] = s.z;
++    return r;
++  }
++
++  static Mat4 fromQuat(const Quat& q) {
++    Mat4 r;
++    q.toMat4(r.m);
++    return r;
++  }
++
++  static Mat4 TRS(const Vec3& pos, const Quat& rot, const Vec3& scl) {
++    Mat4 T = translate(pos);
++    Mat4 R = fromQuat(rot);
++    Mat4 S = scale(scl);
++    return T * R * S;
++  }
++};
+diff --git a/src/project.cpp b/src/project.cpp
+index d7f8523..fa5c5b1 100644
+--- a/src/project.cpp
++++ b/src/project.cpp
+@@ -4,6 +4,8 @@
+ #include <chrono>
+ #include <cmath>
+ 
++#include "math3d.h"
++#include "renderer3d.h"
+ 
+ #include <iostream>
+ #include <string>
+@@ -12,6 +14,15 @@
+ 
+ using namespace std;
+ 
++// ==========================================
++// Part X: 鐏寤洪€犵郴缁熼儴浠跺畾涔?+// ==========================================
++
++// 榧犳爣婊氳疆鍏ㄥ眬鍙橀噺
++static float g_scroll_y = 0.0f;
++static void scroll_callback(GLFWwindow* /*w*/, double /*xoffset*/, double yoffset) {
++  g_scroll_y += (float)yoffset;
++}
+ // ==========================================
+ // Part 0: 鏁板甯搁噺涓庤緟鍔╁伐鍏? // ==========================================
+@@ -397,6 +408,10 @@ private:
+   double mass; // 骞查噸
+   double diameter;
+   double height;
++public:
++  double getHeight() const { return height; }
++  double getDiameter() const { return diameter; }
++private:
+   bool suicide_burn_locked = false;
+   double altitude; // 娴锋嫈楂樺害
+   double velocity; // 鍨傜洿閫熷害 (寰勫悜閫熷害)
+@@ -408,7 +423,7 @@ private:
+   double nozzle_area;
+ 
+   // 鍧愭爣绯伙細鍦板績涓哄師鐐?(0,0)銆傚彂灏勭偣(鍖楁瀬)涓?(0, EARTH_RADIUS)
+-public:
++  public:
+   double local_vx;   // 鐪熷疄鐨勭浉瀵瑰湴琛ㄦ按骞抽€熷害 (鍒囧悜閫熷害)
+   double px, py;     // 2D 浣嶇疆
+   double vx, vy;     // 2D 閫熷害
+@@ -416,6 +431,7 @@ public:
+   double ang_vel;    // 瑙掗€熷害
+   double throttle;   // 娌归棬 (0.0 - 1.0)
+   double torque_cmd; // 鍔涚煩鎸囦护
++  double sim_time;   // 鐗╃悊鏃堕棿绉疮
+ 
+   // PID 鎺у埗鍣ㄥ疄渚?   PID pid_vert = {0.5, 0.001, 1.2};       // 楂樺害鐜?@@ -508,6 +524,7 @@ public:
+     vy = 0;
+     angle = 0;
+     ang_vel = 0;
++    sim_time = 0;
+ 
+     // 鍏煎鏃у彉閲忓垵濮嬪寲
+     altitude = 0;
+@@ -615,10 +632,43 @@ public:
+     // B. 鍙楀姏鍒嗘瀽
+     double total_mass = mass + fuel;
+ 
+-    // 1. 閲嶅姏 (涓囨湁寮曞姏锛屾寚鍚戝湴蹇?
+-    double g_curr = get_gravity(r);
+-    double Fg_x = -g_curr * (px / r) * total_mass;
+-    double Fg_y = -g_curr * (py / r) * total_mass;
++    // 1. 鍦扮悆閲嶅姏 (涓囨湁寮曞姏锛屾寚鍚戝湴蹇?
++    double g_earth = get_gravity(r);
++    double Fg_x = -g_earth * (px / r) * total_mass;
++    double Fg_y = -g_earth * (py / r) * total_mass;
++
++    // 1.5 澶槼閲嶅姏 (鍙屾槦寮曞姏绯荤粺) - 娼睈鍔涙ā鍨?(Third Body Perturbation)
++    sim_time += dt;
++    double au_meters = 149597870700.0;
++    // 寮哄埗鍏浆鍛ㄦ湡涓?precies 365.25 澶?(浠ョ涓哄崟浣? = 31557600s
++    // 澶槼瑙嗚瑙掗€熷害: 2 * PI / 31557600
++    double sun_angular_vel = 6.2831853 / 31557600.0;
++    double sun_angle = -1.2 + sun_angular_vel * sim_time; 
++    
++    // 澶槼鍦ㄤ互鍦扮悆涓轰腑蹇冪殑鍧愭爣绯讳腑鐨勪綅缃?+    double sun_px = cos(sun_angle) * au_meters;
++    double sun_py = sin(sun_angle) * au_meters;
++    
++    double dx_sun = sun_px - px;
++    double dy_sun = sun_py - py;
++    
++    double r_sun_rocket_sq = dx_sun*dx_sun + dy_sun*dy_sun;
++    double dist_sun_rocket = sqrt(r_sun_rocket_sq);
++    double r_sun_rocket3 = r_sun_rocket_sq * dist_sun_rocket;
++    
++    double dist_sun_earth = au_meters;
++    double r_sun_earth3 = dist_sun_earth * dist_sun_earth * dist_sun_earth;
++    
++    // 澶槼璐ㄩ噺寮曞姏甯告暟 (G * M_sun)
++    double GM_sun = G0 * pow(EARTH_RADIUS, 2) * 333000.0;
++    
++    // 绗笁浣撴壈鍔細澶槼瀵圭伀绠殑寮曞姏 鍑忓幓 澶槼瀵瑰湴鐞冪殑寮曞姏 
++    // (鍥犱负鎴戜滑鐨勫潗鏍囩郴鍘熺偣鏄湴鐞冿紝鍦扮悆鏈韩鍦ㄩ殢澶槼杩愬姩)
++    double Fg_sun_x = GM_sun * (dx_sun / r_sun_rocket3 - sun_px / r_sun_earth3) * total_mass;
++    double Fg_sun_y = GM_sun * (dy_sun / r_sun_rocket3 - sun_py / r_sun_earth3) * total_mass;
++    
++    Fg_x += Fg_sun_x;
++    Fg_y += Fg_sun_y;
+ 
+     // 2. 鎺ㄥ姏 (鍩轰簬瑙掑害鍜屾补闂?
+     thrust_power = 0;
+@@ -1132,6 +1182,181 @@ void drawOrbit(Renderer *renderer, double px, double py, double vx, double vy,
+     first = false;
+   }
+ }
++
++// ==========================================================
++// Part 5: 鐏寤洪€犵郴缁?(Rocket Builder)
++// ==========================================================
++struct RocketPart {
++  const char* name;
++  float dry_mass;     // 骞查噸 (kg)
++  float fuel;         // 鐕冩枡閲?(kg)
++  float isp;          // 姣斿啿 (s)锛屼粎寮曟搸鏈夋晥
++  float consumption;  // 鐕冩枡娑堣€楃巼 (kg/s)锛屼粎寮曟搸鏈夋晥
++  float height_add;   // 澧炲姞鐨勯珮搴?(m)
++  float r, g, b;      // 鏄剧ず棰滆壊
++};
++
++// 榧婚敟閫夐」
++const RocketPart NOSE_OPTIONS[] = {
++  {"Standard",    500,  0, 0, 0, 8,   0.85f, 0.85f, 0.9f},
++  {"Aerodynamic", 350,  0, 0, 0, 10,  0.7f,  0.7f,  0.75f},
++  {"Payload",     1200, 0, 0, 0, 12,  0.9f,  0.9f,  0.85f},
++};
++// 鐕冩枡绠遍€夐」
++const RocketPart TANK_OPTIONS[] = {
++  {"Small 50t",   3000,  50000,  0, 0, 30, 0.92f, 0.92f, 0.92f},
++  {"Medium 100t", 5000,  100000, 0, 0, 40, 0.90f, 0.90f, 0.92f},
++  {"Large 200t",  8000,  200000, 0, 0, 55, 0.88f, 0.88f, 0.92f},
++};
++// 寮曟搸閫夐」
++const RocketPart ENGINE_OPTIONS[] = {
++  {"Raptor",   2000, 0, 1500, 100, 4,  0.35f, 0.35f, 0.38f},
++  {"Merlin",   1500, 0, 1200, 80,  3,  0.4f,  0.35f, 0.3f},
++  {"SRB",      3000, 0, 800,  200, 5,  0.5f,  0.4f,  0.3f},
++};
++const int NUM_OPTIONS = 3;
++
++void drawBuilderUI(Renderer* r, int col, int nose_sel, int tank_sel, int eng_sel) {
++  // 鑳屾櫙
++  r->addRect(0.0f, 0.0f, 2.0f, 2.0f, 0.08f, 0.08f, 0.12f, 1.0f);
++
++  // 鏄熺┖鐐圭紑
++  for (int i = 0; i < 80; i++) {
++    float sx = hash11(i * 3917) * 2.0f - 1.0f;
++    float sy = hash11(i * 7121) * 2.0f - 1.0f;
++    float ss = 0.002f + hash11(i * 2131) * 0.003f;
++    r->addRect(sx, sy, ss, ss, 1.0f, 1.0f, 1.0f, 0.4f + hash11(i * 991) * 0.4f);
++  }
++
++  // 鏍囬
++  float title_size = 0.04f;
++  r->drawLabel(-0.15f, 0.85f, "m", title_size * 1.5f, 0.3f, 0.8f, 1.0f);
++
++  // === 涓夊垪閮ㄤ欢閫夋嫨 ===
++  const char* col_names[] = {"nose", "tank", "engine"};  // 鏄剧ず鐢?(涓嶄娇鐢?  
++  float col_x[] = {-0.65f, -0.65f, -0.65f};
++  float col_y_start[] = {0.65f, 0.25f, -0.15f};
++  int selections[] = {nose_sel, tank_sel, eng_sel};
++  const RocketPart* options[] = {NOSE_OPTIONS, TANK_OPTIONS, ENGINE_OPTIONS};
++  const char* headers[] = {"< NOSE >", "< TANK >", "< ENGINE >"};
++
++  for (int c = 0; c < 3; c++) {
++    float hx = -0.65f, hy = col_y_start[c] + 0.12f;
++    // 鍒嗙被鏍囬
++    float hdr_r = (c == col) ? 0.2f : 0.5f;
++    float hdr_g = (c == col) ? 0.9f : 0.5f;
++    float hdr_b = (c == col) ? 0.4f : 0.5f;
++    // 鐢ㄦ暟鐮佺鐢诲垪鍙?+    r->drawNumber(hx - 0.15f, hy, c + 1, 0.025f, hdr_r, hdr_g, hdr_b);
++
++    for (int i = 0; i < NUM_OPTIONS; i++) {
++      float iy = col_y_start[c] - i * 0.1f;
++      bool selected = (selections[c] == i);
++      bool active_col = (col == c);
++
++      // 閫変腑楂樹寒鑳屾櫙
++      if (selected) {
++        float bg_alpha = active_col ? 0.4f : 0.15f;
++        float bg_r = active_col ? 0.1f : 0.15f;
++        float bg_g = active_col ? 0.4f : 0.2f;
++        float bg_b = active_col ? 0.2f : 0.25f;
++        r->addRect(hx + 0.1f, iy, 0.35f, 0.08f, bg_r, bg_g, bg_b, bg_alpha);
++        // 閫変腑鎸囩ず鍣?+        r->addRect(hx - 0.05f, iy, 0.015f, 0.04f, 0.2f, 1.0f, 0.4f, 0.9f);
++      }
++
++      // 閮ㄤ欢棰滆壊鍧?+      const RocketPart& part = options[c][i];
++      r->addRect(hx, iy, 0.03f, 0.05f, part.r, part.g, part.b, 0.9f);
++
++      // 鍙傛暟鏁板瓧
++      float nr = selected ? 0.9f : 0.5f;
++      float ng = selected ? 0.9f : 0.5f;
++      float nb = selected ? 0.9f : 0.5f;
++      if (c == 1) { // 鐕冩枡绠辨樉绀虹噧鏂欓噺
++        r->drawNumber(hx + 0.12f, iy, (int)(part.fuel / 1000), 0.02f, nr, ng, nb);
++        r->drawLabel(hx + 0.23f, iy, "kg", 0.015f, nr * 0.7f, ng * 0.7f, nb * 0.7f);
++      } else if (c == 2) { // 寮曟搸鏄剧ずISP
++        r->drawNumber(hx + 0.12f, iy, (int)part.isp, 0.02f, nr, ng, nb);
++        r->drawLabel(hx + 0.23f, iy, "s", 0.015f, nr * 0.7f, ng * 0.7f, nb * 0.7f);
++      } else { // 榧婚敟鏄剧ず璐ㄩ噺
++        r->drawNumber(hx + 0.12f, iy, (int)part.dry_mass, 0.02f, nr, ng, nb);
++        r->drawLabel(hx + 0.23f, iy, "kg", 0.015f, nr * 0.7f, ng * 0.7f, nb * 0.7f);
++      }
++    }
++  }
++
++  // === 鍙充晶锛氱伀绠瑙?===
++  float preview_x = 0.35f;
++  float preview_y = 0.1f;
++  float rw = 0.06f; // 鐏瀹藉害
++
++  const RocketPart& nose = NOSE_OPTIONS[nose_sel];
++  const RocketPart& tank = TANK_OPTIONS[tank_sel];
++  const RocketPart& eng  = ENGINE_OPTIONS[eng_sel];
++
++  float total_h = (nose.height_add + tank.height_add + eng.height_add) * 0.005f;
++
++  // 寮曟搸锛堝簳閮級
++  float eng_h = eng.height_add * 0.005f;
++  float eng_y = preview_y - total_h / 2.0f + eng_h / 2.0f;
++  r->addRotatedTri(preview_x, eng_y - eng_h * 0.3f, rw * 1.3f, eng_h * 0.6f,
++                   PI, eng.r, eng.g, eng.b);
++  r->addRect(preview_x, eng_y + eng_h * 0.1f, rw, eng_h * 0.4f,
++             eng.r * 0.8f, eng.g * 0.8f, eng.b * 0.8f);
++
++  // 鐕冩枡绠憋紙涓锛?+  float tank_h = tank.height_add * 0.005f;
++  float tank_y = eng_y + eng_h / 2.0f + tank_h / 2.0f;
++  r->addRect(preview_x, tank_y, rw, tank_h, tank.r, tank.g, tank.b);
++  // 绾ч棿娈?+  r->addRect(preview_x, tank_y + tank_h / 2.0f, rw * 1.05f, 0.008f,
++             0.2f, 0.2f, 0.2f);
++  r->addRect(preview_x, tank_y - tank_h / 2.0f, rw * 1.05f, 0.008f,
++             0.2f, 0.2f, 0.2f);
++
++  // 榧婚敟锛堥《閮級
++  float nose_h = nose.height_add * 0.005f;
++  float nose_y = tank_y + tank_h / 2.0f + nose_h / 2.0f;
++  r->addRotatedTri(preview_x, nose_y + nose_h * 0.2f, rw * 0.9f, nose_h * 0.7f,
++                   0.0f, nose.r, nose.g, nose.b);
++  r->addRect(preview_x, nose_y - nose_h * 0.15f, rw * 0.95f, nose_h * 0.3f,
++             nose.r * 0.95f, nose.g * 0.95f, nose.b * 0.95f);
++
++  // === 搴曢儴缁熻闈㈡澘 ===
++  float stat_y = -0.65f;
++  r->addRect(0.0f, stat_y, 1.6f, 0.2f, 0.05f, 0.05f, 0.08f, 0.7f);
++
++  float total_mass = nose.dry_mass + tank.dry_mass + eng.dry_mass + tank.fuel;
++  float dry_mass = nose.dry_mass + tank.dry_mass + eng.dry_mass;
++  float delta_v = (float)(eng.isp * G0 * log((double)total_mass / (double)dry_mass));
++
++  // 鎬昏川閲?+  r->drawNumber(-0.55f, stat_y + 0.03f, (int)(total_mass / 1000), 0.025f,
++                0.9f, 0.9f, 0.9f);
++  r->drawLabel(-0.4f, stat_y + 0.03f, "kg", 0.018f, 0.6f, 0.6f, 0.6f);
++
++  // 鐕冩枡
++  r->drawNumber(-0.1f, stat_y + 0.03f, (int)(tank.fuel / 1000), 0.025f,
++                0.9f, 0.7f, 0.2f);
++  r->drawLabel(0.05f, stat_y + 0.03f, "kg", 0.018f, 0.6f, 0.5f, 0.2f);
++
++  // 螖V
++  r->drawNumber(0.35f, stat_y + 0.03f, (int)delta_v, 0.025f,
++                0.3f, 0.9f, 0.4f);
++  r->drawLabel(0.5f, stat_y + 0.03f, "m/s", 0.018f, 0.2f, 0.6f, 0.3f);
++
++  // 鏍囩琛?+  r->drawNumber(-0.55f, stat_y - 0.04f, 0, 0.0f, 0, 0, 0, 0); // spacer
++  r->drawLabel(-0.55f, stat_y - 0.04f, "m", 0.013f, 0.4f, 0.4f, 0.4f); // "mass" 绠€鍐?+
++  // === 鍙戝皠鎻愮ず ===
++  // 闂儊鏁堟灉
++  float blink = 0.5f + 0.5f * (float)sin(glfwGetTime() * 3.0);
++  r->addRect(0.35f, -0.85f, 0.25f, 0.06f, 0.1f, 0.4f * blink, 0.1f, 0.6f);
++  r->drawLabel(0.28f, -0.85f, "s", 0.025f, 0.3f, 1.0f * blink, 0.4f);
++}
++
+ int main() {
+ 
+   glfwInit();
+@@ -1149,6 +1374,7 @@ int main() {
+   }
+   glfwMakeContextCurrent(window);
+   glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
++  glfwSetScrollCallback(window, scroll_callback);
+ 
+   if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
+     return -1;
+@@ -1159,19 +1385,108 @@ int main() {
+   glEnable(GL_MULTISAMPLE);
+   renderer = new Renderer();
+ 
+-  // 鍒濆鍖栵細鏀惧湪鍦扮悆鍖楁瀬锛屽共閲?0鍚紝鐕冩枡50鍚?-  Explorer baba1(100000, 10000, 3.7, 50, 1, 1500, 100, 0.5);
++  // =========================================================
++  // BUILD 闃舵锛氱伀绠粍瑁呯晫闈?+  // =========================================================
++  int build_col = 0;     // 0=榧婚敟, 1=鐕冩枡绠? 2=寮曟搸
++  int nose_sel = 0, tank_sel = 1, eng_sel = 0; // 榛樿閫夋嫨
++  bool build_done = false;
++
++  // 鏂瑰悜閿槻鎶?+  bool up_prev = false, down_prev = false, left_prev = false, right_prev = false;
++
++  while (!build_done && !glfwWindowShouldClose(window)) {
++    glfwPollEvents();
++    if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
++      glfwSetWindowShouldClose(window, true);
++
++    // 鏂瑰悜閿鑸紙甯﹂槻鎶栵級
++    bool up_now = glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS;
++    bool down_now = glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS;
++    bool left_now = glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS;
++    bool right_now = glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS;
++
++    int* current_sel = (build_col == 0) ? &nose_sel : (build_col == 1) ? &tank_sel : &eng_sel;
++
++    if (up_now && !up_prev) {
++      *current_sel = (*current_sel - 1 + NUM_OPTIONS) % NUM_OPTIONS;
++    }
++    if (down_now && !down_prev) {
++      *current_sel = (*current_sel + 1) % NUM_OPTIONS;
++    }
++    if (left_now && !left_prev) {
++      build_col = (build_col - 1 + 3) % 3;
++    }
++    if (right_now && !right_prev) {
++      build_col = (build_col + 1) % 3;
++    }
++    up_prev = up_now; down_prev = down_now;
++    left_prev = left_now; right_prev = right_now;
++
++    // SPACE = 鍙戝皠
++    if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) {
++      build_done = true;
++    }
++
++    // 娓叉煋
++    glClearColor(0.08f, 0.08f, 0.12f, 1.0f);
++    glClear(GL_COLOR_BUFFER_BIT);
++    renderer->beginFrame();
++    drawBuilderUI(renderer, build_col, nose_sel, tank_sel, eng_sel);
++    renderer->endFrame();
++    glfwSwapBuffers(window);
++
++    this_thread::sleep_for(chrono::milliseconds(16));
++  }
+ 
+-  cout << ">> SYSTEM READY." << endl;
++  // =========================================================
++  // 鐢ㄩ€夊ソ鐨勯儴浠舵瀯閫?Explorer
++  // =========================================================
++  const RocketPart& sel_nose = NOSE_OPTIONS[nose_sel];
++  const RocketPart& sel_tank = TANK_OPTIONS[tank_sel];
++  const RocketPart& sel_eng  = ENGINE_OPTIONS[eng_sel];
++
++  float total_dry = sel_nose.dry_mass + sel_tank.dry_mass + sel_eng.dry_mass;
++  float total_fuel = sel_tank.fuel;
++  float total_height = sel_nose.height_add + sel_tank.height_add + sel_eng.height_add;
++
++  Explorer baba1(total_fuel, total_dry, 3.7, total_height,
++                 1, sel_eng.isp, sel_eng.consumption, 0.5);
++
++  // =========================================================
++  // 鍒濆鍖?3D 娓叉煋鍣ㄥ拰缃戞牸
++  // =========================================================
++  Renderer3D* r3d = new Renderer3D();
++  Mesh earthMesh = MeshGen::sphere(48, 64, 1.0f);  // 鍗曚綅鐞冿紝鐢?model 鐭╅樀缂╂斁
++  Mesh rocketBody = MeshGen::cylinder(16, 1.0f, 1.0f);
++  Mesh rocketNose = MeshGen::cone(16, 1.0f, 1.0f);
++  int cam_mode_3d = 0; // 0=鑷敱杞ㄩ亾, 1=璺熻釜, 2=鍏ㄦ櫙
++  static bool c_was_pressed = false;
++  static bool v_was_pressed = false;
++  bool view_3d = false;
++  // 鍥涘厓鏁拌建閬撶悆鐩告満
++  Quat cam_quat; // 鐩告満鏂逛綅鍥涘厓鏁?(鍗曚綅鍥涘厓鏁?= 鍒濆浣嶇疆)
++  float cam_zoom_chase = 1.0f; // 杞ㄩ亾/璺熻釜妯″紡缂╂斁
++  float cam_zoom_pan = 1.0f;   // 鍏ㄦ櫙妯″紡鐙珛缂╂斁
++  double prev_mx = 0, prev_my = 0;
++  bool mouse_dragging = false;
++
++  cout << ">> ROCKET ASSEMBLED!" << endl;
++  cout << ">>   Dry Mass: " << (int)total_dry << " kg" << endl;
++  cout << ">>   Fuel: " << (int)total_fuel << " kg" << endl;
++  cout << ">>   Height: " << (int)total_height << " m" << endl;
++  cout << ">>   Engine ISP: " << (int)sel_eng.isp << " s" << endl;
+   cout << ">> PRESS [SPACE] TO LAUNCH!" << endl;
+   cout << ">> [TAB] Toggle Auto/Manual | [WASD] Thrust & Attitude" << endl;
+   cout << ">> [Z] Full Throttle | [X] Kill Throttle | [1-4] Time Warp" << endl;
+   cout << ">> [O] Toggle Orbit Display" << endl;
+ 
+   double dt = 0.02; // 50Hz 鐗╃悊姝ラ暱
+-
++  
+   static bool tab_was_pressed = false; // Tab 闃叉姈
+ 
++  std::vector<Vec3> traj_history; // 璁板綍鐏鍘嗗彶椋炶鐨?3D 杞ㄨ抗鐐?+
+   while (baba1.is_Flying() && !glfwWindowShouldClose(window)) {
+     glfwPollEvents();
+     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+@@ -1179,6 +1494,76 @@ int main() {
+     if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
+       baba1.ManualLaunch();
+ 
++    // --- C 閿垏鎹?3D 瑙嗚 ---
++    bool c_now = glfwGetKey(window, GLFW_KEY_C) == GLFW_PRESS;
++    if (c_now && !c_was_pressed) {
++      cam_mode_3d = (cam_mode_3d + 1) % 3;
++      const char* names[] = {"Orbit", "Chase", "Panorama"};
++      cout << ">> Camera: " << names[cam_mode_3d] << endl;
++    }
++    c_was_pressed = c_now;
++
++    // --- V 閿垏鎹?2D/3D 瑙嗗浘 ---
++    bool v_now = glfwGetKey(window, GLFW_KEY_V) == GLFW_PRESS;
++    if (v_now && !v_was_pressed) {
++      view_3d = !view_3d;
++      cout << ">> View: " << (view_3d ? "3D" : "2D") << endl;
++    }
++    v_was_pressed = v_now;
++
++    // --- 榧犳爣杞ㄩ亾鎺у埗 (3D妯″紡涓嬪彸閿嫋鍔? ---
++    if (view_3d) {
++      double mx, my;
++      glfwGetCursorPos(window, &mx, &my);
++      bool rmb = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
++      if (rmb) {
++        if (mouse_dragging) {
++          float dx = (float)(mx - prev_mx) * 0.003f;
++          float dy = (float)(my - prev_my) * 0.003f;
++          // 鍥涘厓鏁板閲忔棆杞細灞忓箷姘村钩鎷栧姩 = 缁曞叏灞€Y鏃嬭浆锛屽瀭鐩存嫋鍔?= 缁曞眬閮╔鏃嬭浆
++          // 鐢ㄧ粫鍏ㄥ眬涓婃柟鍚戞棆杞?(yaw) 鍜岀粫鐩告満鍙虫柟鍚戞棆杞?(pitch)
++          Quat yaw_rot = Quat::fromAxisAngle(Vec3(0.0f, 0.0f, 1.0f), -dx);
++          // 鐩告満鐨勫彸鏂瑰悜 = cam_quat 鏃嬭浆鍚庣殑 X 杞?+          Vec3 cam_right = cam_quat.rotate(Vec3(1.0f, 0.0f, 0.0f));
++          Quat pitch_rot = Quat::fromAxisAngle(cam_right, -dy);
++          cam_quat = (yaw_rot * pitch_rot * cam_quat).normalized();
++        }
++        mouse_dragging = true;
++      } else {
++        mouse_dragging = false;
++      }
++      prev_mx = mx;
++      prev_my = my;
++
++      // 婊氳疆缂╂斁锛氭牴鎹綋鍓嶆ā寮忓垎绂荤缉鏀剧骇鍒?+      if (g_scroll_y != 0.0f) {
++        if (cam_mode_3d == 2) {
++            // 鍏ㄦ櫙妯″紡锛氬厑璁告瀬鍏跺簽澶х殑缂╂斁浠ヤ刊鐬板お闃崇郴
++            cam_zoom_pan *= powf(0.85f, g_scroll_y);
++            if (cam_zoom_pan < 0.05f) cam_zoom_pan = 0.05f;
++            if (cam_zoom_pan > 500000.0f) cam_zoom_pan = 500000.0f; 
++        } else {
++            // 杞ㄩ亾/璺熻釜妯″紡锛氶檺鍒剁缉鏀鹃槻姝㈢伀绠秷澶?+            cam_zoom_chase *= powf(0.85f, g_scroll_y);
++            if (cam_zoom_chase < 0.05f) cam_zoom_chase = 0.05f;
++            if (cam_zoom_chase > 20.0f) cam_zoom_chase = 20.0f;
++        }
++        g_scroll_y = 0.0f;
++      }
++    }
++
++    // --- H 閿垏鎹?HUD 鏄剧ず ---
++    static bool show_hud = true;
++    static bool h_was_pressed = false;
++    if (glfwGetKey(window, GLFW_KEY_H) == GLFW_PRESS) {
++      if (!h_was_pressed) {
++        show_hud = !show_hud;
++        h_was_pressed = true;
++      }
++    } else {
++      h_was_pressed = false;
++    }
++
+     // --- Tab 閿垏鎹㈡ā寮忥紙甯﹂槻鎶栵級---
+     if (glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS) {
+       if (!tab_was_pressed) {
+@@ -1245,60 +1630,400 @@ int main() {
+     this_thread::sleep_for(chrono::milliseconds(20)); // 闄愬埗甯х巼
+ 
+     // 鐢婚潰鍒锋柊
+-    float t = (float)min(baba1.getAltitude() / 50000.0, 1.0);
+-    glClearColor(my_lerp(0.5f, 0.0f, t), my_lerp(0.7f, 0.0f, t),
+-                 my_lerp(1.0f, 0.0f, t), 1.0f);
+-    glClear(GL_COLOR_BUFFER_BIT);
++    // 鐢婚潰鍒锋柊
++    float alt_factor = (float)min(baba1.getAltitude() / 50000.0, 1.0);
++    if (view_3d && cam_mode_3d == 2) {
++       // 鍏ㄦ櫙瑙嗚(Panorama)涓嬭儗鏅簲璇ュ缁堜负鍏ㄩ粦(澶┖)
++       glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
++    } else {
++       // 鍦扮悆琛ㄩ潰璧烽鐨勮摑澶╂笎鍙?+       glClearColor(my_lerp(0.5f, 0.0f, alt_factor), my_lerp(0.7f, 0.0f, alt_factor),
++                    my_lerp(1.0f, 0.0f, alt_factor), 1.0f);
++    }
++    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
++
++    // ================= 3D 娓叉煋閫氶亾 (浠?D妯″紡) =================
++    if (view_3d) {
++      // 涓栫晫鍧愭爣缂╂斁
++      float ws = 0.001f;
++      float earth_r = (float)EARTH_RADIUS * ws;
++
++      // 2D鈫?D 鍧愭爣鏄犲皠
++      Vec3 rocketPos((float)baba1.px * ws, (float)baba1.py * ws, 0.0f);
++      Vec3 rocketUp = rocketPos.normalized();
++      float rocket_angle = (float)baba1.angle;
++      Vec3 localUp = rocketUp;
++      Vec3 localRight(-rocketUp.y, rocketUp.x, 0.0f);
++      Vec3 rocketDir(
++        localUp.x * cosf(rocket_angle) + localRight.x * sinf(rocket_angle),
++        localUp.y * cosf(rocket_angle) + localRight.y * sinf(rocket_angle),
++        0.0f
++      );
++
++      // 鐏灏哄锛氭斁澶?00鍊嶈瀹冨彲瑙?(瀹為檯40m锛屾斁澶у悗= 20鍗曚綅 vs 鍦扮悆6371鍗曚綅)
++      float rocket_vis_scale = 500.0f;
++      float rh = (float)baba1.getHeight() * ws * rocket_vis_scale;
++      float rw_3d = (float)baba1.getDiameter() * ws * 0.5f * rocket_vis_scale;
++
++      // 鐩告満璁剧疆
++      int ww, wh;
++      glfwGetFramebufferSize(window, &ww, &wh);
++      float aspect = (float)ww / (float)wh;
++
++      Vec3 camEye, camTarget, camUpVec;
++
++      // ===== 澶槼浣嶇疆涓庢樇澶滀氦鏇?=====
++      // 鑾峰彇鏋佸叾绮剧‘鐨勭墿鐞嗘椂闂达紝璁＄畻鍑虹湡姝ｇ殑 365澶?鍏浆瑙掑害
++      double sun_angular_vel = 6.2831853 / 31557600.0;
++      float sun_angle = -1.2f + (float)(sun_angular_vel * baba1.sim_time);
++      
++      // 澶槼璺濈璁句负 1 AU (1澶╂枃鍗曚綅)
++      float au_meters = 149597870700.0f;
++      float sun_dist = au_meters * ws;
++      float sun_radius = earth_r * 109.2f; // 鐗╃悊鍗婂緞姣斾緥
++      
++      // 璁╁お闃冲湪璧ら亾闈笂甯?11.3搴?鍊捐鏃嬭浆 (瀹岀編鍦嗗舰锛屼繚鎸?1 AU 缁濆璺濈)
++      // 11.3 搴?= 0.197 寮у害. sin(11.3)=0.196, cos(11.3)=0.980
++      Vec3 sunPos(cosf(sun_angle) * sun_dist, 
++                  sinf(sun_angle) * sun_dist * 0.196f, 
++                  sinf(sun_angle) * sun_dist * 0.980f);
++      
++      // 鏇存柊鍏ㄥ眬鍏夌収鏂瑰悜 (鏂瑰悜涓轰粠鐗╀綋鎸囧悜鍏夋簮)
++      r3d->lightDir = sunPos.normalized();
++
++      // ===== 鎸夐敭鐩戝惉锛氳鐐瑰垏鎹?=====
++      static int focus_target = 0; // 0=鍦扮悆, 1=澶槼
++      static bool comma_prev = false;
++      static bool period_prev = false;
++      bool comma_now = glfwGetKey(window, GLFW_KEY_COMMA) == GLFW_PRESS;
++      bool period_now = glfwGetKey(window, GLFW_KEY_PERIOD) == GLFW_PRESS;
++      if (comma_now && !comma_prev) focus_target = 0;
++      if (period_now && !period_prev) focus_target = 1;
++      comma_prev = comma_now; period_prev = period_now;
++
++      if (cam_mode_3d == 0) {
++        // 杞ㄩ亾瑙嗚锛氬洓鍏冩暟鎺у埗缁曠伀绠棆杞?+        float orbit_dist = rh * 8.0f * cam_zoom_chase;
++        Vec3 cam_offset = cam_quat.rotate(Vec3(0.0f, 0.0f, orbit_dist));
++        camEye = rocketPos + cam_offset;
++        camTarget = rocketPos;
++        camUpVec = cam_quat.rotate(Vec3(0.0f, 1.0f, 0.0f));
++      } else if (cam_mode_3d == 1) {
++        // 璺熻釜瑙嗚锛氬浐瀹氬湪鐏鍚庝笂鏂?+        float chase_dist = rh * 8.0f * cam_zoom_chase;
++        Vec3 chase_base = rocketDir * (-chase_dist * 0.4f) +
++                          rocketUp * (chase_dist * 0.15f);
++        Vec3 slight_off = cam_quat.rotate(Vec3(0.0f, 0.0f, 1.0f));
++        camEye = rocketPos + chase_base + slight_off * (chase_dist * 0.05f);
++        camTarget = rocketPos + rocketDir * (rh * 3.0f);
++        camUpVec = rocketUp;
++      } else {
++        // 鍏ㄦ櫙瑙嗚锛氭敮鎸佽仛鐒︾偣鍒囨崲 (鍦扮悆/澶槼)
++        float pan_dist = earth_r * 4.0f * cam_zoom_pan;
++        if (focus_target == 0) {
++            Vec3 cam_offset = cam_quat.rotate(Vec3(0.0f, 0.0f, pan_dist));
++            camEye = cam_offset; // 缁曞湴蹇冩棆杞?+            camTarget = Vec3(0.0f, 0.0f, 0.0f);
++        } else {
++            // 鑱氱劍澶槼鏃讹紝鐢变簬澶槼浣撶Н鏄湴鐞?09鍊嶏紝鐩告満鍒濆璺濈涔熻鎷夎繙109鍊嶆墠鑳界湅鍏?+            Vec3 cam_offset = cam_quat.rotate(Vec3(0.0f, 0.0f, pan_dist * 110.0f));
++            camEye = sunPos + cam_offset; // 缁曟棩蹇冩棆杞?+            camTarget = sunPos;
++        }
++        camUpVec = cam_quat.rotate(Vec3(0.0f, 1.0f, 0.0f));
++      }
+ 
+-    renderer->beginFrame();
++      // 鍔ㄦ€佽繙瑁佸壀闈?
++      float cam_dist = (camEye - camTarget).length();
++      float dist_to_origin = camEye.length();
++      float far_plane = fmaxf(cam_dist * 3.0f, dist_to_origin + earth_r * 2.0f);
++      // 濡傛灉鐩告満绂诲緱寰堣繙锛堢湅澶槼鎴栨瀬杩滆瑙掞級锛屽繀椤昏鎷撳睍杩滆闈㈡兜鐩栨暣涓?AU 璺濈
++      if (focus_target == 1 || cam_dist > sun_dist * 0.1f) {
++          far_plane = fmaxf(far_plane, sun_dist * 2.5f);
++      }
++      
++      // 杩戣鍓潰锛氬畨鍏ㄨ鐩栨憚鍍忔満鍓嶇殑鐗╀綋锛屽苟涓斾笉鑳芥瘮鎽勫儚鏈虹殑璺濈澶э紙鍚﹀垯瑁佸壀鐩爣锛?+      float safe_near = fmaxf(rh * 0.1f, cam_dist * 0.005f);
++      float near_plane = safe_near;
++      Mat4 projMat = Mat4::perspective(0.8f, aspect, near_plane, far_plane);
++
++      Mat4 viewMat = Mat4::lookAt(camEye, camTarget, camUpVec);
++      r3d->beginFrame(viewMat, projMat, camEye);
++
++      // ===== 澶槼鐗╃悊鏈綋 =====
++      if (cam_mode_3d == 2) { 
++          // 浠呭湪鍏ㄦ櫙妯″紡娓叉煋宸ㄥ瀷鐨勭墿鐞嗗お闃虫ā鍨嬮伩鍏嶉伄鐩栫伀绠湰浣撶粏鑺?+          Mat4 sunModel = Mat4::scale(Vec3(sun_radius, sun_radius, sun_radius));
++          sunModel = Mat4::translate(sunPos) * sunModel;
++          // 澶嶇敤 earthMesh锛屼慨鏀规瀬楂樼幆澧冨厜(ambient=2.0)璁╁叾绾寒鍙戠櫧鍙戦粍
++          r3d->drawMesh(earthMesh, sunModel, 1.0f, 0.95f, 0.9f, 1.0f, 2.0f); 
++          
++          // 鍦扮悆缁曟棩杞ㄩ亾绾?(浠ュお闃充负涓績鐢讳竴涓?AU鍗婂緞鐨勫畬缇庡渾)
++          std::vector<Vec3> earth_orbit_pts;
++          int orbit_res = 120;
++          for (int i=0; i<=orbit_res; i++) {
++              float a = (float)i / orbit_res * 6.2831853f;
++              // 杞ㄩ亾闈㈢敱鏄煎澶硅鍊炬枩璁＄畻涓€鑷?(瀹岀編鍦?
++              earth_orbit_pts.push_back(sunPos + Vec3(cosf(a)*(-sun_dist), 
++                                                      sinf(a)*(-sun_dist)*0.196f, 
++                                                      sinf(a)*(-sun_dist)*0.980f));
++          }
++          // 杞ㄩ亾绾垮搴︼紝淇濇寔閫傚綋鍘氬害
++          float orbit_w = sun_radius * 0.01f * fmaxf(1.0f, fminf(cam_zoom_pan * 0.1f, 500.0f));
++          r3d->drawRibbon(earth_orbit_pts, orbit_w, 0.2f, 0.6f, 1.0f, 0.25f);
++      }
+ 
+-    // =================銆愭柊澧炵壒鏁堬細澶┖鑳屾櫙鏄熺┖銆?================
+-    // 楂樺害 > 5000m 鏃舵笎鏄?-    if (baba1.getAltitude() > 5000.0) {
+-      float star_alpha =
+-          (float)min(1.0, (baba1.getAltitude() - 5000.0) / 45000.0);
+-      for (int i = 0; i < 200; i++) {
+-        float sx = hash11(i * 7919) * 2.0f - 1.0f; // -1 ~ 1
+-        float sy = hash11(i * 6271) * 2.0f - 1.0f;
+-        float brightness = 0.5f + hash11(i * 3571) * 0.5f;
+-        float star_size = 0.002f + hash11(i * 4219) * 0.003f;
+-        renderer->addRect(sx, sy, star_size, star_size, brightness, brightness,
+-                          brightness * 0.9f, star_alpha * brightness);
++      // 鍦扮悆
++      Mat4 earthModel = Mat4::scale(Vec3(earth_r, earth_r, earth_r));
++      r3d->drawEarth(earthMesh, earthModel);
++
++      // ===== 澶ф皵灞傛暎灏勫３ =====
++      r3d->drawAtmosphere(earthMesh, earth_r * 1.025f);
++
++      // ===== 澶槼涓庨暅澶村厜鏅?(鎵€鏈夋ā寮忓彲瑙? =====
++      r3d->drawSunAndFlare(sunPos, Vec3(0.0f, 0.0f, 0.0f), earth_r, ww, wh);
++
++      // ===== 鍘嗗彶杞ㄨ抗绾?(瀹為檯璧拌繃鐨勮矾寰? =====
++      {
++        if (traj_history.empty() || (rocketPos - traj_history.back()).length() > earth_r * 0.002f) {
++           traj_history.push_back(rocketPos);
++           if (traj_history.size() > 800) {
++             traj_history.erase(traj_history.begin());
++           }
++        }
++        
++        // 娓叉煋鍘嗗彶杞ㄨ抗 (鏇翠寒瀹炵嚎: 榛勭豢鑹?, 澧炲姞鍩轰簬鐩告満鎷夎繙鐨勭嚎瀹借ˉ鍋?(浠呭湪 Panorama 鏄剧ず)
++        if (cam_mode_3d == 2 && traj_history.size() >= 2) {
++           float hist_w = earth_r * 0.003f * fmaxf(1.0f, cam_zoom_pan * 0.5f);
++           r3d->drawRibbon(traj_history, hist_w, 0.4f, 1.0f, 0.3f, 0.8f);
++        }
++      }
++
++      // ===== 鐏鑷韩楂樹寒鏍囨敞 (鏂逛究鍦ㄨ繙鏅壘鍒? =====
++      if (cam_mode_3d == 2) {
++        float marker_size = fminf(earth_r * 0.1f, earth_r * 0.02f * fmaxf(1.0f, cam_zoom_pan * 0.8f));
++        r3d->drawBillboard(rocketPos, marker_size, 0.2f, 1.0f, 0.4f, 0.9f);
+       }
++
++      // ===== 杞ㄩ亾棰勬祴绾?(寮€鏅嫆杞ㄩ亾) =====
++      if (cam_mode_3d == 2) {
++        // 鐢?D閫熷害杞?D
++        float vx3d = (float)baba1.vx * ws;
++        float vy3d = (float)baba1.vy * ws;
++        Vec3 vel3d(vx3d, vy3d, 0.0f);
++        // 寮曞姏鍙傛暟 (鐢变簬璺濈涔樹簡ws锛岄渶瑕佺粰g閰嶅钩)
++        float mu = 9.81f * earth_r * earth_r * ws; 
++
++        float r_len = rocketPos.length();
++        float v_len = vel3d.length();
++
++        if (v_len > 0.001f && r_len > earth_r * 0.5f) {
++          float energy = 0.5f * v_len * v_len - mu / r_len;
++          Vec3 h_vec = rocketPos.cross(vel3d);
++          float h = h_vec.length();
++          float a = -mu / (2.0f * energy);
++          Vec3 e_vec = vel3d.cross(h_vec) / mu - rocketPos / r_len;
++          float ecc = e_vec.length();
++
++          if (ecc < 0.999f) {
++            // --- 妞渾杞ㄩ亾 (a > 0) ---
++            float b = a * sqrtf(fmaxf(0.0f, 1.0f - ecc * ecc));
++            Vec3 e_dir = ecc > 1e-6f ? e_vec / ecc : Vec3(1.0f, 0.0f, 0.0f);
++            Vec3 perp_dir(-e_dir.y, e_dir.x, 0.0f);
++
++            float periapsis = a * (1.0f - ecc);
++            float apoapsis = a * (1.0f + ecc);
++            bool will_reenter = periapsis < earth_r;
++
++            Vec3 center_off = e_dir * (-a * ecc);
++
++            // 鐢熸垚棰勬祴杞ㄨ抗鐐归泦
++            std::vector<Vec3> orbit_points;
++            int orbit_segs = 120;
++            for (int i = 0; i <= orbit_segs; i++) {
++              float ang = (float)i / orbit_segs * 6.2831853f;
++              Vec3 pt = center_off + e_dir * (a * cosf(ang)) + perp_dir * (b * sinf(ang));
++              if (pt.length() < earth_r * 0.98f) continue;
++              orbit_points.push_back(pt);
++            }
++            
++            // 娓叉煋棰勬祴杞ㄨ抗
++            float pred_w = earth_r * 0.0025f * fmaxf(1.0f, cam_zoom_pan * 0.5f);
++            if (will_reenter) {
++              r3d->drawRibbon(orbit_points, pred_w, 1.0f, 0.4f, 0.1f, 0.6f);
++            }
++
++            float apsis_size = fminf(earth_r * 0.12f, earth_r * 0.025f * fmaxf(1.0f, cam_zoom_pan * 0.8f));
++            
++            // 杩滃湴鐐规爣璁?+            Vec3 apoPos = e_dir * (-apoapsis);
++            if (apoapsis > earth_r * 1.002f) {
++              r3d->drawBillboard(apoPos, apsis_size, 0.2f, 0.4f, 1.0f, 0.9f);
++            }
++
++            // 杩戝湴鐐规爣璁?+            Vec3 periPos = e_dir * periapsis;
++            if (periapsis > earth_r * 1.002f) {
++              r3d->drawBillboard(periPos, apsis_size, 1.0f, 0.5f, 0.1f, 0.9f);
++            }
++          } else {
++            // --- 鍙屾洸绾?鎶涚墿绾块€冮€歌建閬?(ecc >= 1.0) ---
++            // 鍗婇暱杞?a 涓鸿礋鍊?+            float a_hyp = fabs(a); // 瀹為檯 a 鏄礋鐨勶紝鎴戜滑鍙栫粷瀵瑰€兼柟渚胯绠?+            float b_hyp = a_hyp * sqrtf(fmaxf(0.0f, ecc * ecc - 1.0f));
++            Vec3 e_dir = e_vec / ecc;
++            Vec3 perp_dir(-e_dir.y, e_dir.x, 0.0f);
++            
++            float periapsis = a_hyp * (ecc - 1.0f);
++            Vec3 center_off = e_dir * (a_hyp * ecc);
++
++            // 缁樺埗鍙屾洸绾跨殑涓€鏀紙鐏鍓嶈繘鏂瑰悜鐨勶級
++            std::vector<Vec3> escape_points;
++            int escape_segs = 60;
++            // 鐪熻繎鐐硅娓愯繎绾挎瀬闄?acos(-1/ecc)
++            float max_theta = acosf(-1.0f / ecc) * 0.9f; 
++            
++            // 鎴戜滑娌跨潃鍙傛暟鏂圭▼鎵弿锛屼笉鐢诲畬鏁寸殑锛屽彧鐢荤寮€鍦扮悆鐨勪竴娈佃窛绂?+            float max_sinh = 3.0f; 
++            for (int i = -escape_segs; i <= escape_segs; i++) {
++               float t = (float)i / escape_segs * max_sinh;
++               // 鍙栬建杩规柟绋?: center - a * cosh(t) * e_dir + b * sinh(t) * perp_dir
++               Vec3 pt = center_off - e_dir * (a_hyp * coshf(t)) + perp_dir * (b_hyp * sinhf(t));
++               
++               if (pt.length() < earth_r * 0.98f) continue;
++               
++               // 鍙繚鐣欐湭鏉ヨ椋炵殑锛屾垨鑰呯伀绠綋鍓嶄綅缃檮杩戠殑鐐?鍩轰簬鐐逛箻鍒ゆ柇琛岃繘鏂瑰悜)
++               if (escape_points.empty() || (pt - escape_points.back()).length() > earth_r * 0.05f) {
++                  escape_points.push_back(pt);
++               }
++            }
++
++            // 閫冮€歌建閬撶殑 Ribbon (绱壊浠ｈ〃閫冮€?
++            float pred_w = earth_r * 0.0025f * fmaxf(1.0f, cam_zoom_pan * 0.5f);
++            r3d->drawRibbon(escape_points, pred_w, 0.8f, 0.3f, 1.0f, 0.7f);
++
++            // 杩戝湴鐐规爣璁?+            float apsis_size = fminf(earth_r * 0.12f, earth_r * 0.025f * fmaxf(1.0f, cam_zoom_pan * 0.8f));
++            Vec3 periPos = center_off - e_dir * a_hyp; // 椤剁偣灏辨槸杩戝湴鐐?+            if (periapsis > earth_r * 1.002f) {
++              r3d->drawBillboard(periPos, apsis_size, 1.0f, 0.5f, 0.1f, 0.9f);
++            }
++          }
++        }
++      }
++
++      // ===== 鐏鏈濆悜鍥涘厓鏁?=====
++      Vec3 defaultUp(0.0f, 1.0f, 0.0f);
++      Vec3 rotAxis = defaultUp.cross(rocketDir);
++      float rotAngle = acosf(fminf(fmaxf(defaultUp.dot(rocketDir), -1.0f), 1.0f));
++      Quat rocketQuat;
++      if (rotAxis.length() > 1e-6f)
++        rocketQuat = Quat::fromAxisAngle(rotAxis.normalized(), rotAngle);
++
++      // ===== 鐏娑傝 (Builder棰滆壊) =====
++      // 鏈轰綋 (鐕冩枡绠遍鑹?
++      Mat4 bodyModel = Mat4::TRS(rocketPos, rocketQuat,
++                                  Vec3(rw_3d, rh * 0.7f, rw_3d));
++      r3d->drawMesh(rocketBody, bodyModel,
++                     sel_tank.r, sel_tank.g, sel_tank.b, 1.0f, 0.15f);
++
++      // 榧婚敟 (榧婚敟棰滆壊)
++      Vec3 nosePos = rocketPos + rocketDir * (rh * 0.35f);
++      Mat4 noseModel = Mat4::TRS(nosePos, rocketQuat,
++                                  Vec3(rw_3d, rh * 0.3f, rw_3d));
++      r3d->drawMesh(rocketNose, noseModel,
++                     sel_nose.r, sel_nose.g, sel_nose.b, 1.0f, 0.15f);
++
++      // 寮曟搸鍠风 (寮曟搸棰滆壊)
++      Vec3 engPos = rocketPos - rocketDir * (rh * 0.35f);
++      Quat flipQuat = Quat::fromAxisAngle(
++        rotAxis.length() > 1e-6f ? rotAxis.normalized() : Vec3(0.0f, 0.0f, 1.0f),
++        rotAngle + 3.14159f);
++      Mat4 engModel = Mat4::TRS(engPos, flipQuat,
++                                 Vec3(rw_3d * 1.2f, rh * 0.15f, rw_3d * 1.2f));
++      r3d->drawMesh(rocketNose, engModel,
++                     sel_eng.r, sel_eng.g, sel_eng.b, 1.0f, 0.2f);
++
++      // ===== 3D 鐏劙/灏剧劙绮掑瓙 =====
++      if (baba1.throttle > 0.01) {
++        float thrust = (float)baba1.throttle;
++        float flame_base_size = rw_3d * 1.5f;
++        float game_time = (float)glfwGetTime();
++
++        // 鐪熺┖涓伀鐒版洿澶э紙澶ф皵鍘嬬缉鏁堟灉锛?+        float vacuum_scale = 1.0f + (float)fmin(baba1.getAltitude() / 50000.0, 2.0);
++
++        for (int i = 0; i < 10; i++) {
++          // 绮掑瓙娌挎帹鍔涘弽鏂瑰悜鍒嗗竷
++          float t_off = (float)i / 10.0f;
++          float rand_off = sinf(game_time * 17.3f + i * 7.1f) * 0.3f + 0.5f;
++          float dist = (t_off * 0.5f + rand_off * 0.2f) * rh * thrust * vacuum_scale;
++          Vec3 particlePos = engPos - rocketDir * dist;
++
++          // 闅忔満渚у悜鍋忕Щ
++          float side_x = sinf(game_time * 23.7f + i * 3.3f) * rw_3d * 0.3f;
++          float side_z = cosf(game_time * 19.1f + i * 5.7f) * rw_3d * 0.3f;
++          particlePos = particlePos + localRight * side_x + Vec3(0.0f, 0.0f, 1.0f) * side_z;
++
++          // 棰滆壊: 杩戝柗鍙?鐧? 涓?榛? 杩?姗欑孩
++          float cr, cg, cb;
++          if (t_off < 0.3f) {
++            cr = 1.0f; cg = 0.95f; cb = 0.8f;
++          } else if (t_off < 0.6f) {
++            cr = 1.0f; cg = 0.7f; cb = 0.2f;
++          } else {
++            cr = 1.0f; cg = 0.4f; cb = 0.05f;
++          }
++
++          float size = flame_base_size * (0.5f + t_off * 1.5f) * vacuum_scale;
++          float alpha = thrust * (1.0f - t_off * 0.7f) * 0.6f;
++          r3d->drawBillboard(particlePos, size, cr, cg, cb, alpha);
++        }
++      }
++
++      r3d->endFrame();
+     }
+ 
+-    // 鍧愭爣杞崲锛氫笘鐣屽潗鏍?-> 灞忓箷鍧愭爣
+-    // 鐩告満濮嬬粓瀵瑰噯鐏锛屼絾鐏淇濇寔鍦ㄥ睆骞曚笅鏂?1/3 澶?-    // 闅忕潃楂樺害澧炲姞锛岃閲庣缉鏀?(Zoom out)
++    // ================= 2D HUD 鍙犲姞灞?=================
++    renderer->beginFrame();
+ 
+-    // 鍔ㄦ€佹棤鏋佺缉鏀惧叕寮?+    // 鍧愭爣杞崲鍙橀噺锛圚UD涔熼渶瑕侊級
+     double scale = 1.0 / (baba1.getAltitude() * 1.5 + 200.0);
+     float cx = 0.0f;
+-    float cy = 0.0f; // 鐏姘歌繙鍦ㄥ睆骞曟涓ぎ
+-
+-    // 璁＄畻灞€閮ㄥ瀭鐩磋搴?+    float cy = 0.0f;
+     double rocket_r = sqrt(baba1.px * baba1.px + baba1.py * baba1.py);
+     double rocket_theta = atan2(baba1.py, baba1.px);
+-
+-    // 璁╃浉鏈烘棆杞紝浣垮緱鐏姘歌繙鏈濅笂 (灞忓箷姝ｄ笂鏂?
+     double cam_angle = PI / 2.0 - rocket_theta;
+     double sin_c = sin(cam_angle);
+     double cos_c = cos(cam_angle);
+-
+-    // 甯︽湁鏃嬭浆鐭╅樀鐨勫潗鏍囨槧灏勫櫒
+     auto toScreenX = [&](double wx, double wy) {
+-      double rx = wx * cos_c - wy * sin_c; // 鏃嬭浆
++      double rx = wx * cos_c - wy * sin_c;
+       return (float)(rx * scale + cx);
+     };
+     auto toScreenY = [&](double wx, double wy) {
+-      double ry = wx * sin_c + wy * cos_c;          // 鏃嬭浆
+-      return (float)((ry - rocket_r) * scale + cy); // 鐩稿鐏骞崇Щ
++      double ry = wx * sin_c + wy * cos_c;
++      return (float)((ry - rocket_r) * scale + cy);
+     };
+-
+-    // 4. 鐢荤伀绠富浣?     float w = max(0.015f, (float)(10.0 * scale));
+     float h = max(0.06f, (float)(40.0 * scale));
+     float y_offset = -h / 2.0f;
++
++    if (!view_3d) {
++    // =================銆愬お绌鸿儗鏅槦绌恒€?================
++    if (baba1.getAltitude() > 5000.0) {
++      float star_alpha =
++          (float)min(1.0, (baba1.getAltitude() - 5000.0) / 45000.0);
++      for (int i = 0; i < 200; i++) {
++        float sx = hash11(i * 7919) * 2.0f - 1.0f; // -1 ~ 1
++        float sy = hash11(i * 6271) * 2.0f - 1.0f;
++        float brightness = 0.5f + hash11(i * 3571) * 0.5f;
++        float star_size = 0.002f + hash11(i * 4219) * 0.003f;
++        renderer->addRect(sx, sy, star_size, star_size, brightness, brightness,
++                          brightness * 0.9f, star_alpha * brightness);
++      }
++    }
++
++
+     // 1. 鐢诲湴鐞?(鍔犱笂 y_offset)
+     renderer->addEarthWithContinents(toScreenX(0, 0),
+                                      toScreenY(0, 0) + y_offset,
+@@ -1788,17 +2513,37 @@ int main() {
+                                rot, sr, sg, sb, baba1.smoke[i].alpha);
+     }
+ 
+-    // =================銆愭柊澧炲姛鑳斤細涓撲笟鑸ぉ HUD 浠〃鐩樸€?================
+-    // 浣跨敤鏍囧噯鍖栬澶囧潗鏍?(NDC, 鑼冨洿 -1.0 鍒?1.0) 鐩存帴鍦ㄥ睆骞曚笂缁樺埗 GUI
++    } // end if (!view_3d)
+ 
+-    // --- HUD 閰嶇疆 ---
+-    float hud_opacity = 0.8f;    // 鏁翠綋涓嶉€忔槑搴?-    float gauge_h = 0.6f;        // 浠〃鐩樻€婚珮搴?-    float gauge_w = 0.03f;       // 浠〃鐩樺搴?-    float gauge_y_center = 0.4f; // 浠〃鐩樹腑蹇?Y 鍧愭爣
+-    float gauge_vel_x = -0.92f;  // 閫熷害璁′腑蹇?X 鍧愭爣
+-    float gauge_alt_x = -0.84f;  // 楂樺害璁′腑蹇?X 鍧愭爣
+-    float gauge_fuel_x = -0.76f; // 鐕冩补璁′腑蹇?X 鍧愭爣
++    // ====================================================================
++    // ===== 2D 鍙犲姞灞?HUD =====
++    
++    if (show_hud) {  // 鐢ㄦ埛鎸?H 閿垏鎹㈠紑鍏?+        
++        // --- 寮哄埗閲嶇疆 2D 娓叉煋鍣ㄦ壒澶勭悊鐘舵€?---
++        // 缁撴潫涔嬪墠鐨勫彲鑳介仐鐣欑殑 2D 缁樺埗 (濡傜儫闆剧壒鏁?
++        renderer->endFrame();
++        // 褰诲簳閲嶇疆 OpenGL 娣峰悎鍜屾繁搴︽祴璇曠姸鎬侊紝闃叉 3D 灏剧劙娉勯湶
++        glUseProgram(0);
++        glDisable(GL_DEPTH_TEST);
++        glDisable(GL_CULL_FACE); // 纭繚2D鐭╁舰涓嶄細鍥犱负缁樺埗鏂瑰悜琚剰澶栧墧闄?+        glDepthMask(GL_TRUE);
++        glEnable(GL_BLEND);
++        glBlendEquation(GL_FUNC_ADD); // 淇锛氬紩鎿?Shock Diamonds)鐢ㄤ簡 GL_MAX 瀵艰嚧 HUD 鐨?alpha 娣峰悎澶辨晥
++        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
++        glBindVertexArray(0);
++        glBindBuffer(GL_ARRAY_BUFFER, 0);
++        // 閲嶆柊寮€鍚竴涓柊鐨?2D 鎵瑰鐞嗕笓渚?HUD 浣跨敤 (纭繚鐫€鑹插櫒姝ｇ‘缁戝畾)
++        renderer->beginFrame();
++
++        float hud_opacity = 0.8f;
++
++        float gauge_w = 0.03f;
++        float gauge_h = 0.45f;
++        float gauge_y_center = 0.4f;
++        float gauge_vel_x = -0.92f;
++        float gauge_alt_x = -0.84f;
++        float gauge_fuel_x = -0.76f;
+ 
+     // --- 1. 閫熷害璁?(Velocity Gauge) ---
+     double current_vel = baba1.getVelocityMag();
+@@ -1966,11 +2711,18 @@ int main() {
+                       0.1f, hud_opacity);
+ 
+     // ========================================================================
++    } // end if (show_hud)
++    
++    // 鎻愪氦鏈€鍚庣殑 2D 娓叉煋(濡侶UD)
+     renderer->endFrame();
+     glfwSwapBuffers(window);
+   }
+ 
+   delete renderer;
++  earthMesh.destroy();
++  rocketBody.destroy();
++  rocketNose.destroy();
++  delete r3d;
+   glfwTerminate();
+   if (baba1.status == Explorer::LANDED || baba1.status == Explorer::CRASHED) {
+     cout << "\n>> SIMULATION ENDED. PRESS ENTER." << endl;
+diff --git a/src/renderer3d.h b/src/renderer3d.h
+new file mode 100644
+index 0000000..d0b3258
+--- /dev/null
++++ b/src/renderer3d.h
+@@ -0,0 +1,924 @@
++#pragma once
++// ==========================================================
++// renderer3d.h 鈥?3D Rendering Pipeline
++// Requires: glad, math3d.h
++// ==========================================================
++
++#include "math3d.h"
++// NOTE: glad must be included BEFORE this header in the main translation unit
++#include <vector>
++
++// ==========================================================
++// 3D Vertex Format
++// ==========================================================
++struct Vertex3D {
++  float px, py, pz;     // position
++  float nx, ny, nz;     // normal
++  float u, v;           // UV
++  float r, g, b, a;     // color
++};
++
++// ==========================================================
++// Mesh 鈥?鍙噸鐢ㄧ殑3D鍑犱綍浣?+// ==========================================================
++struct Mesh {
++  GLuint vao = 0, vbo = 0, ebo = 0;
++  int indexCount = 0;
++
++  void upload(const std::vector<Vertex3D>& verts,
++              const std::vector<unsigned int>& indices) {
++    indexCount = (int)indices.size();
++    if (!vao) {
++      glGenVertexArrays(1, &vao);
++      glGenBuffers(1, &vbo);
++      glGenBuffers(1, &ebo);
++    }
++    glBindVertexArray(vao);
++
++    glBindBuffer(GL_ARRAY_BUFFER, vbo);
++    glBufferData(GL_ARRAY_BUFFER, verts.size() * sizeof(Vertex3D),
++                 verts.data(), GL_STATIC_DRAW);
++
++    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
++    glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int),
++                 indices.data(), GL_STATIC_DRAW);
++
++    // pos
++    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex3D),
++                          (void*)offsetof(Vertex3D, px));
++    glEnableVertexAttribArray(0);
++    // normal
++    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex3D),
++                          (void*)offsetof(Vertex3D, nx));
++    glEnableVertexAttribArray(1);
++    // uv
++    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex3D),
++                          (void*)offsetof(Vertex3D, u));
++    glEnableVertexAttribArray(2);
++    // color
++    glVertexAttribPointer(3, 4, GL_FLOAT, GL_FALSE, sizeof(Vertex3D),
++                          (void*)offsetof(Vertex3D, r));
++    glEnableVertexAttribArray(3);
++
++    glBindVertexArray(0);
++  }
++
++  void draw() const {
++    if (!vao || indexCount == 0) return;
++    glBindVertexArray(vao);
++    glDrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_INT, 0);
++    glBindVertexArray(0);
++  }
++
++  void destroy() {
++    if (vao) glDeleteVertexArrays(1, &vao);
++    if (vbo) glDeleteBuffers(1, &vbo);
++    if (ebo) glDeleteBuffers(1, &ebo);
++    vao = vbo = ebo = 0;
++  }
++};
++
++// ==========================================================
++// Mesh Generators
++// ==========================================================
++namespace MeshGen {
++
++// 鐞冧綋 (UV sphere)
++inline Mesh sphere(int latSegs, int lonSegs, float radius) {
++  std::vector<Vertex3D> verts;
++  std::vector<unsigned int> indices;
++  const float PI_f = 3.14159265358979f;
++
++  for (int lat = 0; lat <= latSegs; lat++) {
++    float theta = (float)lat / latSegs * PI_f;
++    float sinT = sinf(theta), cosT = cosf(theta);
++    for (int lon = 0; lon <= lonSegs; lon++) {
++      float phi = (float)lon / lonSegs * 2.0f * PI_f;
++      float sinP = sinf(phi), cosP = cosf(phi);
++
++      float x = cosP * sinT;
++      float y = cosT;
++      float z = sinP * sinT;
++
++      Vertex3D v;
++      v.px = x * radius; v.py = y * radius; v.pz = z * radius;
++      v.nx = x; v.ny = y; v.nz = z;
++      v.u = (float)lon / lonSegs;
++      v.v = (float)lat / latSegs;
++      v.r = 1; v.g = 1; v.b = 1; v.a = 1;
++      verts.push_back(v);
++    }
++  }
++  for (int lat = 0; lat < latSegs; lat++) {
++    for (int lon = 0; lon < lonSegs; lon++) {
++      int a = lat * (lonSegs + 1) + lon;
++      int b = a + lonSegs + 1;
++      indices.push_back(a); indices.push_back(b); indices.push_back(a + 1);
++      indices.push_back(b); indices.push_back(b + 1); indices.push_back(a + 1);
++    }
++  }
++  Mesh m;
++  m.upload(verts, indices);
++  return m;
++}
++
++// 鍦嗘煴浣?(娌?Y 杞? 涓績鍦ㄥ師鐐?
++inline Mesh cylinder(int segs, float radius, float height) {
++  std::vector<Vertex3D> verts;
++  std::vector<unsigned int> indices;
++  const float PI_f = 3.14159265358979f;
++  float halfH = height * 0.5f;
++
++  for (int i = 0; i <= segs; i++) {
++    float ang = (float)i / segs * 2.0f * PI_f;
++    float cs = cosf(ang), sn = sinf(ang);
++    float u = (float)i / segs;
++
++    // 涓婇《鐐?+    Vertex3D vt;
++    vt.px = cs * radius; vt.py = halfH; vt.pz = sn * radius;
++    vt.nx = cs; vt.ny = 0; vt.nz = sn;
++    vt.u = u; vt.v = 0;
++    vt.r = 1; vt.g = 1; vt.b = 1; vt.a = 1;
++    verts.push_back(vt);
++
++    // 涓嬮《鐐?+    Vertex3D vb;
++    vb.px = cs * radius; vb.py = -halfH; vb.pz = sn * radius;
++    vb.nx = cs; vb.ny = 0; vb.nz = sn;
++    vb.u = u; vb.v = 1;
++    vb.r = 1; vb.g = 1; vb.b = 1; vb.a = 1;
++    verts.push_back(vb);
++  }
++  for (int i = 0; i < segs; i++) {
++    int a = i * 2, b = a + 1, c = a + 2, d = a + 3;
++    indices.push_back(a); indices.push_back(b); indices.push_back(c);
++    indices.push_back(b); indices.push_back(d); indices.push_back(c);
++  }
++
++  Mesh m;
++  m.upload(verts, indices);
++  return m;
++}
++
++// 鍦嗛敟 (搴曢儴鍦?y=0, 灏栫鍦?y=height)
++inline Mesh cone(int segs, float radius, float height) {
++  std::vector<Vertex3D> verts;
++  std::vector<unsigned int> indices;
++  const float PI_f = 3.14159265358979f;
++  float slope = radius / sqrtf(radius * radius + height * height);
++  float ny_cone = height / sqrtf(radius * radius + height * height);
++
++  // 灏栫
++  Vertex3D tip;
++  tip.px = 0; tip.py = height; tip.pz = 0;
++  tip.nx = 0; tip.ny = ny_cone; tip.nz = 0;
++  tip.u = 0.5f; tip.v = 0;
++  tip.r = 1; tip.g = 1; tip.b = 1; tip.a = 1;
++  verts.push_back(tip); // index 0
++
++  // 搴曢儴椤剁偣
++  for (int i = 0; i <= segs; i++) {
++    float ang = (float)i / segs * 2.0f * PI_f;
++    float cs = cosf(ang), sn = sinf(ang);
++    Vertex3D v;
++    v.px = cs * radius; v.py = 0; v.pz = sn * radius;
++    v.nx = cs * ny_cone; v.ny = slope; v.nz = sn * ny_cone;
++    v.u = (float)i / segs; v.v = 1;
++    v.r = 1; v.g = 1; v.b = 1; v.a = 1;
++    verts.push_back(v); // index 1 + i
++  }
++  for (int i = 0; i < segs; i++) {
++    indices.push_back(0);
++    indices.push_back(1 + i);
++    indices.push_back(2 + i);
++  }
++
++  Mesh m;
++  m.upload(verts, indices);
++  return m;
++}
++
++} // namespace MeshGen
++
++// ==========================================================
++// Renderer3D
++// ==========================================================
++class Renderer3D {
++public:
++  GLuint program3d = 0;
++  GLuint earthProgram = 0;
++  GLuint billboardProg = 0;
++  GLuint atmoProg = 0;
++  GLuint billboardVAO = 0, billboardVBO = 0;
++  GLint u_mvp = -1, u_model = -1, u_lightDir = -1, u_viewPos = -1;
++  GLint u_baseColor = -1, u_ambientStr = -1;
++  GLint ue_mvp = -1, ue_model = -1, ue_lightDir = -1, ue_viewPos = -1;
++  // Billboard uniforms
++  GLint ub_vp = -1, ub_proj = -1, ub_pos = -1, ub_size = -1, ub_color = -1;
++  // Atmosphere uniforms
++  GLint ua_mvp = -1, ua_model = -1, ua_lightDir = -1, ua_viewPos = -1;
++
++  Mat4 view, proj;
++  Vec3 camPos;
++  Vec3 lightDir;
++
++  // Ribbon Renderer properties
++  GLuint ribbonProg, ribbonVAO, ribbonVBO;
++  GLint ur_mvp, ur_color;
++
++  // Lens Flare properties
++  GLuint lensFlareProg, lfVAO, lfVBO;
++  GLint ulf_sunScreenPos, ulf_aspect, ulf_color, ulf_intensity;
++
++  Renderer3D() {
++    // --- Standard 3D Shader (Phong) ---
++    const char* vertSrc = R"(
++      #version 330 core
++      layout(location=0) in vec3 aPos;
++      layout(location=1) in vec3 aNormal;
++      layout(location=2) in vec2 aUV;
++      layout(location=3) in vec4 aColor;
++
++      uniform mat4 uMVP;
++      uniform mat4 uModel;
++
++      out vec3 vWorldPos;
++      out vec3 vNormal;
++      out vec2 vUV;
++      out vec4 vColor;
++
++      void main() {
++        vec4 worldPos = uModel * vec4(aPos, 1.0);
++        vWorldPos = worldPos.xyz;
++        vNormal = mat3(transpose(inverse(uModel))) * aNormal;
++        vUV = aUV;
++        vColor = aColor;
++        gl_Position = uMVP * vec4(aPos, 1.0);
++      }
++    )";
++
++    const char* fragSrc = R"(
++      #version 330 core
++      in vec3 vWorldPos;
++      in vec3 vNormal;
++      in vec2 vUV;
++      in vec4 vColor;
++
++      uniform vec3 uLightDir;
++      uniform vec3 uViewPos;
++      uniform vec4 uBaseColor;
++      uniform float uAmbientStr;
++
++      out vec4 FragColor;
++
++      void main() {
++        vec3 N = normalize(vNormal);
++        vec3 L = normalize(uLightDir);
++        float ambient = uAmbientStr;
++        float diff = max(dot(N, L), 0.0);
++        vec3 V = normalize(uViewPos - vWorldPos);
++        vec3 H = normalize(L + V);
++        float spec = pow(max(dot(N, H), 0.0), 32.0);
++        vec4 color = uBaseColor * vColor;
++        vec3 result = color.rgb * (ambient + diff * 0.7 + spec * 0.3);
++        FragColor = vec4(result, color.a);
++      }
++    )";
++
++    program3d = compileProgram(vertSrc, fragSrc);
++    u_mvp = glGetUniformLocation(program3d, "uMVP");
++    u_model = glGetUniformLocation(program3d, "uModel");
++    u_lightDir = glGetUniformLocation(program3d, "uLightDir");
++    u_viewPos = glGetUniformLocation(program3d, "uViewPos");
++    u_baseColor = glGetUniformLocation(program3d, "uBaseColor");
++    u_ambientStr = glGetUniformLocation(program3d, "uAmbientStr");
++
++    // --- Earth Shader (procedural continents) ---
++    const char* earthFragSrc = R"(
++      #version 330 core
++      in vec3 vWorldPos;
++      in vec3 vNormal;
++      in vec2 vUV;
++      in vec4 vColor;
++
++      uniform vec3 uLightDir;
++      uniform vec3 uViewPos;
++
++      out vec4 FragColor;
++
++      // Simple 3D hash noise for procedural terrain
++      float hash(vec3 p) {
++        p = fract(p * vec3(443.897, 441.423, 437.195));
++        p += dot(p, p.yzx + 19.19);
++        return fract((p.x + p.y) * p.z);
++      }
++
++      float noise3d(vec3 p) {
++        vec3 i = floor(p);
++        vec3 f = fract(p);
++        f = f * f * (3.0 - 2.0 * f); // smoothstep
++        float n000 = hash(i);
++        float n100 = hash(i + vec3(1,0,0));
++        float n010 = hash(i + vec3(0,1,0));
++        float n110 = hash(i + vec3(1,1,0));
++        float n001 = hash(i + vec3(0,0,1));
++        float n101 = hash(i + vec3(1,0,1));
++        float n011 = hash(i + vec3(0,1,1));
++        float n111 = hash(i + vec3(1,1,1));
++        float nx00 = mix(n000, n100, f.x);
++        float nx10 = mix(n010, n110, f.x);
++        float nx01 = mix(n001, n101, f.x);
++        float nx11 = mix(n011, n111, f.x);
++        float nxy0 = mix(nx00, nx10, f.y);
++        float nxy1 = mix(nx01, nx11, f.y);
++        return mix(nxy0, nxy1, f.z);
++      }
++
++      float fbm(vec3 p) {
++        float v = 0.0;
++        float amp = 0.5;
++        for (int i = 0; i < 5; i++) {
++          v += noise3d(p) * amp;
++          p *= 2.1;
++          amp *= 0.5;
++        }
++        return v;
++      }
++
++      void main() {
++        vec3 N = normalize(vNormal);
++        vec3 L = normalize(uLightDir);
++        vec3 V = normalize(uViewPos - vWorldPos);
++
++        // Use normal as 3D coordinate for procedural texture
++        vec3 texCoord = normalize(vWorldPos) * 3.0;
++        float continent = fbm(texCoord * 1.5);
++
++        // Latitude for ice caps
++        float lat = abs(N.y);
++
++        // Color mapping
++        vec3 ocean = vec3(0.05, 0.15, 0.45);
++        vec3 shallow = vec3(0.1, 0.3, 0.6);
++        vec3 land_low = vec3(0.15, 0.45, 0.12);
++        vec3 land_high = vec3(0.55, 0.45, 0.25);
++        vec3 mountain = vec3(0.5, 0.42, 0.35);
++        vec3 snow = vec3(0.9, 0.92, 0.95);
++
++        vec3 surfColor;
++        if (continent < 0.42) {
++          surfColor = mix(ocean, shallow, continent / 0.42);
++        } else if (continent < 0.48) {
++          float t = (continent - 0.42) / 0.06;
++          surfColor = mix(shallow, land_low, t);
++        } else if (continent < 0.65) {
++          float t = (continent - 0.48) / 0.17;
++          surfColor = mix(land_low, land_high, t);
++        } else if (continent < 0.8) {
++          float t = (continent - 0.65) / 0.15;
++          surfColor = mix(land_high, mountain, t);
++        } else {
++          surfColor = mountain;
++        }
++
++        // Ice caps at poles
++        if (lat > 0.85) {
++          float ice = smoothstep(0.85, 0.95, lat);
++          surfColor = mix(surfColor, snow, ice);
++        }
++
++        // Cloud layer (separate noise layer)
++        float clouds = fbm(texCoord * 2.5 + vec3(0.0, 100.0, 0.0));
++        clouds = smoothstep(0.45, 0.7, clouds) * 0.5;
++        surfColor = mix(surfColor, vec3(1.0), clouds);
++
++        // Lighting
++        float diff = max(dot(N, L), 0.0);
++        float ambient = 0.20; // Increased ambient for dark scenes
++
++        // Atmosphere rim glow
++        float rim = 1.0 - max(dot(N, V), 0.0);
++        rim = pow(rim, 3.0);
++        vec3 atmosColor = vec3(0.3, 0.5, 1.0) * rim * 0.6;
++
++        vec3 result = surfColor * (ambient + diff * 0.85) + atmosColor;
++
++        // Night side city lights (subtle)
++        if (diff < 0.05) {
++          float city = noise3d(texCoord * 10.0);
++          if (continent > 0.48 && city > 0.7) {
++            result += vec3(1.0, 0.8, 0.3) * 0.8 * (1.0 - diff / 0.05); // Brighter city lights
++          }
++        }
++
++        FragColor = vec4(result, 1.0);
++      }
++    )";
++
++    earthProgram = compileProgram(vertSrc, earthFragSrc);
++    ue_mvp = glGetUniformLocation(earthProgram, "uMVP");
++    ue_model = glGetUniformLocation(earthProgram, "uModel");
++    ue_lightDir = glGetUniformLocation(earthProgram, "uLightDir");
++    ue_viewPos = glGetUniformLocation(earthProgram, "uViewPos");
++
++    lightDir = Vec3(0.5f, 0.8f, 0.3f).normalized();
++
++    // --- Billboard Shader (fire/glow particles, markers) ---
++    const char* bbVertSrc = R"(
++      #version 330 core
++      layout(location=0) in vec2 aOffset;
++      // Need View and Proj separately precisely for billboarding
++      uniform mat4 uView;
++      uniform mat4 uProj;
++      uniform vec3 uCenter;
++      uniform vec2 uSize;
++      out vec2 vUV;
++      void main() {
++        vUV = aOffset * 0.5 + 0.5;
++        // Exact spherical billboarding: extract camera right and up from View Matrix
++        // uView[0][0], uView[1][0], uView[2][0] is the right vector
++        // uView[0][1], uView[1][1], uView[2][1] is the up vector
++        vec3 right = vec3(uView[0][0], uView[1][0], uView[2][0]);
++        vec3 up    = vec3(uView[0][1], uView[1][1], uView[2][1]);
++        
++        // Compute world position of this vertex
++        vec3 worldPos = uCenter + right * aOffset.x * uSize.x + up * aOffset.y * uSize.y;
++        
++        // Project to screen
++        gl_Position = uProj * uView * vec4(worldPos, 1.0);
++      }
++    )";
++    const char* bbFragSrc = R"(
++      #version 330 core
++      in vec2 vUV;
++      uniform vec4 uColor;
++      out vec4 FragColor;
++      void main() {
++        float d = distance(vUV, vec2(0.5));
++        float alpha = smoothstep(0.5, 0.0, d);
++        FragColor = vec4(uColor.rgb, uColor.a * alpha);
++      }
++    )";
++    billboardProg = compileProgram(bbVertSrc, bbFragSrc);
++    ub_vp = glGetUniformLocation(billboardProg, "uView"); // Actually uView now
++    ub_proj = glGetUniformLocation(billboardProg, "uProj");
++    ub_pos = glGetUniformLocation(billboardProg, "uCenter");
++    ub_size = glGetUniformLocation(billboardProg, "uSize");
++    ub_color = glGetUniformLocation(billboardProg, "uColor");
++
++    // Billboard quad VAO
++    float quad[] = { -1,-1,  1,-1,  -1,1,  1,1 };
++    glGenVertexArrays(1, &billboardVAO);
++    glGenBuffers(1, &billboardVBO);
++    glBindVertexArray(billboardVAO);
++    glBindBuffer(GL_ARRAY_BUFFER, billboardVBO);
++    glBufferData(GL_ARRAY_BUFFER, sizeof(quad), quad, GL_STATIC_DRAW);
++    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, 0);
++    glEnableVertexAttribArray(0);
++    glBindVertexArray(0);
++
++    // --- Atmosphere Shader ---
++    const char* atmoFragSrc = R"(
++      #version 330 core
++      in vec3 vWorldPos;
++      in vec3 vNormal;
++      in vec2 vUV;
++      in vec4 vColor;
++      uniform vec3 uLightDir;
++      uniform vec3 uViewPos;
++      out vec4 FragColor;
++      void main() {
++        vec3 N = normalize(vNormal);
++        vec3 V = normalize(uViewPos - vWorldPos);
++        vec3 L = normalize(uLightDir);
++        // Rim intensity (edge-on = bright)
++        float rim = 1.0 - abs(dot(N, V));
++        rim = pow(rim, 2.5);
++        // Rayleigh scattering color
++        vec3 scatter = vec3(0.3, 0.55, 1.0); // blue
++        // Sunset at terminator
++        float sunAngle = dot(N, L);
++        float terminator = smoothstep(-0.1, 0.15, sunAngle);
++        vec3 sunset = vec3(1.0, 0.4, 0.1);
++        vec3 atmoColor = mix(sunset * 0.5, scatter, terminator);
++        // Only visible on lit side + terminator
++        float visibility = smoothstep(-0.3, 0.0, sunAngle) + 0.15;
++        float alpha = rim * visibility * 0.7;
++        FragColor = vec4(atmoColor, alpha);
++      }
++    )";
++    atmoProg = compileProgram(vertSrc, atmoFragSrc);
++    ua_mvp = glGetUniformLocation(atmoProg, "uMVP");
++    ua_model = glGetUniformLocation(atmoProg, "uModel");
++    ua_lightDir = glGetUniformLocation(atmoProg, "uLightDir");
++    ua_viewPos = glGetUniformLocation(atmoProg, "uViewPos");
++
++    // --- Ribbon Shader (Trajectory Trails) ---
++    const char* ribbonVertSrc = R"(
++      #version 330 core
++      layout(location=0) in vec3 aPos;
++      uniform mat4 uMVP;
++      void main() {
++        gl_Position = uMVP * vec4(aPos, 1.0);
++      }
++    )";
++    const char* ribbonFragSrc = R"(
++      #version 330 core
++      uniform vec4 uColor;
++      out vec4 FragColor;
++      void main() {
++        FragColor = uColor;
++      }
++    )";
++    ribbonProg = compileProgram(ribbonVertSrc, ribbonFragSrc);
++    ur_mvp = glGetUniformLocation(ribbonProg, "uMVP");
++    ur_color = glGetUniformLocation(ribbonProg, "uColor");
++
++    glGenVertexArrays(1, &ribbonVAO);
++    glGenBuffers(1, &ribbonVBO);
++    glBindVertexArray(ribbonVAO);
++    glBindBuffer(GL_ARRAY_BUFFER, ribbonVBO);
++    // Allocate an initial buffer size (e.g., 2000 points * 2 edges * sizeof(Vec3))
++    glBufferData(GL_ARRAY_BUFFER, sizeof(Vec3) * 4000, nullptr, GL_DYNAMIC_DRAW);
++    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vec3), (void*)0);
++    glEnableVertexAttribArray(0);
++    glBindVertexArray(0);
++
++    // --- Lens Flare Shader (Procedural 2D Screen-Space) ---
++    const char* lfVertSrc = R"(
++      #version 330 core
++      layout(location=0) in vec2 aPos;
++      
++      uniform vec2 uSunScreenPos; // Position of sun in NDC (-1 to 1)
++      uniform float uAspect;      // Screen aspect ratio
++      uniform vec2 uScale;        // Scale of this specific flare element
++      uniform vec2 uOffset;       // Screen-space offset relative to sun or center
++      
++      out vec2 vUV;
++      
++      void main() {
++        vUV = aPos * 0.5 + 0.5; // 0 to 1 UVs
++        // Base quad is -1 to 1. Scale it.
++        vec2 pos = aPos * uScale;
++        // Fix aspect ratio so circles are round
++        pos.x /= uAspect;
++        // Apply offset (center of the element)
++        gl_Position = vec4(pos + uOffset, 0.0, 1.0);
++      }
++    )";
++    const char* lfFragSrc = R"(
++      #version 330 core
++      in vec2 vUV;
++      
++      uniform vec4 uColor;
++      uniform float uIntensity;
++      uniform int uShapeType; // 0 = soft circle, 1 = anamorphic streak, 2 = hexagon bokeh
++      
++      out vec4 FragColor;
++      
++      float hexDist(vec2 p) {
++        p = abs(p);
++        float c = dot(p, normalize(vec2(1.0, 1.73205081)));
++        return max(c, p.x);
++      }
++      
++      void main() {
++        vec2 rUV = vUV * 2.0 - 1.0; // -1 to 1
++        float alpha = 0.0;
++        
++        if (uShapeType == 0) {
++           // Soft core / Glow
++           float d = length(rUV);
++           alpha = pow(max(0.0, 1.0 - d), 2.0);
++        } else if (uShapeType == 1) {
++           // Anamorphic horizontal streak
++           float dx = abs(rUV.x);
++           float dy = abs(rUV.y);
++           // very sharp falloff vertically, gradual horizontally
++           alpha = pow(max(0.0, 1.0 - dx), 3.0) * pow(max(0.0, 1.0 - dy*20.0), 3.0);
++        } else if (uShapeType == 2) {
++           // Hexagonal/Polygonal Bokeh Ring
++           float d = hexDist(rUV);
++           // Ring shape: sharp outside, softer inside
++           float ring = smoothstep(1.0, 0.85, d) * smoothstep(0.6, 0.8, d);
++           alpha = ring * 0.5 + smoothstep(1.0, 0.9, d) * 0.1; 
++        }
++        
++        FragColor = vec4(uColor.rgb, uColor.a * alpha * uIntensity);
++      }
++    )";
++    
++    lensFlareProg = compileProgram(lfVertSrc, lfFragSrc);
++    ulf_sunScreenPos = glGetUniformLocation(lensFlareProg, "uSunScreenPos");
++    ulf_aspect = glGetUniformLocation(lensFlareProg, "uAspect");
++    ulf_color = glGetUniformLocation(lensFlareProg, "uColor");
++    ulf_intensity = glGetUniformLocation(lensFlareProg, "uIntensity");
++
++    // Re-use billboard VAO/VBO for Lens Flare since both are just 2D quads
++    lfVAO = billboardVAO;
++    lfVBO = billboardVBO;
++  }
++
++  void beginFrame(const Mat4& viewMat, const Mat4& projMat, const Vec3& cameraPos) {
++    view = viewMat;
++    proj = projMat;
++    camPos = cameraPos;
++    glEnable(GL_DEPTH_TEST);
++    glClear(GL_DEPTH_BUFFER_BIT);
++  }
++
++  // 缁樺埗鍗曚釜 Mesh, 鎸囧畾 Model 鐭╅樀鍜岄鑹?+  void drawMesh(const Mesh& mesh, const Mat4& model,
++                float cr = 1, float cg = 1, float cb = 1, float ca = 1,
++                float ambient = 0.15f) {
++    glUseProgram(program3d);
++
++    Mat4 mvp = proj * view * model;
++    glUniformMatrix4fv(u_mvp, 1, GL_FALSE, mvp.m);
++    glUniformMatrix4fv(u_model, 1, GL_FALSE, model.m);
++    glUniform3f(u_lightDir, lightDir.x, lightDir.y, lightDir.z);
++    glUniform3f(u_viewPos, camPos.x, camPos.y, camPos.z);
++    glUniform4f(u_baseColor, cr, cg, cb, ca);
++    glUniform1f(u_ambientStr, ambient);
++
++    mesh.draw();
++  }
++
++  // ==== Procedural Screen Space Lens Flare (Feature 5) ====
++  void drawSunAndFlare(const Vec3& sunWorldPos, const Vec3& earthPos, float earthRadius, int screenW, int screenH) {
++     // 1. Ray-Sphere Occlusion Test against Earth (is the sun behind the planet?)
++     Vec3 rayDir = (sunWorldPos - camPos).normalized();
++     Vec3 oc = camPos - earthPos;
++     float b = 2.0f * oc.dot(rayDir);
++     float c = oc.dot(oc) - earthRadius * earthRadius;
++     float discriminant = b * b - 4 * c;
++     float occlusionFade = 1.0f;
++     float distToLimb = 1000000.0f;
++     
++     // Closest distance point along the ray
++     float t_closest = -oc.dot(rayDir);
++     
++     if (t_closest < 0) {
++         // The earth is strictly BEHIND the camera; no occlusion possible.
++         occlusionFade = 1.0f;
++     } else {
++         if (discriminant > 0) {
++             float t1 = t_closest - sqrtf(discriminant) / 2.0f;
++             float sunDist = (sunWorldPos - camPos).length();
++             if (t1 > 0 && t1 < sunDist) {
++                 occlusionFade = 0.0f; // Eclipsed entirely by earth core
++                 distToLimb = 0.0f;
++             }
++         } else {
++             // Ray clears earth. How close did it get to the surface?
++             float passDist = oc.cross(rayDir).length();
++             distToLimb = passDist - earthRadius;
++             // Fade smoothly through the thin upper atmosphere
++             if (distToLimb >= 0.0f && distToLimb < earthRadius * 0.05f) {
++                 occlusionFade *= distToLimb / (earthRadius * 0.05f);
++             }
++         }
++     }
++
++     if (occlusionFade <= 0.01f) return; // Completely hidden
++
++     // 2. Compute Screen Space (NDC) position of the sun
++     // We manually multiply the 4D vector to avoid needing a Vec4 class
++     Mat4 vp = proj * view;
++     float cx = vp.m[0]*sunWorldPos.x + vp.m[4]*sunWorldPos.y + vp.m[8]*sunWorldPos.z + vp.m[12];
++     float cy = vp.m[1]*sunWorldPos.x + vp.m[5]*sunWorldPos.y + vp.m[9]*sunWorldPos.z + vp.m[13];
++     float cz = vp.m[2]*sunWorldPos.x + vp.m[6]*sunWorldPos.y + vp.m[10]*sunWorldPos.z + vp.m[14];
++     float cw = vp.m[3]*sunWorldPos.x + vp.m[7]*sunWorldPos.y + vp.m[11]*sunWorldPos.z + vp.m[15];
++     
++     if (cw <= 0.0f) return; // Behind camera
++     
++     Vec3 ndcPos = Vec3(cx / cw, cy / cw, cz / cw);
++     
++     // If far off screen, do not draw flares (increased bounds to prevent sudden popping)
++     if (fabs(ndcPos.x) > 3.5f || fabs(ndcPos.y) > 3.5f) return;
++
++     // 3. Render Setup
++     glUseProgram(lensFlareProg);
++     glUniform2f(ulf_sunScreenPos, ndcPos.x, ndcPos.y);
++     float aspect = (float)screenW / (float)screenH;
++     glUniform1f(ulf_aspect, aspect);
++     
++     glBlendFunc(GL_SRC_ALPHA, GL_ONE); // Additive blending for light
++     glDepthMask(GL_FALSE);
++     glDisable(GL_DEPTH_TEST);
++     glDisable(GL_CULL_FACE);
++
++     glBindVertexArray(lfVAO);
++     glBindBuffer(GL_ARRAY_BUFFER, lfVBO);
++     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, (void*)0);
++     glEnableVertexAttribArray(0);
++
++     // Define a helper to draw one flare element
++     // Let's get locations inside the lambda for safety
++     auto drawFlare = [&](int shape, float scaleX, float scaleY, float ndcOffsetMult, 
++                              float r, float g, float b, float aFactor) {
++          glUniform1i(glGetUniformLocation(lensFlareProg, "uShapeType"), shape);
++          glUniform2f(glGetUniformLocation(lensFlareProg, "uScale"), scaleX, scaleY);
++          glUniform2f(glGetUniformLocation(lensFlareProg, "uOffset"), ndcPos.x * ndcOffsetMult, ndcPos.y * ndcOffsetMult);
++          glUniform4f(ulf_color, r, g, b, 1.0f);
++          glUniform1f(ulf_intensity, aFactor * occlusionFade);
++          glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
++     };
++
++     // Core Sun
++     drawFlare(0, 0.25f, 0.25f, 1.0f,  1.0f, 0.9f, 0.8f, 2.0f); // Main Glow
++     drawFlare(0, 0.60f, 0.60f, 1.0f,  0.5f, 0.4f, 0.6f, 0.5f); // Outer Halo
++
++     // Anamorphic Streak (wide horizontal line)
++     drawFlare(1, 3.0f, 0.05f, 1.0f,   0.3f, 0.6f, 1.0f, 1.2f); // Blue Streak
++     drawFlare(1, 1.2f, 0.02f, 1.0f,   1.0f, 1.0f, 1.0f, 1.0f); // White Core Streak
++
++     // Bokeh Ghosts (mirrored across center 0,0 by negative multipliers)
++     // The further the sun is from center, the further the ghosts spread
++     drawFlare(2, 0.15f, 0.15f, -0.3f, 0.2f, 0.8f, 0.4f, 0.3f); // Green hex
++     drawFlare(2, 0.30f, 0.30f, -0.6f, 0.8f, 0.2f, 0.6f, 0.2f); // Pink hex
++     drawFlare(2, 0.08f, 0.08f, -1.2f, 0.1f, 0.5f, 0.9f, 0.5f); // Blue hex
++     
++     // Some soft blob ghosts
++     drawFlare(0, 0.4f, 0.4f,  0.5f,  0.5f, 0.2f, 0.2f, 0.15f); // Reddish blob
++     drawFlare(0, 0.2f, 0.2f, -0.9f,  0.2f, 0.2f, 0.8f, 0.15f); // Blueish blob
++
++     glBindVertexArray(0);
++
++     glEnable(GL_DEPTH_TEST);
++     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
++     glDepthMask(GL_TRUE);
++  }
++
++  // 鐢ㄥ湴鐞冧笓鐢ㄧ潃鑹插櫒缁樺埗
++  void drawEarth(const Mesh& mesh, const Mat4& model) {
++    glUseProgram(earthProgram);
++    Mat4 mvp = proj * view * model;
++    glUniformMatrix4fv(ue_mvp, 1, GL_FALSE, mvp.m);
++    glUniformMatrix4fv(ue_model, 1, GL_FALSE, model.m);
++    glUniform3f(ue_lightDir, lightDir.x, lightDir.y, lightDir.z);
++    glUniform3f(ue_viewPos, camPos.x, camPos.y, camPos.z);
++    mesh.draw();
++  }
++
++  // 鐏劙/鍙戝厜 Billboard (闈㈠悜鐩告満鐨勯潰鐗?
++  void drawBillboard(const Vec3& worldPos, float size,
++                     float cr, float cg, float cb, float ca) {
++    glUseProgram(billboardProg);
++    
++    // Provide View and Proj separately
++    glUniformMatrix4fv(ub_vp, 1, GL_FALSE, view.m);
++    glUniformMatrix4fv(ub_proj, 1, GL_FALSE, proj.m);
++    
++    glUniform3f(ub_pos, worldPos.x, worldPos.y, worldPos.z);
++    glUniform2f(ub_size, size, size);
++    glUniform4f(ub_color, cr, cg, cb, ca);
++    
++    // 鍔犳硶娣峰悎 (鐏劙鍙戝厜)
++    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
++    glDepthMask(GL_FALSE);
++    glDisable(GL_CULL_FACE); // 闃叉瑙嗗彛缈昏浆瀵艰嚧鑳岄潰鍓旈櫎
++    
++    glBindVertexArray(billboardVAO);
++    glBindBuffer(GL_ARRAY_BUFFER, billboardVBO);
++    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, (void*)0);
++    glEnableVertexAttribArray(0);
++
++    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
++    
++    glBindVertexArray(0);
++    glEnable(GL_CULL_FACE);
++    glDepthMask(GL_TRUE);
++    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
++  }
++
++  // 澶ф皵灞傛暎灏勫３
++  void drawAtmosphere(const Mesh& sphereMesh, float radius) {
++    glUseProgram(atmoProg);
++    Mat4 model = Mat4::scale(Vec3(radius, radius, radius));
++    Mat4 mvp = proj * view * model;
++    glUniformMatrix4fv(ua_mvp, 1, GL_FALSE, mvp.m);
++    glUniformMatrix4fv(ua_model, 1, GL_FALSE, model.m);
++    glUniform3f(ua_lightDir, lightDir.x, lightDir.y, lightDir.z);
++    glUniform3f(ua_viewPos, camPos.x, camPos.y, camPos.z);
++    // 鍔犳硶娣峰悎 (澶ф皵鍏夋檿)
++    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
++    glDepthMask(GL_FALSE);
++    glCullFace(GL_FRONT); // 鍙粯鍒跺唴琛ㄩ潰
++    glEnable(GL_CULL_FACE);
++    sphereMesh.draw();
++    glDisable(GL_CULL_FACE);
++    glDepthMask(GL_TRUE);
++    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
++  }
++
++  // Camera-facing dynamic ribbon (trajectory trail)
++  void drawRibbon(const std::vector<Vec3>& points, float width, float r, float g, float b, float a) {
++    if (points.size() < 2) return;
++
++    std::vector<Vec3> stripVerts;
++    stripVerts.reserve(points.size() * 2);
++
++    for (size_t i = 0; i < points.size(); ++i) {
++      Vec3 p = points[i];
++      
++      // forward vector along the path
++      Vec3 forward;
++      if (i < points.size() - 1) {
++        forward = (points[i+1] - p);
++      } else {
++        forward = (p - points[i-1]);
++      }
++      if (forward.length() < 1e-6f) forward = Vec3(0.0f, 1.0f, 0.0f); else forward = forward.normalized();
++
++      // Vector from point to camera
++      Vec3 toCam = (camPos - p);
++      if (toCam.length() < 1e-6f) toCam = Vec3(1.0f, 0.0f, 0.0f); else toCam = toCam.normalized();
++
++      // Right vector (perpendicular to path and facing camera)
++      Vec3 right = forward.cross(toCam);
++      if (right.length() < 1e-6f) {
++          // Fallback if aligned with camera
++          right = forward.cross(Vec3(0.0f, 1.0f, 0.0f));
++          if (right.length() < 1e-6f) right = forward.cross(Vec3(1.0f, 0.0f, 0.0f));
++      }
++      right = right.normalized();
++
++      float halfW = width * 0.5f;
++      // Zigzag for triangle strip: first left, then right
++      stripVerts.push_back(p + right * halfW); 
++      stripVerts.push_back(p - right * halfW);
++    }
++
++    glUseProgram(ribbonProg);
++    Mat4 mvp = proj * view; // No model matrix needed, points are in world space
++    glUniformMatrix4fv(ur_mvp, 1, GL_FALSE, mvp.m);
++    glUniform4f(ur_color, r, g, b, a);
++
++    // Buffer dynamic data
++    glBindVertexArray(ribbonVAO);
++    glBindBuffer(GL_ARRAY_BUFFER, ribbonVBO);
++    if (stripVerts.size() * sizeof(Vec3) > sizeof(Vec3) * 1000 * 2) {
++      // Reallocate if somehow we exceed initial buffer size
++      glBufferData(GL_ARRAY_BUFFER, stripVerts.size() * sizeof(Vec3), stripVerts.data(), GL_DYNAMIC_DRAW);
++    } else {
++      glBufferSubData(GL_ARRAY_BUFFER, 0, stripVerts.size() * sizeof(Vec3), stripVerts.data());
++    }
++
++    // Force re-bind attribute pointer just in case another mesh corrupted our VAO state
++    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vec3), (void*)0);
++    glEnableVertexAttribArray(0);
++
++    // Glow blending
++    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
++    glDepthMask(GL_FALSE); // Disable depth write so trails don't occlude themselves
++    glDisable(GL_CULL_FACE); // Ensure triangle strips are never culled
++
++    glDrawArrays(GL_TRIANGLE_STRIP, 0, stripVerts.size());
++
++    // Restore
++    glEnable(GL_CULL_FACE);
++    glDepthMask(GL_TRUE);
++    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
++    glBindVertexArray(0);
++  }
++
++  void endFrame() {
++    glDisable(GL_DEPTH_TEST);
++  }
++
++private:
++  GLuint compileShader(const char* src, GLenum type) {
++    GLuint s = glCreateShader(type);
++    glShaderSource(s, 1, &src, nullptr);
++    glCompileShader(s);
++    int ok;
++    glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
++    if (!ok) {
++      char log[512];
++      glGetShaderInfoLog(s, 512, nullptr, log);
++      printf("Shader Error: %s\n", log);
++    }
++    return s;
++  }
++
++  GLuint compileProgram(const char* vert, const char* frag) {
++    GLuint vs = compileShader(vert, GL_VERTEX_SHADER);
++    GLuint fs = compileShader(frag, GL_FRAGMENT_SHADER);
++    GLuint prog = glCreateProgram();
++    glAttachShader(prog, vs);
++    glAttachShader(prog, fs);
++    glLinkProgram(prog);
++    int ok;
++    glGetProgramiv(prog, GL_LINK_STATUS, &ok);
++    if (!ok) {
++      char log[512];
++      glGetProgramInfoLog(prog, 512, nullptr, log);
++      printf("Link Error: %s\n", log);
++    }
++    glDeleteShader(vs);
++    glDeleteShader(fs);
++    return prog;
++  }
++};
