@@ -425,8 +425,8 @@ private:
   // 坐标系：地心为原点 (0,0)。发射点(北极)为 (0, EARTH_RADIUS)
   public:
   double local_vx;   // 真实的相对地表水平速度 (切向速度)
-  double px, py;     // 2D 位置
-  double vx, vy;     // 2D 速度
+  double px, py, pz; // 位置坐标 (米) (以地球中心为原点)
+  double vx, vy, vz; // 速度 (米/秒)
   double angle;      // 姿态角 (0=垂直向上/径向, 正=向左倾斜, 负=向右倾斜)
   double ang_vel;    // 角速度
   double angle_z = 0;    // 轴外俯仰角 (-PI 到 PI)
@@ -522,10 +522,12 @@ public:
            double specific_impulse, double fuel_consumption_rate,
            double nozzle_area) {
     // 2D 初始化：放在地球北极
-    px = 0;
-    py = EARTH_RADIUS;
+    px = 0.0;
+    py = EARTH_RADIUS + 0.1; // 起始略高于地面
+    pz = 0.0;
     vx = 0;
     vy = 0;
+    vz = 0;
     angle = 0;
     angle_z = 0;
     ang_vel = 0;
@@ -556,24 +558,30 @@ public:
 
   double getAltitude() const { return altitude; }
   double getThrust() const { return thrust_power; }
-  double getVelocityMag() const { return sqrt(vx * vx + vy * vy); }
+  double getVelocityMag() const { return sqrt(vx * vx + vy * vy + vz * vz); }
   double getVerticalVel() const { return velocity; }
   double getFuel() const { return fuel; }
   // 实时计算远地点(Apoapsis)和近地点(Periapsis)
   void getOrbitParams(double &apoapsis, double &periapsis) {
-    double r = sqrt(px * px + py * py);
-    double v_sq = vx * vx + vy * vy;
+    double r = sqrt(px * px + py * py + pz * pz);
+    double v_sq = vx * vx + vy * vy + vz * vz;
     double mu = G0 * EARTH_RADIUS * EARTH_RADIUS; // 标准引力参数
 
     double energy = v_sq / 2.0 - mu / r; // 轨道比能
-    double h = px * vy - py * vx;        // 比角动量
+    
+    // 3D Specific Angular Momentum: h = r x v
+    double hx = py * vz - pz * vy;
+    double hy = pz * vx - px * vz;
+    double hz = px * vy - py * vx;
+    double h_sq = hx * hx + hy * hy + hz * hz;
 
-    double e_sq = 1.0 + 2.0 * energy * h * h / (mu * mu); // 离心率平方
+    // 离心率平方
+    double e_sq = 1.0 + 2.0 * energy * h_sq / (mu * mu);
     double e = (e_sq > 0) ? sqrt(e_sq) : 0;
 
     if (energy >= 0) { // 逃逸轨道
       apoapsis = 999999999;
-      periapsis = (h * h / mu) / (1.0 + e) - EARTH_RADIUS;
+      periapsis = (h_sq / mu) / (1.0 + e) - EARTH_RADIUS; // h^2/mu
     } else {                           // 闭合椭圆轨道
       double a = -mu / (2.0 * energy); // 半长轴
       apoapsis = a * (1.0 + e) - EARTH_RADIUS;
@@ -629,8 +637,10 @@ public:
     if (status == PRE_LAUNCH) {
       px = 0;
       py = EARTH_RADIUS;
+      pz = 0;
       vx = 0;
       vy = 0;
+      vz = 0;
       altitude = 0;
       return;
     }
@@ -709,19 +719,55 @@ public:
       fuel_consumption_rate = 0;
     }
 
-    // 推力方向：假设 angle=0 是沿径向向上。
-    // 计算局部垂直方向 (Local Vertical) 的角度
-    double local_up_angle = atan2(py, px);
-    // 实际推力方向 = 局部垂直 + 火箭偏角
-    double thrust_dir = local_up_angle + angle;
+    // --- 3D Geometric Frame and Thrust Projection ---
+    // 1. Local Up (U) = Position Normalized
+    double r_mag = sqrt(px*px + py*py + pz*pz);
+    double Ux = px / r_mag;
+    double Uy = py / r_mag;
+    double Uz = pz / r_mag;
 
-    // 由于火箭在轴外倾斜 (angle_z)，投射到 2D 平面上的推力会被 cos(angle_z) 衰减
-    double Ft_x = thrust_power * cos(angle_z) * cos(thrust_dir);
-    double Ft_y = thrust_power * cos(angle_z) * sin(thrust_dir);
+    // 2. Local Right (R) - Parallel to XY plane
+    double r_xy_mag = sqrt(Ux*Ux + Uy*Uy);
+    double Rx = 0, Ry = 0, Rz = 0;
+    if (r_xy_mag > 1e-6) {
+        Rx = -Uy / r_xy_mag;
+        Ry = Ux / r_xy_mag;
+        Rz = 0.0;
+    } else {
+        Rx = 1.0; Ry = 0.0; Rz = 0.0; // Fallback for poles
+    }
+
+    // 3. Local North (N) = U x R (Orthogonal to U and R)
+    double Nx = Uy * Rz - Uz * Ry;
+    double Ny = Uz * Rx - Ux * Rz;
+    double Nz = Ux * Ry - Uy * Rx;
+    double N_mag = sqrt(Nx*Nx + Ny*Ny + Nz*Nz);
+    Nx /= N_mag; Ny /= N_mag; Nz /= N_mag;
+
+    // 4. Calculate Forward/Nose vector in U-R plane (yaw rotated by 'angle')
+    double cos_a = cos(angle);
+    double sin_a = sin(angle);
+    double Fx = Ux * cos_a + Rx * sin_a;
+    double Fy = Uy * cos_a + Ry * sin_a;
+    double Fz = Uz * cos_a + Rz * sin_a;
+
+    // 5. Apply out-of-plane pitch (angle_z) towards N
+    double cos_z = cos(angle_z);
+    double sin_z = sin(angle_z);
+    
+    // Rotate the Forward vector out of plane towards North Normal by angle_z
+    double thrust_dir_x = Fx * cos_z + Nx * sin_z;
+    double thrust_dir_y = Fy * cos_z + Ny * sin_z;
+    double thrust_dir_z = Fz * cos_z + Nz * sin_z;
+
+    double Ft_x = thrust_power * thrust_dir_x;
+    double Ft_y = thrust_power * thrust_dir_y;
+    double Ft_z = thrust_power * thrust_dir_z;
 
     // 3. 空气阻力 & 气动扭矩
-    double v_sq = vx * vx + vy * vy;
+    double v_sq = vx * vx + vy * vy + vz * vz;
     double v_mag = sqrt(v_sq);
+    double local_up_angle = atan2(py, px);
     double Fd_x = 0, Fd_y = 0;
     double aero_torque = 0;
 
@@ -777,27 +823,30 @@ public:
     // 为了支持极高的时间加速而不会因为 Euler 积分发散导致解体
     
     // 内部定义一个闭包，给定当前位置 (p) 和速度 (v) 计算加速度 (a)
-    auto calc_accel = [&](double temp_px, double temp_py, double temp_vx, double temp_vy, double& out_ax, double& out_ay) {
-        double r = sqrt(temp_px * temp_px + temp_py * temp_py);
+    auto calc_accel = [&](double temp_px, double temp_py, double temp_pz, double temp_vx, double temp_vy, double temp_vz, double& out_ax, double& out_ay, double& out_az) {
+        double r = sqrt(temp_px * temp_px + temp_py * temp_py + temp_pz * temp_pz);
         double alt = r - EARTH_RADIUS;
         
         // 重力
         double g_earth = get_gravity(r);
         double Fgx = -g_earth * (temp_px / r) * total_mass;
         double Fgy = -g_earth * (temp_py / r) * total_mass;
+        double Fgz = -g_earth * (temp_pz / r) * total_mass;
         
         // 太阳重力 (假设这段 dt 内太阳位置不变)
         double dx = sun_px - temp_px;
         double dy = sun_py - temp_py;
-        double r_rocket_sq = dx*dx + dy*dy;
+        double dz = -temp_pz; // 太阳在 z=0 平面
+        double r_rocket_sq = dx*dx + dy*dy + dz*dz;
         double dist_rocket = sqrt(r_rocket_sq);
         double r_rocket3 = r_rocket_sq * dist_rocket;
         double Fg_sun_x = GM_sun * (dx / r_rocket3 - sun_px / r_sun_earth3) * total_mass;
         double Fg_sun_y = GM_sun * (dy / r_rocket3 - sun_py / r_sun_earth3) * total_mass;
+        double Fg_sun_z = GM_sun * (dz / r_rocket3 - 0.0) * total_mass; // sun_pz = 0
         
         // 空气阻力
-        double Fdx = 0, Fdy = 0;
-        double temp_v_sq = temp_vx * temp_vx + temp_vy * temp_vy;
+        double Fdx = 0, Fdy = 0, Fdz = 0;
+        double temp_v_sq = temp_vx * temp_vx + temp_vy * temp_vy + temp_vz * temp_vz;
         double temp_v_mag = sqrt(temp_v_sq);
         if (temp_v_mag > 0.1 && alt < 80000) {
             double rho = get_air_density(alt);
@@ -807,47 +856,55 @@ public:
             double drag_mag = 0.5 * rho * temp_v_sq * 0.5 * effective_area;
             Fdx = -drag_mag * (temp_vx / temp_v_mag);
             Fdy = -drag_mag * (temp_vy / temp_v_mag);
+            Fdz = -drag_mag * (temp_vz / temp_v_mag);
         }
         
         out_ax = (Fgx + Fg_sun_x + Ft_x + Fdx) / total_mass;
         out_ay = (Fgy + Fg_sun_y + Ft_y + Fdy) / total_mass;
+        out_az = (Fgz + Fg_sun_z + Ft_z + Fdz) / total_mass;
     };
 
-    double k1_vx, k1_vy, k1_px, k1_py;
-    calc_accel(px, py, vx, vy, k1_vx, k1_vy);
-    k1_px = vx; 
-    k1_py = vy;
+    double k1_vx, k1_vy, k1_vz, k1_px, k1_py, k1_pz;
+    calc_accel(px, py, pz, vx, vy, vz, k1_vx, k1_vy, k1_vz);
+    k1_px = vx; k1_py = vy; k1_pz = vz;
 
-    double k2_vx, k2_vy, k2_px, k2_py;
-    calc_accel(px + 0.5 * dt * k1_px, py + 0.5 * dt * k1_py, vx + 0.5 * dt * k1_vx, vy + 0.5 * dt * k1_vy, k2_vx, k2_vy);
-    k2_px = vx + 0.5 * dt * k1_vx;
-    k2_py = vy + 0.5 * dt * k1_vy;
+    double k2_vx, k2_vy, k2_vz, k2_px, k2_py, k2_pz;
+    calc_accel(px + 0.5 * dt * k1_px, py + 0.5 * dt * k1_py, pz + 0.5 * dt * k1_pz, 
+               vx + 0.5 * dt * k1_vx, vy + 0.5 * dt * k1_vy, vz + 0.5 * dt * k1_vz, 
+               k2_vx, k2_vy, k2_vz);
+    k2_px = vx + 0.5 * dt * k1_vx; k2_py = vy + 0.5 * dt * k1_vy; k2_pz = vz + 0.5 * dt * k1_vz;
 
-    double k3_vx, k3_vy, k3_px, k3_py;
-    calc_accel(px + 0.5 * dt * k2_px, py + 0.5 * dt * k2_py, vx + 0.5 * dt * k2_vx, vy + 0.5 * dt * k2_vy, k3_vx, k3_vy);
-    k3_px = vx + 0.5 * dt * k2_vx;
-    k3_py = vy + 0.5 * dt * k2_vy;
+    double k3_vx, k3_vy, k3_vz, k3_px, k3_py, k3_pz;
+    calc_accel(px + 0.5 * dt * k2_px, py + 0.5 * dt * k2_py, pz + 0.5 * dt * k2_pz, 
+               vx + 0.5 * dt * k2_vx, vy + 0.5 * dt * k2_vy, vz + 0.5 * dt * k2_vz, 
+               k3_vx, k3_vy, k3_vz);
+    k3_px = vx + 0.5 * dt * k2_vx; k3_py = vy + 0.5 * dt * k2_vy; k3_pz = vz + 0.5 * dt * k2_vz;
 
-    double k4_vx, k4_vy, k4_px, k4_py;
-    calc_accel(px + dt * k3_px, py + dt * k3_py, vx + dt * k3_vx, vy + dt * k3_vy, k4_vx, k4_vy);
-    k4_px = vx + dt * k3_vx;
-    k4_py = vy + dt * k3_vy;
+    double k4_vx, k4_vy, k4_vz, k4_px, k4_py, k4_pz;
+    calc_accel(px + dt * k3_px, py + dt * k3_py, pz + dt * k3_pz, 
+               vx + dt * k3_vx, vy + dt * k3_vy, vz + dt * k3_vz, 
+               k4_vx, k4_vy, k4_vz);
+    k4_px = vx + dt * k3_vx; k4_py = vy + dt * k3_vy; k4_pz = vz + dt * k3_vz;
 
     vx += (dt / 6.0) * (k1_vx + 2.0 * k2_vx + 2.0 * k3_vx + k4_vx);
     vy += (dt / 6.0) * (k1_vy + 2.0 * k2_vy + 2.0 * k3_vy + k4_vy);
+    vz += (dt / 6.0) * (k1_vz + 2.0 * k2_vz + 2.0 * k3_vz + k4_vz);
+    
     px += (dt / 6.0) * (k1_px + 2.0 * k2_px + 2.0 * k3_px + k4_px);
     py += (dt / 6.0) * (k1_py + 2.0 * k2_py + 2.0 * k3_py + k4_py);
+    pz += (dt / 6.0) * (k1_pz + 2.0 * k2_pz + 2.0 * k3_pz + k4_pz);
     
     // 我们也需要更新显示用的加速度变量 (基于最新的 state)
-    double final_ax, final_ay;
-    calc_accel(px, py, vx, vy, final_ax, final_ay);
-    acceleration = sqrt(final_ax * final_ax + final_ay * final_ay);
+    double final_ax, final_ay, final_az;
+    calc_accel(px, py, pz, vx, vy, vz, final_ax, final_ay, final_az);
+    acceleration = sqrt(final_ax * final_ax + final_ay * final_ay + final_az * final_az);
 
     // 角运动在下方统一计算（已修复重复积分 bug）
     double moment_of_inertia = 50000.0; // 假定转动惯量
     double ang_accel = 0;               // 此处仅声明，后续统一积分
 
-    // 1. 真实垂直速度 (径向，正为向上)
+    // 1. 真实垂直速度 (在 2D 平面的投影或利用 3D 点乘)
+    // 但为了和以前的 AutoPilot 切向控制兼容，我们仍然保留基于 px,py 2D 平面的局部速度投影
     velocity = vx * cos(local_up_angle) + vy * sin(local_up_angle);
 
     // 2. 真实水平速度 (切向，正为顺时针飞行)
@@ -855,7 +912,7 @@ public:
     local_vx = -vx * sin(local_up_angle) + vy * cos(local_up_angle);
 
     // E. 碰撞检测
-    double current_r = sqrt(px * px + py * py);
+    double current_r = sqrt(px * px + py * py + pz * pz);
     double current_alt = current_r - EARTH_RADIUS;
 
     if (current_alt <= 0.0) {
@@ -968,13 +1025,14 @@ public:
       t_remaining -= dt;
       sim_time += dt;
       
-      auto calc_accel = [&](double temp_px, double temp_py, double temp_time, double& out_ax, double& out_ay) {
-          double r2 = temp_px * temp_px + temp_py * temp_py;
+      auto calc_accel = [&](double temp_px, double temp_py, double temp_pz, double temp_time, double& out_ax, double& out_ay, double& out_az) {
+          double r2 = temp_px * temp_px + temp_py * temp_py + temp_pz * temp_pz;
           double r = sqrt(r2);
           
           double g_earth = mu_earth / r2;
           double Fgx = -g_earth * (temp_px / r) * total_mass;
           double Fgy = -g_earth * (temp_py / r) * total_mass;
+          double Fgz = -g_earth * (temp_pz / r) * total_mass;
           
           double sun_angle = -1.2 + sun_angular_vel * temp_time; 
           double sun_px = cos(sun_angle) * au_meters;
@@ -982,40 +1040,45 @@ public:
           
           double dx = sun_px - temp_px;
           double dy = sun_py - temp_py;
-          double r_rocket_sq = dx*dx + dy*dy;
+          double dz = -temp_pz;
+          double r_rocket_sq = dx*dx + dy*dy + dz*dz;
           double dist_rocket = sqrt(r_rocket_sq);
           double r_rocket3 = r_rocket_sq * dist_rocket;
           double r_sun_earth3 = au_meters * au_meters * au_meters;
           
           double Fg_sun_x = GM_sun * (dx / r_rocket3 - sun_px / r_sun_earth3) * total_mass;
           double Fg_sun_y = GM_sun * (dy / r_rocket3 - sun_py / r_sun_earth3) * total_mass;
+          double Fg_sun_z = GM_sun * (dz / r_rocket3 - 0.0) * total_mass;
           
           out_ax = (Fgx + Fg_sun_x) / total_mass;
           out_ay = (Fgy + Fg_sun_y) / total_mass;
+          out_az = (Fgz + Fg_sun_z) / total_mass;
       };
 
-      double k1_vx, k1_vy, k1_px, k1_py;
-      calc_accel(px, py, sim_time - dt, k1_vx, k1_vy);
-      k1_px = vx; k1_py = vy;
+      double k1_vx, k1_vy, k1_vz, k1_px, k1_py, k1_pz;
+      calc_accel(px, py, pz, sim_time - dt, k1_vx, k1_vy, k1_vz);
+      k1_px = vx; k1_py = vy; k1_pz = vz;
 
-      double k2_vx, k2_vy, k2_px, k2_py;
-      calc_accel(px + 0.5 * dt * k1_px, py + 0.5 * dt * k1_py, sim_time - dt + 0.5 * dt, k2_vx, k2_vy);
-      k2_px = vx + 0.5 * dt * k1_vx; k2_py = vy + 0.5 * dt * k1_vy;
+      double k2_vx, k2_vy, k2_vz, k2_px, k2_py, k2_pz;
+      calc_accel(px + 0.5 * dt * k1_px, py + 0.5 * dt * k1_py, pz + 0.5 * dt * k1_pz, sim_time - dt + 0.5 * dt, k2_vx, k2_vy, k2_vz);
+      k2_px = vx + 0.5 * dt * k1_vx; k2_py = vy + 0.5 * dt * k1_vy; k2_pz = vz + 0.5 * dt * k1_vz;
 
-      double k3_vx, k3_vy, k3_px, k3_py;
-      calc_accel(px + 0.5 * dt * k2_px, py + 0.5 * dt * k2_py, sim_time - dt + 0.5 * dt, k3_vx, k3_vy);
-      k3_px = vx + 0.5 * dt * k2_vx; k3_py = vy + 0.5 * dt * k2_vy;
+      double k3_vx, k3_vy, k3_vz, k3_px, k3_py, k3_pz;
+      calc_accel(px + 0.5 * dt * k2_px, py + 0.5 * dt * k2_py, pz + 0.5 * dt * k2_pz, sim_time - dt + 0.5 * dt, k3_vx, k3_vy, k3_vz);
+      k3_px = vx + 0.5 * dt * k2_vx; k3_py = vy + 0.5 * dt * k2_vy; k3_pz = vz + 0.5 * dt * k2_vz;
 
-      double k4_vx, k4_vy, k4_px, k4_py;
-      calc_accel(px + dt * k3_px, py + dt * k3_py, sim_time, k4_vx, k4_vy);
-      k4_px = vx + dt * k3_vx; k4_py = vy + dt * k3_vy;
+      double k4_vx, k4_vy, k4_vz, k4_px, k4_py, k4_pz;
+      calc_accel(px + dt * k3_px, py + dt * k3_py, pz + dt * k3_pz, sim_time, k4_vx, k4_vy, k4_vz);
+      k4_px = vx + dt * k3_vx; k4_py = vy + dt * k3_vy; k4_pz = vz + dt * k3_vz;
 
       vx += (dt / 6.0) * (k1_vx + 2.0 * k2_vx + 2.0 * k3_vx + k4_vx);
       vy += (dt / 6.0) * (k1_vy + 2.0 * k2_vy + 2.0 * k3_vy + k4_vy);
+      vz += (dt / 6.0) * (k1_vz + 2.0 * k2_vz + 2.0 * k3_vz + k4_vz);
       px += (dt / 6.0) * (k1_px + 2.0 * k2_px + 2.0 * k3_px + k4_px);
       py += (dt / 6.0) * (k1_py + 2.0 * k2_py + 2.0 * k3_py + k4_py);
+      pz += (dt / 6.0) * (k1_pz + 2.0 * k2_pz + 2.0 * k3_pz + k4_pz);
       
-      altitude = sqrt(px*px + py*py) - EARTH_RADIUS;
+      altitude = sqrt(px*px + py*py + pz*pz) - EARTH_RADIUS;
       
       if (altitude <= 0.0) {
           altitude = 0;
@@ -1892,7 +1955,7 @@ int main() {
       // 2D→3D 坐标映射 (Double precision)
       double r_px = baba1.px * ws_d;
       double r_py = baba1.py * ws_d;
-      double r_pz = 0.0;
+      double r_pz = baba1.pz * ws_d;
       
       // ===== 太阳位置与昼夜交替 (Double precision) =====
       double G_const_d = 6.67430e-11;
@@ -1944,18 +2007,22 @@ int main() {
           rocketUp = Vec3(0.0f, 1.0f, 0.0f);
       }
       
-      float rocket_angle = (float)baba1.angle;
-      Vec3 localUp = rocketUp;
-      Vec3 localRight(-rocketUp.y, rocketUp.x, 0.0f);
-      
-      // 先计算出平面的 2D 朝向
-      Vec3 rocketDir2D(
-        localUp.x * cosf(rocket_angle) + localRight.x * sinf(rocket_angle),
-        localUp.y * cosf(rocket_angle) + localRight.y * sinf(rocket_angle),
-        0.0f
-      );
-
       // ===== 构建火箭完整的 3D 朝向四元数 =====
+      // 保证局部坐标系的单位正交
+      double local_xy_mag = sqrt(rocketUp.x*rocketUp.x + rocketUp.y*rocketUp.y);
+      Vec3 localRight(0,0,0);
+      if (local_xy_mag > 1e-4) {
+          localRight = Vec3((float)(-rocketUp.y/local_xy_mag), (float)(rocketUp.x/local_xy_mag), 0.0f);
+      } else {
+          localRight = Vec3(1.0f, 0.0f, 0.0f);
+      }
+      Vec3 localNorth = rocketUp.cross(localRight).normalized();
+
+      // 构建 2D 面内主朝向
+      float rocket_angle = (float)baba1.angle;
+      Vec3 rocketDir2D = rocketUp * cosf(rocket_angle) + localRight * sinf(rocket_angle);
+
+      // 构建对应的主旋转四元数
       Vec3 defaultUp(0.0f, 1.0f, 0.0f);
       Vec3 rotAxis = defaultUp.cross(rocketDir2D);
       float rotAngle = acosf(fminf(fmaxf(defaultUp.dot(rocketDir2D), -1.0f), 1.0f));
@@ -1963,8 +2030,11 @@ int main() {
       if (rotAxis.length() > 1e-6f)
         baseQuat = Quat::fromAxisAngle(rotAxis.normalized(), rotAngle);
 
+      // 提取动态翻滚轴 (Rotated Right) 用作俯仰轴，防止 Gimbal Lock 导致 angle_z 偏航失效
+      Vec3 dynamicRight = localNorth.cross(rocketDir2D).normalized();
+
       // 组合基础 2D 旋转与局部的轴外俯仰 (Pitch) 旋转
-      Quat pitchQuat = Quat::fromAxisAngle(localRight, (float)baba1.angle_z);
+      Quat pitchQuat = Quat::fromAxisAngle(dynamicRight, (float)baba1.angle_z);
       Quat rocketQuat = pitchQuat * baseQuat;
       
       // 更新 rocketDir 为包含 3D 俯仰的真实朝向
@@ -2148,7 +2218,7 @@ int main() {
 
           // 全物理量双精度计算
           double abs_px = r_px, abs_py = r_py, abs_pz = r_pz;
-          double abs_vx = baba1.vx * ws_d, abs_vy = baba1.vy * ws_d, abs_vz = 0.0;
+          double abs_vx = baba1.vx * ws_d, abs_vy = baba1.vy * ws_d, abs_vz = baba1.vz * ws_d;
 
           if (is_sun_ref) {
               // Use exact same derived sun_angle and sun_angular_vel as physics engine (Burn)
@@ -2490,14 +2560,16 @@ int main() {
 
         double rel_vx = baba1.vx - current_sun_vx;
         double rel_vy = baba1.vy - current_sun_vy;
+        double rel_vz = baba1.vz;
         double rel_px = baba1.px - current_sun_px;
         double rel_py = baba1.py - current_sun_py;
+        double rel_pz = baba1.pz;
         
-        current_vel = sqrt(rel_vx * rel_vx + rel_vy * rel_vy);
-        double dist_to_sun = sqrt(rel_px * rel_px + rel_py * rel_py);
+        current_vel = sqrt(rel_vx * rel_vx + rel_vy * rel_vy + rel_vz * rel_vz);
+        double dist_to_sun = sqrt(rel_px * rel_px + rel_py * rel_py + rel_pz * rel_pz);
         current_alt = dist_to_sun - 696340000.0; 
         
-        double rel_vvel_real = (rel_vx * rel_px + rel_vy * rel_py) / dist_to_sun;
+        double rel_vvel_real = (rel_vx * rel_px + rel_vy * rel_py + rel_vz * rel_pz) / dist_to_sun;
         current_vvel = (int)rel_vvel_real;
     }
 
