@@ -6,6 +6,9 @@
 
 #include "math3d.h"
 #include "renderer3d.h"
+#include "rocket_state.h"
+#include "physics_system.h"
+#include "control_system.h"
 
 #include <iostream>
 #include <string>
@@ -26,17 +29,7 @@ static void scroll_callback(GLFWwindow* /*w*/, double /*xoffset*/, double yoffse
 // ==========================================
 // Part 0: 数学常量与辅助工具
 // ==========================================
-const double PI = 3.14159265358979323846;
-const double G0 = 9.80665;             // 海平面标准重力
-const double EARTH_RADIUS = 6371000.0; // 地球半径 (米)
 
-// 引擎底层：无状态伪随机哈希函数
-// 输入一个整数网格索引，输出一个极其均匀的 0.0 到 1.0 的浮点数
-float hash11(int n) {
-  n = (n << 13) ^ n;
-  int nn = (n * (n * n * 60493 + 19990303) + 1376312589) & 0x7fffffff;
-  return ((float)nn / (float)0x7fffffff);
-}
 // 简单的二维向量工具
 struct Vec2 {
   double x, y;
@@ -47,35 +40,6 @@ Vec2 rotateVec(double x, double y, double angle) {
   return {x * c - y * s, x * s + y * c};
 }
 float my_lerp(float a, float b, float t) { return a + t * (b - a); }
-
-// PID 控制器结构体
-// 修改 Part 0 中的 PID 结构体
-struct PID {
-  double kp, ki, kd;
-  double integral = 0;
-  double prev_error = 0;
-
-  double integral_limit = 50.0;
-
-  double update(double target, double current, double dt) {
-    double error = target - current;
-    integral += error * dt;
-
-    if (integral > integral_limit)
-      integral = integral_limit;
-    if (integral < -integral_limit)
-      integral = -integral_limit;
-
-    double derivative = (error - prev_error) / dt;
-    prev_error = error;
-    return kp * error + ki * integral + kd * derivative;
-  }
-
-  void reset() {
-    integral = 0;
-    prev_error = 0;
-  }
-};
 
 // ==========================================
 // Part 1: 现代 OpenGL 渲染引擎 (升级版：支持旋转)
@@ -388,971 +352,8 @@ public:
 };
 
 // ==========================================
-// Part 2: Explorer 类 (集成 2D 物理与控制)
+// Part 2: Explorer Class -> Replaced by ECS (RocketState, PhysicsSystem)
 // ==========================================
-const double SLP = 1013.25;
-
-// 世界坐标烟雾粒子
-struct SmokeParticle {
-  double wx, wy;     // 世界坐标
-  double vwx, vwy;   // 世界速度
-  float alpha;       // 当前透明度
-  float size;        // 当前大小
-  float life;        // 剩余寿命 (0~1)
-  bool active;
-};
-
-class Explorer {
-private:
-  double fuel;
-  double mass; // 干重
-  double diameter;
-  double height;
-public:
-  double getHeight() const { return height; }
-  double getDiameter() const { return diameter; }
-private:
-  bool suicide_burn_locked = false;
-  double altitude; // 海拔高度
-  double velocity; // 垂直速度 (径向速度)
-  double specific_impulse;
-  double fuel_consumption_rate; // 当前油门下的消耗率
-  double thrust_power;
-  double acceleration;
-  double cosrate; // 满油门消耗率
-  double nozzle_area;
-
-  // 坐标系：地心为原点 (0,0)。发射点(北极)为 (0, EARTH_RADIUS)
-  public:
-  double local_vx;   // 真实的相对地表水平速度 (切向速度)
-  double px, py, pz; // 位置坐标 (米) (以地球中心为原点)
-  double vx, vy, vz; // 速度 (米/秒)
-  double angle;      // 姿态角 (0=垂直向上/径向, 正=向左倾斜, 负=向右倾斜)
-  double ang_vel;    // 角速度
-  double angle_z = 0;    // 轴外俯仰角 (-PI 到 PI)
-  double ang_vel_z = 0;  // 轴外角速度
-  double throttle;   // 油门 (0.0 - 1.0)
-  double torque_cmd; // 力矩指令
-  double torque_cmd_z = 0; // 轴外力矩指令
-  double sim_time;   // 物理时间积累
-
-  // PID 控制器实例
-  PID pid_vert = {0.5, 0.001, 1.2};       // 高度环
-  PID pid_pos = {0.001, 0.0, 0.2};        // 位置环 (参数很小因为距离很大)
-  PID pid_att = {40000.0, 0.0, 100000.0}; // 姿态环 (需要快速响应)
-  PID pid_att_z = {40000.0, 0.0, 100000.0}; // Z轴姿态环
-
-public:
-  enum State { PRE_LAUNCH, ASCEND, DESCEND, LANDED, CRASHED } status;
-  string mission_msg = "SYSTEM READY";
-  int stages;
-  int mission_phase = 0;            // 记录当前太空任务阶段
-  double mission_timer = 0;         // 任务计时器
-  bool auto_mode = true;            // true=自动驾驶 false=手动控制
-  double leg_deploy_progress = 0.0; // 着陆腿展开进度 0~1
-  static const int MAX_SMOKE = 300;
-  SmokeParticle smoke[MAX_SMOKE];
-  int smoke_idx = 0;
-
-  void emitSmoke(double dt) {
-    if (thrust_power < 1000.0) return;
-    double local_up = atan2(py, px);
-    double nozzle_dir = local_up + angle + PI;
-    double nozzle_wx = px + cos(nozzle_dir) * 20.0;
-    double nozzle_wy = py + sin(nozzle_dir) * 20.0;
-    // 每帧发射 3 个粒子，形成浓密烟雾
-    for (int k = 0; k < 3; k++) {
-      SmokeParticle& p = smoke[smoke_idx % MAX_SMOKE];
-      float rnd1 = hash11(smoke_idx * 1337 + k * 997) - 0.5f;
-      float rnd2 = hash11(smoke_idx * 7919 + k * 773) - 0.5f;
-      p.wx = nozzle_wx + rnd1 * 15.0;
-      p.wy = nozzle_wy + rnd2 * 15.0;
-      // 给粒子初速度：沿喷口方向向下喷射
-      double exhaust_speed = 30.0 + hash11(smoke_idx * 3571 + k) * 20.0;
-      p.vwx = cos(nozzle_dir) * exhaust_speed + rnd1 * 10.0;
-      p.vwy = sin(nozzle_dir) * exhaust_speed + rnd2 * 10.0;
-      p.alpha = 0.6f;
-      p.size = 10.0f + hash11(smoke_idx * 4567 + k) * 8.0f;
-      p.life = 1.0f;
-      p.active = true;
-      smoke_idx++;
-    }
-  }
-
-  void updateSmoke(double dt) {
-    for (int i = 0; i < MAX_SMOKE; i++) {
-      if (!smoke[i].active) continue;
-      smoke[i].life -= (float)(dt * 0.25);
-      smoke[i].alpha = min(0.25f, smoke[i].life * 0.3f); // 75% 透明
-      smoke[i].size += (float)(dt * 20.0);
-
-      smoke[i].wx += smoke[i].vwx * dt;
-      smoke[i].wy += smoke[i].vwy * dt;
-
-      // 地面碰撞反弹
-      double r = sqrt(smoke[i].wx * smoke[i].wx + smoke[i].wy * smoke[i].wy);
-      if (r < EARTH_RADIUS && r > 0) {
-        smoke[i].wx = smoke[i].wx / r * EARTH_RADIUS;
-        smoke[i].wy = smoke[i].wy / r * EARTH_RADIUS;
-        double nx = smoke[i].wx / r, ny = smoke[i].wy / r;
-        double v_radial = smoke[i].vwx * nx + smoke[i].vwy * ny;
-        double v_tang = -smoke[i].vwx * ny + smoke[i].vwy * nx;
-        v_radial = abs(v_radial) * 0.3;
-        // 随机方向反弹 — 每个粒子弹向不同方向
-        float rnd_dir = (hash11(i * 8731) - 0.5f) * 2.0f;
-        v_tang = abs(v_tang) * (1.5f + rnd_dir) * (rnd_dir > 0 ? 1.0 : -1.0);
-        smoke[i].vwx = nx * v_radial - ny * v_tang;
-        smoke[i].vwy = ny * v_radial + nx * v_tang;
-        smoke[i].size += 5.0f;
-      }
-
-      // 热气上升 + 速度衰减
-      if (r > 0) {
-        smoke[i].vwx += (smoke[i].wx / r) * dt * 8.0;
-        smoke[i].vwy += (smoke[i].wy / r) * dt * 8.0;
-      }
-      smoke[i].vwx *= (1.0 - dt * 0.8); // 空气阻力
-      smoke[i].vwy *= (1.0 - dt * 0.8);
-
-      if (smoke[i].life <= 0) smoke[i].active = false;
-    }
-  }
-
-  Explorer(double fuel, double mass, double diameter, double height, int stages,
-           double specific_impulse, double fuel_consumption_rate,
-           double nozzle_area) {
-    // 2D 初始化：放在地球北极
-    px = 0.0;
-    py = EARTH_RADIUS + 0.1; // 起始略高于地面
-    pz = 0.0;
-    vx = 0;
-    vy = 0;
-    vz = 0;
-    angle = 0;
-    angle_z = 0;
-    ang_vel = 0;
-    ang_vel_z = 0;
-    sim_time = 0;
-
-    // 兼容旧变量初始化
-    altitude = 0;
-    velocity = 0;
-
-    this->fuel = fuel;
-    this->mass = mass;
-    this->diameter = diameter;
-    this->height = height;
-    this->stages = stages;
-    this->specific_impulse = specific_impulse;
-
-    this->cosrate = fuel_consumption_rate;
-    this->nozzle_area = nozzle_area;
-
-    this->fuel_consumption_rate = 0;
-    this->thrust_power = 0;
-    this->throttle = 0;
-    this->torque_cmd = 0;
-
-    status = PRE_LAUNCH;
-  }
-
-  double getAltitude() const { return altitude; }
-  double getThrust() const { return thrust_power; }
-  double getVelocityMag() const { return sqrt(vx * vx + vy * vy + vz * vz); }
-  double getVerticalVel() const { return velocity; }
-  double getFuel() const { return fuel; }
-  // 实时计算远地点(Apoapsis)和近地点(Periapsis)
-  void getOrbitParams(double &apoapsis, double &periapsis) {
-    double r = sqrt(px * px + py * py + pz * pz);
-    double v_sq = vx * vx + vy * vy + vz * vz;
-    double mu = G0 * EARTH_RADIUS * EARTH_RADIUS; // 标准引力参数
-
-    double energy = v_sq / 2.0 - mu / r; // 轨道比能
-    
-    // 3D Specific Angular Momentum: h = r x v
-    double hx = py * vz - pz * vy;
-    double hy = pz * vx - px * vz;
-    double hz = px * vy - py * vx;
-    double h_sq = hx * hx + hy * hy + hz * hz;
-
-    // 离心率平方
-    double e_sq = 1.0 + 2.0 * energy * h_sq / (mu * mu);
-    double e = (e_sq > 0) ? sqrt(e_sq) : 0;
-
-    if (energy >= 0) { // 逃逸轨道
-      apoapsis = 999999999;
-      periapsis = (h_sq / mu) / (1.0 + e) - EARTH_RADIUS; // h^2/mu
-    } else {                           // 闭合椭圆轨道
-      double a = -mu / (2.0 * energy); // 半长轴
-      apoapsis = a * (1.0 + e) - EARTH_RADIUS;
-      periapsis = a * (1.0 - e) - EARTH_RADIUS;
-    }
-  }
-  // --- 物理计算 ---
-  // 1. 重力随高度变化 (平方反比定律)
-  double get_gravity(double r) { return G0 * pow(EARTH_RADIUS / r, 2); }
-
-  // 2. 气压/密度模型
-  double get_pressure(double h) {
-    if (h > 100000)
-      return 0;
-    if (h < 0)
-      return SLP;
-    return SLP * exp(-h / 7000.0); // 简化指数大气
-  }
-  double get_air_density(double h) {
-    if (h > 100000)
-      return 0;
-    return 1.225 * exp(-h / 7000.0);
-  }
-
-  void Report_Status() {
-    double apo, peri;
-    getOrbitParams(apo, peri);
-    cout << "\n----------------------------------" << endl;
-    cout << ">>> [MISSION CONTROL]: " << mission_msg << " <<<" << endl;
-    cout << "----------------------------------" << endl;
-    cout << "[Alt]: " << altitude << " m | [Vert_Vel]: " << velocity << " m/s";
-    
-    // 如果处于极高的时间加速状态，额外打印当前的加速倍率
-    if (!auto_mode && altitude > 100000.0 && throttle < 0.01) {
-        cout << " | [WARP READY]" << endl;
-    } else {
-        cout << endl;
-    }
-    cout << "[Pos_X]: " << px << " m | [Horz_Vel]: " << vx << " m/s" << endl;
-    cout << "[Angle]: " << angle * 180.0 / PI
-         << " deg | [Throttle]: " << throttle * 100 << "%" << endl;
-    cout << "[Ground_Horz_Vel]: " << local_vx
-         << " m/s | [Orbit_Vel]: " << getVelocityMag() << " m/s" << endl;
-    cout << "[Thrust]: " << thrust_power / 1000 << " kN | [Fuel]: " << fuel
-         << " kg" << endl;
-    cout << "[Apoapsis]: " << apo / 1000.0
-         << " km | [Periapsis]: " << peri / 1000.0 << " km" << endl;
-    cout << "[Status]: " << status << endl;
-  }
-
-  // 核心物理引擎 (2D 矢量版)
-  void Burn(double dt) {
-    if (status == PRE_LAUNCH) {
-      px = 0;
-      py = EARTH_RADIUS;
-      pz = 0;
-      vx = 0;
-      vy = 0;
-      vz = 0;
-      altitude = 0;
-      return;
-    }
-    if (status == LANDED || status == CRASHED)
-      return;
-
-    // A. 基础状态计算
-    double r = sqrt(px * px + py * py); // 距地心距离
-    altitude = r - EARTH_RADIUS;
-
-    // B. 受力分析
-    double total_mass = mass + fuel;
-
-    // 1. 地球重力 (万有引力，指向地心)
-    double g_earth = get_gravity(r);
-    double Fg_x = -g_earth * (px / r) * total_mass;
-    double Fg_y = -g_earth * (py / r) * total_mass;
-
-    // 1.5 太阳重力 (双星引力系统) - 潮汐力模型 (Third Body Perturbation)
-    sim_time += dt;
-    double au_meters = 149597870700.0;
-    
-    // 太阳真实引力常数 (G * M_sun)
-    // 太阳质量 1.989e30 kg, 地球质量 5.972e24 kg
-    // 万有引力常数 G = 6.67430e-11
-    double G_const = 6.67430e-11;
-    double M_sun = 1.989e30;
-    double GM_sun = G_const * M_sun;
-    
-    // 强制公转角速度完美匹配太阳重力，避免预测轨道出现偏心率震荡
-    double sun_angular_vel = sqrt(GM_sun / (au_meters * au_meters * au_meters));
-    
-    // 这里 sun_angle 是地球看太阳的角度
-    double sun_angle = -1.2 + sun_angular_vel * sim_time; 
-    
-    // 太阳在以地球为中心的坐标系中的位置 (地球看太阳)
-    double sun_px = cos(sun_angle) * au_meters;
-    double sun_py = sin(sun_angle) * au_meters;
-    
-    // 火箭指向太阳的向量
-    double dx_sun = sun_px - px;
-    double dy_sun = sun_py - py;
-    
-    double r_sun_rocket_sq = dx_sun*dx_sun + dy_sun*dy_sun;
-    double dist_sun_rocket = sqrt(r_sun_rocket_sq);
-    double r_sun_rocket3 = r_sun_rocket_sq * dist_sun_rocket;
-    
-    double dist_sun_earth = au_meters;
-    double r_sun_earth3 = dist_sun_earth * dist_sun_earth * dist_sun_earth;
-    
-    // 第三体扰动：太阳对火箭的引力 减去 太阳对地球的引力 
-    // (因为我们的坐标系原点是随地球加速运动的)
-    double Fg_sun_x = GM_sun * (dx_sun / r_sun_rocket3 - sun_px / r_sun_earth3) * total_mass;
-    double Fg_sun_y = GM_sun * (dy_sun / r_sun_rocket3 - sun_py / r_sun_earth3) * total_mass;
-    
-    Fg_x += Fg_sun_x;
-    Fg_y += Fg_sun_y;
-
-    // 2. 推力 (基于角度和油门)
-    thrust_power = 0;
-    if (fuel > 0) {
-      // 计算推力 (真空推力 - 背压损失)
-      double max_thrust = specific_impulse * G0 * cosrate;
-      double pressure_loss = 100 * get_pressure(altitude) * nozzle_area;
-      double current_thrust = throttle * max_thrust - pressure_loss;
-      if (current_thrust < 0)
-        current_thrust = 0;
-      thrust_power = current_thrust;
-
-      // 消耗燃料
-      double m_dot = thrust_power / (specific_impulse * G0);
-      fuel -= m_dot * dt;
-      fuel_consumption_rate = m_dot; // 记录当前消耗率供显示
-    } else {
-      thrust_power = 0;
-      fuel_consumption_rate = 0;
-    }
-
-    // --- 3D Geometric Frame and Thrust Projection ---
-    // 1. Local Up (U) = Position Normalized
-    double r_mag = sqrt(px*px + py*py + pz*pz);
-    double Ux = px / r_mag;
-    double Uy = py / r_mag;
-    double Uz = pz / r_mag;
-
-    // 2. Local Right (R) - Parallel to XY plane
-    double r_xy_mag = sqrt(Ux*Ux + Uy*Uy);
-    double Rx = 0, Ry = 0, Rz = 0;
-    if (r_xy_mag > 1e-6) {
-        Rx = -Uy / r_xy_mag;
-        Ry = Ux / r_xy_mag;
-        Rz = 0.0;
-    } else {
-        Rx = 1.0; Ry = 0.0; Rz = 0.0; // Fallback for poles
-    }
-
-    // 3. Local North (N) = U x R (Orthogonal to U and R)
-    double Nx = Uy * Rz - Uz * Ry;
-    double Ny = Uz * Rx - Ux * Rz;
-    double Nz = Ux * Ry - Uy * Rx;
-    double N_mag = sqrt(Nx*Nx + Ny*Ny + Nz*Nz);
-    Nx /= N_mag; Ny /= N_mag; Nz /= N_mag;
-
-    // 4. Calculate Forward/Nose vector in U-R plane (yaw rotated by 'angle')
-    double cos_a = cos(angle);
-    double sin_a = sin(angle);
-    double Fx = Ux * cos_a + Rx * sin_a;
-    double Fy = Uy * cos_a + Ry * sin_a;
-    double Fz = Uz * cos_a + Rz * sin_a;
-
-    // 5. Apply out-of-plane pitch (angle_z) towards N
-    double cos_z = cos(angle_z);
-    double sin_z = sin(angle_z);
-    
-    // Rotate the Forward vector out of plane towards North Normal by angle_z
-    double thrust_dir_x = Fx * cos_z + Nx * sin_z;
-    double thrust_dir_y = Fy * cos_z + Ny * sin_z;
-    double thrust_dir_z = Fz * cos_z + Nz * sin_z;
-
-    double Ft_x = thrust_power * thrust_dir_x;
-    double Ft_y = thrust_power * thrust_dir_y;
-    double Ft_z = thrust_power * thrust_dir_z;
-
-    // 3. 空气阻力 & 气动扭矩
-    double v_sq = vx * vx + vy * vy + vz * vz;
-    double v_mag = sqrt(v_sq);
-    double local_up_angle = atan2(py, px);
-    double Fd_x = 0, Fd_y = 0;
-    double aero_torque = 0;
-
-    if (v_mag > 0.1 && altitude < 80000) {
-      double rho = get_air_density(altitude);
-
-      // 阻力面积基于轴外倾角动态增加 (迎风面变大)
-      double base_area = 10.0;
-      double side_area = height * diameter; // 宽大侧面积
-      double effective_area = base_area + side_area * abs(sin(angle_z));
-
-      // 阻力 (F = 0.5 * rho * v^2 * Cd * A)
-      // 假设 Cd = 0.5
-      double drag_mag = 0.5 * rho * v_sq * 0.5 * effective_area;
-      Fd_x = -drag_mag * (vx / v_mag);
-      Fd_y = -drag_mag * (vy / v_mag);
-
-      // 结构极限检查：如果在极高动压下严重脱离偏航平面，折断火箭！
-      double dynamic_pressure = 0.5 * rho * v_sq;
-      if (dynamic_pressure > 50000.0 && abs(angle_z) > 0.35) { // ~20 degrees
-          status = CRASHED;
-          mission_msg = ">> STRUCTURAL FAILURE: HIGH Q OUT-OF-PLANE PITCH!";
-          vx = 0; vy = 0; throttle = 0; ang_vel = 0; ang_vel_z = 0;
-          return;
-      }
-
-      // 气动扭矩 (风向标效应)
-      // 攻角 Alpha = 火箭指向 - 速度方向
-      double vel_angle = atan2(vy, vx);
-      // 这里比较复杂，简化为：由于 angle 是相对于局部垂直的，我们需要绝对角度
-      // 绝对火箭角 = local_up_angle + angle
-      double rocket_abs_angle = local_up_angle + angle;
-      double alpha = rocket_abs_angle - vel_angle;
-
-      // 归一化到 -PI ~ PI
-      while (alpha > PI)
-        alpha -= 2 * PI;
-      while (alpha < -PI)
-        alpha += 2 * PI;
-
-      // 恢复力矩：屁股朝下飞时(alpha接近PI)，如果不稳定会翻转
-      // 我们假设有栅格翼，提供强大的稳定性 (Stability Factor)
-      // 扭矩尝试减小 alpha
-      double stability = 10.0; // 稳定性系数
-      // 特殊情况：如果倒飞 (alpha ~ 180度)，我们需要它稳定在倒飞状态
-      // 简化处理：仅仅施加阻尼和控制力矩，假设栅格翼工作良好
-
-      // 这里的扭矩我们主要模拟“旋转阻力”，防止转个不停
-      aero_torque -= ang_vel * 0.1 * v_mag * rho;
-    }
-
-    // C. 积分 (牛顿第二定律) - RK4 (Runge-Kutta 4th Order) 积分器
-    // 为了支持极高的时间加速而不会因为 Euler 积分发散导致解体
-    
-    // 内部定义一个闭包，给定当前位置 (p) 和速度 (v) 计算加速度 (a)
-    auto calc_accel = [&](double temp_px, double temp_py, double temp_pz, double temp_vx, double temp_vy, double temp_vz, double& out_ax, double& out_ay, double& out_az) {
-        double r = sqrt(temp_px * temp_px + temp_py * temp_py + temp_pz * temp_pz);
-        double alt = r - EARTH_RADIUS;
-        
-        // 重力
-        double g_earth = get_gravity(r);
-        double Fgx = -g_earth * (temp_px / r) * total_mass;
-        double Fgy = -g_earth * (temp_py / r) * total_mass;
-        double Fgz = -g_earth * (temp_pz / r) * total_mass;
-        
-        // 太阳重力 (假设这段 dt 内太阳位置不变)
-        double dx = sun_px - temp_px;
-        double dy = sun_py - temp_py;
-        double dz = -temp_pz; // 太阳在 z=0 平面
-        double r_rocket_sq = dx*dx + dy*dy + dz*dz;
-        double dist_rocket = sqrt(r_rocket_sq);
-        double r_rocket3 = r_rocket_sq * dist_rocket;
-        double Fg_sun_x = GM_sun * (dx / r_rocket3 - sun_px / r_sun_earth3) * total_mass;
-        double Fg_sun_y = GM_sun * (dy / r_rocket3 - sun_py / r_sun_earth3) * total_mass;
-        double Fg_sun_z = GM_sun * (dz / r_rocket3 - 0.0) * total_mass; // sun_pz = 0
-        
-        // 空气阻力
-        double Fdx = 0, Fdy = 0, Fdz = 0;
-        double temp_v_sq = temp_vx * temp_vx + temp_vy * temp_vy + temp_vz * temp_vz;
-        double temp_v_mag = sqrt(temp_v_sq);
-        if (temp_v_mag > 0.1 && alt < 80000) {
-            double rho = get_air_density(alt);
-            double base_area = 10.0;
-            double side_area = height * diameter;
-            double effective_area = base_area + side_area * abs(sin(angle_z));
-            double drag_mag = 0.5 * rho * temp_v_sq * 0.5 * effective_area;
-            Fdx = -drag_mag * (temp_vx / temp_v_mag);
-            Fdy = -drag_mag * (temp_vy / temp_v_mag);
-            Fdz = -drag_mag * (temp_vz / temp_v_mag);
-        }
-        
-        out_ax = (Fgx + Fg_sun_x + Ft_x + Fdx) / total_mass;
-        out_ay = (Fgy + Fg_sun_y + Ft_y + Fdy) / total_mass;
-        out_az = (Fgz + Fg_sun_z + Ft_z + Fdz) / total_mass;
-    };
-
-    double k1_vx, k1_vy, k1_vz, k1_px, k1_py, k1_pz;
-    calc_accel(px, py, pz, vx, vy, vz, k1_vx, k1_vy, k1_vz);
-    k1_px = vx; k1_py = vy; k1_pz = vz;
-
-    double k2_vx, k2_vy, k2_vz, k2_px, k2_py, k2_pz;
-    calc_accel(px + 0.5 * dt * k1_px, py + 0.5 * dt * k1_py, pz + 0.5 * dt * k1_pz, 
-               vx + 0.5 * dt * k1_vx, vy + 0.5 * dt * k1_vy, vz + 0.5 * dt * k1_vz, 
-               k2_vx, k2_vy, k2_vz);
-    k2_px = vx + 0.5 * dt * k1_vx; k2_py = vy + 0.5 * dt * k1_vy; k2_pz = vz + 0.5 * dt * k1_vz;
-
-    double k3_vx, k3_vy, k3_vz, k3_px, k3_py, k3_pz;
-    calc_accel(px + 0.5 * dt * k2_px, py + 0.5 * dt * k2_py, pz + 0.5 * dt * k2_pz, 
-               vx + 0.5 * dt * k2_vx, vy + 0.5 * dt * k2_vy, vz + 0.5 * dt * k2_vz, 
-               k3_vx, k3_vy, k3_vz);
-    k3_px = vx + 0.5 * dt * k2_vx; k3_py = vy + 0.5 * dt * k2_vy; k3_pz = vz + 0.5 * dt * k2_vz;
-
-    double k4_vx, k4_vy, k4_vz, k4_px, k4_py, k4_pz;
-    calc_accel(px + dt * k3_px, py + dt * k3_py, pz + dt * k3_pz, 
-               vx + dt * k3_vx, vy + dt * k3_vy, vz + dt * k3_vz, 
-               k4_vx, k4_vy, k4_vz);
-    k4_px = vx + dt * k3_vx; k4_py = vy + dt * k3_vy; k4_pz = vz + dt * k3_vz;
-
-    vx += (dt / 6.0) * (k1_vx + 2.0 * k2_vx + 2.0 * k3_vx + k4_vx);
-    vy += (dt / 6.0) * (k1_vy + 2.0 * k2_vy + 2.0 * k3_vy + k4_vy);
-    vz += (dt / 6.0) * (k1_vz + 2.0 * k2_vz + 2.0 * k3_vz + k4_vz);
-    
-    px += (dt / 6.0) * (k1_px + 2.0 * k2_px + 2.0 * k3_px + k4_px);
-    py += (dt / 6.0) * (k1_py + 2.0 * k2_py + 2.0 * k3_py + k4_py);
-    pz += (dt / 6.0) * (k1_pz + 2.0 * k2_pz + 2.0 * k3_pz + k4_pz);
-    
-    // 我们也需要更新显示用的加速度变量 (基于最新的 state)
-    double final_ax, final_ay, final_az;
-    calc_accel(px, py, pz, vx, vy, vz, final_ax, final_ay, final_az);
-    acceleration = sqrt(final_ax * final_ax + final_ay * final_ay + final_az * final_az);
-
-    // 角运动在下方统一计算（已修复重复积分 bug）
-    double moment_of_inertia = 50000.0; // 假定转动惯量
-    double ang_accel = 0;               // 此处仅声明，后续统一积分
-
-    // 1. 真实垂直速度 (在 2D 平面的投影或利用 3D 点乘)
-    // 但为了和以前的 AutoPilot 切向控制兼容，我们仍然保留基于 px,py 2D 平面的局部速度投影
-    velocity = vx * cos(local_up_angle) + vy * sin(local_up_angle);
-
-    // 2. 真实水平速度 (切向，正为顺时针飞行)
-    // 利用向量点乘切向单位向量 (-sin, cos) 算出
-    local_vx = -vx * sin(local_up_angle) + vy * cos(local_up_angle);
-
-    // E. 碰撞检测
-    double current_r = sqrt(px * px + py * py + pz * pz);
-    double current_alt = current_r - EARTH_RADIUS;
-
-    if (current_alt <= 0.0) {
-
-      if (status == ASCEND) {
-        // 如果是上升状态，说明只是推力还没把火箭推起来 (TWR < 1)
-        // 此时强制锁在地面
-        px = 0;
-        py = EARTH_RADIUS;
-        vx = 0;
-        vy = 0;
-        altitude = 0;
-        // 不改变 status，继续积攒推力
-      } else if (velocity < 0.1) {
-        // 只有非上升状态，且没有明显向上速度时，才算着陆/坠毁
-        altitude = 0;
-        px = 0;
-        py = EARTH_RADIUS;
-
-        if (status != PRE_LAUNCH) {
-          if (abs(velocity) > 10 || abs(local_vx) > 10) {
-            status = CRASHED;
-            cout << ">> CRASH! Impact Vel: " << velocity << endl;
-          } else {
-            status = LANDED;
-            cout << ">> LANDED! Smoothly." << endl;
-          }
-          vx = 0;
-          vy = 0;
-          throttle = 0;
-          ang_vel = 0;
-          ang_vel_z = 0;
-          angle = 0;
-          angle_z = 0;
-          suicide_burn_locked = false; // 重置标志位
-        }
-      } else {
-
-        altitude = current_alt;
-      }
-    } else {
-      altitude = current_alt;
-    }
-
-    // 角运动 (I * alpha = Torque)
-    moment_of_inertia = 50000.0;
-
-    // 【物理升级】力矩不再是凭空产生的，而是推力矢量产生的
-    // 假设喷管最大能偏转 5度 (0.087 rad)
-    // PID 输出的 torque_cmd 现在代表“喷管偏转百分比 (-1.0 到 1.0)”
-
-    // 如果引擎没开 (thrust_power=0)，就没有控制力矩 (RCS除外)
-    // 这里模拟：主引擎推力 * 力臂(20米) * sin(喷管角度)
-    double gimbal_torque = 0;
-    if (thrust_power > 0) {
-      // 限制 PID 输出在 -1 到 1 之间作为喷管指令
-      double gimbal_cmd = max(-1.0, min(1.0, torque_cmd / 10000.0));
-      double max_gimbal_angle = 0.1; // 约 5.7度
-
-      // 力矩 = 推力 * sin(偏转角) * 质心距离
-      gimbal_torque =
-          thrust_power * sin(gimbal_cmd * max_gimbal_angle) * (height / 2);
-    }
-
-    // double final_torque = torque_cmd;
-
-    double final_torque = torque_cmd;
-
-    ang_accel = (final_torque + aero_torque) / moment_of_inertia;
-    ang_vel += ang_accel * dt;
-    angle += ang_vel * dt;
-
-    // --- Z轴 (轴外俯仰) 运动积分 ---
-    double rho_z = (altitude < 80000) ? get_air_density(altitude) : 0.0;
-    double aero_torque_z = -ang_vel_z * 0.1 * v_mag * rho_z; // 气动阻尼
-    double ang_accel_z = (torque_cmd_z + aero_torque_z) / moment_of_inertia;
-    ang_vel_z += ang_accel_z * dt;
-
-    // 在真空中给一点微弱的阻尼，防止一直像风车一样转
-    if (altitude > 80000) {
-        ang_vel_z *= pow(0.95, dt);
-    }
-
-    angle_z += ang_vel_z * dt;
-
-    // 严谨的角度包裹 (-PI 到 PI)
-    while (angle_z > PI) angle_z -= 2 * PI;
-    while (angle_z < -PI) angle_z += 2 * PI;
-  }
-
-  // 高帧率大步长纯重力积分 (时间加速极高倍率专供)
-  void FastGravityUpdate(double dt_total) {
-    if (status == PRE_LAUNCH || status == LANDED || status == CRASHED) return;
-
-    // 无论时间加速多少倍，内部依然做最高 5.0 秒的小碎步切分计算，保证轨道非常稳定且不穿模
-    double dt_step = 5.0; 
-    double t_remaining = dt_total;
-    
-    double total_mass = mass + fuel;
-    double au_meters = 149597870700.0;
-    
-    double G_const = 6.67430e-11;
-    double M_sun = 1.989e30;
-    double GM_sun = G_const * M_sun;
-    double sun_angular_vel = sqrt(GM_sun / (au_meters * au_meters * au_meters));
-    double mu_earth = G0 * pow(EARTH_RADIUS, 2);
-
-    while (t_remaining > 0) {
-      double dt = min(t_remaining, dt_step);
-      t_remaining -= dt;
-      sim_time += dt;
-      
-      auto calc_accel = [&](double temp_px, double temp_py, double temp_pz, double temp_time, double& out_ax, double& out_ay, double& out_az) {
-          double r2 = temp_px * temp_px + temp_py * temp_py + temp_pz * temp_pz;
-          double r = sqrt(r2);
-          
-          double g_earth = mu_earth / r2;
-          double Fgx = -g_earth * (temp_px / r) * total_mass;
-          double Fgy = -g_earth * (temp_py / r) * total_mass;
-          double Fgz = -g_earth * (temp_pz / r) * total_mass;
-          
-          double sun_angle = -1.2 + sun_angular_vel * temp_time; 
-          double sun_px = cos(sun_angle) * au_meters;
-          double sun_py = sin(sun_angle) * au_meters;
-          
-          double dx = sun_px - temp_px;
-          double dy = sun_py - temp_py;
-          double dz = -temp_pz;
-          double r_rocket_sq = dx*dx + dy*dy + dz*dz;
-          double dist_rocket = sqrt(r_rocket_sq);
-          double r_rocket3 = r_rocket_sq * dist_rocket;
-          double r_sun_earth3 = au_meters * au_meters * au_meters;
-          
-          double Fg_sun_x = GM_sun * (dx / r_rocket3 - sun_px / r_sun_earth3) * total_mass;
-          double Fg_sun_y = GM_sun * (dy / r_rocket3 - sun_py / r_sun_earth3) * total_mass;
-          double Fg_sun_z = GM_sun * (dz / r_rocket3 - 0.0) * total_mass;
-          
-          out_ax = (Fgx + Fg_sun_x) / total_mass;
-          out_ay = (Fgy + Fg_sun_y) / total_mass;
-          out_az = (Fgz + Fg_sun_z) / total_mass;
-      };
-
-      double k1_vx, k1_vy, k1_vz, k1_px, k1_py, k1_pz;
-      calc_accel(px, py, pz, sim_time - dt, k1_vx, k1_vy, k1_vz);
-      k1_px = vx; k1_py = vy; k1_pz = vz;
-
-      double k2_vx, k2_vy, k2_vz, k2_px, k2_py, k2_pz;
-      calc_accel(px + 0.5 * dt * k1_px, py + 0.5 * dt * k1_py, pz + 0.5 * dt * k1_pz, sim_time - dt + 0.5 * dt, k2_vx, k2_vy, k2_vz);
-      k2_px = vx + 0.5 * dt * k1_vx; k2_py = vy + 0.5 * dt * k1_vy; k2_pz = vz + 0.5 * dt * k1_vz;
-
-      double k3_vx, k3_vy, k3_vz, k3_px, k3_py, k3_pz;
-      calc_accel(px + 0.5 * dt * k2_px, py + 0.5 * dt * k2_py, pz + 0.5 * dt * k2_pz, sim_time - dt + 0.5 * dt, k3_vx, k3_vy, k3_vz);
-      k3_px = vx + 0.5 * dt * k2_vx; k3_py = vy + 0.5 * dt * k2_vy; k3_pz = vz + 0.5 * dt * k2_vz;
-
-      double k4_vx, k4_vy, k4_vz, k4_px, k4_py, k4_pz;
-      calc_accel(px + dt * k3_px, py + dt * k3_py, pz + dt * k3_pz, sim_time, k4_vx, k4_vy, k4_vz);
-      k4_px = vx + dt * k3_vx; k4_py = vy + dt * k3_vy; k4_pz = vz + dt * k3_vz;
-
-      vx += (dt / 6.0) * (k1_vx + 2.0 * k2_vx + 2.0 * k3_vx + k4_vx);
-      vy += (dt / 6.0) * (k1_vy + 2.0 * k2_vy + 2.0 * k3_vy + k4_vy);
-      vz += (dt / 6.0) * (k1_vz + 2.0 * k2_vz + 2.0 * k3_vz + k4_vz);
-      px += (dt / 6.0) * (k1_px + 2.0 * k2_px + 2.0 * k3_px + k4_px);
-      py += (dt / 6.0) * (k1_py + 2.0 * k2_py + 2.0 * k3_py + k4_py);
-      pz += (dt / 6.0) * (k1_pz + 2.0 * k2_pz + 2.0 * k3_pz + k4_pz);
-      
-      altitude = sqrt(px*px + py*py + pz*pz) - EARTH_RADIUS;
-      
-      if (altitude <= 0.0) {
-          altitude = 0;
-          status = CRASHED;
-          break;
-      }
-    }
-  }
-
-  bool is_Flying() {
-    return (status == PRE_LAUNCH || status == ASCEND || status == DESCEND);
-  }
-  bool is_IntoSpace() { return (altitude > 100000); }
-  bool is_IntoOrbit() { return (altitude > 100000 && abs(vx) > 7000); }
-
-  // ---  AutoPilot  ---
-  void AutoPilot(double dt) {
-    if (status == PRE_LAUNCH || status == LANDED || status == CRASHED)
-      return;
-
-    // 始终尝试让轴外倾角 (angle_z) 归零以维持二维平面的最优推力
-    torque_cmd_z = pid_att_z.update(0.0, angle_z, dt);
-
-    // 1. 获取物理参数
-    double max_thrust_vac = specific_impulse * G0 * cosrate;
-    double current_total_mass = mass + fuel;
-    double current_g = get_gravity(sqrt(px * px + py * py));
-
-    // 因为我们预判接下来会大幅侧身，垂直分力不足 100%
-    double conservative_thrust = max_thrust_vac * 0.95;
-    double max_accel_avail =
-        (conservative_thrust / current_total_mass) - current_g;
-
-    // 2. 状态机逻辑
-
-    if (status == ASCEND) {
-      double apo, peri;
-      getOrbitParams(apo, peri); // 获取实时开普勒轨道参数
-
-      if (mission_phase == 0) {
-        // 阶段 0：上升与重力转弯 (抬高远地点)
-        throttle = 1.0;
-        // 平滑重力转弯
-        double target_pitch = 0;
-        if (altitude > 1000) {
-          target_pitch = -min(1.2, (altitude - 1000) / 80000.0 * 1.57);
-        }
-        torque_cmd = pid_att.update(target_pitch, angle, dt);
-
-        // 目标远地点 150km 达成，立刻关机！
-        if (apo > 150000) {
-          mission_phase = 1;
-          mission_msg = "MECO! COASTING TO APOAPSIS.";
-        }
-      } else if (mission_phase == 1) {
-        // 阶段 1：无动力滑行至远地点
-        throttle = 0;
-        torque_cmd = pid_att.update(-PI / 2.0, angle, dt); // 飞船改平
-
-        // 当火箭爬升到接近远地点 (垂直速度极小) 时，准备圆轨
-        if (altitude > 130000 && velocity < 50) {
-          mission_phase = 2;
-          mission_msg = "CIRCULARIZATION BURN STARTED!";
-        }
-        // 保底：如果还没到 130km 就往下掉了，强行切入圆轨
-        if (velocity < -50)
-          mission_phase = 2;
-      } else if (mission_phase == 2) {
-        // 阶段 2：远地点圆轨点火 (拉高近地点)
-        throttle = 1.0;
-        torque_cmd =
-            pid_att.update(-PI / 2.0, angle, dt); // 死死按住水平方向喷射
-
-        // 当近地点突破 140km，说明轨道完美变圆！
-        if (peri > 140000) {
-          mission_phase = 3;
-          mission_timer = 0;
-          mission_msg = "ORBIT CIRCULARIZED! CRUISING.";
-        }
-      } else if (mission_phase == 3) {
-        // 阶段 3：在轨巡航
-        throttle = 0;
-        torque_cmd = pid_att.update(-PI / 2.0, angle, dt);
-
-        mission_timer += dt;
-        // 绕轨巡航 6000 秒
-        if (mission_timer > 5000.0) {
-          mission_phase = 4;
-          mission_msg = "DE-ORBIT SEQUENCE START.";
-        }
-      } else if (mission_phase == 4) {
-        // 阶段 4：脱轨点火 (降低近地点)
-        double vel_angle = atan2(vy, vx);
-        double align_angle = (vel_angle + PI) - atan2(py, px); // 逆向对准
-        while (align_angle > PI)
-          align_angle -= 2 * PI;
-        while (align_angle < -PI)
-          align_angle += 2 * PI;
-
-        torque_cmd = pid_att.update(align_angle, angle, dt);
-
-        if (abs(angle - align_angle) < 0.1)
-          throttle = 1.0;
-        else
-          throttle = 0.0;
-
-        // 目标脱轨轨道：让近地点砸进 30km 的浓密大气层
-        if (peri < 30000) {
-          throttle = 0;
-          status = DESCEND; // 移交着陆系统
-          pid_vert.reset();
-          mission_msg = ">> RE-ENTRY BURN COMPLETE. AEROBRAKING INITIATED.";
-        }
-      }
-      return;
-    }
-    // --- 下落阶段 ---
-    status = DESCEND;
-
-    // 1. 独立计算 Y 轴绝对保命推力 (最低限度抗重力 + 垂直减速)
-    double req_a_y = (velocity * velocity) / (2.0 * max(1.0, altitude));
-    if (velocity > 0)
-      req_a_y = 0; // 防反弹
-    double req_F_y = current_total_mass * (current_g + req_a_y);
-
-    // 2. 独立计算 X 轴消除速度所需推力 (【核心升级】：时间同步刹车)
-    // 让水平和垂直速度在触地时“同时”归零！
-    // 假设落地时间 T = 2 * 高度 / 垂直下落速度
-    // 需要的水平加速度 a_x = v_x / T = (v_x * v_y) / (2 * 高度)
-    double ref_vel = max(2.0, abs(velocity));
-    double req_a_x = (-local_vx * ref_vel) / (2.0 * max(1.0, altitude));
-    req_a_x += -local_vx * 0.5;
-    double req_F_x = current_total_mass * req_a_x;
-
-    // 3. 矢量合成与点火判断
-    double req_thrust = sqrt(req_F_x * req_F_x + req_F_y * req_F_y);
-    bool need_burn = suicide_burn_locked;
-
-    // 3. 触发逻辑：当总需求推力达到引擎上限的 95%，且高度逼近低空时，极限点火！
-    if (!need_burn && req_thrust > max_thrust_vac * 0.95 && altitude < 4000) {
-      suicide_burn_locked = true;
-      need_burn = true;
-      mission_msg = ">> SYNCHRONIZED HOVERSLAM IGNITION!";
-    }
-
-    // 4. 防悬停锁：如果空气阻力极其给力，导致需求推力甚至连重力的 80% 都不到了
-    // 坚决关机，白嫖自由落体！不到低空绝不悬停！
-    if (suicide_burn_locked && altitude > 100.0 &&
-        req_thrust < current_total_mass * current_g * 0.8) {
-      suicide_burn_locked = false;
-      need_burn = false;
-      mission_msg = ">> AEROBRAKING COAST... WAITING.";
-    }
-
-    if (!need_burn) {
-      throttle = 0;
-      // 自由落体时，保持逆气流方向减阻
-      double vel_angle = atan2(vy, vx);
-      double align_angle = (vel_angle + PI) - atan2(py, px);
-      while (align_angle > PI)
-        align_angle -= 2 * PI;
-      while (align_angle < -PI)
-        align_angle += 2 * PI;
-      torque_cmd = pid_att.update(align_angle, angle, dt);
-    } else {
-
-      // 理论最完美的侧滑角
-      double target_angle = atan2(req_F_x, req_F_y);
-
-      // 防撞地绝对极限倾角
-      double max_safe_tilt = 1.5;
-      if (req_F_y < max_thrust_vac) {
-        max_safe_tilt = acos(req_F_y / max_thrust_vac);
-      } else {
-        max_safe_tilt = 0.0;
-      }
-
-      if (altitude < 100.0) {
-        // 基础允许倾角随高度降低而逐渐减小
-        double base_tilt = (altitude / 100.0) * 0.5;
-        // 只要横向速度没消完，就允许借用倾角去疯狂刹车！(每1m/s侧滑借用约1.5度)
-        double rescue_tilt = abs(local_vx) * 0.025;
-        max_safe_tilt = min(max_safe_tilt, base_tilt + rescue_tilt);
-      }
-
-      // 只有当高度<2米且横向速度<1m/s 时，才真正立正触地！
-      if (altitude < 2.0 && abs(local_vx) < 1.0)
-        max_safe_tilt = 0.0;
-
-      if (target_angle > max_safe_tilt)
-        target_angle = max_safe_tilt;
-      if (target_angle < -max_safe_tilt)
-        target_angle = -max_safe_tilt;
-
-      torque_cmd = pid_att.update(target_angle, angle, dt);
-
-      // 最终油门计算
-      if (altitude > 2.0) {
-        double final_thrust = req_F_y / max(0.1, cos(target_angle));
-        throttle = final_thrust / max_thrust_vac;
-      } else {
-        // 最后 2 米触地段，同样需要姿态补偿！
-        double hover_throttle =
-            (current_total_mass * current_g) / max_thrust_vac;
-        throttle = hover_throttle + ((-1.5 - velocity) * 2.0);
-        throttle /= max(0.8, cos(target_angle));
-      }
-    }
-
-    if (throttle > 1.0)
-      throttle = 1.0;
-    if (throttle < 0.0)
-      throttle = 0.0;
-  }
-
-  // 手动发射
-  void ManualLaunch() {
-    if (status == PRE_LAUNCH) {
-      status = ASCEND;
-    }
-  }
-
-  // --- 手动控制模式 ---
-  void ManualControl(GLFWwindow *window, double dt) {
-    if (status == PRE_LAUNCH || status == LANDED || status == CRASHED)
-      return;
-
-    // 油门控制
-    if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS)
-      throttle = min(1.0, throttle + 1.5 * dt);
-    if (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS)
-      throttle = max(0.0, throttle - 1.5 * dt);
-    if (glfwGetKey(window, GLFW_KEY_Z) == GLFW_PRESS)
-      throttle = 1.0;
-    if (glfwGetKey(window, GLFW_KEY_X) == GLFW_PRESS)
-      throttle = 0.0;
-
-    // 姿态控制 (施加力矩)
-    torque_cmd = 0;
-    torque_cmd_z = 0;
-    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS ||
-        glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS)
-      torque_cmd = 30000.0; // 逆时针 (向左倾)
-    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS ||
-        glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS)
-      torque_cmd = -30000.0; // 顺时针 (向右倾)
-
-    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS ||
-        glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS)
-      torque_cmd_z = 30000.0; // 向前倾 (+Z)
-    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS ||
-        glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS)
-      torque_cmd_z = -30000.0; // 向后倾 (-Z)
-
-    // 维持 status 更新
-    if (status == ASCEND && velocity < 0 && altitude > 1000)
-      status = DESCEND;
-  }
-
-  // 切换控制模式
-  void ToggleMode() {
-    auto_mode = !auto_mode;
-    if (auto_mode) {
-      // 切回自动：重置 PID 积分项，防止积分饱和
-      pid_vert.reset();
-      pid_pos.reset();
-      pid_att.reset();
-      pid_att_z.reset();
-      mission_msg = ">> AUTOPILOT ENGAGED";
-    } else {
-      mission_msg = ">> MANUAL CONTROL ACTIVE";
-    }
-  }
-};
 
 // ==========================================
 // Part 3: 主函数
@@ -1633,6 +634,32 @@ void drawBuilderUI(Renderer* r, int col, int nose_sel, int tank_sel, int eng_sel
   r->drawLabel(0.28f, -0.85f, "s", 0.025f, 0.3f, 1.0f * blink, 0.4f);
 }
 
+void Report_Status(const RocketState& state, const ControlInput& input) {
+  double apo = 0, peri = 0;
+  PhysicsSystem::getOrbitParams(state, apo, peri);
+  cout << "\n----------------------------------" << endl;
+  cout << ">>> [MISSION CONTROL]: " << state.mission_msg << " <<<" << endl;
+  cout << "----------------------------------" << endl;
+  cout << "[Alt]: " << state.altitude << " m | [Vert_Vel]: " << state.velocity << " m/s";
+  
+  if (!state.auto_mode && state.altitude > 100000.0 && input.throttle < 0.01) {
+      cout << " | [WARP READY]" << endl;
+  } else {
+      cout << endl;
+  }
+  double velocity_mag = sqrt(state.vx*state.vx + state.vy*state.vy + state.vz*state.vz);
+  cout << "[Pos_X]: " << state.px << " m | [Horz_Vel]: " << state.vx << " m/s" << endl;
+  cout << "[Angle]: " << state.angle * 180.0 / PI
+       << " deg | [Throttle]: " << input.throttle * 100 << "%" << endl;
+  cout << "[Ground_Horz_Vel]: " << state.local_vx
+       << " m/s | [Orbit_Vel]: " << velocity_mag << " m/s" << endl;
+  cout << "[Thrust]: " << state.thrust_power / 1000 << " kN | [Fuel]: " << state.fuel
+       << " kg" << endl;
+  cout << "[Apoapsis]: " << apo / 1000.0
+       << " km | [Periapsis]: " << peri / 1000.0 << " km" << endl;
+  cout << "[Status]: " << state.status << endl;
+}
+
 int main() {
 
   glfwInit();
@@ -1726,8 +753,21 @@ int main() {
   float total_fuel = sel_tank.fuel;
   float total_height = sel_nose.height_add + sel_tank.height_add + sel_eng.height_add;
 
-  Explorer baba1(total_fuel, total_dry, 3.7, total_height,
-                 1, sel_eng.isp, sel_eng.consumption, 0.5);
+  RocketConfig rocket_config = {
+      total_dry,          // dry_mass
+      3.7,                // diameter
+      total_height,       // height
+      1,                  // stages
+      sel_eng.isp,        // specific_impulse
+      sel_eng.consumption,// cosrate
+      0.5                 // nozzle_area
+  };
+
+  RocketState rocket_state;
+  rocket_state.fuel = total_fuel;
+  rocket_state.status = PRE_LAUNCH;
+  
+  ControlInput control_input;
 
   // =========================================================
   // 初始化 3D 渲染器和网格
@@ -1764,12 +804,13 @@ int main() {
   struct TrajPoint { DVec3 e; DVec3 s; };
   std::vector<TrajPoint> traj_history; // 记录火箭历史飞行的 3D 轨迹点
 
-  while (baba1.is_Flying() && !glfwWindowShouldClose(window)) {
+  while ((rocket_state.status == PRE_LAUNCH || rocket_state.status == ASCEND || rocket_state.status == DESCEND) && !glfwWindowShouldClose(window)) {
     glfwPollEvents();
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
       glfwSetWindowShouldClose(window, true);
-    if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
-      baba1.ManualLaunch();
+    if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) {
+      if (rocket_state.status == PRE_LAUNCH) rocket_state.status = ASCEND;
+    }
 
     // --- C 键切换 3D 视角 ---
     bool c_now = glfwGetKey(window, GLFW_KEY_C) == GLFW_PRESS;
@@ -1836,7 +877,16 @@ int main() {
     // --- Tab 键切换模式（带防抖）---
     if (glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS) {
       if (!tab_was_pressed) {
-        baba1.ToggleMode();
+        rocket_state.auto_mode = !rocket_state.auto_mode;
+        if (rocket_state.auto_mode) {
+          rocket_state.pid_vert.reset();
+          rocket_state.pid_pos.reset();
+          rocket_state.pid_att.reset();
+          rocket_state.pid_att_z.reset();
+          rocket_state.mission_msg = ">> AUTOPILOT ENGAGED";
+        } else {
+          rocket_state.mission_msg = ">> MANUAL CONTROL ACTIVE";
+        }
         tab_was_pressed = true;
       }
     } else {
@@ -1874,9 +924,9 @@ int main() {
     // --- 时间加速逻辑 ---
     static int time_warp = 1;
     // 条件：手动模式、没开推力(或者没燃料了)、处于真空(真空设为>100000m) 才可以开启极速加速 (5,6,7,8)
-    bool can_super_warp = (!baba1.auto_mode && baba1.getAltitude() > 100000.0 && (baba1.getThrust() == 0 || baba1.getFuel() <= 0));
+    bool can_super_warp = (!rocket_state.auto_mode && rocket_state.altitude > 100000.0 && (rocket_state.thrust_power == 0 || rocket_state.fuel <= 0));
 
-    if (baba1.auto_mode) {
+    if (rocket_state.auto_mode) {
       if (glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_KP_1) == GLFW_PRESS) time_warp = 1;
       if (glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_KP_2) == GLFW_PRESS) time_warp = 10;
       if (glfwGetKey(window, GLFW_KEY_3) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_KP_3) == GLFW_PRESS) time_warp = 100;
@@ -1907,35 +957,45 @@ int main() {
       }
     }
 
+    ControlSystem::ManualInputs manual;
+    manual.throttle_up = glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS;
+    manual.throttle_down = glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS;
+    manual.throttle_max = glfwGetKey(window, GLFW_KEY_Z) == GLFW_PRESS;
+    manual.throttle_min = glfwGetKey(window, GLFW_KEY_X) == GLFW_PRESS;
+    manual.pitch_left = glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS;
+    manual.pitch_right = glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS;
+    manual.pitch_forward = glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS;
+    manual.pitch_backward = glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS;
+
     // --- 物理更新 ---
     if (time_warp > 1000) {
         // 超级时间加速！绕过气动和引擎模拟，直接当作质点切分迭代
-        baba1.FastGravityUpdate(dt * time_warp);
+        PhysicsSystem::FastGravityUpdate(rocket_state, rocket_config, dt * time_warp);
     } else {
         // 普通循环执行实现加速
         for (int i = 0; i < time_warp; i++) {
-          if (baba1.auto_mode) baba1.AutoPilot(dt);
-          else baba1.ManualControl(window, dt);
-          baba1.Burn(dt);
-          if (!baba1.is_Flying()) break;
+          if (rocket_state.auto_mode) ControlSystem::UpdateAutoPilot(rocket_state, rocket_config, control_input, dt);
+          else ControlSystem::UpdateManualControl(rocket_state, control_input, manual, dt);
+          PhysicsSystem::Update(rocket_state, rocket_config, control_input, dt);
+          if (rocket_state.status == LANDED || rocket_state.status == CRASHED) break;
         }
 
         // --- 额外一步物理更新 (用于尾烟特效) ---
         if (time_warp == 1) {
-            baba1.emitSmoke(dt);
-            baba1.updateSmoke(dt);
+            PhysicsSystem::EmitSmoke(rocket_state, rocket_config, dt);
+            PhysicsSystem::UpdateSmoke(rocket_state, dt);
         }
     }
 
     // 只有每隔一定帧数才打印，防止控制台看不清
     if (frame % 10 == 0)
-      baba1.Report_Status();
+      Report_Status(rocket_state, control_input);
 
     this_thread::sleep_for(chrono::milliseconds(20)); // 限制帧率
 
     // 画面刷新
     // 画面刷新
-    float alt_factor = (float)min(baba1.getAltitude() / 50000.0, 1.0);
+    float alt_factor = (float)min(rocket_state.altitude / 50000.0, 1.0);
     if (cam_mode_3d == 2) {
        // 全景视角(Panorama)下背景应该始终为全黑(太空)
        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -1953,9 +1013,9 @@ int main() {
       float earth_r = (float)EARTH_RADIUS * (float)ws_d;
 
       // 2D→3D 坐标映射 (Double precision)
-      double r_px = baba1.px * ws_d;
-      double r_py = baba1.py * ws_d;
-      double r_pz = baba1.pz * ws_d;
+      double r_px = rocket_state.px * ws_d;
+      double r_py = rocket_state.py * ws_d;
+      double r_pz = rocket_state.pz * ws_d;
       
       // ===== 太阳位置与昼夜交替 (Double precision) =====
       double G_const_d = 6.67430e-11;
@@ -1964,7 +1024,7 @@ int main() {
       double au_meters_d = 149597870700.0;
       double sun_angular_vel = sqrt(GM_sun_d / (au_meters_d * au_meters_d * au_meters_d));
       
-      double sun_angle_d = -1.2 + sun_angular_vel * baba1.sim_time;
+      double sun_angle_d = -1.2 + sun_angular_vel * rocket_state.sim_time;
       double sun_dist_d = au_meters_d * ws_d;
       double sun_px = cos(sun_angle_d) * sun_dist_d;
       double sun_py = sin(sun_angle_d) * sun_dist_d;
@@ -2003,7 +1063,7 @@ int main() {
       // 【深空姿态锁定】：使用精度更高的几何距离防止抖动
       double dist_to_earth = sqrt(r_px*r_px + r_py*r_py + r_pz*r_pz);
       Vec3 rocketUp((float)(r_px / dist_to_earth), (float)(r_py / dist_to_earth), 0.0f);
-      if (baba1.getAltitude() > 2000000.0) { // 2000公里外，完全脱离近地轨道，进入深空
+      if (rocket_state.altitude > 2000000.0) { // 2000公里外，完全脱离近地轨道，进入深空
           rocketUp = Vec3(0.0f, 1.0f, 0.0f);
       }
       
@@ -2019,7 +1079,7 @@ int main() {
       Vec3 localNorth = rocketUp.cross(localRight).normalized();
 
       // 构建 2D 面内主朝向
-      float rocket_angle = (float)baba1.angle;
+      float rocket_angle = (float)rocket_state.angle;
       Vec3 rocketDir2D = rocketUp * cosf(rocket_angle) + localRight * sinf(rocket_angle);
 
       // 构建对应的主旋转四元数
@@ -2034,7 +1094,7 @@ int main() {
       Vec3 dynamicRight = localNorth.cross(rocketDir2D).normalized();
 
       // 组合基础 2D 旋转与局部的轴外俯仰 (Pitch) 旋转
-      Quat pitchQuat = Quat::fromAxisAngle(dynamicRight, (float)baba1.angle_z);
+      Quat pitchQuat = Quat::fromAxisAngle(dynamicRight, (float)rocket_state.angle_z);
       Quat rocketQuat = pitchQuat * baseQuat;
       
       // 更新 rocketDir 为包含 3D 俯仰的真实朝向
@@ -2042,8 +1102,8 @@ int main() {
 
       // 火箭尺寸
       float rocket_vis_scale = 1.0f;
-      float rh = (float)baba1.getHeight() * (float)ws_d * rocket_vis_scale;
-      float rw_3d = (float)baba1.getDiameter() * (float)ws_d * 0.5f * rocket_vis_scale;
+      float rh = (float)rocket_config.height * (float)ws_d * rocket_vis_scale;
+      float rw_3d = (float)rocket_config.diameter * (float)ws_d * 0.5f * rocket_vis_scale;
 
       // 火箭渲染锚点（将火箭向上偏移，解决2D物理质心带来的穿模问题）
       Vec3 renderRocketPos = renderRocketBase + rocketUp * (rh * 0.425f);
@@ -2218,7 +1278,7 @@ int main() {
 
           // 全物理量双精度计算
           double abs_px = r_px, abs_py = r_py, abs_pz = r_pz;
-          double abs_vx = baba1.vx * ws_d, abs_vy = baba1.vy * ws_d, abs_vz = baba1.vz * ws_d;
+          double abs_vx = rocket_state.vx * ws_d, abs_vy = rocket_state.vy * ws_d, abs_vz = rocket_state.vz * ws_d;
 
           if (is_sun_ref) {
               // Use exact same derived sun_angle and sun_angular_vel as physics engine (Burn)
@@ -2228,7 +1288,7 @@ int main() {
               double au_meters = 149597870700.0;
               double sun_angular_vel = sqrt(GM_sun / (au_meters * au_meters * au_meters));
               
-              double exact_sun_angle = -1.2 + sun_angular_vel * baba1.sim_time;
+              double exact_sun_angle = -1.2 + sun_angular_vel * rocket_state.sim_time;
               double sun_vx = -sin(exact_sun_angle) * au_meters * sun_angular_vel;
               double sun_vy = cos(exact_sun_angle) * au_meters * sun_angular_vel;
               
@@ -2447,13 +1507,13 @@ int main() {
                      sel_eng.r, sel_eng.g, sel_eng.b, 1.0f, 0.4f);
 
       // ===== 3D 火焰/尾焰粒子 =====
-      if (baba1.getThrust() > 0.0) {
-        float thrust = (float)baba1.throttle;
+      if (rocket_state.thrust_power > 0.0) {
+        float thrust = (float)control_input.throttle;
         float flame_base_size = rw_3d * 1.5f;
         float game_time = (float)glfwGetTime();
 
         // 真空中火焰更大（大气压缩效果）
-        float vacuum_scale = 1.0f + (float)fmin(baba1.getAltitude() / 50000.0, 2.0);
+        float vacuum_scale = 1.0f + (float)fmin(rocket_state.altitude / 50000.0, 2.0);
 
         for (int i = 0; i < 10; i++) {
           // 粒子沿推力反方向分布
@@ -2491,11 +1551,11 @@ int main() {
     renderer->beginFrame();
 
     // 坐标转换变量（HUD也需要）
-    double scale = 1.0 / (baba1.getAltitude() * 1.5 + 200.0);
+    double scale = 1.0 / (rocket_state.altitude * 1.5 + 200.0);
     float cx = 0.0f;
     float cy = 0.0f;
-    double rocket_r = sqrt(baba1.px * baba1.px + baba1.py * baba1.py);
-    double rocket_theta = atan2(baba1.py, baba1.px);
+    double rocket_r = sqrt(rocket_state.px * rocket_state.px + rocket_state.py * rocket_state.py);
+    double rocket_theta = atan2(rocket_state.py, rocket_state.px);
     double cam_angle = PI / 2.0 - rocket_theta;
     double sin_c = sin(cam_angle);
     double cos_c = cos(cam_angle);
@@ -2542,9 +1602,9 @@ int main() {
         float gauge_alt_x = -0.84f;
         float gauge_fuel_x = -0.76f;
 
-    double current_vel = baba1.getVelocityMag();
-    double current_alt = baba1.getAltitude();
-    int current_vvel = (int)baba1.getVerticalVel();
+    double current_vel = sqrt(rocket_state.vx*rocket_state.vx + rocket_state.vy*rocket_state.vy + rocket_state.vz*rocket_state.vz);
+    double current_alt = rocket_state.altitude;
+    int current_vvel = (int)rocket_state.velocity;
 
     if (orbit_reference_sun) {
         double G_const = 6.67430e-11;
@@ -2552,18 +1612,18 @@ int main() {
         double GM_sun = G_const * M_sun;
         double au = 149597870700.0;
         double sun_angular_vel = sqrt(GM_sun / (au * au * au));
-        double sun_angle = -1.2 + sun_angular_vel * baba1.sim_time;
+        double sun_angle = -1.2 + sun_angular_vel * rocket_state.sim_time;
         double current_sun_px = cos(sun_angle) * au;
         double current_sun_py = sin(sun_angle) * au;
         double current_sun_vx = -sin(sun_angle) * au * sun_angular_vel;
         double current_sun_vy = cos(sun_angle) * au * sun_angular_vel;
 
-        double rel_vx = baba1.vx - current_sun_vx;
-        double rel_vy = baba1.vy - current_sun_vy;
-        double rel_vz = baba1.vz;
-        double rel_px = baba1.px - current_sun_px;
-        double rel_py = baba1.py - current_sun_py;
-        double rel_pz = baba1.pz;
+        double rel_vx = rocket_state.vx - current_sun_vx;
+        double rel_vy = rocket_state.vy - current_sun_vy;
+        double rel_vz = rocket_state.vz;
+        double rel_px = rocket_state.px - current_sun_px;
+        double rel_py = rocket_state.py - current_sun_py;
+        double rel_pz = rocket_state.pz;
         
         current_vel = sqrt(rel_vx * rel_vx + rel_vy * rel_vy + rel_vz * rel_vz);
         double dist_to_sun = sqrt(rel_px * rel_px + rel_py * rel_py + rel_pz * rel_pz);
@@ -2601,7 +1661,7 @@ int main() {
                       0.3f + alt_ratio * 0.7f, 1.0f, hud_opacity);
 
     // --- 3. 燃油计 (Fuel Gauge) ---
-    double current_fuel = baba1.getFuel();
+    double current_fuel = rocket_state.fuel;
     float max_gauge_fuel = 100000.0f; // 对应火箭初始化时的 100 吨满载燃料
     float fuel_ratio = (float)max(0.0, min(1.0, current_fuel / max_gauge_fuel));
 
@@ -2688,14 +1748,14 @@ int main() {
 
     // 油门读数 + %
     renderer->addRect(num_x, 0.25f, bg_w * 0.8f, bg_h * 0.8f, 0.0f, 0.0f, 0.0f, 0.5f);
-    renderer->drawNumber(num_x - 0.02f, 0.25f, (int)(baba1.throttle * 100),
+    renderer->drawNumber(num_x - 0.02f, 0.25f, (int)(control_input.throttle * 100),
                          num_size * 0.8f, 0.8f, 0.8f, 0.8f, hud_opacity);
     renderer->drawLabel(label_x - 0.01f, 0.25f, "%", num_size * 0.6f,
                         0.8f, 0.8f, 0.8f, hud_opacity);
 
     // 俯仰读数 (Pitch) + 度数
     renderer->addRect(num_x, 0.10f, bg_w * 0.8f, bg_h * 0.8f, 0.0f, 0.0f, 0.0f, 0.5f);
-    int pitch_deg = (int)(abs(baba1.angle_z) * 180.0 / PI);
+    int pitch_deg = (int)(abs(rocket_state.angle_z) * 180.0 / PI);
     float pr = 0.8f, pg = 0.8f, pb = 0.8f;
     if (pitch_deg > 20 && current_vel > 200.0) {
         pr = 1.0f; pg = 0.2f; pb = 0.2f; // Red Warning (high Q area)
@@ -2721,7 +1781,7 @@ int main() {
     float mode_y = 0.85f;
     // 背景框
     renderer->addRect(mode_x, mode_y, 0.22f, 0.06f, 0.05f, 0.05f, 0.05f, 0.7f);
-    if (baba1.auto_mode) {
+    if (rocket_state.auto_mode) {
       // 绿色 AUTO 指示
       renderer->addRect(mode_x, mode_y, 0.20f, 0.04f, 0.1f, 0.8f, 0.2f, 0.9f);
     } else {
@@ -2738,14 +1798,14 @@ int main() {
     renderer->addRect(thr_bar_x, thr_bar_y, thr_bar_w + 0.02f,
                       thr_bar_h + 0.01f, 0.1f, 0.1f, 0.1f, 0.5f * hud_opacity);
     // 填充
-    float thr_fill = thr_bar_w * (float)baba1.throttle;
+    float thr_fill = thr_bar_w * (float)control_input.throttle;
     float thr_fill_x = thr_bar_x - thr_bar_w / 2.0f + thr_fill / 2.0f;
-    float thr_r = (float)baba1.throttle > 0.8f
+    float thr_r = (float)control_input.throttle > 0.8f
                       ? 1.0f
-                      : 0.3f + (float)baba1.throttle * 0.7f;
-    float thr_g = (float)baba1.throttle < 0.5f
+                      : 0.3f + (float)control_input.throttle * 0.7f;
+    float thr_g = (float)control_input.throttle < 0.5f
                       ? 0.8f
-                      : 0.8f - ((float)baba1.throttle - 0.5f) * 1.6f;
+                      : 0.8f - ((float)control_input.throttle - 0.5f) * 1.6f;
     renderer->addRect(thr_fill_x, thr_bar_y, thr_fill, thr_bar_h, thr_r, thr_g,
                       0.1f, hud_opacity);
 
@@ -2762,7 +1822,7 @@ int main() {
   rocketNose.destroy();
   delete r3d;
   glfwTerminate();
-  if (baba1.status == Explorer::LANDED || baba1.status == Explorer::CRASHED) {
+  if (rocket_state.status == LANDED || rocket_state.status == CRASHED) {
     cout << "\n>> SIMULATION ENDED. PRESS ENTER." << endl;
     cin.get();
   }

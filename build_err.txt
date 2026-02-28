@@ -1,0 +1,83 @@
+**********************************************************************
+** Visual Studio 2026 Developer Command Prompt v18.2.2
+** Copyright (c) 2025 Microsoft Corporation
+**********************************************************************
+[DEBUG:ext\vcvars.bat] Found potential v145 version file: 'Microsoft.VCToolsVersion.VC.14.50.18.0.txt'
+[DEBUG:ext\vcvars.bat] Testing v145 version file: 'Microsoft.VCToolsVersion.VC.14.50.18.0.txt'
+[vcvarsall.bat] Environment initialized for: 'x64'
+?? x64 ? Microsoft (R) C/C++ ????? 19.50.35724 ?
+????(C) Microsoft Corporation????????
+
+project.cpp
+C:\antigravity_code\vertical-landing-test-v1.0\src\math3d.h(1): warning C4819: ?????????????(936)??????????????? Unicode ?????????
+C:\antigravity_code\vertical-landing-test-v1.0\src\renderer3d.h(1): warning C4819: ?????????????(936)??????????????? Unicode ?????????
+C:\antigravity_code\vertical-landing-test-v1.0\src\renderer3d.h(804): warning C4819: ?????????????(936)??????????????? Unicode ?????????
+src\project.cpp(32): error C2374: "PI": ???;?????
+C:\antigravity_code\vertical-landing-test-v1.0\src\rocket_state.h(9): note: ??"PI"???
+src\project.cpp(32): error C2086: "const double PI": ???
+C:\antigravity_code\vertical-landing-test-v1.0\src\rocket_state.h(9): note: ??"PI"???
+src\project.cpp(33): error C2374: "G0": ???;?????
+C:\antigravity_code\vertical-landing-test-v1.0\src\rocket_state.h(10): note: ??"G0"???
+src\project.cpp(33): error C2086: "const double G0": ???
+C:\antigravity_code\vertical-landing-test-v1.0\src\rocket_state.h(10): note: ??"G0"???
+src\project.cpp(34): error C2374: "EARTH_RADIUS": ???;?????
+C:\antigravity_code\vertical-landing-test-v1.0\src\rocket_state.h(11): note: ??"EARTH_RADIUS"???
+src\project.cpp(34): error C2086: "const double EARTH_RADIUS": ???
+C:\antigravity_code\vertical-landing-test-v1.0\src\rocket_state.h(11): note: ??"EARTH_RADIUS"???
+src\project.cpp(38): error C2084: ??"float hash11(int)"????
+C:\antigravity_code\vertical-landing-test-v1.0\src\rocket_state.h(27): note: ??"hash11"??????
+src\project.cpp(56): error C2011: "PID":"struct"?????
+C:\antigravity_code\vertical-landing-test-v1.0\src\rocket_state.h(34): note: ??"PID"???
+src\project.cpp(213): error C2568: "*": ????????
+src\project.cpp(213): note: ???"float hash11(int)"
+src\project.cpp(216): error C2568: "*": ????????
+src\project.cpp(216): note: ???"float hash11(int)"
+src\project.cpp(231): error C2568: "*": ????????
+src\project.cpp(231): note: ???"float hash11(int)"
+src\project.cpp(238): error C2440: "???": ???"float (__cdecl *)(int)"???"float"
+src\project.cpp(238): note: ???????????????
+src\project.cpp(244): error C2568: "*": ????????
+src\project.cpp(244): note: ???"float hash11(int)"
+src\project.cpp(262): error C2568: "*": ????????
+src\project.cpp(262): note: ???"float hash11(int)"
+src\project.cpp(541): error C2568: "*": ????????
+src\project.cpp(541): note: ???"float hash11(int)"
+src\project.cpp(542): error C2568: "*": ????????
+src\project.cpp(542): note: ???"float hash11(int)"
+src\project.cpp(543): error C2568: "*": ????????
+src\project.cpp(543): note: ???"float hash11(int)"
+src\project.cpp(544): error C2568: "*": ????????
+src\project.cpp(544): note: ???"float hash11(int)"
+src\project.cpp(684): error C2039: "throttle": ?? "RocketState" ???
+C:\antigravity_code\vertical-landing-test-v1.0\src\rocket_state.h(88): note: ??"RocketState"???
+src\project.cpp(692): error C2039: "throttle": ?? "RocketState" ???
+C:\antigravity_code\vertical-landing-test-v1.0\src\rocket_state.h(88): note: ??"RocketState"???
+src\project.cpp(921): error C2027: ????????"PID"
+C:\antigravity_code\vertical-landing-test-v1.0\src\rocket_state.h(34): note: ??"PID"???
+src\project.cpp(922): error C2027: ????????"PID"
+C:\antigravity_code\vertical-landing-test-v1.0\src\rocket_state.h(34): note: ??"PID"???
+src\project.cpp(923): error C2027: ????????"PID"
+C:\antigravity_code\vertical-landing-test-v1.0\src\rocket_state.h(34): note: ??"PID"???
+src\project.cpp(924): error C2027: ????????"PID"
+C:\antigravity_code\vertical-landing-test-v1.0\src\rocket_state.h(34): note: ??"PID"???
+src\project.cpp(1550): error C2039: "throttle": ?? "RocketState" ???
+C:\antigravity_code\vertical-landing-test-v1.0\src\rocket_state.h(88): note: ??"RocketState"???
+src\project.cpp(1790): error C2039: "throttle": ?? "RocketState" ???
+C:\antigravity_code\vertical-landing-test-v1.0\src\rocket_state.h(88): note: ??"RocketState"???
+src\project.cpp(1840): error C2039: "throttle": ?? "RocketState" ???
+C:\antigravity_code\vertical-landing-test-v1.0\src\rocket_state.h(88): note: ??"RocketState"???
+src\project.cpp(1842): error C2039: "throttle": ?? "RocketState" ???
+C:\antigravity_code\vertical-landing-test-v1.0\src\rocket_state.h(88): note: ??"RocketState"???
+src\project.cpp(1844): error C2039: "throttle": ?? "RocketState" ???
+C:\antigravity_code\vertical-landing-test-v1.0\src\rocket_state.h(88): note: ??"RocketState"???
+src\project.cpp(1845): error C2039: "throttle": ?? "RocketState" ???
+C:\antigravity_code\vertical-landing-test-v1.0\src\rocket_state.h(88): note: ??"RocketState"???
+src\project.cpp(1847): error C2039: "throttle": ?? "RocketState" ???
+C:\antigravity_code\vertical-landing-test-v1.0\src\rocket_state.h(88): note: ??"RocketState"???
+physics_system.cpp
+src\physics_system.cpp(292): error C3490: ????????????"throttle",??????????
+control_system.cpp
+??????...
+????...
+glad.c
+??????...

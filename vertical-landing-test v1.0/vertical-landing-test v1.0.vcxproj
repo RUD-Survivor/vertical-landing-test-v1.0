@@ -21,6 +21,13 @@
   <ItemGroup>
     <ClCompile Include="..\src\glad.c" />
     <ClCompile Include="..\src\project.cpp" />
+    <ClCompile Include="..\src\physics_system.cpp" />
+    <ClCompile Include="..\src\control_system.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\src\physics_system.h" />
+    <ClInclude Include="..\src\control_system.h" />
+    <ClInclude Include="..\src\rocket_state.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>18.0</VCProjectVersion>
