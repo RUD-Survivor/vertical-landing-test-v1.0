@@ -429,14 +429,18 @@ private:
   double vx, vy;     // 2D 速度
   double angle;      // 姿态角 (0=垂直向上/径向, 正=向左倾斜, 负=向右倾斜)
   double ang_vel;    // 角速度
+  double angle_z = 0;    // 轴外俯仰角 (-PI 到 PI)
+  double ang_vel_z = 0;  // 轴外角速度
   double throttle;   // 油门 (0.0 - 1.0)
   double torque_cmd; // 力矩指令
+  double torque_cmd_z = 0; // 轴外力矩指令
   double sim_time;   // 物理时间积累
 
   // PID 控制器实例
   PID pid_vert = {0.5, 0.001, 1.2};       // 高度环
   PID pid_pos = {0.001, 0.0, 0.2};        // 位置环 (参数很小因为距离很大)
   PID pid_att = {40000.0, 0.0, 100000.0}; // 姿态环 (需要快速响应)
+  PID pid_att_z = {40000.0, 0.0, 100000.0}; // Z轴姿态环
 
 public:
   enum State { PRE_LAUNCH, ASCEND, DESCEND, LANDED, CRASHED } status;
@@ -523,7 +527,9 @@ public:
     vx = 0;
     vy = 0;
     angle = 0;
+    angle_z = 0;
     ang_vel = 0;
+    ang_vel_z = 0;
     sim_time = 0;
 
     // 兼容旧变量初始化
@@ -709,8 +715,9 @@ public:
     // 实际推力方向 = 局部垂直 + 火箭偏角
     double thrust_dir = local_up_angle + angle;
 
-    double Ft_x = thrust_power * cos(thrust_dir);
-    double Ft_y = thrust_power * sin(thrust_dir);
+    // 由于火箭在轴外倾斜 (angle_z)，投射到 2D 平面上的推力会被 cos(angle_z) 衰减
+    double Ft_x = thrust_power * cos(angle_z) * cos(thrust_dir);
+    double Ft_y = thrust_power * cos(angle_z) * sin(thrust_dir);
 
     // 3. 空气阻力 & 气动扭矩
     double v_sq = vx * vx + vy * vy;
@@ -721,11 +728,25 @@ public:
     if (v_mag > 0.1 && altitude < 80000) {
       double rho = get_air_density(altitude);
 
+      // 阻力面积基于轴外倾角动态增加 (迎风面变大)
+      double base_area = 10.0;
+      double side_area = height * diameter; // 宽大侧面积
+      double effective_area = base_area + side_area * abs(sin(angle_z));
+
       // 阻力 (F = 0.5 * rho * v^2 * Cd * A)
-      // 假设 Cd = 0.5, A = 10 (简化)
-      double drag_mag = 0.5 * rho * v_sq * 0.5 * 10.0;
+      // 假设 Cd = 0.5
+      double drag_mag = 0.5 * rho * v_sq * 0.5 * effective_area;
       Fd_x = -drag_mag * (vx / v_mag);
       Fd_y = -drag_mag * (vy / v_mag);
+
+      // 结构极限检查：如果在极高动压下严重脱离偏航平面，折断火箭！
+      double dynamic_pressure = 0.5 * rho * v_sq;
+      if (dynamic_pressure > 50000.0 && abs(angle_z) > 0.35) { // ~20 degrees
+          status = CRASHED;
+          mission_msg = ">> STRUCTURAL FAILURE: HIGH Q OUT-OF-PLANE PITCH!";
+          vx = 0; vy = 0; throttle = 0; ang_vel = 0; ang_vel_z = 0;
+          return;
+      }
 
       // 气动扭矩 (风向标效应)
       // 攻角 Alpha = 火箭指向 - 速度方向
@@ -780,7 +801,10 @@ public:
         double temp_v_mag = sqrt(temp_v_sq);
         if (temp_v_mag > 0.1 && alt < 80000) {
             double rho = get_air_density(alt);
-            double drag_mag = 0.5 * rho * temp_v_sq * 0.5 * 10.0;
+            double base_area = 10.0;
+            double side_area = height * diameter;
+            double effective_area = base_area + side_area * abs(sin(angle_z));
+            double drag_mag = 0.5 * rho * temp_v_sq * 0.5 * effective_area;
             Fdx = -drag_mag * (temp_vx / temp_v_mag);
             Fdy = -drag_mag * (temp_vy / temp_v_mag);
         }
@@ -863,7 +887,9 @@ public:
           vy = 0;
           throttle = 0;
           ang_vel = 0;
+          ang_vel_z = 0;
           angle = 0;
+          angle_z = 0;
           suicide_burn_locked = false; // 重置标志位
         }
       } else {
@@ -901,6 +927,23 @@ public:
     ang_accel = (final_torque + aero_torque) / moment_of_inertia;
     ang_vel += ang_accel * dt;
     angle += ang_vel * dt;
+
+    // --- Z轴 (轴外俯仰) 运动积分 ---
+    double rho_z = (altitude < 80000) ? get_air_density(altitude) : 0.0;
+    double aero_torque_z = -ang_vel_z * 0.1 * v_mag * rho_z; // 气动阻尼
+    double ang_accel_z = (torque_cmd_z + aero_torque_z) / moment_of_inertia;
+    ang_vel_z += ang_accel_z * dt;
+
+    // 在真空中给一点微弱的阻尼，防止一直像风车一样转
+    if (altitude > 80000) {
+        ang_vel_z *= pow(0.95, dt);
+    }
+
+    angle_z += ang_vel_z * dt;
+
+    // 严谨的角度包裹 (-PI 到 PI)
+    while (angle_z > PI) angle_z -= 2 * PI;
+    while (angle_z < -PI) angle_z += 2 * PI;
   }
 
   // 高帧率大步长纯重力积分 (时间加速极高倍率专供)
@@ -992,6 +1035,9 @@ public:
   void AutoPilot(double dt) {
     if (status == PRE_LAUNCH || status == LANDED || status == CRASHED)
       return;
+
+    // 始终尝试让轴外倾角 (angle_z) 归零以维持二维平面的最优推力
+    torque_cmd_z = pid_att_z.update(0.0, angle_z, dt);
 
     // 1. 获取物理参数
     double max_thrust_vac = specific_impulse * G0 * cosrate;
@@ -1198,11 +1244,9 @@ public:
       return;
 
     // 油门控制
-    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS ||
-        glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS)
+    if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS)
       throttle = min(1.0, throttle + 1.5 * dt);
-    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS ||
-        glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS)
+    if (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS)
       throttle = max(0.0, throttle - 1.5 * dt);
     if (glfwGetKey(window, GLFW_KEY_Z) == GLFW_PRESS)
       throttle = 1.0;
@@ -1211,12 +1255,20 @@ public:
 
     // 姿态控制 (施加力矩)
     torque_cmd = 0;
+    torque_cmd_z = 0;
     if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS ||
         glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS)
       torque_cmd = 30000.0; // 逆时针 (向左倾)
     if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS ||
         glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS)
       torque_cmd = -30000.0; // 顺时针 (向右倾)
+
+    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS ||
+        glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS)
+      torque_cmd_z = 30000.0; // 向前倾 (+Z)
+    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS ||
+        glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS)
+      torque_cmd_z = -30000.0; // 向后倾 (-Z)
 
     // 维持 status 更新
     if (status == ASCEND && velocity < 0 && altitude > 1000)
@@ -1231,6 +1283,7 @@ public:
       pid_vert.reset();
       pid_pos.reset();
       pid_att.reset();
+      pid_att_z.reset();
       mission_msg = ">> AUTOPILOT ENGAGED";
     } else {
       mission_msg = ">> MANUAL CONTROL ACTIVE";
@@ -1527,7 +1580,7 @@ int main() {
   // 请求一个包含 4倍多重采样 的帧缓冲
   glfwWindowHint(GLFW_SAMPLES, 4);
 
-  GLFWwindow *window = glfwCreateWindow(1000, 800, "2D Rocket Sim", NULL, NULL);
+  GLFWwindow *window = glfwCreateWindow(1000, 800, "3D Rocket Sim", NULL, NULL);
   if (!window) {
     glfwTerminate();
     return -1;
@@ -1618,8 +1671,9 @@ int main() {
   // =========================================================
   Renderer3D* r3d = new Renderer3D();
   Mesh earthMesh = MeshGen::sphere(48, 64, 1.0f);  // 单位球，用 model 矩阵缩放
-  Mesh rocketBody = MeshGen::cylinder(16, 1.0f, 1.0f);
-  Mesh rocketNose = MeshGen::cone(16, 1.0f, 1.0f);
+  Mesh rocketBody = MeshGen::cylinder(32, 1.0f, 1.0f);
+  Mesh rocketNose = MeshGen::cone(32, 1.0f, 1.0f);
+  Mesh rocketBox  = MeshGen::box(1.0f, 1.0f, 1.0f);
   int cam_mode_3d = 0; // 0=自由轨道, 1=跟踪, 2=全景
   static bool c_was_pressed = false;
   // 四元数轨道球相机
@@ -1841,9 +1895,13 @@ int main() {
       double r_pz = 0.0;
       
       // ===== 太阳位置与昼夜交替 (Double precision) =====
-      double sun_angular_vel = 6.2831853 / 31557600.0;
-      double sun_angle_d = -1.2 + sun_angular_vel * baba1.sim_time;
+      double G_const_d = 6.67430e-11;
+      double M_sun_d = 1.989e30;
+      double GM_sun_d = G_const_d * M_sun_d;
       double au_meters_d = 149597870700.0;
+      double sun_angular_vel = sqrt(GM_sun_d / (au_meters_d * au_meters_d * au_meters_d));
+      
+      double sun_angle_d = -1.2 + sun_angular_vel * baba1.sim_time;
       double sun_dist_d = au_meters_d * ws_d;
       double sun_px = cos(sun_angle_d) * sun_dist_d;
       double sun_py = sin(sun_angle_d) * sun_dist_d;
@@ -1889,11 +1947,28 @@ int main() {
       float rocket_angle = (float)baba1.angle;
       Vec3 localUp = rocketUp;
       Vec3 localRight(-rocketUp.y, rocketUp.x, 0.0f);
-      Vec3 rocketDir(
+      
+      // 先计算出平面的 2D 朝向
+      Vec3 rocketDir2D(
         localUp.x * cosf(rocket_angle) + localRight.x * sinf(rocket_angle),
         localUp.y * cosf(rocket_angle) + localRight.y * sinf(rocket_angle),
         0.0f
       );
+
+      // ===== 构建火箭完整的 3D 朝向四元数 =====
+      Vec3 defaultUp(0.0f, 1.0f, 0.0f);
+      Vec3 rotAxis = defaultUp.cross(rocketDir2D);
+      float rotAngle = acosf(fminf(fmaxf(defaultUp.dot(rocketDir2D), -1.0f), 1.0f));
+      Quat baseQuat;
+      if (rotAxis.length() > 1e-6f)
+        baseQuat = Quat::fromAxisAngle(rotAxis.normalized(), rotAngle);
+
+      // 组合基础 2D 旋转与局部的轴外俯仰 (Pitch) 旋转
+      Quat pitchQuat = Quat::fromAxisAngle(localRight, (float)baba1.angle_z);
+      Quat rocketQuat = pitchQuat * baseQuat;
+      
+      // 更新 rocketDir 为包含 3D 俯仰的真实朝向
+      Vec3 rocketDir = rocketQuat.rotate(Vec3(0.0f, 1.0f, 0.0f));
 
       // 火箭尺寸
       float rocket_vis_scale = 1.0f;
@@ -2064,163 +2139,167 @@ int main() {
 
       // ===== 轨道预测线 (开普勒轨道) =====
       if (cam_mode_3d == 2) {
-        // 选择参考系
-        double mu_body = orbit_reference_sun ? (9.81 * earth_r * earth_r * ws_d * 333000.0) : (9.81 * earth_r * earth_r * ws_d); 
+        // We calculate and draw BOTH Earth-relative AND Sun-relative orbits concurrently!
+        for (int ref_idx = 0; ref_idx < 2; ref_idx++) {
+          bool is_sun_ref = (ref_idx == 1);
 
-        // 全物理量双精度计算
-        double abs_px = r_px, abs_py = r_py, abs_pz = r_pz;
-        double abs_vx = baba1.vx * ws_d, abs_vy = baba1.vy * ws_d, abs_vz = 0.0;
+          // 选择参考系
+          double mu_body = is_sun_ref ? (9.81 * earth_r * earth_r * ws_d * 333000.0) : (9.81 * earth_r * earth_r * ws_d); 
 
-        if (orbit_reference_sun) {
-            // Use exact same derived sun_angle and sun_angular_vel as physics engine (Burn)
-            double G_const = 6.67430e-11;
-            double M_sun = 1.989e30;
-            double GM_sun = G_const * M_sun;
-            double au_meters = 149597870700.0;
-            double sun_angular_vel = sqrt(GM_sun / (au_meters * au_meters * au_meters));
+          // 全物理量双精度计算
+          double abs_px = r_px, abs_py = r_py, abs_pz = r_pz;
+          double abs_vx = baba1.vx * ws_d, abs_vy = baba1.vy * ws_d, abs_vz = 0.0;
+
+          if (is_sun_ref) {
+              // Use exact same derived sun_angle and sun_angular_vel as physics engine (Burn)
+              double G_const = 6.67430e-11;
+              double M_sun = 1.989e30;
+              double GM_sun = G_const * M_sun;
+              double au_meters = 149597870700.0;
+              double sun_angular_vel = sqrt(GM_sun / (au_meters * au_meters * au_meters));
+              
+              double exact_sun_angle = -1.2 + sun_angular_vel * baba1.sim_time;
+              double sun_vx = -sin(exact_sun_angle) * au_meters * sun_angular_vel;
+              double sun_vy = cos(exact_sun_angle) * au_meters * sun_angular_vel;
+              
+              // 地心相对日心为 -sunPos
+              abs_px -= cos(exact_sun_angle) * au_meters * ws_d; 
+              abs_py -= sin(exact_sun_angle) * au_meters * ws_d; 
+              abs_pz -= sun_pz;
+
+              // V_rocket/Sun = V_rocket/Earth - V_Sun/Earth
+              abs_vx -= sun_vx * ws_d; 
+              abs_vy -= sun_vy * ws_d;
+          }
+
+          double r_len = sqrt(abs_px*abs_px + abs_py*abs_py + abs_pz*abs_pz);
+          double v_len = sqrt(abs_vx*abs_vx + abs_vy*abs_vy + abs_vz*abs_vz);
+
+          if (v_len > 0.001f && r_len > earth_r * 0.5f) {
+            double energy = 0.5 * v_len * v_len - mu_body / r_len;
             
-            double exact_sun_angle = -1.2 + sun_angular_vel * baba1.sim_time;
+            Vec3 h_vec( (float)(abs_py * abs_vz - abs_pz * abs_vy), 
+                        (float)(abs_pz * abs_vx - abs_px * abs_vz),
+                        (float)(abs_px * abs_vy - abs_py * abs_vx) );
+
+            float h = h_vec.length();
+            double a = -mu_body / (2.0 * energy);
+            Vec3 v_vec((float)abs_vx, (float)abs_vy, (float)abs_vz);
+            Vec3 p_vec((float)abs_px, (float)abs_py, (float)abs_pz);
             
-            // Earth's exact orbital velocity matching the physics steps
-            double earth_vx = -sin(exact_sun_angle) * au_meters * sun_angular_vel;
-            double earth_vy = cos(exact_sun_angle) * au_meters * sun_angular_vel;
-            
-            // 地心相对日心为 -sunPos
-            abs_px -= cos(exact_sun_angle) * au_meters; 
-            abs_py -= sin(exact_sun_angle) * au_meters; 
-            abs_pz -= sun_pz;
+            Vec3 e_vec = v_vec.cross(h_vec) / (float)mu_body - p_vec / (float)r_len;
+            float ecc = e_vec.length();
 
-            // Notice we are NOT scaling the velocity by ws_d, because earth_vx is already correct scale
-            abs_vx += earth_vx * ws_d; 
-            abs_vy += earth_vy * ws_d;
-        }
+            float opacity = (is_sun_ref == orbit_reference_sun) ? 0.9f : 0.3f;
 
-        double r_len = sqrt(abs_px*abs_px + abs_py*abs_py + abs_pz*abs_pz);
-        double v_len = sqrt(abs_vx*abs_vx + abs_vy*abs_vy + abs_vz*abs_vz);
+            if (ecc < 1.0f) {
+              // --- 椭圆轨道 (a > 0) ---
+              float b = (float)a * sqrtf(fmaxf(0.0f, 1.0f - ecc * ecc));
+              Vec3 e_dir = ecc > 1e-6f ? e_vec / ecc : Vec3(1.0f, 0.0f, 0.0f);
+              Vec3 perp_dir = h_vec.normalized().cross(e_dir);
 
-        if (v_len > 0.001f && r_len > earth_r * 0.5f) {
-          double energy = 0.5 * v_len * v_len - mu_body / r_len;
-          
-          Vec3 h_vec( (float)(abs_py * abs_vz - abs_pz * abs_vy), 
-                      (float)(abs_pz * abs_vx - abs_px * abs_vz),
-                      (float)(abs_px * abs_vy - abs_py * abs_vx) );
+              float periapsis = (float)a * (1.0f - ecc);
+              float apoapsis = (float)a * (1.0f + ecc);
+              bool will_reenter = periapsis < earth_r && !is_sun_ref;
 
-          float h = h_vec.length();
-          double a = -mu_body / (2.0 * energy);
-          Vec3 v_vec((float)abs_vx, (float)abs_vy, (float)abs_vz);
-          Vec3 p_vec((float)abs_px, (float)abs_py, (float)abs_pz);
-          
-          Vec3 e_vec = v_vec.cross(h_vec) / (float)mu_body - p_vec / (float)r_len;
-          float ecc = e_vec.length();
+              Vec3 center_off = e_dir * (-(float)a * ecc);
 
+              // 生成预测轨迹点集
+              std::vector<Vec3> orbit_points;
+              int orbit_segs = 120;
+              for (int i = 0; i <= orbit_segs; i++) {
+                float ang = (float)i / orbit_segs * 6.2831853f;
+                Vec3 pt_rel = center_off + e_dir * ((float)a * cosf(ang)) + perp_dir * (b * sinf(ang));
+                double p_x = pt_rel.x, p_y = pt_rel.y, p_z = pt_rel.z;
+                if (is_sun_ref) { p_x += sun_px; p_y += sun_py; p_z += sun_pz; }
+                Vec3 pt = Vec3((float)(p_x - ro_x), (float)(p_y - ro_y), (float)(p_z - ro_z));
+                if (!is_sun_ref && pt.length() < earth_r * 0.98f) continue;
+                orbit_points.push_back(pt);
+              }
+              
+              // 渲染预测轨迹
+              float pred_w = earth_r * 0.0025f * fmaxf(1.0f, cam_zoom_pan * 0.5f);
+              float macro_fade = fminf(1.0f, fmaxf(0.0f, (cam_zoom_pan - 0.05f) / 0.1f));
+              if (macro_fade > 0.01f) {
+                  if (will_reenter) {
+                    r3d->drawRibbon(orbit_points, pred_w, 1.0f, 0.4f, 0.1f, opacity * macro_fade);
+                  } else {
+                    if (is_sun_ref) {
+                       r3d->drawRibbon(orbit_points, pred_w, 0.2f, 0.6f, 1.0f, opacity * macro_fade); // Dimmer/bluer for Sun
+                    } else {
+                       r3d->drawRibbon(orbit_points, pred_w, 0.2f, 0.8f, 1.0f, opacity * macro_fade); 
+                    }
+                  }
+              }
 
-          if (ecc < 1.0f) {
-            // --- 椭圆轨道 (a > 0) ---
-            float b = (float)a * sqrtf(fmaxf(0.0f, 1.0f - ecc * ecc));
-            Vec3 e_dir = ecc > 1e-6f ? e_vec / ecc : Vec3(1.0f, 0.0f, 0.0f);
-            Vec3 perp_dir = h_vec.normalized().cross(e_dir);
+              float apsis_size = fminf(earth_r * 0.12f, earth_r * 0.025f * fmaxf(1.0f, cam_zoom_pan * 0.8f));
+              apsis_size *= (is_sun_ref ? 10.0f : 1.0f);
+              
+              // 远地点标记
+              Vec3 apoPos = e_dir * (-apoapsis);
+              double ax = apoPos.x, ay = apoPos.y, az = apoPos.z;
+              if (is_sun_ref) { ax += sun_px; ay += sun_py; az += sun_pz; }
+              Vec3 w_apoPos((float)(ax - ro_x), (float)(ay - ro_y), (float)(az - ro_z));
+              if (apoapsis > earth_r * 1.002f) {
+                r3d->drawBillboard(w_apoPos, apsis_size, 0.2f, 0.4f, 1.0f, opacity);
+              }
 
-            float periapsis = (float)a * (1.0f - ecc);
-            float apoapsis = (float)a * (1.0f + ecc);
-            bool will_reenter = periapsis < earth_r && !orbit_reference_sun;
+              // 近地点标记
+              Vec3 periPos = e_dir * periapsis;
+              double px = periPos.x, py = periPos.y, pz = periPos.z;
+              if (is_sun_ref) { px += sun_px; py += sun_py; pz += sun_pz; }
+              Vec3 w_periPos((float)(px - ro_x), (float)(py - ro_y), (float)(pz - ro_z));
+              if (periapsis > earth_r * 1.002f) {
+                r3d->drawBillboard(w_periPos, apsis_size, 1.0f, 0.5f, 0.1f, opacity);
+              }
+            } else {
+              // --- 双曲线/抛物线逃逸轨道 (ecc >= 1.0) ---
+              float a_hyp = fabs(a); 
+              float b_hyp = a_hyp * sqrtf(fmaxf(0.0f, ecc * ecc - 1.0f));
+              Vec3 e_dir = e_vec / ecc;
+              Vec3 perp_dir = h_vec.normalized().cross(e_dir);
+              
+              float periapsis = a_hyp * (ecc - 1.0f);
+              Vec3 center_off = e_dir * (a_hyp * ecc);
 
-            Vec3 center_off = e_dir * (-(float)a * ecc);
+              std::vector<Vec3> escape_points;
+              int escape_segs = 60;
+              float max_sinh = 3.0f; 
+              for (int i = -escape_segs; i <= escape_segs; i++) {
+                 float t = (float)i / escape_segs * max_sinh;
+                 Vec3 pt_rel = center_off - e_dir * (a_hyp * coshf(t)) + perp_dir * (b_hyp * sinhf(t));
+                 double px = pt_rel.x, py = pt_rel.y, pz = pt_rel.z;
+                 if (is_sun_ref) { px += sun_px; py += sun_py; pz += sun_pz; }
+                 
+                 Vec3 pt((float)(px - ro_x), (float)(py - ro_y), (float)(pz - ro_z));
+                 if (!is_sun_ref && pt.length() < earth_r * 0.98f) continue;
+                 
+                 if (escape_points.empty() || (pt - escape_points.back()).length() > earth_r * 0.05f) {
+                    escape_points.push_back(pt);
+                 }
+              }
 
-            // 生成预测轨迹点集
-            std::vector<Vec3> orbit_points;
-            int orbit_segs = 120;
-            for (int i = 0; i <= orbit_segs; i++) {
-              float ang = (float)i / orbit_segs * 6.2831853f;
-              Vec3 pt_rel = center_off + e_dir * ((float)a * cosf(ang)) + perp_dir * (b * sinf(ang));
-              double p_x = pt_rel.x, p_y = pt_rel.y, p_z = pt_rel.z;
-              if (orbit_reference_sun) { p_x += sun_px; p_y += sun_py; p_z += sun_pz; }
-              Vec3 pt = Vec3((float)(p_x - ro_x), (float)(p_y - ro_y), (float)(p_z - ro_z));
-              if (!orbit_reference_sun && pt.length() < earth_r * 0.98f) continue;
-              orbit_points.push_back(pt);
-            }
-            
-            // 渲染预测轨迹
-            float pred_w = earth_r * 0.0025f * fmaxf(1.0f, cam_zoom_pan * 0.5f);
-            float macro_fade = fminf(1.0f, fmaxf(0.0f, (cam_zoom_pan - 0.05f) / 0.1f));
-            if (macro_fade > 0.01f) {
-                if (will_reenter) {
-                  r3d->drawRibbon(orbit_points, pred_w, 1.0f, 0.4f, 0.1f, 0.8f * macro_fade);
-                } else {
-                  r3d->drawRibbon(orbit_points, pred_w, 0.2f, 0.8f, 1.0f, 0.8f * macro_fade); 
-                }
-            }
+              // 逃逸轨道的 Ribbon (紫色代表逃逸)
+              float pred_w = earth_r * 0.0025f * fmaxf(1.0f, cam_zoom_pan * 0.5f);
+              float macro_fade = fminf(1.0f, fmaxf(0.0f, (cam_zoom_pan - 0.05f) / 0.1f));
+              if (macro_fade > 0.01f) {
+                  if (is_sun_ref) {
+                       r3d->drawRibbon(escape_points, pred_w, 0.9f, 0.2f, 0.8f, opacity * macro_fade);
+                  } else {
+                       r3d->drawRibbon(escape_points, pred_w, 0.8f, 0.3f, 1.0f, opacity * macro_fade);
+                  }
+              }
 
-            float apsis_size = fminf(earth_r * 0.12f, earth_r * 0.025f * fmaxf(1.0f, cam_zoom_pan * 0.8f));
-            apsis_size *= (orbit_reference_sun ? 10.0f : 1.0f);
-            
-            // 远地点标记
-            Vec3 apoPos = e_dir * (-apoapsis);
-            double ax = apoPos.x, ay = apoPos.y, az = apoPos.z;
-            if (orbit_reference_sun) { ax += sun_px; ay += sun_py; az += sun_pz; }
-            Vec3 w_apoPos((float)(ax - ro_x), (float)(ay - ro_y), (float)(az - ro_z));
-            if (apoapsis > earth_r * 1.002f) {
-              r3d->drawBillboard(w_apoPos, apsis_size, 0.2f, 0.4f, 1.0f, 0.9f);
-            }
-
-            // 近地点标记
-            Vec3 periPos = e_dir * periapsis;
-            double px = periPos.x, py = periPos.y, pz = periPos.z;
-            if (orbit_reference_sun) { px += sun_px; py += sun_py; pz += sun_pz; }
-            Vec3 w_periPos((float)(px - ro_x), (float)(py - ro_y), (float)(pz - ro_z));
-            if (periapsis > earth_r * 1.002f) {
-              r3d->drawBillboard(w_periPos, apsis_size, 1.0f, 0.5f, 0.1f, 0.9f);
-            }
-          } else {
-            // --- 双曲线/抛物线逃逸轨道 (ecc >= 1.0) ---
-            // 半长轴 a 为负值
-            float a_hyp = fabs(a); // 实际 a 是负的，我们取绝对值方便计算
-            float b_hyp = a_hyp * sqrtf(fmaxf(0.0f, ecc * ecc - 1.0f));
-            Vec3 e_dir = e_vec / ecc;
-            Vec3 perp_dir = h_vec.normalized().cross(e_dir);
-            
-            float periapsis = a_hyp * (ecc - 1.0f);
-            Vec3 center_off = e_dir * (a_hyp * ecc);
-
-            // 绘制双曲线的一支（火箭前进方向的）
-            std::vector<Vec3> escape_points;
-            int escape_segs = 60;
-            // 真近点角渐近线极限 acos(-1/ecc)
-            float max_theta = acosf(-1.0f / ecc) * 0.9f; 
-            
-            // 我们沿着参数方程扫描，不画完整的，只画离开地球的一段距离
-            float max_sinh = 3.0f; 
-            for (int i = -escape_segs; i <= escape_segs; i++) {
-               float t = (float)i / escape_segs * max_sinh;
-               // 取轨迹方程 : center - a * cosh(t) * e_dir + b * sinh(t) * perp_dir
-               Vec3 pt_rel = center_off - e_dir * (a_hyp * coshf(t)) + perp_dir * (b_hyp * sinhf(t));
-               double px = pt_rel.x, py = pt_rel.y, pz = pt_rel.z;
-               if (orbit_reference_sun) { px += sun_px; py += sun_py; pz += sun_pz; }
-               
-               Vec3 pt((float)(px - ro_x), (float)(py - ro_y), (float)(pz - ro_z));
-               if (!orbit_reference_sun && pt.length() < earth_r * 0.98f) continue;
-               
-               // 只保留未来要飞的，或者火箭当前位置附近的点(基于点乘判断行进方向)
-               if (escape_points.empty() || (pt - escape_points.back()).length() > earth_r * 0.05f) {
-                  escape_points.push_back(pt);
-               }
-            }
-
-            // 逃逸轨道的 Ribbon (紫色代表逃逸)
-            float pred_w = earth_r * 0.0025f * fmaxf(1.0f, cam_zoom_pan * 0.5f);
-            float macro_fade = fminf(1.0f, fmaxf(0.0f, (cam_zoom_pan - 0.05f) / 0.1f));
-            if (macro_fade > 0.01f) {
-                r3d->drawRibbon(escape_points, pred_w, 0.8f, 0.3f, 1.0f, 0.8f * macro_fade);
-            }
-
-            // 近地点标记
-            float apsis_size = fminf(earth_r * 0.12f, earth_r * 0.025f * fmaxf(1.0f, cam_zoom_pan * 0.8f));
-            apsis_size *= (orbit_reference_sun ? 10.0f : 1.0f);
-            Vec3 periPos = center_off - e_dir * a_hyp; // 顶点就是近地点
-            double px = periPos.x, py = periPos.y, pz = periPos.z;
-            if (orbit_reference_sun) { px += sun_px; py += sun_py; pz += sun_pz; }
-            Vec3 w_periPos((float)(px - ro_x), (float)(py - ro_y), (float)(pz - ro_z));
-            if (periapsis > earth_r * 1.002f) {
-              r3d->drawBillboard(w_periPos, apsis_size, 1.0f, 0.5f, 0.1f, 0.9f);
+              // 近地点标记
+              float apsis_size = fminf(earth_r * 0.12f, earth_r * 0.025f * fmaxf(1.0f, cam_zoom_pan * 0.8f));
+              apsis_size *= (is_sun_ref ? 10.0f : 1.0f);
+              Vec3 periPos = center_off - e_dir * a_hyp; 
+              double px = periPos.x, py = periPos.y, pz = periPos.z;
+              if (is_sun_ref) { px += sun_px; py += sun_py; pz += sun_pz; }
+              Vec3 w_periPos((float)(px - ro_x), (float)(py - ro_y), (float)(pz - ro_z));
+              if (periapsis > earth_r * 1.002f) {
+                r3d->drawBillboard(w_periPos, apsis_size, 1.0f, 0.5f, 0.1f, opacity);
+              }
             }
           }
         }
@@ -2239,37 +2318,64 @@ int main() {
       Mat4 microProjMat = Mat4::perspective(0.8f, aspect, micro_near, micro_far);
       r3d->beginFrame(viewMat, microProjMat, camEye_rel);
 
-      // ===== 火箭朝向四元数 =====
-      Vec3 defaultUp(0.0f, 1.0f, 0.0f);
-      Vec3 rotAxis = defaultUp.cross(rocketDir);
-      float rotAngle = acosf(fminf(fmaxf(defaultUp.dot(rocketDir), -1.0f), 1.0f));
-      Quat rocketQuat;
-      if (rotAxis.length() > 1e-6f)
-        rocketQuat = Quat::fromAxisAngle(rotAxis.normalized(), rotAngle);
+
 
       // ===== 火箭涂装 (Builder颜色) =====
-      // 机体 (燃料箱颜色)
+      // 1. 机体 (主燃料箱与分段)
       Mat4 bodyModel = Mat4::TRS(renderRocketPos, rocketQuat,
-                                  Vec3(rw_3d, rh * 0.7f, rw_3d));
+                                  Vec3(rw_3d, rh * 0.6f, rw_3d));
       r3d->drawMesh(rocketBody, bodyModel,
-                     sel_tank.r, sel_tank.g, sel_tank.b, 1.0f, 0.15f);
+                     sel_tank.r, sel_tank.g, sel_tank.b, 1.0f, 0.25f);
 
-      // 鼻锥 (鼻锥颜色)
-      Vec3 nosePos = renderRocketPos + rocketDir * (rh * 0.35f);
+      // 级间段/结构环 (Interstage Ring) - 金属灰暗色
+      Vec3 interstagePos = renderRocketPos - rocketDir * (rh * 0.325f);
+      Mat4 interstageModel = Mat4::TRS(interstagePos, rocketQuat,
+                                  Vec3(rw_3d * 1.02f, rh * 0.05f, rw_3d * 1.02f));
+      r3d->drawMesh(rocketBody, interstageModel, 0.2f, 0.2f, 0.25f, 1.0f, 0.4f);
+
+      // 2. 鼻锥头部
+      Vec3 nosePos = renderRocketPos + rocketDir * (rh * 0.375f);
       Mat4 noseModel = Mat4::TRS(nosePos, rocketQuat,
-                                  Vec3(rw_3d, rh * 0.3f, rw_3d));
+                                  Vec3(rw_3d, rh * 0.25f, rw_3d));
       r3d->drawMesh(rocketNose, noseModel,
-                     sel_nose.r, sel_nose.g, sel_nose.b, 1.0f, 0.15f);
+                     sel_nose.r, sel_nose.g, sel_nose.b, 1.0f, 0.25f);
 
-      // 引擎喷管 (引擎颜色)
-      Vec3 engPos = renderRocketPos - rocketDir * (rh * 0.35f);
-      Quat flipQuat = Quat::fromAxisAngle(
-        rotAxis.length() > 1e-6f ? rotAxis.normalized() : Vec3(0.0f, 0.0f, 1.0f),
-        rotAngle + 3.14159f);
-      Mat4 engModel = Mat4::TRS(engPos, flipQuat,
-                                 Vec3(rw_3d * 1.2f, rh * 0.15f, rw_3d * 1.2f));
-      r3d->drawMesh(rocketNose, engModel,
-                     sel_eng.r, sel_eng.g, sel_eng.b, 1.0f, 0.2f);
+      // 前端热盾/整流罩尖顶 (钛合金黑色)
+      Vec3 tipPos = renderRocketPos + rocketDir * (rh * 0.485f);
+      Mat4 tipModel = Mat4::TRS(tipPos, rocketQuat,
+                                  Vec3(rw_3d * 0.15f, rh * 0.05f, rw_3d * 0.15f));
+      r3d->drawMesh(rocketNose, tipModel, 0.15f, 0.15f, 0.15f, 1.0f, 0.5f);
+
+      // 3. 气动翼片/栅格舵 (Fins & Grid Fins)
+      for (int i = 0; i < 4; i++) {
+        float angle = i * 1.570796f; // 90 degrees
+        Quat finRot = rocketQuat * Quat::fromAxisAngle(Vec3(0.0f, 1.0f, 0.0f), angle);
+        
+        // 尾部主翼
+        Vec3 mainFinPos = renderRocketPos - rocketDir * (rh * 0.25f) + finRot.rotate(Vec3(rw_3d * 1.2f, 0.0f, 0.0f));
+        Mat4 mainFinModel = Mat4::TRS(mainFinPos, finRot, Vec3(rw_3d * 1.5f, rh * 0.1f, rw_3d * 0.05f));
+        r3d->drawMesh(rocketBox, mainFinModel, sel_tank.r * 0.8f, sel_tank.g * 0.8f, sel_tank.b * 0.8f, 1.0f, 0.2f);
+        
+        // 头部栅格舵
+        Vec3 gridFinPos = renderRocketPos + rocketDir * (rh * 0.2f) + finRot.rotate(Vec3(rw_3d * 1.1f, 0.0f, 0.0f));
+        Mat4 gridFinModel = Mat4::TRS(gridFinPos, finRot, Vec3(rw_3d * 0.4f, rh * 0.02f, rw_3d * 0.3f));
+        r3d->drawMesh(rocketBox, gridFinModel, 0.2f, 0.2f, 0.2f, 1.0f, 0.3f);
+      }
+
+      // 4. 引擎喷管 (Detailed Engine)
+      Vec3 engBasePos = renderRocketPos - rocketDir * (rh * 0.35f);
+      // 发动机机械基座
+      Mat4 engBaseModel = Mat4::TRS(engBasePos, rocketQuat, Vec3(rw_3d * 0.6f, rh * 0.05f, rw_3d * 0.6f));
+      r3d->drawMesh(rocketBody, engBaseModel, 0.15f, 0.15f, 0.15f, 1.0f, 0.5f);
+
+      // 喷管钟罩
+      // 我们用 rocketQuat 作为基础，然后在其本地坐标系中向下(Y相反)翻转 180 度 (PI)
+      Quat flipQuat = rocketQuat * Quat::fromAxisAngle(Vec3(1.0f, 0.0f, 0.0f), 3.14159f);
+      Vec3 engNozzlePos = renderRocketPos - rocketDir * (rh * 0.40f);
+      Mat4 engNozzleModel = Mat4::TRS(engNozzlePos, flipQuat,
+                                  Vec3(rw_3d * 1.1f, rh * 0.10f, rw_3d * 1.1f));
+      r3d->drawMesh(rocketNose, engNozzleModel,
+                     sel_eng.r, sel_eng.g, sel_eng.b, 1.0f, 0.4f);
 
       // ===== 3D 火焰/尾焰粒子 =====
       if (baba1.getThrust() > 0.0) {
@@ -2285,7 +2391,7 @@ int main() {
           float t_off = (float)i / 10.0f;
           float rand_off = sinf(game_time * 17.3f + i * 7.1f) * 0.3f + 0.5f;
           float dist = (t_off * 0.5f + rand_off * 0.2f) * rh * thrust * vacuum_scale;
-          Vec3 particlePos = engPos - rocketDir * dist;
+          Vec3 particlePos = engNozzlePos - rocketDir * dist;
 
           // 随机侧向偏移
           float side_x = sinf(game_time * 23.7f + i * 3.3f) * rw_3d * 0.3f;
@@ -2372,9 +2478,12 @@ int main() {
     int current_vvel = (int)baba1.getVerticalVel();
 
     if (orbit_reference_sun) {
-        double sun_angular_vel = 6.2831853 / 31557600.0;
-        double sun_angle = -1.2 + sun_angular_vel * baba1.sim_time;
+        double G_const = 6.67430e-11;
+        double M_sun = 1.989e30;
+        double GM_sun = G_const * M_sun;
         double au = 149597870700.0;
+        double sun_angular_vel = sqrt(GM_sun / (au * au * au));
+        double sun_angle = -1.2 + sun_angular_vel * baba1.sim_time;
         double current_sun_px = cos(sun_angle) * au;
         double current_sun_py = sin(sun_angle) * au;
         double current_sun_vx = -sin(sun_angle) * au * sun_angular_vel;
@@ -2512,6 +2621,20 @@ int main() {
                          num_size * 0.8f, 0.8f, 0.8f, 0.8f, hud_opacity);
     renderer->drawLabel(label_x - 0.01f, 0.25f, "%", num_size * 0.6f,
                         0.8f, 0.8f, 0.8f, hud_opacity);
+
+    // 俯仰读数 (Pitch) + 度数
+    renderer->addRect(num_x, 0.10f, bg_w * 0.8f, bg_h * 0.8f, 0.0f, 0.0f, 0.0f, 0.5f);
+    int pitch_deg = (int)(abs(baba1.angle_z) * 180.0 / PI);
+    float pr = 0.8f, pg = 0.8f, pb = 0.8f;
+    if (pitch_deg > 20 && current_vel > 200.0) {
+        pr = 1.0f; pg = 0.2f; pb = 0.2f; // Red Warning (high Q area)
+    } else if (pitch_deg > 20) {
+        pr = 1.0f; pg = 0.7f; pb = 0.2f; // Yellow Warning (Safe speed)
+    }
+    renderer->drawNumber(num_x - 0.02f, 0.10f, pitch_deg, num_size * 0.8f,
+                         pr, pg, pb, hud_opacity);
+    renderer->drawLabel(label_x - 0.01f, 0.10f, "deg", num_size * 0.5f,
+                        pr, pg, pb, hud_opacity);
 
     // 垂直速度读数 + m/s (右侧 HUD)
     renderer->addRect(0.85f, 0.4f, 0.22f, 0.06f, 0.05f, 0.05f, 0.05f, 0.5f);

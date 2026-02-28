@@ -199,6 +199,57 @@ inline Mesh cone(int segs, float radius, float height) {
   return m;
 }
 
+// 立方体/长方体 (中心在原点)
+inline Mesh box(float width, float height, float depth) {
+  std::vector<Vertex3D> verts;
+  std::vector<unsigned int> indices;
+
+  float dx = width * 0.5f;
+  float dy = height * 0.5f;
+  float dz = depth * 0.5f;
+
+  Vec3 p[8] = {
+    Vec3(-dx, -dy,  dz), Vec3( dx, -dy,  dz), Vec3( dx,  dy,  dz), Vec3(-dx,  dy,  dz), // Front
+    Vec3(-dx, -dy, -dz), Vec3( dx, -dy, -dz), Vec3( dx,  dy, -dz), Vec3(-dx,  dy, -dz)  // Back
+  };
+
+  Vec3 n[6] = {
+    Vec3( 0.0f,  0.0f,  1.0f), Vec3( 0.0f,  0.0f, -1.0f), // Front, Back
+    Vec3(-1.0f,  0.0f,  0.0f), Vec3( 1.0f,  0.0f,  0.0f), // Left, Right
+    Vec3( 0.0f,  1.0f,  0.0f), Vec3( 0.0f, -1.0f,  0.0f)  // Top, Bottom
+  };
+
+  // Face definitions (4 vertices per face)
+  int f[6][4] = {
+    {0, 1, 2, 3}, // Front
+    {5, 4, 7, 6}, // Back
+    {4, 0, 3, 7}, // Left
+    {1, 5, 6, 2}, // Right
+    {3, 2, 6, 7}, // Top
+    {4, 5, 1, 0}  // Bottom
+  };
+
+  for (int i = 0; i < 6; i++) {
+    for (int j = 0; j < 4; j++) {
+      Vertex3D v;
+      Vec3 pos = p[f[i][j]];
+      v.px = pos.x; v.py = pos.y; v.pz = pos.z;
+      v.nx = n[i].x; v.ny = n[i].y; v.nz = n[i].z;
+      v.u = (j == 1 || j == 2) ? 1.0f : 0.0f;
+      v.v = (j == 2 || j == 3) ? 1.0f : 0.0f;
+      v.r = 1; v.g = 1; v.b = 1; v.a = 1;
+      verts.push_back(v);
+    }
+    int base = i * 4;
+    indices.push_back(base + 0); indices.push_back(base + 1); indices.push_back(base + 2);
+    indices.push_back(base + 0); indices.push_back(base + 2); indices.push_back(base + 3);
+  }
+
+  Mesh m;
+  m.upload(verts, indices);
+  return m;
+}
+
 } // namespace MeshGen
 
 // ==========================================================
