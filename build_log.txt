@@ -1,0 +1,17 @@
+**********************************************************************
+** Visual Studio 2026 Developer Command Prompt v18.2.2
+** Copyright (c) 2025 Microsoft Corporation
+**********************************************************************
+[DEBUG:ext\vcvars.bat] Found potential v145 version file: 'Microsoft.VCToolsVersion.VC.14.50.18.0.txt'
+[DEBUG:ext\vcvars.bat] Testing v145 version file: 'Microsoft.VCToolsVersion.VC.14.50.18.0.txt'
+[vcvarsall.bat] Environment initialized for: 'x64'
+用于 x64 的 Microsoft (R) C/C++ 优化编译器 19.50.35724 版
+版权所有(C) Microsoft Corporation。保留所有权利。
+
+project.cpp
+src\project.cpp(1): fatal error C1083: 无法打开包括文件: “glad/glad.h”: No such file or directory
+正在生成代码...
+正在编译...
+glad.c
+src\glad.c(25): fatal error C1083: 无法打开包括文件: “glad/glad.h”: No such file or directory
+正在生成代码...

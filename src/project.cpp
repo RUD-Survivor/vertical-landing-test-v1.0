@@ -646,9 +646,16 @@ public:
     // 1.5 太阳重力 (双星引力系统) - 潮汐力模型 (Third Body Perturbation)
     sim_time += dt;
     double au_meters = 149597870700.0;
-    // 强制公转周期为 precies 365.25 天 (以秒为单位) = 31557600s
-    // 太阳视角角速度: 2 * PI / 31557600
-    double sun_angular_vel = 6.2831853 / 31557600.0;
+    
+    // 太阳真实引力常数 (G * M_sun)
+    // 太阳质量 1.989e30 kg, 地球质量 5.972e24 kg
+    // 万有引力常数 G = 6.67430e-11
+    double G_const = 6.67430e-11;
+    double M_sun = 1.989e30;
+    double GM_sun = G_const * M_sun;
+    
+    // 强制公转角速度完美匹配太阳重力，避免预测轨道出现偏心率震荡
+    double sun_angular_vel = sqrt(GM_sun / (au_meters * au_meters * au_meters));
     
     // 这里 sun_angle 是地球看太阳的角度
     double sun_angle = -1.2 + sun_angular_vel * sim_time; 
@@ -667,13 +674,6 @@ public:
     
     double dist_sun_earth = au_meters;
     double r_sun_earth3 = dist_sun_earth * dist_sun_earth * dist_sun_earth;
-    
-    // 太阳真实引力常数 (G * M_sun)
-    // 太阳质量 1.989e30 kg, 地球质量 5.972e24 kg
-    // 万有引力常数 G = 6.67430e-11
-    double G_const = 6.67430e-11;
-    double M_sun = 1.989e30;
-    double GM_sun = G_const * M_sun;
     
     // 第三体扰动：太阳对火箭的引力 减去 太阳对地球的引力 
     // (因为我们的坐标系原点是随地球加速运动的)
@@ -913,11 +913,11 @@ public:
     
     double total_mass = mass + fuel;
     double au_meters = 149597870700.0;
-    double sun_angular_vel = 6.2831853 / 31557600.0;
     
     double G_const = 6.67430e-11;
     double M_sun = 1.989e30;
     double GM_sun = G_const * M_sun;
+    double sun_angular_vel = sqrt(GM_sun / (au_meters * au_meters * au_meters));
     double mu_earth = G0 * pow(EARTH_RADIUS, 2);
 
     while (t_remaining > 0) {
@@ -1622,8 +1622,6 @@ int main() {
   Mesh rocketNose = MeshGen::cone(16, 1.0f, 1.0f);
   int cam_mode_3d = 0; // 0=自由轨道, 1=跟踪, 2=全景
   static bool c_was_pressed = false;
-  static bool v_was_pressed = false;
-  bool view_3d = false;
   // 四元数轨道球相机
   Quat cam_quat; // 相机方位四元数 (单位四元数 = 初始位置)
   float cam_zoom_chase = 1.0f; // 轨道/跟踪模式缩放
@@ -1665,16 +1663,8 @@ int main() {
     }
     c_was_pressed = c_now;
 
-    // --- V 键切换 2D/3D 视图 ---
-    bool v_now = glfwGetKey(window, GLFW_KEY_V) == GLFW_PRESS;
-    if (v_now && !v_was_pressed) {
-      view_3d = !view_3d;
-      cout << ">> View: " << (view_3d ? "3D" : "2D") << endl;
-    }
-    v_was_pressed = v_now;
-
     // --- 鼠标轨道控制 (3D模式下右键拖动) ---
-    if (view_3d) {
+    {
       double mx, my;
       glfwGetCursorPos(window, &mx, &my);
       bool rmb = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
@@ -1829,7 +1819,7 @@ int main() {
     // 画面刷新
     // 画面刷新
     float alt_factor = (float)min(baba1.getAltitude() / 50000.0, 1.0);
-    if (view_3d && cam_mode_3d == 2) {
+    if (cam_mode_3d == 2) {
        // 全景视角(Panorama)下背景应该始终为全黑(太空)
        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     } else {
@@ -1839,8 +1829,8 @@ int main() {
     }
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    // ================= 3D 渲染通道 (仅3D模式) =================
-    if (view_3d) {
+    // ================= 3D 渲染通道 =================
+    {
       // 世界坐标缩放
       double ws_d = 0.001;
       float earth_r = (float)EARTH_RADIUS * (float)ws_d;
@@ -1922,15 +1912,15 @@ int main() {
       if (cam_mode_3d == 0) {
         float orbit_dist = rh * 8.0f * cam_zoom_chase;
         Vec3 cam_offset = cam_quat.rotate(Vec3(0.0f, 0.0f, orbit_dist));
-        camEye_rel = renderRocketBase + cam_offset;
-        camTarget_rel = renderRocketBase;
+        camEye_rel = renderRocketPos + cam_offset;
+        camTarget_rel = renderRocketPos;
         camUpVec = cam_quat.rotate(Vec3(0.0f, 1.0f, 0.0f));
       } else if (cam_mode_3d == 1) {
         float chase_dist = rh * 8.0f * cam_zoom_chase;
         Vec3 chase_base = rocketDir * (-chase_dist * 0.4f) + rocketUp * (chase_dist * 0.15f);
         Vec3 slight_off = cam_quat.rotate(Vec3(0.0f, 0.0f, 1.0f));
-        camEye_rel = renderRocketBase + chase_base + slight_off * (chase_dist * 0.05f);
-        camTarget_rel = renderRocketBase + rocketDir * (rh * 3.0f);
+        camEye_rel = renderRocketPos + chase_base + slight_off * (chase_dist * 0.05f);
+        camTarget_rel = renderRocketPos + rocketDir * (rh * 3.0f);
         camUpVec = rocketUp;
       } else {
         float pan_dist = earth_r * 4.0f * cam_zoom_pan;
@@ -2082,14 +2072,27 @@ int main() {
         double abs_vx = baba1.vx * ws_d, abs_vy = baba1.vy * ws_d, abs_vz = 0.0;
 
         if (orbit_reference_sun) {
-            // 地球公转速度
-            double v_orb = sqrt(mu_body / sun_dist_d);
-            double earth_vx = sin(sun_angle_d) * v_orb;
-            double earth_vy = -cos(sun_angle_d) * v_orb;
+            // Use exact same derived sun_angle and sun_angular_vel as physics engine (Burn)
+            double G_const = 6.67430e-11;
+            double M_sun = 1.989e30;
+            double GM_sun = G_const * M_sun;
+            double au_meters = 149597870700.0;
+            double sun_angular_vel = sqrt(GM_sun / (au_meters * au_meters * au_meters));
+            
+            double exact_sun_angle = -1.2 + sun_angular_vel * baba1.sim_time;
+            
+            // Earth's exact orbital velocity matching the physics steps
+            double earth_vx = -sin(exact_sun_angle) * au_meters * sun_angular_vel;
+            double earth_vy = cos(exact_sun_angle) * au_meters * sun_angular_vel;
             
             // 地心相对日心为 -sunPos
-            abs_px -= sun_px; abs_py -= sun_py; abs_pz -= sun_pz;
-            abs_vx += earth_vx; abs_vy += earth_vy;
+            abs_px -= cos(exact_sun_angle) * au_meters; 
+            abs_py -= sin(exact_sun_angle) * au_meters; 
+            abs_pz -= sun_pz;
+
+            // Notice we are NOT scaling the velocity by ws_d, because earth_vx is already correct scale
+            abs_vx += earth_vx * ws_d; 
+            abs_vy += earth_vy * ws_d;
         }
 
         double r_len = sqrt(abs_px*abs_px + abs_py*abs_py + abs_pz*abs_pz);
@@ -2098,10 +2101,9 @@ int main() {
         if (v_len > 0.001f && r_len > earth_r * 0.5f) {
           double energy = 0.5 * v_len * v_len - mu_body / r_len;
           
-          Vec3 h_vec( (float)(abs_px * abs_vy - abs_py * abs_vx), 
-                      (float)(abs_py * abs_vz - abs_pz * abs_vy),
-                      (float)(abs_pz * abs_vx - abs_px * abs_vz) );
-          if (orbit_reference_sun) h_vec.z = 0.0f; // Force planar for 2D map accuracy
+          Vec3 h_vec( (float)(abs_py * abs_vz - abs_pz * abs_vy), 
+                      (float)(abs_pz * abs_vx - abs_px * abs_vz),
+                      (float)(abs_px * abs_vy - abs_py * abs_vx) );
 
           float h = h_vec.length();
           double a = -mu_body / (2.0 * energy);
@@ -2334,534 +2336,6 @@ int main() {
     float h = max(0.06f, (float)(40.0 * scale));
     float y_offset = -h / 2.0f;
 
-    if (!view_3d) {
-    // =================【太空背景星空】=================
-    if (baba1.getAltitude() > 5000.0) {
-      float star_alpha =
-          (float)min(1.0, (baba1.getAltitude() - 5000.0) / 45000.0);
-      for (int i = 0; i < 200; i++) {
-        float sx = hash11(i * 7919) * 2.0f - 1.0f; // -1 ~ 1
-        float sy = hash11(i * 6271) * 2.0f - 1.0f;
-        float brightness = 0.5f + hash11(i * 3571) * 0.5f;
-        float star_size = 0.002f + hash11(i * 4219) * 0.003f;
-        renderer->addRect(sx, sy, star_size, star_size, brightness, brightness,
-                          brightness * 0.9f, star_alpha * brightness);
-      }
-    }
-
-
-    // 1. 画地球 (加上 y_offset)
-    renderer->addEarthWithContinents(toScreenX(0, 0),
-                                     toScreenY(0, 0) + y_offset,
-                                     EARTH_RADIUS * scale, cam_angle);
-    renderer->addAtmosphereGlow(toScreenX(0, 0), toScreenY(0, 0) + y_offset,
-                                EARTH_RADIUS * scale, cam_angle);
-    // 轨道线延迟到再入特效之后绘制（见下方）
-
-    // 3. 画发射台 (放在地表，加上 y_offset)
-    renderer->addRotatedRect(
-        toScreenX(0, EARTH_RADIUS),
-        toScreenY(0, EARTH_RADIUS) + y_offset - 25.0f * scale, 100.0f * scale,
-        50.0f * scale, (float)-cam_angle, 0.5f, 0.5f, 0.5f);
-
-    // =================【新增功能：无限程序化生成植被系统】=================
-    // 高度限制：只在 20km (20000米) 以下渲染树木，内存占用 O(1)！
-    if (baba1.getAltitude() < 20000.0) {
-      float baseTrunkW = 5.0f;
-      float baseTrunkH = 15.0f;
-      float baseLeafW = 18.0f;
-      float baseLeafH = 28.0f;
-
-      // 1. 获取火箭当前的绝对极角 (0 ~ 2PI)
-      double rocket_theta = atan2(baba1.py, baba1.px);
-      if (rocket_theta < 0)
-        rocket_theta += 2.0 * PI;
-
-      // 2. 定义视距：只计算火箭前后各 0.03 弧度 (约 200 公里范围)
-      double view_range = 0.03;
-
-      // 3. 将整个地球划分为无数个 15 米宽的虚拟网格
-      double grid_step = 15.0 / EARTH_RADIUS;
-      int total_grids = (int)ceil((2.0 * PI) / grid_step); // 地球一圈总网格数
-
-      // 计算视野内覆盖了哪些网格索引
-      int start_idx = (int)floor((rocket_theta - view_range) / grid_step);
-      int end_idx = (int)ceil((rocket_theta + view_range) / grid_step);
-
-      for (int i = start_idx; i <= end_idx; ++i) {
-        // 解决绕地球一圈后的索引越界问题
-        int wrapped_i = (i % total_grids + total_grids) % total_grids;
-
-        // 【核心魔法】：用网格索引算命！
-        float random_presence = hash11(wrapped_i * 12345);
-        // 只有 35% 的概率这个槽位会有一棵树，形成错落有致的森林
-        if (random_presence > 0.35f)
-          continue;
-
-        // 通过索引反推这棵树在地球上的真实物理极角
-        double tree_angle = wrapped_i * grid_step;
-
-        // 【海洋剔除】：同步大陆级地球渲染逻辑
-        float tree_pos = (float)(tree_angle / (2.0 * PI)); // 0~1
-        bool tree_on_land = false;
-        for (int c = 0; c < 8; c++) {
-          float cc = (float)c / 8.0f + hash11(c * 9973) * 0.08f;
-          if (cc > 1.0f) cc -= 1.0f;
-          float chw = 0.03f + hash11(c * 7333) * 0.07f;
-          float d = abs(tree_pos - cc);
-          if (d > 0.5f) d = 1.0f - d;
-          if (d < chw) { tree_on_land = true; break; }
-        }
-        if (!tree_on_land)
-          continue; // 海洋区域，跳过！
-
-        // 发射台避让区 (PI/2 附近 80 米范围)
-        if (abs(tree_angle - PI / 2.0) < 0.000012)
-          continue;
-
-        // 计算随机大小 (0.5 ~ 1.5 倍)
-        float random_size = 0.5f + hash11(wrapped_i * 54321) * 1.0f;
-
-        // 计算坐标
-        double wx = EARTH_RADIUS * cos(tree_angle);
-        double wy = EARTH_RADIUS * sin(tree_angle);
-        float screenX = toScreenX(wx, wy);
-        float screenY = toScreenY(wx, wy) + y_offset;
-
-        float finalScale = (float)scale * random_size;
-        float tW = baseTrunkW * finalScale;
-        float tH = baseTrunkH * finalScale;
-        float lW = baseLeafW * finalScale;
-        float lH = baseLeafH * finalScale;
-
-        // 计算法线角度：让树木向外生长，同时考虑视角的相对旋转
-        double angle_diff =
-            tree_angle -
-            (rocket_theta > PI ? rocket_theta - 2 * PI : rocket_theta);
-        if (angle_diff > PI)
-          angle_diff -= 2 * PI;
-        if (angle_diff < -PI)
-          angle_diff += 2 * PI;
-        float screen_normal_angle = (float)angle_diff;
-
-        Vec2 trunk_offset = {0, tH / 2.0f};
-        trunk_offset =
-            rotateVec(trunk_offset.x, trunk_offset.y, screen_normal_angle);
-        Vec2 leaf_offset = {0, tH + lH / 2.0f};
-        leaf_offset =
-            rotateVec(leaf_offset.x, leaf_offset.y, screen_normal_angle);
-
-        renderer->addRotatedRect(screenX + trunk_offset.x,
-                                 screenY + trunk_offset.y, tW, tH,
-                                 screen_normal_angle, 0.4f, 0.25f, 0.1f);
-        renderer->addRotatedTri(screenX + leaf_offset.x,
-                                screenY + leaf_offset.y, lW, lH,
-                                screen_normal_angle, 0.1f, 0.6f, 0.2f);
-      }
-    }
-    // =================================================================
-    // 绘制轨道线（可用 O 键切换）
-    if (show_orbit) {
-      double earth_mu = 9.80665 * 6371000.0 * 6371000.0;
-      double sun_mu = 6.67430e-11 * 1.989e30; 
-      double draw_mu = orbit_reference_sun ? sun_mu : earth_mu;
-      
-      double sun_angular_vel = 6.2831853 / 31557600.0;
-      double sun_angle = -1.2 + sun_angular_vel * baba1.sim_time; 
-      double au = 149597870700.0;
-      double current_sun_px = cos(sun_angle) * au;
-      double current_sun_py = sin(sun_angle) * au;
-      
-      // 太阳在地球参考系下的速度 (地球静止，太阳公转)
-      double current_sun_vx = -sin(sun_angle) * au * sun_angular_vel;
-      double current_sun_vy = cos(sun_angle) * au * sun_angular_vel;
-      
-      double draw_bx = orbit_reference_sun ? current_sun_px : 0.0;
-      double draw_by = orbit_reference_sun ? current_sun_py : 0.0;
-      double draw_bvx = orbit_reference_sun ? current_sun_vx : 0.0;
-      double draw_bvy = orbit_reference_sun ? current_sun_vy : 0.0;
-      double draw_br = orbit_reference_sun ? 696340000.0 : EARTH_RADIUS; 
-
-      drawOrbit(renderer, baba1.px, baba1.py, baba1.vx, baba1.vy,
-                draw_bx, draw_by, draw_bvx, draw_bvy, draw_mu, draw_br, 
-                scale, cx, cy, cam_angle, rocket_r);
-    }
-    // ================= 特效 1: 弓形再入激波 + 流星尾 (Meteor Reentry) =================
-    double speed = baba1.getVelocityMag();
-    double alt = baba1.getAltitude();
-    if (alt < 70000.0 && speed > 2000.0) {
-      float intensity = (float)min(1.0, (speed - 2000.0) / 3000.0) *
-                        (float)(1.0 - alt / 70000.0);
-      double svx = baba1.vx * cos_c - baba1.vy * sin_c;
-      double svy = baba1.vx * sin_c + baba1.vy * cos_c;
-      double move_angle = atan2(svx, svy);
-      float render_angle = (float)(move_angle + PI);
-
-      // A. 弓形激波 — 真正的弧形，用多个小块排列成弧线
-      float bow_base = h / 2.0f + w * 0.3f;
-      for (int layer = 0; layer < 6; layer++) {
-        float lf = (float)layer / 6.0f;
-        float arc_radius = w * (1.5f + lf * 2.0f) * (0.8f + intensity * 0.5f);
-        float dist = bow_base + layer * w * 0.15f;
-        int arc_pts = 7 + layer * 2; // 弧线细分点数
-        for (int a = 0; a < arc_pts; a++) {
-          float af = (float)a / (float)(arc_pts - 1) - 0.5f; // -0.5 ~ 0.5
-          // 沿弧线分布
-          float arc_x = af * arc_radius * 2.0f;
-          float arc_y = dist - af * af * arc_radius * 1.5f; // 弓形：中心最前，两端向后扫
-          // 旋转到速度方向
-          float rx = (float)(arc_x * cos(move_angle) + arc_y * sin(move_angle));
-          float ry = (float)(-arc_x * sin(move_angle) + arc_y * cos(move_angle));
-          // 抖动
-          float jx = (hash11(layer * 2917 + a * 137 + frame * 3) - 0.5f) * w * 0.2f;
-          float jy = (hash11(layer * 4111 + a * 211 + frame * 5) - 0.5f) * w * 0.2f;
-          float bpx = cx + rx + jx;
-          float bpy = cy + ry + jy;
-          float block_size = w * (0.4f + lf * 0.3f) * (1.0f - abs(af) * 0.5f);
-          float lr = 1.0f;
-          float lg = 0.95f - lf * 0.5f - abs(af) * 0.3f;
-          float lb = 0.7f - lf * 0.6f;
-          float la = intensity * (0.9f - lf * 0.1f) * (1.0f - abs(af) * 0.6f);
-          renderer->addRect(bpx, bpy, block_size, block_size * 0.7f,
-                            lr, lg, lb, la);
-        }
-      }
-
-      // B. 侧向扩散火焰翅膀 — 更长更宽
-      float wing_len = w * (3.0f + intensity * 8.0f);
-      float wing_w = h * 0.5f * intensity;
-      float side_nx = (float)cos(move_angle);
-      float side_ny = (float)-sin(move_angle);
-      float tail_dx = -(float)sin(move_angle);
-      float tail_dy = -(float)cos(move_angle);
-      for (int side = -1; side <= 1; side += 2) {
-        for (int f = 0; f < 5; f++) {
-          float ff = (float)f / 5.0f;
-          float jitter = (hash11(f * 3917 + side * 100 + frame * 7) - 0.5f) * w * 0.5f;
-          float sx = cx + side_nx * (w * 0.5f + wing_len * ff) * side
-                       + tail_dx * (wing_w * ff * 0.5f + jitter);
-          float sy = cy + side_ny * (w * 0.5f + wing_len * ff) * side
-                       + tail_dy * (wing_w * ff * 0.5f + jitter);
-          float fw = w * 0.5f * (1.0f - ff * 0.4f);
-          float fh = wing_w * (1.0f - ff * 0.5f);
-          float fa_wing = intensity * (0.7f - ff * 0.15f);
-          renderer->addRotatedRect(sx, sy, fw, fh, render_angle,
-                                   1.0f, 0.8f - ff * 0.6f, 0.3f - ff * 0.3f,
-                                   fa_wing);
-        }
-      }
-
-      // C. 流星尾迹 — 最长 20 倍火箭高度！
-      float tail_total_len = h * (8.0f + intensity * 12.0f);
-      int tail_segments = 30;
-      for (int t = 0; t < tail_segments; t++) {
-        float tt = (float)(t + 1) / (float)tail_segments;
-        float seg_dist = tail_total_len * tt;
-        // 尾部随机晃动
-        float jitter_x = (hash11(t * 3917 + frame) - 0.5f) * w * 1.5f * tt;
-        float jitter_y = (hash11(t * 7121 + frame) - 0.5f) * w * 0.5f * tt;
-        float tx = cx + tail_dx * seg_dist + side_nx * jitter_x + tail_dx * jitter_y;
-        float ty = cy + tail_dy * seg_dist + side_ny * jitter_x + tail_dy * jitter_y;
-        // 宽度从粗到细 (缓慢收窄)
-        float seg_w = w * (1.5f - tt * tt * 1.0f);
-        float seg_h = tail_total_len / tail_segments * 2.2f; // 加大重叠消除明暗相间
-        // 颜色：前 70% 保持浓密白黄，最后才变暗红消散
-        float fade = tt * tt * tt; // 立方衰减：前80%几乎不变，最后急速消退
-        float cr = 1.0f;
-        float cg = max(0.0f, 0.95f - fade * 1.2f);
-        float cb = max(0.0f, 0.7f - fade * 1.5f);
-        float ca = intensity * (0.9f - fade * 0.9f);
-        if (ca > 0.01f) {
-          renderer->addRotatedRect(tx, ty, seg_w, seg_h, render_angle,
-                                   cr, cg, cb, ca);
-        }
-      }
-
-      // D. 等离子粒子点缀
-      for (int p = 0; p < 12; p++) {
-        float rnd_x = (hash11(p * 3917 + frame) - 0.5f) * w * 3.0f;
-        float rnd_y = -(hash11(p * 7121 + frame) * h * 1.5f);
-        Vec2 poff = rotateVec(rnd_x, rnd_y, move_angle);
-        float pa = intensity * (0.3f + hash11(p * 2131) * 0.3f);
-        float ps = w * 0.15f * (0.5f + hash11(p * 4513) * 0.5f);
-        renderer->addRect(cx + poff.x, cy + poff.y, ps, ps, 1.0f, 0.6f, 0.2f,
-                          pa);
-      }
-    }
-    // ================= 特效 2 & 3: 动态粒子尾焰 & 着陆烟尘 =================
-    double thrust_kN = baba1.getThrust() / 1000.0;
-    if (thrust_kN > 10.0) { // 有推力就显示
-      float throttle_factor = (float)(baba1.throttle);
-      float flameLen =
-          (thrust_kN / 3000.0f) * h * 2.5f;
-      // 真空中尾焰扩散（最大1.8倍）
-      float vacuum_expand = 1.0f + (float)min(0.8, baba1.getAltitude() / 50000.0);
-      float flameW = w * 0.9f * vacuum_expand;
-
-      // 计算尾焰尖端是否触地
-      double nozzle_up = atan2(baba1.py, baba1.px);
-      double nozzle_dir = nozzle_up + baba1.angle + PI;
-      double flame_tip_r_world = flameLen / scale; // 尾焰长度转世界坐标
-      double tip_wx = baba1.px + cos(nozzle_dir) * (20.0 + flame_tip_r_world);
-      double tip_wy = baba1.py + sin(nozzle_dir) * (20.0 + flame_tip_r_world);
-      double tip_r = sqrt(tip_wx * tip_wx + tip_wy * tip_wy);
-      bool flame_hits_ground = (tip_r < EARTH_RADIUS && baba1.getAltitude() < 300.0);
-
-      // --- A. 动态火焰粒子群 ---
-      int flame_particles = 15 + (int)(throttle_factor * 10);
-      for (int p = 0; p < flame_particles; p++) {
-        float pf = (float)p / (float)flame_particles;
-        // 每个粒子沿尾焰轴线分布，带随机偏移
-        float dist = flameLen * (0.1f + pf * 0.9f);
-        float jitter_x = (hash11(p * 3917 + frame * 7) - 0.5f) * flameW * 1.2f;
-        float jitter_y = (hash11(p * 7121 + frame * 13) - 0.5f) * flameLen * 0.15f;
-        Vec2 fp_off = {jitter_x, -h / 2.0f - dist + jitter_y};
-        fp_off = rotateVec(fp_off.x, fp_off.y, baba1.angle);
-        // 大小从粗到细
-        float ps = flameW * (1.0f - pf * 0.7f) * (0.6f + hash11(p * 2131 + frame * 3) * 0.4f);
-        // 颜色从白黄到橙红
-        float cr = 1.0f;
-        float cg = max(0.0f, 0.9f - pf * 0.8f + (hash11(p * 4513 + frame * 5) - 0.5f) * 0.2f);
-        float cb = max(0.0f, 0.5f - pf * 0.8f);
-        float ca = throttle_factor * (0.8f - pf * 0.5f);
-        // 地面偏转：火焰粒子不穿模，撞到地面向两边扩散
-        float draw_x = cx + fp_off.x;
-        float draw_y = cy + fp_off.y;
-        if (flame_hits_ground) {
-          // 检查粒子世界位置是否在地下
-          double p_wx = baba1.px + (double)(fp_off.x) / scale;
-          double p_wy = baba1.py + (double)(fp_off.y) / scale;
-          double p_r = sqrt(p_wx * p_wx + p_wy * p_wy);
-          if (p_r < EARTH_RADIUS) {
-            // 将粒子推到地表并沿切向偏移
-            double pnx = p_wx / p_r, pny = p_wy / p_r;
-            p_wx = pnx * EARTH_RADIUS;
-            p_wy = pny * EARTH_RADIUS;
-            // 切向偏移（向两侧扩散）
-            double ptx = -pny, pty = pnx;
-            float side_spread = (hash11(p * 1171 + frame * 3) - 0.5f) * 2.0f;
-            p_wx += ptx * side_spread * (double)(flameW / scale) * 1.5;
-            p_wy += pty * side_spread * (double)(flameW / scale) * 1.5;
-            draw_x = toScreenX(p_wx, p_wy);
-            draw_y = toScreenY(p_wx, p_wy) + y_offset;
-            // 粒子变扁，贴地扩散
-            renderer->addRect(draw_x, draw_y, ps * 1.5f, ps * 0.3f,
-                              cr, cg, cb, ca * 0.7f);
-            continue;
-          }
-        }
-        renderer->addRect(draw_x, draw_y, ps, ps * 0.6f,
-                          cr, cg, cb, ca);
-      }
-
-      // --- A2. 火焰撞地时产生烟雾 ---
-      if (flame_hits_ground && baba1.getAltitude() < 200.0) {
-        float ground_factor = (float)(1.0 - baba1.getAltitude() / 200.0);
-        double up_angle = atan2(baba1.py, baba1.px);
-        double impact_wx = EARTH_RADIUS * cos(up_angle);
-        double impact_wy = EARTH_RADIUS * sin(up_angle);
-        double inx = cos(up_angle), iny = sin(up_angle);
-        double itx = -iny, ity = inx;
-        int num_impact_smoke = (int)(2.0f * ground_factor * (float)baba1.throttle) + 1;
-        for (int k = 0; k < num_impact_smoke; k++) {
-          SmokeParticle& sp = baba1.smoke[baba1.smoke_idx % Explorer::MAX_SMOKE];
-          float dir = (hash11(baba1.smoke_idx * 2917 + k) - 0.5f) * 2.0f;
-          float spd = 10.0f + hash11(baba1.smoke_idx * 4111 + k) * 30.0f * ground_factor;
-          sp.wx = impact_wx + itx * dir * 10.0 + inx * 3.0;
-          sp.wy = impact_wy + ity * dir * 10.0 + iny * 3.0;
-          sp.vwx = itx * dir * spd + inx * spd * 0.3;
-          sp.vwy = ity * dir * spd + iny * spd * 0.3;
-          sp.alpha = 0.25f * ground_factor;
-          sp.size = 6.0f + hash11(baba1.smoke_idx * 7331 + k) * 8.0f;
-          sp.life = 1.0f;
-          sp.active = true;
-          baba1.smoke_idx++;
-        }
-      }
-
-      // --- B. 动态马赫环 (Shock Diamonds) ---
-      if (throttle_factor > 0.1f) {
-        int num_diamonds = max(1, (int)(throttle_factor * 5));
-        float diamond_spacing = flameLen / (num_diamonds + 1);
-        for (int i = 1; i <= num_diamonds; i++) {
-          // 每帧随机抖动 + 闪烁
-          float d_jx = (hash11(i * 4937 + frame * 11) - 0.5f) * flameW * 0.3f;
-          float d_jy = (hash11(i * 6173 + frame * 17) - 0.5f) * diamond_spacing * 0.1f;
-          float d_flicker = 0.7f + hash11(i * 8291 + frame * 7) * 0.3f;
-          float d_size = flameW * (0.4f + hash11(i * 3571 + frame * 3) * 0.2f);
-          Vec2 diamond_pos = {d_jx, -h / 2.0f - diamond_spacing * i + d_jy};
-          diamond_pos = rotateVec(diamond_pos.x, diamond_pos.y, baba1.angle);
-          renderer->addRotatedRect(cx + diamond_pos.x, cy + diamond_pos.y,
-                                   d_size, d_size,
-                                   (float)baba1.angle + PI / 4.0f, 1.0f, 0.9f,
-                                   0.7f, d_flicker * throttle_factor);
-        }
-      }
-    }
-    // ====================================================================
-    // ===== 精细火箭箔体 (无缝拼接版) =====
-    float fa = (float)baba1.angle;
-    // 布局 (从底到顶，总高 h)：
-    //   发动机喷口: 倒三角，顶边在 -h/2
-    //   下段燃料箱: 高度 0.5h， 中心在 -h*0.10
-    //   级间段:     高度 0.08h，中心在 h*0.15
-    //   上段设备舱: 高度 0.30h，中心在 h*0.34
-    //   鼻锥:       顶边在 h/2
-
-    // 下段（燃料箱）白色 — 高0.50h, 中心 y = -0.10h (底边=-0.35h, 顶边=0.15h 不重叠)
-    float lower_h = h * 0.52f;
-    Vec2 lower_off = {0, -h * 0.08f};
-    lower_off = rotateVec(lower_off.x, lower_off.y, fa);
-    renderer->addRotatedRect(cx + lower_off.x, cy + lower_off.y, w, lower_h,
-                             fa, 0.92f, 0.92f, 0.92f);
-    // 级间段（深灰）— 高0.08h, 中心 y = 0.18h (底=0.14h, 顶=0.22h)
-    float inter_h = h * 0.10f;
-    Vec2 inter_off = {0, h * 0.18f};
-    inter_off = rotateVec(inter_off.x, inter_off.y, fa);
-    renderer->addRotatedRect(cx + inter_off.x, cy + inter_off.y, w * 1.05f,
-                             inter_h, fa, 0.3f, 0.3f, 0.3f);
-    // 上段（设备舱）浅灰 — 高0.28h, 中心 y = 0.34h (底=0.20h, 顶=0.48h)
-    float upper_h = h * 0.30f;
-    Vec2 upper_off = {0, h * 0.34f};
-    upper_off = rotateVec(upper_off.x, upper_off.y, fa);
-    renderer->addRotatedRect(cx + upper_off.x, cy + upper_off.y, w * 0.95f,
-                             upper_h, fa, 0.85f, 0.85f, 0.88f);
-    // 黑色涂装带
-    Vec2 band_off = {0, h * 0.18f};
-    band_off = rotateVec(band_off.x, band_off.y, fa);
-    renderer->addRotatedRect(cx + band_off.x, cy + band_off.y, w * 1.02f,
-                             h * 0.06f, fa, 0.1f, 0.1f, 0.1f);
-    // 栏格翼 x2
-    Vec2 gf_l = {-w * 0.6f, h * 0.2f};
-    gf_l = rotateVec(gf_l.x, gf_l.y, fa);
-    Vec2 gf_r = {w * 0.6f, h * 0.2f};
-    gf_r = rotateVec(gf_r.x, gf_r.y, fa);
-    renderer->addRotatedRect(cx + gf_l.x, cy + gf_l.y, w * 0.25f, h * 0.12f, fa,
-                             0.25f, 0.25f, 0.25f);
-    renderer->addRotatedRect(cx + gf_r.x, cy + gf_r.y, w * 0.25f, h * 0.12f, fa,
-                             0.25f, 0.25f, 0.25f);
-    // 发动机裙部 — 倒三角朝下，顶边紧贴燃料箱底部 (-0.34h)
-    float eng_tri_h = w * 0.35f;
-    Vec2 eng_off = {0, -h * 0.34f - eng_tri_h / 2.0f};
-    eng_off = rotateVec(eng_off.x, eng_off.y, fa);
-    renderer->addRotatedTri(cx + eng_off.x, cy + eng_off.y, w * 1.3f, eng_tri_h,
-                            fa + (float)PI, 0.35f, 0.35f, 0.38f);
-    // 鼻锥（深灰）— 底边紧贴上段顶部 (0.49h)
-    float nose_h = w * 0.9f;
-    Vec2 nose_offset = {0, h * 0.49f + nose_h / 2.0f};
-    nose_offset = rotateVec(nose_offset.x, nose_offset.y, fa);
-    renderer->addRotatedTri(cx + nose_offset.x, cy + nose_offset.y, w, nose_h, fa,
-                            0.35f, 0.35f, 0.4f);
-
-    // =================【新增特效：RCS 侧推喷射火焰】=================
-    // 条件：太空中 (>80km) 且有力矩指令
-    if (baba1.getAltitude() > 80000.0 && abs(baba1.torque_cmd) > 1000.0) {
-      float rcs_len = w * 0.6f;
-      float rcs_w = w * 0.3f;
-      float rcs_alpha = (float)min(1.0, abs(baba1.torque_cmd) / 30000.0) * 0.8f;
-
-      // 上部RCS位置 (火箭顶部侧面)
-      Vec2 rcs_top_offset = {(baba1.torque_cmd > 0 ? -w / 2.0f : w / 2.0f),
-                             h * 0.35f};
-      rcs_top_offset =
-          rotateVec(rcs_top_offset.x, rcs_top_offset.y, baba1.angle);
-      float rcs_angle_top =
-          (float)baba1.angle +
-          (baba1.torque_cmd > 0 ? (float)PI / 2.0f : -(float)PI / 2.0f);
-      renderer->addRotatedTri(cx + rcs_top_offset.x, cy + rcs_top_offset.y,
-                              rcs_w, rcs_len, rcs_angle_top, 1.0f, 0.9f, 0.7f,
-                              rcs_alpha);
-
-      // 底部RCS位置 (火箭底部反向)
-      Vec2 rcs_bot_offset = {(baba1.torque_cmd > 0 ? w / 2.0f : -w / 2.0f),
-                             -h * 0.35f};
-      rcs_bot_offset =
-          rotateVec(rcs_bot_offset.x, rcs_bot_offset.y, baba1.angle);
-      float rcs_angle_bot =
-          (float)baba1.angle +
-          (baba1.torque_cmd > 0 ? -(float)PI / 2.0f : (float)PI / 2.0f);
-      renderer->addRotatedTri(cx + rcs_bot_offset.x, cy + rcs_bot_offset.y,
-                              rcs_w, rcs_len, rcs_angle_bot, 1.0f, 0.9f, 0.7f,
-                              rcs_alpha);
-    }
-
-    // =================【新增特效：着陆腿展开动画】=================
-    if (baba1.status == Explorer::DESCEND && baba1.getAltitude() < 5000.0) {
-      // 展开进度 0~1 动画
-      baba1.leg_deploy_progress = min(1.0, baba1.leg_deploy_progress + 0.02);
-    }
-    if (baba1.leg_deploy_progress > 0.01) {
-      float leg_angle_max = (float)(PI / 4.0); // 最大展开 45度
-      float leg_current = leg_angle_max * (float)baba1.leg_deploy_progress;
-      float leg_len = h * 0.35f;
-      float leg_w_px = w * 0.12f;
-
-      // 左腿
-      Vec2 leg_base_L = {-w * 0.3f, -h / 2.0f};
-      leg_base_L = rotateVec(leg_base_L.x, leg_base_L.y, baba1.angle);
-      float leg_angle_L = (float)baba1.angle - leg_current;
-      Vec2 leg_ext_L = {0, -leg_len / 2.0f};
-      leg_ext_L = rotateVec(leg_ext_L.x, leg_ext_L.y, (double)leg_angle_L);
-      renderer->addRotatedRect(cx + leg_base_L.x + leg_ext_L.x,
-                               cy + leg_base_L.y + leg_ext_L.y, leg_w_px,
-                               leg_len, leg_angle_L, 0.4f, 0.4f, 0.4f);
-
-      // 右腿
-      Vec2 leg_base_R = {w * 0.3f, -h / 2.0f};
-      leg_base_R = rotateVec(leg_base_R.x, leg_base_R.y, baba1.angle);
-      float leg_angle_R = (float)baba1.angle + leg_current;
-      Vec2 leg_ext_R = {0, -leg_len / 2.0f};
-      leg_ext_R = rotateVec(leg_ext_R.x, leg_ext_R.y, (double)leg_angle_R);
-      renderer->addRotatedRect(cx + leg_base_R.x + leg_ext_R.x,
-                               cy + leg_base_R.y + leg_ext_R.y, leg_w_px,
-                               leg_len, leg_angle_R, 0.4f, 0.4f, 0.4f);
-    }
-
-    // =================【新增特效：着陆烟尘】=================
-    // 只在下降状态才显示，防止起飞时出现横杠
-    if (baba1.status == Explorer::DESCEND && baba1.getThrust() > 0 &&
-        baba1.getAltitude() < 200.0 && baba1.getAltitude() > 0.5) {
-      float dust_intensity =
-          (float)(1.0 - baba1.getAltitude() / 200.0) * (float)(baba1.throttle);
-      float dust_spread = w * 3.0f * dust_intensity;
-      float dust_h = h * 0.15f;
-
-      // 左右两团烟尘
-      Vec2 dust_base = {0, -h / 2.0f - dust_h};
-      dust_base = rotateVec(dust_base.x, dust_base.y, baba1.angle);
-
-      renderer->addRotatedRect(cx + dust_base.x - dust_spread, cy + dust_base.y,
-                               dust_spread * 1.5f, dust_h, (float)baba1.angle,
-                               0.6f, 0.5f, 0.4f, 0.4f * dust_intensity);
-      renderer->addRotatedRect(cx + dust_base.x + dust_spread, cy + dust_base.y,
-                               dust_spread * 1.5f, dust_h, (float)baba1.angle,
-                               0.6f, 0.5f, 0.4f, 0.4f * dust_intensity);
-      // 中心热浪
-      renderer->addRotatedRect(
-        cx + dust_base.x, cy + dust_base.y - dust_h * 0.5f,
-          dust_spread * 0.8f, dust_h * 2.0f, (float)baba1.angle, 0.8f, 0.6f,
-          0.3f, 0.2f * dust_intensity);
-    }
-
-    // =================【新增特效：世界坐标烟雾粒子】=================
-    for (int i = 0; i < Explorer::MAX_SMOKE; i++) {
-      if (!baba1.smoke[i].active) continue;
-      float sx = toScreenX(baba1.smoke[i].wx, baba1.smoke[i].wy);
-      float sy = toScreenY(baba1.smoke[i].wx, baba1.smoke[i].wy) + y_offset;
-      float ss = (float)(baba1.smoke[i].size * scale);
-      if (ss < 0.001f) continue;
-      // 随机旋转角 — 让粒子不是正方形
-      float rot = hash11(i * 5431) * (float)PI;
-      // 新粒子更白，老粒子变灰（模拟真实火箭烟雾）
-      float smoke_age = 1.0f - baba1.smoke[i].life;
-      float sr = 0.95f - smoke_age * 0.25f;
-      float sg = 0.93f - smoke_age * 0.28f;
-      float sb = 0.90f - smoke_age * 0.30f;
-      renderer->addRotatedRect(sx, sy, ss, ss * (0.6f + hash11(i * 3217) * 0.4f),
-                               rot, sr, sg, sb, baba1.smoke[i].alpha);
-    }
-
-    } // end if (!view_3d)
 
     // ====================================================================
     // ===== 2D 叠加层 HUD =====
