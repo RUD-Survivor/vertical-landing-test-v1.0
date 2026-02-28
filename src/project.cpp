@@ -687,6 +687,8 @@ int main() {
   // 激活硬件级多重采样抗锯齿
   glEnable(GL_MULTISAMPLE);
   renderer = new Renderer();
+  
+  PhysicsSystem::InitSolarSystem();
 
   // =========================================================
   // BUILD 阶段：火箭组装界面
@@ -774,6 +776,7 @@ int main() {
   // =========================================================
   Renderer3D* r3d = new Renderer3D();
   Mesh earthMesh = MeshGen::sphere(48, 64, 1.0f);  // 单位球，用 model 矩阵缩放
+  Mesh ringMesh = MeshGen::ring(64, 0.45f, 1.0f);   // 环形网格(内径0.45, 外径1.0)
   Mesh rocketBody = MeshGen::cylinder(32, 1.0f, 1.0f);
   Mesh rocketNose = MeshGen::cone(32, 1.0f, 1.0f);
   Mesh rocketBox  = MeshGen::box(1.0f, 1.0f, 1.0f);
@@ -1012,34 +1015,33 @@ int main() {
       double ws_d = 0.001;
       float earth_r = (float)EARTH_RADIUS * (float)ws_d;
 
-      // 2D→3D 坐标映射 (Double precision)
-      double r_px = rocket_state.px * ws_d;
-      double r_py = rocket_state.py * ws_d;
-      double r_pz = rocket_state.pz * ws_d;
+      // 2D→3D 坐标映射 (Double precision) - Use absolute heliocentric coordinates!
+      double r_px = rocket_state.abs_px * ws_d;
+      double r_py = rocket_state.abs_py * ws_d;
+      double r_pz = rocket_state.abs_pz * ws_d;
       
-      // ===== 太阳位置与昼夜交替 (Double precision) =====
-      double G_const_d = 6.67430e-11;
-      double M_sun_d = 1.989e30;
-      double GM_sun_d = G_const_d * M_sun_d;
-      double au_meters_d = 149597870700.0;
-      double sun_angular_vel = sqrt(GM_sun_d / (au_meters_d * au_meters_d * au_meters_d));
-      
-      double sun_angle_d = -1.2 + sun_angular_vel * rocket_state.sim_time;
-      double sun_dist_d = au_meters_d * ws_d;
-      double sun_px = cos(sun_angle_d) * sun_dist_d;
-      double sun_py = sin(sun_angle_d) * sun_dist_d;
-      double sun_pz = 0.0;
-      
-      float sun_radius = earth_r * 109.2f;
+      // ===== 太阳位置与真实尺寸 =====
+      CelestialBody& sun_body = SOLAR_SYSTEM[0];
+      double sun_px = sun_body.px * ws_d;
+      double sun_py = sun_body.py * ws_d;
+      double sun_pz = sun_body.pz * ws_d;
+      float sun_radius = (float)sun_body.radius * ws_d;
+      double sun_dist_d = sqrt(r_px*r_px + r_py*r_py + r_pz*r_pz);
 
       // ===== 按键监听：视点切换 =====
-      static int focus_target = 0; // 0=地球, 1=太阳
+      static int focus_target = 3; // Default to Earth
       static bool comma_prev = false;
       static bool period_prev = false;
       bool comma_now = glfwGetKey(window, GLFW_KEY_COMMA) == GLFW_PRESS;
       bool period_now = glfwGetKey(window, GLFW_KEY_PERIOD) == GLFW_PRESS;
-      if (comma_now && !comma_prev) focus_target = 0;
-      if (period_now && !period_prev) focus_target = 1;
+      if (comma_now && !comma_prev) {
+          focus_target--;
+          if (focus_target < 0) focus_target = SOLAR_SYSTEM.size() - 1;
+      }
+      if (period_now && !period_prev) {
+          focus_target++;
+          if (focus_target >= SOLAR_SYSTEM.size()) focus_target = 0;
+      }
       comma_prev = comma_now; period_prev = period_now;
 
       // --- FLOATING ORIGIN FIX (True Double Precision) ---
@@ -1048,21 +1050,24 @@ int main() {
       if (cam_mode_3d == 0 || cam_mode_3d == 1) {
           ro_x = r_px; ro_y = r_py; ro_z = r_pz;
       } else {
-          if (focus_target == 0) { ro_x = 0.0; ro_y = 0.0; ro_z = 0.0; }
-          else { ro_x = sun_px; ro_y = sun_py; ro_z = sun_pz; }
+          ro_x = SOLAR_SYSTEM[focus_target].px * ws_d; 
+          ro_y = SOLAR_SYSTEM[focus_target].py * ws_d; 
+          ro_z = SOLAR_SYSTEM[focus_target].pz * ws_d; 
       }
       
       // 计算相对于渲染中心的 3D 物体坐标 (直接转成 float 后不会再有远距离网格撕裂)
-      Vec3 renderEarth((float)(0.0 - ro_x), (float)(0.0 - ro_y), (float)(0.0 - ro_z));
+      Vec3 renderEarth((float)(SOLAR_SYSTEM[current_soi_index].px * ws_d - ro_x), (float)(SOLAR_SYSTEM[current_soi_index].py * ws_d - ro_y), (float)(SOLAR_SYSTEM[current_soi_index].pz * ws_d - ro_z));
       Vec3 renderSun((float)(sun_px - ro_x), (float)(sun_py - ro_y), (float)(sun_pz - ro_z));
       Vec3 renderRocketBase((float)(r_px - ro_x), (float)(r_py - ro_y), (float)(r_pz - ro_z));
 
-      // 更新全局光照方向
-      r3d->lightDir = renderSun.normalized();
+      // 更新全局光照方向 (指向太阳)
+      Vec3 lightVec = renderSun - renderRocketBase;
+      r3d->lightDir = lightVec.normalized();
 
-      // 【深空姿态锁定】：使用精度更高的几何距离防止抖动
-      double dist_to_earth = sqrt(r_px*r_px + r_py*r_py + r_pz*r_pz);
-      Vec3 rocketUp((float)(r_px / dist_to_earth), (float)(r_py / dist_to_earth), 0.0f);
+      // 【深空姿态锁定】：基于火箭在当前参考星系的本地坐标(以中心天体为原点)计算向上的表面法线！
+      double local_dist_sq = rocket_state.px*rocket_state.px + rocket_state.py*rocket_state.py + rocket_state.pz*rocket_state.pz;
+      double local_dist = sqrt(local_dist_sq);
+      Vec3 rocketUp((float)(rocket_state.px / local_dist), (float)(rocket_state.py / local_dist), (float)(rocket_state.pz / local_dist));
       if (rocket_state.altitude > 2000000.0) { // 2000公里外，完全脱离近地轨道，进入深空
           rocketUp = Vec3(0.0f, 1.0f, 0.0f);
       }
@@ -1128,35 +1133,31 @@ int main() {
         camTarget_rel = renderRocketPos + rocketDir * (rh * 3.0f);
         camUpVec = rocketUp;
       } else {
-        float pan_dist = earth_r * 4.0f * cam_zoom_pan;
-        if (focus_target == 0) {
-            Vec3 cam_offset = cam_quat.rotate(Vec3(0.0f, 0.0f, pan_dist));
-            camEye_rel = renderEarth + cam_offset;
-            camTarget_rel = renderEarth;
-        } else {
-            Vec3 cam_offset = cam_quat.rotate(Vec3(0.0f, 0.0f, pan_dist * 110.0f));
-            camEye_rel = renderSun + cam_offset;
-            camTarget_rel = renderSun;
-        }
+        float base_pan_radius = (float)SOLAR_SYSTEM[focus_target].radius * (float)ws_d;
+        float pan_dist = fmaxf(base_pan_radius * 4.0f, earth_r * 2.0f) * cam_zoom_pan;
+        if (focus_target == 0) pan_dist = sun_radius * 4.0f * cam_zoom_pan;
+        
+        Vec3 cam_offset = cam_quat.rotate(Vec3(0.0f, 0.0f, pan_dist));
+        Vec3 renderFocus((float)(SOLAR_SYSTEM[focus_target].px * ws_d - ro_x), 
+                         (float)(SOLAR_SYSTEM[focus_target].py * ws_d - ro_y), 
+                         (float)(SOLAR_SYSTEM[focus_target].pz * ws_d - ro_z));
+        camEye_rel = renderFocus + cam_offset;
+        camTarget_rel = renderFocus;
         camUpVec = cam_quat.rotate(Vec3(0.0f, 1.0f, 0.0f));
       }
 
       // 动态远裁剪面 
       float cam_dist = (camEye_rel - camTarget_rel).length();
       float dist_to_earth_surf = fmaxf(1.0f, (camEye_rel - renderEarth).length() - earth_r);
-      float far_plane = fmaxf(cam_dist * 3.0f, dist_to_earth_surf + earth_r * 3.0f);
-      if (focus_target == 1 || cam_dist > sun_dist_d * 0.1) {
-          far_plane = fmaxf(far_plane, (float)sun_dist_d * 2.5f);
-      }
+      
+      // Ensure far clipping plane covers the entire solar system (Neptune is ~30 AU)
+      float far_plane = 50.0f * 149597870.0f; // 50 AU in km (ws_d)
       
       Mat4 viewMat = Mat4::lookAt(camEye_rel, camTarget_rel, camUpVec);
 
       // =========== PASS 1: MACRO BACKGROUND ===========
-      // 宏观天体专用的相机矩阵：基于相机距地表的高度动态推断 clipping
-      float macro_near = fmaxf(0.1f, dist_to_earth_surf * 0.05f);
-      if (focus_target == 1 && cam_dist > sun_dist_d * 0.5) macro_near = 10000.0f;
-      macro_near = fmaxf(macro_near, 0.01f);
-      macro_near = fminf(macro_near, fmaxf(0.5f, cam_dist * 0.5f));
+      // 宏观天体专用的相机矩阵：使用基于 cam_dist 的 near plane 解决由于远裁剪面过大导致的 Z-fighting (深度闪烁)
+      float macro_near = fmaxf(0.01f, cam_dist * 0.001f);
       
       Mat4 macroProjMat = Mat4::perspective(0.8f, aspect, macro_near, far_plane);
       r3d->beginFrame(viewMat, macroProjMat, camEye_rel);
@@ -1169,57 +1170,132 @@ int main() {
           // 复用 earthMesh，修改极高环境光(ambient=2.0)让其纯亮发白发黄
           r3d->drawMesh(earthMesh, sunModel, 1.0f, 0.95f, 0.9f, 1.0f, 2.0f); 
           
-          // 地球绕日轨道线 (以太阳为中心画一个1AU半径的完美圆)
-          std::vector<Vec3> earth_orbit_pts;
-          // 新设计：使用一根线多次调用 drawRibbon，因为当前的 drawRibbon 只能单色。或者直接修改顶点！
-          // 由于 drawRibbon 目前是定色，我们可以拆分成120段单独画。
-          int orbit_res = 120;
-          float orbit_w = earth_r * 0.05f * fmaxf(1.0f, fminf(cam_zoom_pan * 0.05f, 50000.0f));
-          for (int i=0; i<orbit_res; i++) {
-              float theta = (float)i / orbit_res * 6.2831853f;
-              float next_theta = (float)(i+1) / orbit_res * 6.2831853f;
-              
-              double dx1 = cos(theta) * sun_dist_d;
-              double dy1 = sin(theta) * sun_dist_d;
-              Vec3 p1( (float)(sun_px - dx1 - ro_x), (float)(sun_py - dy1 - ro_y), (float)(-ro_z) );
-              
-              double dx2 = cos(next_theta) * sun_dist_d;
-              double dy2 = sin(next_theta) * sun_dist_d;
-              Vec3 p2( (float)(sun_px - dx2 - ro_x), (float)(sun_py - dy2 - ro_y), (float)(-ro_z) );
+          // NOTE: Hardcoded Earth orbit removed in favor of procedural gradient orbits for all planets
+      }
 
-              float a1 = (float)theta;
-              if (a1 < 0) a1 += 6.2831853f; // 0 to 2PI
+      // 渲染整个太阳系
+      for (size_t i = 1; i < SOLAR_SYSTEM.size(); i++) {
+          CelestialBody& b = SOLAR_SYSTEM[i];
+          float r = (float)b.radius * ws_d;
+          Vec3 renderPlanet((float)(b.px * ws_d - ro_x), (float)(b.py * ws_d - ro_y), (float)(b.pz * ws_d - ro_z));
+          
+          // 应用主体的自转与极轴倾斜 (黄道坐标系中Z轴为原生北极，XY为轨道面)
+          // 默认模型球体的极轴是Y轴，首先需要将它躺平(-90度X轴旋转)对齐Z轴
+          Quat align_to_z = Quat::fromAxisAngle(Vec3(1.0f, 0.0f, 0.0f), -PI / 2.0f);
+          // 主轴自转，绕Z轴（现在的极轴）旋转
+          Quat spin = Quat::fromAxisAngle(Vec3(0.0f, 0.0f, 1.0f), b.prime_meridian_epoch + (rocket_state.sim_time * 2.0 * PI / b.rotation_period));
+          // 极轴倾斜，绕X轴侧倾
+          Quat tilt = Quat::fromAxisAngle(Vec3(1.0f, 0.0f, 0.0f), b.axial_tilt); 
+          Quat rotation_quat = tilt * spin * align_to_z;
 
-              // 最亮处直接设为太阳经过的真正相位角
-              float earth_a = fmod((float)sun_angle_d, 6.2831853f);
-              if (earth_a < 0) earth_a += 6.2831853f;
+          Mat4 planetModel = Mat4::scale(Vec3(r, r, r));
+          planetModel = Mat4::fromQuat(rotation_quat) * planetModel; // Apply rotation
+          planetModel = Mat4::translate(renderPlanet) * planetModel;
+          
+          // DO NOT dim the base color with rocket occlusion (that makes the darkest side of Earth pitch black void).
+          r3d->drawPlanet(earthMesh, planetModel, b.type, b.r, b.g, b.b, 1.0f);
+          
+          if (b.type == TERRESTRIAL || b.type == GAS_GIANT) {
+              Mat4 atmoModel = Mat4::scale(Vec3(r * 1.025f, r * 1.025f, r * 1.025f));
+              atmoModel = Mat4::translate(renderPlanet) * atmoModel;
+              r3d->drawAtmosphere(earthMesh, atmoModel);
+          }
+          if (b.type == RINGED_GAS_GIANT) {
+              Mat4 ringModel = Mat4::scale(Vec3(r * 2.2f, r * 0.001f, r * 2.2f));
+              ringModel = Mat4::fromQuat(rotation_quat) * ringModel;
+              ringModel = Mat4::translate(renderPlanet) * ringModel;
+              r3d->drawRing(ringMesh, ringModel, b.r, b.g, b.b, 0.4f);
+          }
+          
+          // 渲染行星轨道和标签 (仅在全景模式下显示)
+          if (cam_mode_3d == 2 && cam_zoom_pan > 0.05f) {
+              double a = b.sma_base;
+              double e = b.ecc_base;
+              double i_inc = b.inc_base;
+              double lan = b.lan_base;
+              double arg_p = b.arg_peri_base;
               
-              float delta = earth_a - a1;
-              if (delta < 0) delta += 6.2831853f;
-              float brightness = 1.0f - delta / 6.2831853f;
-              brightness = fmaxf(0.1f, brightness);
+              // Determine current anomaly angle to center the gradient brightness 
+              double planet_px = b.px; double planet_py = b.py; double planet_pz = b.pz;
+              if (i == 4) { planet_px -= SOLAR_SYSTEM[3].px; planet_py -= SOLAR_SYSTEM[3].py; planet_pz -= SOLAR_SYSTEM[3].pz; }
               
-              // Fade out the macro orbit line when camera is zooming in tightly
+              int segs = 120;
+              float ring_w = earth_r * 0.002f * fmaxf(1.0f, cam_zoom_pan * 0.5f);
+              if (i == 4) ring_w = earth_r * 0.0005f * cam_zoom_pan; // Thin moon orbit
               float macro_fade = fminf(1.0f, fmaxf(0.0f, (cam_zoom_pan - 0.05f) / 0.1f));
+              
               if (macro_fade > 0.01f) {
-                 std::vector<Vec3> seg = {p1, p2};
-                 r3d->drawRibbon(seg, orbit_w, 0.3f*brightness+0.1f, 0.7f*brightness+0.1f, 1.0f*brightness+0.2f, fmaxf(0.3f, 0.8f*brightness) * macro_fade);
+                  for(int k=0; k<segs; k++) {
+                      double E1 = (double)k/segs * 2.0 * PI;
+                      double nu1 = 2.0 * atan2(sqrt(1.0+e)*sin(E1/2.0), sqrt(1.0-e)*cos(E1/2.0));
+                      double r_dist1 = a * (1.0 - e * cos(E1));
+                      double o_x1 = r_dist1 * cos(nu1);
+                      double o_y1 = r_dist1 * sin(nu1);
+                      
+                      double E2 = (double)(k+1)/segs * 2.0 * PI;
+                      double nu2 = 2.0 * atan2(sqrt(1.0+e)*sin(E2/2.0), sqrt(1.0-e)*cos(E2/2.0));
+                      double r_dist2 = a * (1.0 - e * cos(E2));
+                      double o_x2 = r_dist2 * cos(nu2);
+                      double o_y2 = r_dist2 * sin(nu2);
+                      
+                      double c_O = cos(lan), s_O = sin(lan);
+                      double c_w = cos(arg_p), s_w = sin(arg_p);
+                      double c_i = cos(i_inc), s_i = sin(i_inc);
+                      
+                      auto local_to_world = [&](double ox, double oy) {
+                          double px = (c_O*c_w - s_O*s_w*c_i)*ox + (-c_O*s_w - s_O*c_w*c_i)*oy;
+                          double py = (s_O*c_w + c_O*s_w*c_i)*ox + (-s_O*s_w + c_O*c_w*c_i)*oy;
+                          double pz = (s_w*s_i)*ox + (c_w*s_i)*oy;
+                          return Vec3((float)px, (float)py, (float)pz);
+                      };
+                      
+                      Vec3 v1 = local_to_world(o_x1, o_y1);
+                      Vec3 v2 = local_to_world(o_x2, o_y2);
+                      Vec3 planet_local_vec = Vec3((float)planet_px, (float)planet_py, (float)planet_pz);
+                      
+                      // Calculate angular distance to current planet position to create a beautiful gradient fade
+                      float ang1 = atan2f(v1.z, v1.x);
+                      float e_ang = atan2f(planet_local_vec.z, planet_local_vec.x);
+                      float delta = fmodf(fabsf(ang1 - e_ang), 2.0f * (float)PI);
+                      if (delta > (float)PI) delta = 2.0f * (float)PI - delta;
+                      float brightness = 1.0f - delta / (2.0f * (float)PI);
+                      brightness = fmaxf(0.1f, brightness);
+                      // Make the orbit brightest near the planet
+                      brightness = powf(brightness, 2.0f);
+                      
+                      if (i == 4) { // Moon orbits Earth
+                          v1.x += (float)SOLAR_SYSTEM[3].px; v1.y += (float)SOLAR_SYSTEM[3].py; v1.z += (float)SOLAR_SYSTEM[3].pz;
+                          v2.x += (float)SOLAR_SYSTEM[3].px; v2.y += (float)SOLAR_SYSTEM[3].py; v2.z += (float)SOLAR_SYSTEM[3].pz;
+                      }
+                      
+                      std::vector<Vec3> seg = {
+                          Vec3(v1.x * (float)ws_d - (float)ro_x, v1.y * (float)ws_d - (float)ro_y, v1.z * (float)ws_d - (float)ro_z),
+                          Vec3(v2.x * (float)ws_d - (float)ro_x, v2.y * (float)ws_d - (float)ro_y, v2.z * (float)ws_d - (float)ro_z)
+                      };
+                      
+                      r3d->drawRibbon(seg, ring_w, b.r * brightness + 0.1f, b.g * brightness + 0.1f, b.b * brightness + 0.1f, fmaxf(0.2f, brightness) * macro_fade);
+                  }
+                  
+                  // Draw planet marker label - size stabilized relative to camera distance to prevent vanishing or blowing up!
+                  float dist_to_cam = (renderPlanet - camEye_rel).length();
+                  float marker_size = fmaxf((float)b.radius * (float)ws_d * 1.5f, dist_to_cam * 0.012f);
+                  r3d->drawBillboard(renderPlanet, marker_size, b.r, b.g, b.b, 0.9f * macro_fade);
               }
           }
       }
 
-      // 地球
-      Mat4 earthModel = Mat4::scale(Vec3(earth_r, earth_r, earth_r));
-      earthModel = Mat4::translate(renderEarth) * earthModel;
-      r3d->drawEarth(earthMesh, earthModel);
-
-      // ===== 大气层散射壳 =====
-      Mat4 atmoModel = Mat4::scale(Vec3(earth_r * 1.025f, earth_r * 1.025f, earth_r * 1.025f));
-      atmoModel = Mat4::translate(renderEarth) * atmoModel;
-      r3d->drawAtmosphere(earthMesh, atmoModel);
-
       // ===== 太阳与镜头光晕 (所有模式可见) =====
-      r3d->drawSunAndFlare(renderSun, renderEarth, earth_r, ww, wh);
+      std::vector<Vec4> sun_occluders;
+      for (size_t i = 1; i < SOLAR_SYSTEM.size(); i++) {
+          CelestialBody& b = SOLAR_SYSTEM[i];
+          sun_occluders.push_back(Vec4(
+              (float)(b.px * ws_d - ro_x),
+              (float)(b.py * ws_d - ro_y),
+              (float)(b.pz * ws_d - ro_z),
+              (float)b.radius * (float)ws_d
+          ));
+      }
+      r3d->drawSunAndFlare(renderSun, sun_occluders, ww, wh);
 
       // ===== 历史轨迹线 (实际走过的路径) =====
       {
@@ -1274,38 +1350,23 @@ int main() {
           bool is_sun_ref = (ref_idx == 1);
 
           // 选择参考系
-          double mu_body = is_sun_ref ? (9.81 * earth_r * earth_r * ws_d * 333000.0) : (9.81 * earth_r * earth_r * ws_d); 
+          double G_const = 6.67430e-11;
+          double mu_body = is_sun_ref ? (G_const * SOLAR_SYSTEM[0].mass) : (G_const * SOLAR_SYSTEM[current_soi_index].mass);
+          
+          // 全物理量双精度计算 (标准米)
+          double abs_px = rocket_state.px, abs_py = rocket_state.py, abs_pz = rocket_state.pz;
+          double abs_vx = rocket_state.vx, abs_vy = rocket_state.vy, abs_vz = rocket_state.vz;
 
-          // 全物理量双精度计算
-          double abs_px = r_px, abs_py = r_py, abs_pz = r_pz;
-          double abs_vx = rocket_state.vx * ws_d, abs_vy = rocket_state.vy * ws_d, abs_vz = rocket_state.vz * ws_d;
-
-          if (is_sun_ref) {
-              // Use exact same derived sun_angle and sun_angular_vel as physics engine (Burn)
-              double G_const = 6.67430e-11;
-              double M_sun = 1.989e30;
-              double GM_sun = G_const * M_sun;
-              double au_meters = 149597870700.0;
-              double sun_angular_vel = sqrt(GM_sun / (au_meters * au_meters * au_meters));
-              
-              double exact_sun_angle = -1.2 + sun_angular_vel * rocket_state.sim_time;
-              double sun_vx = -sin(exact_sun_angle) * au_meters * sun_angular_vel;
-              double sun_vy = cos(exact_sun_angle) * au_meters * sun_angular_vel;
-              
-              // 地心相对日心为 -sunPos
-              abs_px -= cos(exact_sun_angle) * au_meters * ws_d; 
-              abs_py -= sin(exact_sun_angle) * au_meters * ws_d; 
-              abs_pz -= sun_pz;
-
-              // V_rocket/Sun = V_rocket/Earth - V_Sun/Earth
-              abs_vx -= sun_vx * ws_d; 
-              abs_vy -= sun_vy * ws_d;
+          if (is_sun_ref && current_soi_index != 0) {
+              CelestialBody& cb = SOLAR_SYSTEM[current_soi_index];
+              abs_px += cb.px; abs_py += cb.py; abs_pz += cb.pz;
+              abs_vx += cb.vx; abs_vy += cb.vy; abs_vz += cb.vz;
           }
 
           double r_len = sqrt(abs_px*abs_px + abs_py*abs_py + abs_pz*abs_pz);
           double v_len = sqrt(abs_vx*abs_vx + abs_vy*abs_vy + abs_vz*abs_vz);
 
-          if (v_len > 0.001f && r_len > earth_r * 0.5f) {
+          if (v_len > 0.001 && r_len > SOLAR_SYSTEM[is_sun_ref ? 0 : current_soi_index].radius * 0.5) {
             double energy = 0.5 * v_len * v_len - mu_body / r_len;
             
             Vec3 h_vec( (float)(abs_py * abs_vz - abs_pz * abs_vy), 
@@ -1330,7 +1391,7 @@ int main() {
 
               float periapsis = (float)a * (1.0f - ecc);
               float apoapsis = (float)a * (1.0f + ecc);
-              bool will_reenter = periapsis < earth_r && !is_sun_ref;
+              bool will_reenter = periapsis < SOLAR_SYSTEM[is_sun_ref ? 0 : current_soi_index].radius && !is_sun_ref;
 
               Vec3 center_off = e_dir * (-(float)a * ecc);
 
@@ -1340,10 +1401,14 @@ int main() {
               for (int i = 0; i <= orbit_segs; i++) {
                 float ang = (float)i / orbit_segs * 6.2831853f;
                 Vec3 pt_rel = center_off + e_dir * ((float)a * cosf(ang)) + perp_dir * (b * sinf(ang));
-                double p_x = pt_rel.x, p_y = pt_rel.y, p_z = pt_rel.z;
-                if (is_sun_ref) { p_x += sun_px; p_y += sun_py; p_z += sun_pz; }
-                Vec3 pt = Vec3((float)(p_x - ro_x), (float)(p_y - ro_y), (float)(p_z - ro_z));
-                if (!is_sun_ref && pt.length() < earth_r * 0.98f) continue;
+                double px = pt_rel.x, py = pt_rel.y, pz = pt_rel.z;
+                if (!is_sun_ref) { 
+                    px += SOLAR_SYSTEM[current_soi_index].px; 
+                    py += SOLAR_SYSTEM[current_soi_index].py; 
+                    pz += SOLAR_SYSTEM[current_soi_index].pz; 
+                }
+                Vec3 pt = Vec3((float)(px * ws_d - ro_x), (float)(py * ws_d - ro_y), (float)(pz * ws_d - ro_z));
+                // Do not clip orbit points beneath the surface so users can see where they crash
                 orbit_points.push_back(pt);
               }
               
@@ -1368,20 +1433,24 @@ int main() {
               // 远地点标记
               Vec3 apoPos = e_dir * (-apoapsis);
               double ax = apoPos.x, ay = apoPos.y, az = apoPos.z;
-              if (is_sun_ref) { ax += sun_px; ay += sun_py; az += sun_pz; }
-              Vec3 w_apoPos((float)(ax - ro_x), (float)(ay - ro_y), (float)(az - ro_z));
-              if (apoapsis > earth_r * 1.002f) {
-                r3d->drawBillboard(w_apoPos, apsis_size, 0.2f, 0.4f, 1.0f, opacity);
+              if (!is_sun_ref) { 
+                  ax += SOLAR_SYSTEM[current_soi_index].px; 
+                  ay += SOLAR_SYSTEM[current_soi_index].py; 
+                  az += SOLAR_SYSTEM[current_soi_index].pz; 
               }
+              Vec3 w_apoPos((float)(ax * ws_d - ro_x), (float)(ay * ws_d - ro_y), (float)(az * ws_d - ro_z));
+              r3d->drawBillboard(w_apoPos, apsis_size, 0.2f, 0.4f, 1.0f, opacity);
 
               // 近地点标记
               Vec3 periPos = e_dir * periapsis;
               double px = periPos.x, py = periPos.y, pz = periPos.z;
-              if (is_sun_ref) { px += sun_px; py += sun_py; pz += sun_pz; }
-              Vec3 w_periPos((float)(px - ro_x), (float)(py - ro_y), (float)(pz - ro_z));
-              if (periapsis > earth_r * 1.002f) {
-                r3d->drawBillboard(w_periPos, apsis_size, 1.0f, 0.5f, 0.1f, opacity);
+              if (!is_sun_ref) { 
+                  px += SOLAR_SYSTEM[current_soi_index].px; 
+                  py += SOLAR_SYSTEM[current_soi_index].py; 
+                  pz += SOLAR_SYSTEM[current_soi_index].pz; 
               }
+              Vec3 w_periPos((float)(px * ws_d - ro_x), (float)(py * ws_d - ro_y), (float)(pz * ws_d - ro_z));
+              r3d->drawBillboard(w_periPos, apsis_size, 1.0f, 0.5f, 0.1f, opacity);
             } else {
               // --- 双曲线/抛物线逃逸轨道 (ecc >= 1.0) ---
               float a_hyp = fabs(a); 
@@ -1399,10 +1468,13 @@ int main() {
                  float t = (float)i / escape_segs * max_sinh;
                  Vec3 pt_rel = center_off - e_dir * (a_hyp * coshf(t)) + perp_dir * (b_hyp * sinhf(t));
                  double px = pt_rel.x, py = pt_rel.y, pz = pt_rel.z;
-                 if (is_sun_ref) { px += sun_px; py += sun_py; pz += sun_pz; }
+                 if (!is_sun_ref) { 
+                     px += SOLAR_SYSTEM[current_soi_index].px; 
+                     py += SOLAR_SYSTEM[current_soi_index].py; 
+                     pz += SOLAR_SYSTEM[current_soi_index].pz; 
+                 }
                  
-                 Vec3 pt((float)(px - ro_x), (float)(py - ro_y), (float)(pz - ro_z));
-                 if (!is_sun_ref && pt.length() < earth_r * 0.98f) continue;
+                 Vec3 pt((float)(px * ws_d - ro_x), (float)(py * ws_d - ro_y), (float)(pz * ws_d - ro_z));
                  
                  if (escape_points.empty() || (pt - escape_points.back()).length() > earth_r * 0.05f) {
                     escape_points.push_back(pt);
@@ -1425,11 +1497,13 @@ int main() {
               apsis_size *= (is_sun_ref ? 10.0f : 1.0f);
               Vec3 periPos = center_off - e_dir * a_hyp; 
               double px = periPos.x, py = periPos.y, pz = periPos.z;
-              if (is_sun_ref) { px += sun_px; py += sun_py; pz += sun_pz; }
-              Vec3 w_periPos((float)(px - ro_x), (float)(py - ro_y), (float)(pz - ro_z));
-              if (periapsis > earth_r * 1.002f) {
-                r3d->drawBillboard(w_periPos, apsis_size, 1.0f, 0.5f, 0.1f, opacity);
+              if (!is_sun_ref) { 
+                  px += SOLAR_SYSTEM[current_soi_index].px; 
+                  py += SOLAR_SYSTEM[current_soi_index].py; 
+                  pz += SOLAR_SYSTEM[current_soi_index].pz; 
               }
+              Vec3 w_periPos((float)(px * ws_d - ro_x), (float)(py * ws_d - ro_y), (float)(pz * ws_d - ro_z));
+              r3d->drawBillboard(w_periPos, apsis_size, 1.0f, 0.5f, 0.1f, opacity);
             }
           }
         }
@@ -1818,8 +1892,10 @@ int main() {
 
   delete renderer;
   earthMesh.destroy();
+  ringMesh.destroy();
   rocketBody.destroy();
   rocketNose.destroy();
+  rocketBox.destroy();
   delete r3d;
   glfwTerminate();
   if (rocket_state.status == LANDED || rocket_state.status == CRASHED) {

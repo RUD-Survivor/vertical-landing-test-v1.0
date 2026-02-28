@@ -5,6 +5,7 @@
 // ==========================================================
 
 #include "math3d.h"
+#include "rocket_state.h"
 // NOTE: glad must be included BEFORE this header in the main translation unit
 #include <vector>
 
@@ -250,6 +251,47 @@ inline Mesh box(float width, float height, float depth) {
   return m;
 }
 
+// 环形图 (用于土星环, 原点中心, 位于XZ平面)
+inline Mesh ring(int segs, float innerRadius, float outerRadius) {
+  std::vector<Vertex3D> verts;
+  std::vector<unsigned int> indices;
+  const float PI_f = 3.14159265358979f;
+
+  for (int i = 0; i <= segs; i++) {
+    float ang = (float)i / segs * 2.0f * PI_f;
+    float cs = cosf(ang), sn = sinf(ang);
+
+    Vertex3D vi;
+    vi.px = cs * innerRadius; vi.py = 0; vi.pz = sn * innerRadius;
+    vi.nx = 0; vi.ny = 1; vi.nz = 0;
+    vi.u = (float)i / segs; vi.v = 0;
+    vi.r = 1; vi.g = 1; vi.b = 1; vi.a = 1;
+
+    Vertex3D vo;
+    vo.px = cs * outerRadius; vo.py = 0; vo.pz = sn * outerRadius;
+    vo.nx = 0; vo.ny = 1; vo.nz = 0;
+    vo.u = (float)i / segs; vo.v = 1;
+    vo.r = 1; vo.g = 1; vo.b = 1; vo.a = 1;
+
+    verts.push_back(vi);
+    verts.push_back(vo);
+  }
+
+  for (int i = 0; i < segs; i++) {
+    int v0 = i * 2;
+    int v1 = v0 + 1;
+    int v2 = v0 + 2;
+    int v3 = v0 + 3;
+
+    indices.push_back(v0); indices.push_back(v2); indices.push_back(v1);
+    indices.push_back(v1); indices.push_back(v2); indices.push_back(v3);
+  }
+
+  Mesh m;
+  m.upload(verts, indices);
+  return m;
+}
+
 } // namespace MeshGen
 
 // ==========================================================
@@ -259,12 +301,18 @@ class Renderer3D {
 public:
   GLuint program3d = 0;
   GLuint earthProgram = 0;
+  GLuint gasGiantProgram = 0;
+  GLuint barrenProgram = 0;
+  GLuint ringProgram = 0;
   GLuint billboardProg = 0;
   GLuint atmoProg = 0;
   GLuint billboardVAO = 0, billboardVBO = 0;
   GLint u_mvp = -1, u_model = -1, u_lightDir = -1, u_viewPos = -1;
   GLint u_baseColor = -1, u_ambientStr = -1;
   GLint ue_mvp = -1, ue_model = -1, ue_lightDir = -1, ue_viewPos = -1;
+  GLint ugg_mvp = -1, ugg_model = -1, ugg_lightDir = -1, ugg_viewPos = -1, ugg_baseColor = -1;
+  GLint uba_mvp = -1, uba_model = -1, uba_lightDir = -1, uba_viewPos = -1, uba_baseColor = -1;
+  GLint uri_mvp = -1, uri_model = -1, uri_lightDir = -1, uri_viewPos = -1, uri_baseColor = -1;
   // Billboard uniforms
   GLint ub_vp = -1, ub_proj = -1, ub_pos = -1, ub_size = -1, ub_color = -1;
   // Atmosphere uniforms
@@ -454,7 +502,8 @@ public:
         // Atmosphere rim glow
         float rim = 1.0 - max(dot(N, V), 0.0);
         rim = pow(rim, 3.0);
-        vec3 atmosColor = vec3(0.3, 0.5, 1.0) * rim * 0.6;
+        float dayFade = smoothstep(-0.2, 0.1, dot(N, L));
+        vec3 atmosColor = vec3(0.3, 0.5, 1.0) * rim * 0.6 * dayFade;
 
         vec3 result = surfColor * (ambient + diff * 0.85) + atmosColor;
 
@@ -476,7 +525,165 @@ public:
     ue_lightDir = glGetUniformLocation(earthProgram, "uLightDir");
     ue_viewPos = glGetUniformLocation(earthProgram, "uViewPos");
 
+    // --- Gas Giant Shader ---
+    const char* gasGiantFragSrc = R"(
+      #version 330 core
+      in vec3 vWorldPos;
+      in vec3 vNormal;
+      in vec2 vUV;
+      in vec3 vLocalPos;
+      uniform vec3 uLightDir;
+      uniform vec3 uViewPos;
+      uniform vec4 uBaseColor;
+      out vec4 FragColor;
+
+      float hash(vec3 p) {
+        p = fract(p * vec3(443.897, 441.423, 437.195));
+        p += dot(p, p.yzx + 19.19);
+        return fract((p.x + p.y) * p.z);
+      }
+      float noise3d(vec3 p) {
+        vec3 i = floor(p); vec3 f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
+        float n000 = hash(i); float n100 = hash(i + vec3(1,0,0));
+        float n010 = hash(i + vec3(0,1,0)); float n110 = hash(i + vec3(1,1,0));
+        float n001 = hash(i + vec3(0,0,1)); float n101 = hash(i + vec3(1,0,1));
+        float n011 = hash(i + vec3(0,1,1)); float n111 = hash(i + vec3(1,1,1));
+        float nx00 = mix(n000, n100, f.x); float nx10 = mix(n010, n110, f.x);
+        float nx01 = mix(n001, n101, f.x); float nx11 = mix(n011, n111, f.x);
+        float nxy0 = mix(nx00, nx10, f.y); float nxy1 = mix(nx01, nx11, f.y);
+        return mix(nxy0, nxy1, f.z);
+      }
+      float fbm(vec3 p) {
+        float v = 0.0; float amp = 0.5;
+        for (int i = 0; i < 5; i++) { v += noise3d(p) * amp; p *= 2.1; amp *= 0.5; }
+        return v;
+      }
+
+      void main() {
+        vec3 N = normalize(vNormal);
+        vec3 L = normalize(uLightDir);
+        vec3 V = normalize(uViewPos - vWorldPos);
+        vec3 texCoord = normalize(vLocalPos) * 5.0;
+        
+        float warp = fbm(texCoord + vec3(0, texCoord.y * 3.0, 0));
+        float bands = sin(texCoord.y * 15.0 + warp * 5.0);
+        bands = smoothstep(-1.0, 1.0, bands);
+        
+        vec3 color1 = uBaseColor.rgb;
+        vec3 color2 = uBaseColor.rgb * 0.4 + vec3(0.3);
+        vec3 surfColor = mix(color1, color2, bands);
+        
+        float storms = fbm(texCoord * 4.0);
+        if (storms > 0.7) {
+            surfColor = mix(surfColor, vec3(0.9, 0.8, 0.7), (storms - 0.7) * 3.3);
+        }
+
+        float diff = max(dot(N, L), 0.0);
+        float ambient = 0.15;
+        float rim = 1.0 - max(dot(N, V), 0.0);
+        rim = pow(rim, 3.0);
+        vec3 atmosColor = uBaseColor.rgb * rim * 0.5;
+
+        vec3 result = surfColor * (ambient + diff * 0.85) + atmosColor;
+        FragColor = vec4(result, 1.0);
+      }
+    )";
+    gasGiantProgram = compileProgram(vertSrc, gasGiantFragSrc);
+    ugg_mvp = glGetUniformLocation(gasGiantProgram, "uMVP");
+    ugg_model = glGetUniformLocation(gasGiantProgram, "uModel");
+    ugg_lightDir = glGetUniformLocation(gasGiantProgram, "uLightDir");
+    ugg_viewPos = glGetUniformLocation(gasGiantProgram, "uViewPos");
+    ugg_baseColor = glGetUniformLocation(gasGiantProgram, "uBaseColor");
+
+    // --- Barren/Crater Shader ---
+    const char* barrenFragSrc = R"(
+      #version 330 core
+      in vec3 vWorldPos;
+      in vec3 vNormal;
+      in vec3 vLocalPos;
+      uniform vec3 uLightDir;
+      uniform vec3 uViewPos;
+      uniform vec4 uBaseColor;
+      out vec4 FragColor;
+
+      float hash(vec3 p) {
+        p = fract(p * vec3(443.897, 441.423, 437.195));
+        p += dot(p, p.yzx + 19.19);
+        return fract((p.x + p.y) * p.z);
+      }
+      float noise3d(vec3 p) {
+        vec3 i = floor(p); vec3 f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
+        float n000 = hash(i); float n100 = hash(i + vec3(1,0,0));
+        float n010 = hash(i + vec3(0,1,0)); float n110 = hash(i + vec3(1,1,0));
+        float n001 = hash(i + vec3(0,0,1)); float n101 = hash(i + vec3(1,0,1));
+        float n011 = hash(i + vec3(0,1,1)); float n111 = hash(i + vec3(1,1,1));
+        float nx00 = mix(n000, n100, f.x); float nx10 = mix(n010, n110, f.x);
+        float nx01 = mix(n001, n101, f.x); float nx11 = mix(n011, n111, f.x);
+        float nxy0 = mix(nx00, nx10, f.y); float nxy1 = mix(nx01, nx11, f.y);
+        return mix(nxy0, nxy1, f.z);
+      }
+      float fbm(vec3 p) {
+        float v = 0.0; float amp = 0.5;
+        for (int i = 0; i < 5; i++) { v += noise3d(p) * amp; p *= 2.1; amp *= 0.5; }
+        return v;
+      }
+
+      void main() {
+        vec3 N = normalize(vNormal);
+        vec3 L = normalize(uLightDir);
+        vec3 texCoord = normalize(vLocalPos) * 8.0;
+        
+        float craters = fbm(texCoord * 4.0);
+        craters = abs(craters * 2.0 - 1.0);
+        
+        vec3 surfColor = uBaseColor.rgb * (0.5 + 0.5 * craters);
+        float diff = max(dot(N, L), 0.0);
+        float ambient = 0.05;
+
+        vec3 result = surfColor * (ambient + diff * 0.95);
+        FragColor = vec4(result, 1.0);
+      }
+    )";
+    barrenProgram = compileProgram(vertSrc, barrenFragSrc);
+    uba_mvp = glGetUniformLocation(barrenProgram, "uMVP");
+    uba_model = glGetUniformLocation(barrenProgram, "uModel");
+    uba_lightDir = glGetUniformLocation(barrenProgram, "uLightDir");
+    uba_viewPos = glGetUniformLocation(barrenProgram, "uViewPos");
+    uba_baseColor = glGetUniformLocation(barrenProgram, "uBaseColor");
+
+    // --- Ring Shader ---
+    const char* ringFragSrc = R"(
+      #version 330 core
+      in vec3 vNormal;
+      in vec3 vLocalPos;
+      uniform vec3 uLightDir;
+      uniform vec4 uBaseColor;
+      out vec4 FragColor;
+      
+      void main() {
+        vec3 N = normalize(vNormal);
+        vec3 L = normalize(uLightDir);
+        float diff = max(abs(dot(N, L)), 0.0); // thin ring lit from both sides
+        float ambient = 0.1;
+        
+        float dist = length(vLocalPos.xz);
+        float band = sin(dist * 2.0) * cos(dist * 4.0 + 1.2);
+        float alpha = smoothstep(-0.5, 0.5, band) * 0.7 + 0.1;
+        
+        vec3 result = uBaseColor.rgb * (ambient + diff * 0.9);
+        FragColor = vec4(result, alpha * uBaseColor.a);
+      }
+    )";
+    ringProgram = compileProgram(vertSrc, ringFragSrc);
+    uri_mvp = glGetUniformLocation(ringProgram, "uMVP");
+    uri_model = glGetUniformLocation(ringProgram, "uModel");
+    uri_lightDir = glGetUniformLocation(ringProgram, "uLightDir");
+    uri_baseColor = glGetUniformLocation(ringProgram, "uBaseColor");
+
     lightDir = Vec3(0.5f, 0.8f, 0.3f).normalized();
+
 
     // --- Billboard Shader (fire/glow particles, markers) ---
     const char* bbVertSrc = R"(
@@ -557,7 +764,7 @@ public:
         vec3 sunset = vec3(1.0, 0.4, 0.1);
         vec3 atmoColor = mix(sunset * 0.5, scatter, terminator);
         // Only visible on lit side + terminator
-        float visibility = smoothstep(-0.3, 0.0, sunAngle) + 0.15;
+        float visibility = smoothstep(-0.15, 0.1, sunAngle);
         float alpha = rim * visibility * 0.7;
         FragColor = vec4(atmoColor, alpha);
       }
@@ -700,42 +907,45 @@ public:
   }
 
   // ==== Procedural Screen Space Lens Flare (Feature 5) ====
-  void drawSunAndFlare(const Vec3& sunWorldPos, const Vec3& earthPos, float earthRadius, int screenW, int screenH) {
-     // 1. Ray-Sphere Occlusion Test against Earth (is the sun behind the planet?)
+  void drawSunAndFlare(const Vec3& sunWorldPos, const std::vector<Vec4>& occluders, int screenW, int screenH) {
+     // 1. Ray-Sphere Occlusion Test against occluders (is the sun behind a planet?)
      Vec3 rayDir = (sunWorldPos - camPos).normalized();
-     Vec3 oc = camPos - earthPos;
-     float b = 2.0f * oc.dot(rayDir);
-     float c = oc.dot(oc) - earthRadius * earthRadius;
-     float discriminant = b * b - 4 * c;
      float occlusionFade = 1.0f;
-     float distToLimb = 1000000.0f;
      
-     // Closest distance point along the ray
-     float t_closest = -oc.dot(rayDir);
-     
-     if (t_closest < 0) {
-         // The earth is strictly BEHIND the camera; no occlusion possible.
-         occlusionFade = 1.0f;
-     } else {
-         if (discriminant > 0) {
-             float t1 = t_closest - sqrtf(discriminant) / 2.0f;
-             float sunDist = (sunWorldPos - camPos).length();
-             if (t1 > 0 && t1 < sunDist) {
-                 occlusionFade = 0.0f; // Eclipsed entirely by earth core
-                 distToLimb = 0.0f;
-             }
-         } else {
-             // Ray clears earth. How close did it get to the surface?
-             float passDist = oc.cross(rayDir).length();
-             distToLimb = passDist - earthRadius;
-             // Fade smoothly through the thin upper atmosphere
-             if (distToLimb >= 0.0f && distToLimb < earthRadius * 0.05f) {
-                 occlusionFade *= distToLimb / (earthRadius * 0.05f);
+     for (const auto& occ : occluders) {
+         Vec3 occPos(occ.x, occ.y, occ.z);
+         float occRadius = occ.w;
+         
+         Vec3 oc = camPos - occPos;
+         float b = 2.0f * oc.dot(rayDir);
+         float c = oc.dot(oc) - occRadius * occRadius;
+         float discriminant = b * b - 4 * c;
+         
+         float t_closest = -oc.dot(rayDir);
+         float localOccFade = 1.0f;
+         
+         if (t_closest >= 0) {
+             if (discriminant > 0) {
+                 float t1 = t_closest - sqrtf(discriminant) / 2.0f;
+                 float sunDist = (sunWorldPos - camPos).length();
+                 if (t1 > 0 && t1 < sunDist) {
+                     localOccFade = 0.0f; // Eclipsed entirely by planet core
+                 }
+             } else {
+                 // Ray clears planet. How close did it get to the surface?
+                 float passDist = oc.cross(rayDir).length();
+                 float distToLimb = passDist - occRadius;
+                 // Fade smoothly through the thin upper atmosphere
+                 if (distToLimb >= 0.0f && distToLimb < occRadius * 0.05f) {
+                     localOccFade *= distToLimb / (occRadius * 0.05f);
+                 }
              }
          }
+         occlusionFade = fminf(occlusionFade, localOccFade);
+         if (occlusionFade <= 0.01f) break; // Completely hidden
      }
 
-     if (occlusionFade <= 0.01f) return; // Completely hidden
+     if (occlusionFade <= 0.01f) return;
 
      // 2. Compute Screen Space (NDC) position of the sun
      // We manually multiply the 4D vector to avoid needing a Vec4 class
@@ -805,15 +1015,40 @@ public:
      glDepthMask(GL_TRUE);
   }
 
-  // 用地球专用着色器绘制
-  void drawEarth(const Mesh& mesh, const Mat4& model) {
-    glUseProgram(earthProgram);
+  void drawPlanet(const Mesh& mesh, const Mat4& model, BodyType type, float cr, float cg, float cb, float ca) {
+    GLuint prog = earthProgram;
+    GLint mvpLoc = ue_mvp, modelLoc = ue_model, lightLoc = ue_lightDir, viewLoc = ue_viewPos, colorLoc = -1;
+
+    if (type == GAS_GIANT || type == RINGED_GAS_GIANT) {
+        prog = gasGiantProgram;
+        mvpLoc = ugg_mvp; modelLoc = ugg_model; lightLoc = ugg_lightDir; viewLoc = ugg_viewPos; colorLoc = ugg_baseColor;
+    } else if (type == MOON || (type == TERRESTRIAL && (cr != 0.2f || cg != 0.5f))) {
+        prog = barrenProgram;
+        mvpLoc = uba_mvp; modelLoc = uba_model; lightLoc = uba_lightDir; viewLoc = uba_viewPos; colorLoc = uba_baseColor;
+    }
+
+    glUseProgram(prog);
     Mat4 mvp = proj * view * model;
-    glUniformMatrix4fv(ue_mvp, 1, GL_FALSE, mvp.m);
-    glUniformMatrix4fv(ue_model, 1, GL_FALSE, model.m);
-    glUniform3f(ue_lightDir, lightDir.x, lightDir.y, lightDir.z);
-    glUniform3f(ue_viewPos, camPos.x, camPos.y, camPos.z);
+    glUniformMatrix4fv(mvpLoc, 1, GL_FALSE, mvp.m);
+    glUniformMatrix4fv(modelLoc, 1, GL_FALSE, model.m);
+    glUniform3f(lightLoc, lightDir.x, lightDir.y, lightDir.z);
+    if (viewLoc != -1) glUniform3f(viewLoc, camPos.x, camPos.y, camPos.z);
+    if (colorLoc != -1) glUniform4f(colorLoc, cr, cg, cb, ca);
+    
     mesh.draw();
+  }
+
+  void drawRing(const Mesh& ringMesh, const Mat4& model, float cr, float cg, float cb, float ca) {
+    glUseProgram(ringProgram);
+    Mat4 mvp = proj * view * model;
+    glUniformMatrix4fv(uri_mvp, 1, GL_FALSE, mvp.m);
+    glUniformMatrix4fv(uri_model, 1, GL_FALSE, model.m);
+    glUniform3f(uri_lightDir, lightDir.x, lightDir.y, lightDir.z);
+    glUniform4f(uri_baseColor, cr, cg, cb, ca);
+    
+    glDisable(GL_CULL_FACE);
+    ringMesh.draw();
+    glEnable(GL_CULL_FACE);
   }
 
   // 火焰/发光 Billboard (面向相机的面片)

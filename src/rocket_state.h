@@ -15,6 +15,54 @@ const double G_const = 6.67430e-11;
 const double M_sun = 1.989e30;
 const double GM_sun = G_const * M_sun;
 
+enum BodyType {
+    STAR,
+    TERRESTRIAL,
+    GAS_GIANT,
+    MOON,
+    RINGED_GAS_GIANT
+};
+
+struct CelestialBody {
+    std::string name;
+    double mass;
+    double radius;
+    BodyType type;
+    
+    // Rendering colors
+    float r, g, b;
+
+    // Rotation parameters
+    double axial_tilt;                 // Obliquity to orbit (radians)
+    double rotation_period;            // Sidereal day (seconds)
+    double prime_meridian_epoch;       // Prime meridian angle at epoch (radians)
+    
+    // Ephemeris elements (VSOP87 / Secular perturbations)
+    double sma_base;          // Semi-major axis base (meters)
+    double sma_rate;          // Rate of change (meters/century)
+    double ecc_base;          // Eccentricity base
+    double ecc_rate;          // Rate of change (1/century)
+    double inc_base;          // Inclination base (radians)
+    double inc_rate;          // Rate of change (rad/century)
+    double lan_base;          // Longitude of ascending node base (radians)
+    double lan_rate;          // Rate of change (rad/century)
+    double arg_peri_base;     // Argument of periapsis base (radians)
+    double arg_peri_rate;     // Rate of change (rad/century)
+    double mean_anom_base;    // Mean anomaly at epoch (radians)
+    double mean_anom_rate;    // Mean motion (rad/sec)
+    
+    // Dynamic physics state
+    double px, py, pz;        // Heliocentric position (meters)
+    double vx, vy, vz;        // Heliocentric velocity (meters/sec)
+    
+    // Pre-calculated SOI
+    double soi_radius;        // Sphere of Influence radius (meters)
+};
+
+extern std::vector<CelestialBody> SOLAR_SYSTEM;
+extern int current_soi_index;
+
+
 enum MissionState {
     PRE_LAUNCH,
     ASCEND,
@@ -89,9 +137,12 @@ struct RocketState {
     // Basic properties
     double fuel = 0.0;
     
-    // Position/Velocity in Earth-centric coordinate system
+    // Position/Velocity relative to current SOI origin
     double px = 0.0, py = EARTH_RADIUS + 0.1, pz = 0.0;
     double vx = 0.0, vy = 0.0, vz = 0.0;
+    
+    // Absolute Heliocentric Position (used for continuous global tracking and Eclipse checks)
+    double abs_px = 0.0, abs_py = 0.0, abs_pz = 0.0;
     
     // Attitude
     double angle = 0.0;      // Yaw (in 2D plane)
@@ -109,6 +160,9 @@ struct RocketState {
     double fuel_consumption_rate = 0.0;
     double thrust_power = 0.0;
     double acceleration = 0.0;
+    
+    // Environment
+    double solar_occlusion = 1.0;    // 0.0 to 1.0 (0=Umbra, 1=Fully lit)
     
     // AI / Autopilot flags
     bool suicide_burn_locked = false;
