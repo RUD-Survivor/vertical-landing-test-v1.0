@@ -2334,16 +2334,16 @@ int main() {
       r3d->drawMesh(rocketBody, interstageModel, 0.2f, 0.2f, 0.25f, 1.0f, 0.4f);
 
       // 2. 鼻锥头部
-      Vec3 nosePos = renderRocketPos + rocketDir * (rh * 0.375f);
+      Vec3 nosePos = renderRocketPos + rocketDir * (rh * 0.30f);
       Mat4 noseModel = Mat4::TRS(nosePos, rocketQuat,
                                   Vec3(rw_3d, rh * 0.25f, rw_3d));
       r3d->drawMesh(rocketNose, noseModel,
                      sel_nose.r, sel_nose.g, sel_nose.b, 1.0f, 0.25f);
 
       // 前端热盾/整流罩尖顶 (钛合金黑色)
-      Vec3 tipPos = renderRocketPos + rocketDir * (rh * 0.485f);
+      Vec3 tipPos = renderRocketPos + rocketDir * (rh * 0.50f);
       Mat4 tipModel = Mat4::TRS(tipPos, rocketQuat,
-                                  Vec3(rw_3d * 0.15f, rh * 0.05f, rw_3d * 0.15f));
+                                  Vec3(rw_3d * 0.2f, rh * 0.05f, rw_3d * 0.2f));
       r3d->drawMesh(rocketNose, tipModel, 0.15f, 0.15f, 0.15f, 1.0f, 0.5f);
 
       // 3. 气动翼片/栅格舵 (Fins & Grid Fins)
@@ -2363,17 +2363,16 @@ int main() {
       }
 
       // 4. 引擎喷管 (Detailed Engine)
-      Vec3 engBasePos = renderRocketPos - rocketDir * (rh * 0.35f);
+      Vec3 engBasePos = renderRocketPos - rocketDir * (rh * 0.375f);
       // 发动机机械基座
       Mat4 engBaseModel = Mat4::TRS(engBasePos, rocketQuat, Vec3(rw_3d * 0.6f, rh * 0.05f, rw_3d * 0.6f));
       r3d->drawMesh(rocketBody, engBaseModel, 0.15f, 0.15f, 0.15f, 1.0f, 0.5f);
 
       // 喷管钟罩
-      // 我们用 rocketQuat 作为基础，然后在其本地坐标系中向下(Y相反)翻转 180 度 (PI)
-      Quat flipQuat = rocketQuat * Quat::fromAxisAngle(Vec3(1.0f, 0.0f, 0.0f), 3.14159f);
-      Vec3 engNozzlePos = renderRocketPos - rocketDir * (rh * 0.40f);
-      Mat4 engNozzleModel = Mat4::TRS(engNozzlePos, flipQuat,
-                                  Vec3(rw_3d * 1.1f, rh * 0.10f, rw_3d * 1.1f));
+      // 我们用无翻转的锥体，宽底面朝下，尖端朝上刺入发动机基座，来模拟真实的钟形喷口 (Bell Nozzle)
+      Vec3 engNozzlePos = renderRocketPos - rocketDir * (rh * 0.50f);
+      Mat4 engNozzleModel = Mat4::TRS(engNozzlePos, rocketQuat,
+                                  Vec3(rw_3d * 0.9f, rh * 0.10f, rw_3d * 0.9f));
       r3d->drawMesh(rocketNose, engNozzleModel,
                      sel_eng.r, sel_eng.g, sel_eng.b, 1.0f, 0.4f);
 
