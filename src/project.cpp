@@ -252,54 +252,68 @@ public:
   }
 
   // --- Improved 5x7 Procedural Font ---
-  void drawText(float x, float y, const char* text, float size, float r, float g, float b, float a = 1.0f, bool shadow = true) {
+  enum Align { LEFT, CENTER, RIGHT };
+  void drawText(float x, float y, const char* text, float size, float r, float g, float b, float a = 1.0f, bool shadow = true, Align align = LEFT) {
+    int len = 0;
+    while (text[len]) len++;
+    
+    float px = size * 0.15f;
+    float cw = px * 6.0f;
+    float total_w = (len > 0) ? (len * cw - px) : 0;
+    
+    float ox_start = x;
+    if (align == CENTER) ox_start -= total_w * 0.5f;
+    else if (align == RIGHT) ox_start -= total_w;
+
     if (shadow) {
         // Render a subtle drop shadow for maximum clarity against any background
-        drawText(x + size * 0.1f, y - size * 0.1f, text, size, 0.0f, 0.0f, 0.0f, a * 0.8f, false);
+        drawText(ox_start + size * 0.08f, y - size * 0.08f, text, size, 0.0f, 0.0f, 0.0f, a * 0.8f, false, LEFT);
     }
 
     auto getGlyph5x7 = [](char c) -> uint64_t {
+      // Convert lowercase to uppercase for the pixel font to ensure visibility
+      if (c >= 'a' && c <= 'z') c -= 32;
+
       switch (c) {
-        case '0': return 0x1C22262A32221C; case '1': return 0x080C080808081C;
-        case '2': return 0x1C22020C10203E; case '3': return 0x1C22020C02221C;
-        case '4': return 0x040C14243E0404; case '5': return 0x3E203C0202221C;
-        case '6': return 0x1C22203C22221C; case '7': return 0x3E020408101010;
-        case '8': return 0x1C22221C22221C; case '9': return 0x1C22221E02221C;
-        case 'A': return 0x1C22223E222222; case 'B': return 0x3C22223C22223C;
-        case 'C': return 0x1C22202020221C; case 'D': return 0x3C22222222223C;
-        case 'E': return 0x3E20203C20203E; case 'F': return 0x3E20203C202020;
-        case 'G': return 0x1C22202E22221C; case 'H': return 0x2222223E222222;
-        case 'I': return 0x1C08080808081C; case 'J': return 0x0E040404042418;
-        case 'K': return 0x22242830282422; case 'L': return 0x2020202020203E;
-        case 'M': return 0x22362A22222222; case 'N': return 0x22322A26222222;
-        case 'O': return 0x1C22222222221C; case 'P': return 0x3C22223C202020;
-        case 'Q': return 0x1C2222222A241A; case 'R': return 0x3C22223C282422;
-        case 'S': return 0x1C22100C02221C; case 'T': return 0x3E080808080808;
-        case 'U': return 0x2222222222221C; case 'V': return 0x22222222221408;
-        case 'W': return 0x2222222A2A3622; case 'X': return 0x22221408142222;
-        case 'Y': return 0x22222214080808; case 'Z': return 0x3E02040810203E;
-        case 'm': return 0x00001A2D292929; case 's': return 0x00001E201C023C;
-        case 'k': return 0x2020262A322A26; case 'g': return 0x00001E22221E021C;
-        case '.': return 0x00000000000008; case ':': return 0x00080000000800;
-        case '-': return 0x0000001C000000; case '/': return 0x02040810204000;
-        case '%': return 0x22040810220000; case '(': return 0x04080808080804;
-        case ')': return 0x08040404040408; case '+': return 0x0008083E080800;
+        case '0': return 0x1C22262A32221CULL; case '1': return 0x080C080808081CULL;
+        case '2': return 0x1C22020C10203EULL; case '3': return 0x1C22020C02221CULL;
+        case '4': return 0x040C14243E0404ULL; case '5': return 0x3E203C0202221CULL;
+        case '6': return 0x1C22203C22221CULL; case '7': return 0x3E020408101010ULL;
+        case '8': return 0x1C22221C22221CULL; case '9': return 0x1C22221E02221CULL;
+        case 'A': return 0x1C22223E222222ULL; case 'B': return 0x3C22223C22223CULL;
+        case 'C': return 0x1C22202020221CULL; case 'D': return 0x3C22222222223CULL;
+        case 'E': return 0x3E20203C20203EULL; case 'F': return 0x3E20203C202020ULL;
+        case 'G': return 0x1C22202E22221CULL; case 'H': return 0x2222223E222222ULL;
+        case 'I': return 0x1C08080808081CULL; case 'J': return 0x0E040404042418ULL;
+        case 'K': return 0x22242830282422ULL; case 'L': return 0x2020202020203EULL;
+        case 'M': return 0x22362A22222222ULL; case 'N': return 0x22322A26222222ULL;
+        case 'O': return 0x1C22222222221CULL; case 'P': return 0x3C22223C202020ULL;
+        case 'Q': return 0x1C2222222A241AULL; case 'R': return 0x3C22223C282422ULL;
+        case 'S': return 0x1C22100C02221CULL; case 'T': return 0x3E080808080808ULL;
+        case 'U': return 0x2222222222221CULL; case 'V': return 0x22222222221408ULL;
+        case 'W': return 0x2222222A2A3622ULL; case 'X': return 0x22221408142222ULL;
+        case 'Y': return 0x22222214080808ULL; case 'Z': return 0x3E02040810203EULL;
+        case '.': return 0x00000000000008ULL; case ':': return 0x00080000000800ULL;
+        case '-': return 0x0000001C000000ULL; case '/': return 0x02040810204000ULL;
+        case '%': return 0x22040810222412ULL; case '(': return 0x04080808080804ULL;
+        case ')': return 0x08040404040408ULL; case '+': return 0x0008083E080800ULL;
+        case '[': return 0x1E10101010101EULL; case ']': return 0x1E02020202021EULL;
+        case '<': return 0x04081020100804ULL; case '>': return 0x10080402040810ULL;
         default: return 0;
       }
     };
 
-    float px = size * 0.15f;
-    float cw = px * 6.0f;
     int idx = 0;
     while (text[idx]) {
       uint64_t gl = getGlyph5x7(text[idx]);
       if (gl != 0 || text[idx] == ' ') {
-        float ox = x + idx * cw;
+        float ox = ox_start + idx * cw;
         for (int row = 0; row < 7; row++) {
           int row_data = (int)((gl >> ((6 - row) * 8)) & 0xFF);
           for (int col = 0; col < 5; col++) {
             if (row_data & (1 << (5 - col))) {
-              addRect(ox + col * px, y + (3 - row) * px, px * 1.1f, px * 1.1f, r, g, b, a);
+              // Thicker stroke: draw 1.35x size pixels for a bolder look
+              addRect(ox + col * px, y + (3 - row) * px, px * 1.35f, px * 1.35f, r, g, b, a);
             }
           }
         }
@@ -308,9 +322,9 @@ public:
     }
   }
 
-  void drawInt(float x, float y, int val, float size, float r, float g, float b, float a = 1.0f) {
+  void drawInt(float x, float y, int val, float size, float r, float g, float b, float a = 1.0f, Align align = LEFT) {
       char buf[32]; snprintf(buf, sizeof(buf), "%d", val);
-      drawText(x, y, buf, size, r, g, b, a);
+      drawText(x, y, buf, size, r, g, b, a, true, align);
   }
 
 
@@ -1410,8 +1424,8 @@ int main() {
             r3d->drawMesh(rocketBody, bodyMdl, def.r * 0.95f, def.g * 0.95f, def.b * 0.95f, 1.0f, 0.25f);
             // Upper 60%: cone from body top to part top
             float coneFrac = 1.0f - bodyFrac;
-            Vec3 coneCenter = partBot + rocketDir * (part_h_3d * (bodyFrac + coneFrac * 0.5f));
-            Mat4 coneMdl = Mat4::TRS(coneCenter, rocketQuat, Vec3(part_w_3d, part_h_3d * coneFrac, part_w_3d));
+            Vec3 coneStart = partBot + rocketDir * (part_h_3d * bodyFrac);
+            Mat4 coneMdl = Mat4::TRS(coneStart, rocketQuat, Vec3(part_w_3d, part_h_3d * coneFrac, part_w_3d));
             r3d->drawMesh(rocketNose, coneMdl, def.r, def.g, def.b, 1.0f, 0.25f);
           } else if (def.category == CAT_ENGINE) {
             // Upper 40%: cylinder body flush with part above
@@ -1419,12 +1433,12 @@ int main() {
             Vec3 bodyCenter = partTop - rocketDir * (part_h_3d * bodyFrac * 0.5f);
             Mat4 bodyMdl = Mat4::TRS(bodyCenter, rocketQuat, Vec3(part_w_3d * 0.55f, part_h_3d * bodyFrac, part_w_3d * 0.55f));
             r3d->drawMesh(rocketBody, bodyMdl, 0.18f, 0.18f, 0.20f, 1.0f, 0.4f);
-            // Lower 60%: bell nozzle (cone, wide end down)
+            // Lower 60%: bell nozzle (cone mesh base at y=0, tip at y=h)
+            // To flare out downwards, we place it at partBot and it grows up to the body.
             float nozzleFrac = 1.0f - bodyFrac;
-            Vec3 nozzleCenter = partBot + rocketDir * (part_h_3d * nozzleFrac * 0.5f);
-            Mat4 nozzleMdl = Mat4::TRS(nozzleCenter, rocketQuat, Vec3(part_w_3d * 0.85f, part_h_3d * nozzleFrac, part_w_3d * 0.85f));
+            Mat4 nozzleMdl = Mat4::TRS(partBot, rocketQuat, Vec3(part_w_3d * 0.85f, part_h_3d * nozzleFrac, part_w_3d * 0.85f));
             r3d->drawMesh(rocketNose, nozzleMdl, def.r, def.g, def.b, 1.0f, 0.4f);
-            engNozzlePos = nozzleCenter; // update for flame rendering
+            engNozzlePos = partBot; // update for flame rendering
           } else if (def.category == CAT_STRUCTURAL && def.drag_coeff < 0) {
             // Fin set: 4 fins around this part (no body needed)
             for (int fi = 0; fi < 4; fi++) {
@@ -1453,8 +1467,8 @@ int main() {
             r3d->drawMesh(rocketBody, bodyMdl, def.r, def.g, def.b, 1.0f, 0.3f);
             // Upper 50%: cone top
             float coneFrac = 1.0f - bodyFrac;
-            Vec3 coneCenter = partBot + rocketDir * (part_h_3d * (bodyFrac + coneFrac * 0.5f));
-            Mat4 coneMdl = Mat4::TRS(coneCenter, rocketQuat, Vec3(part_w_3d * 0.9f, part_h_3d * coneFrac, part_w_3d * 0.9f));
+            Vec3 coneStart = partBot + rocketDir * (part_h_3d * bodyFrac);
+            Mat4 coneMdl = Mat4::TRS(coneStart, rocketQuat, Vec3(part_w_3d * 0.9f, part_h_3d * coneFrac, part_w_3d * 0.9f));
             r3d->drawMesh(rocketNose, coneMdl, def.r * 1.1f, def.g * 1.1f, def.b * 1.1f, 1.0f, 0.3f);
           } else if (def.category == CAT_STRUCTURAL && def.drag_coeff >= 0) {
             // Decoupler/adapter
@@ -1679,36 +1693,36 @@ int main() {
     renderer->addRect(gauge_fuel_x, gauge_y_center - gauge_h / 2.0f - 0.03f,
                       gauge_w * 2.0f, 0.03f, 0.9f, 0.6f, 0.1f,
                       hud_opacity); // 橙: FUEL
-    // --- 5. 数字读数 (七段数码管) + 黑色背景 + 像素字体单位 ---
-    float num_x = -0.65f;
-    float num_size = 0.035f;
-    float bg_w = 0.20f;  // 数字背景宽 (加宽放单位)
-    float bg_h = 0.05f;  // 数字背景高
-    float label_x = num_x + 0.08f; // 单位文字起始X
+    // --- Telemetry Readings (Right Side - Final Refinement) ---
+    float num_size = 0.025f; // Even smaller
+    float num_x = 0.85f;     // Far right
+    float label_x = num_x + 0.065f; 
+    float bg_w = 0.22f;
+    float bg_h = 0.05f;
 
     // 速度读数 + m/s
     renderer->addRect(num_x, 0.7f, bg_w, bg_h, 0.0f, 0.0f, 0.0f, 0.5f);
-    renderer->drawInt(num_x - 0.04f, 0.7f, (int)current_vel, num_size, 1.0f, 0.4f, 0.4f, hud_opacity);
+    renderer->drawInt(num_x + 0.05f, 0.7f, (int)current_vel, num_size, 1.0f, 0.4f, 0.4f, hud_opacity, Renderer::RIGHT);
     renderer->drawText(label_x, 0.7f, "m/s", num_size * 0.7f, 1.0f, 0.6f, 0.6f, hud_opacity);
 
     // 海拔读数 + m 或 km
     renderer->addRect(num_x, 0.55f, bg_w, bg_h, 0.0f, 0.0f, 0.0f, 0.5f);
     if (current_alt > 10000) {
-      renderer->drawInt(num_x - 0.04f, 0.55f, (int)(current_alt / 1000.0), num_size, 0.4f, 0.7f, 1.0f, hud_opacity);
+      renderer->drawInt(num_x + 0.05f, 0.55f, (int)(current_alt / 1000.0), num_size, 0.4f, 0.7f, 1.0f, hud_opacity, Renderer::RIGHT);
       renderer->drawText(label_x, 0.55f, "km", num_size * 0.7f, 0.5f, 0.8f, 1.0f, hud_opacity);
     } else {
-      renderer->drawInt(num_x - 0.04f, 0.55f, (int)current_alt, num_size, 0.4f, 0.7f, 1.0f, hud_opacity);
+      renderer->drawInt(num_x + 0.05f, 0.55f, (int)current_alt, num_size, 0.4f, 0.7f, 1.0f, hud_opacity, Renderer::RIGHT);
       renderer->drawText(label_x, 0.55f, "m", num_size * 0.7f, 0.5f, 0.8f, 1.0f, hud_opacity);
     }
 
     // 燃油读数 + kg
     renderer->addRect(num_x, 0.4f, bg_w, bg_h, 0.0f, 0.0f, 0.0f, 0.5f);
-    renderer->drawInt(num_x - 0.04f, 0.4f, (int)current_fuel, num_size, 0.9f, 0.7f, 0.2f, hud_opacity);
+    renderer->drawInt(num_x + 0.05f, 0.4f, (int)current_fuel, num_size, 0.9f, 0.7f, 0.2f, hud_opacity, Renderer::RIGHT);
     renderer->drawText(label_x, 0.4f, "kg", num_size * 0.7f, 1.0f, 0.8f, 0.3f, hud_opacity);
 
     // 油门读数 + %
     renderer->addRect(num_x, 0.25f, bg_w * 0.8f, bg_h * 0.8f, 0.0f, 0.0f, 0.0f, 0.5f);
-    renderer->drawInt(num_x - 0.03f, 0.25f, (int)(control_input.throttle * 100), num_size * 0.8f, 0.8f, 0.8f, 0.8f, hud_opacity);
+    renderer->drawInt(num_x + 0.04f, 0.25f, (int)(control_input.throttle * 100), num_size * 0.8f, 0.8f, 0.8f, 0.8f, hud_opacity, Renderer::RIGHT);
     renderer->drawText(label_x - 0.02f, 0.25f, "%", num_size * 0.6f, 0.8f, 0.8f, 0.8f, hud_opacity);
 
     // 俯仰读数 (Pitch) + 度数
@@ -1720,29 +1734,34 @@ int main() {
     } else if (pitch_deg > 20) {
         pr = 1.0f; pg = 0.7f; pb = 0.2f; // Yellow Warning (Safe speed)
     }
-    renderer->drawInt(num_x - 0.03f, 0.10f, pitch_deg, num_size * 0.8f, pr, pg, pb, hud_opacity);
+    renderer->drawInt(num_x + 0.04f, 0.10f, pitch_deg, num_size * 0.8f, pr, pg, pb, hud_opacity, Renderer::RIGHT);
     renderer->drawText(label_x - 0.02f, 0.10f, "deg", num_size * 0.5f, pr, pg, pb, hud_opacity);
 
-    // 垂直速度读数 + m/s (右侧 HUD)
-    renderer->addRect(0.85f, 0.4f, 0.22f, 0.06f, 0.05f, 0.05f, 0.05f, 0.5f);
+    // 垂直速度读数 + m/s
+    renderer->addRect(num_x, -0.05f, bg_w, bg_h, 0.05f, 0.05f, 0.05f, 0.5f);
     float vr = current_vvel < 0 ? 1.0f : 0.3f;
     float vg = current_vvel >= 0 ? 1.0f : 0.3f;
-    renderer->drawInt(0.81f, 0.4f, current_vvel, num_size * 0.9f, vr, vg, 0.3f, hud_opacity);
-    renderer->drawText(0.91f, 0.4f, "m/s", num_size * 0.5f, 0.7f, 0.7f, 0.7f, hud_opacity);
+    renderer->drawInt(num_x + 0.05f, -0.05f, current_vvel, num_size * 0.9f, vr, vg, 0.3f, hud_opacity, Renderer::RIGHT);
+    renderer->drawText(label_x, -0.05f, "v_m/s", num_size * 0.5f, 0.7f, 0.7f, 0.7f, hud_opacity);
 
 
-    // --- 6. 控制模式指示器 (HUD 右上角) ---
-    float mode_x = 0.85f;
+    // --- 6. 控制模式指示器 (HUD 右上角, 更加收缩) ---
+    float mode_x = 0.88f; 
     float mode_y = 0.85f;
-    // 背景框
-    renderer->addRect(mode_x, mode_y, 0.22f, 0.06f, 0.05f, 0.05f, 0.05f, 0.7f);
+    float mode_w = 0.15f;
+    float mode_h = 0.04f;
+    renderer->addRect(mode_x, mode_y, mode_w, mode_h, 0.05f, 0.05f, 0.05f, 0.7f);
     if (rocket_state.auto_mode) {
-      // 绿色 AUTO 指示
-      renderer->addRect(mode_x, mode_y, 0.20f, 0.04f, 0.1f, 0.8f, 0.2f, 0.9f);
+      renderer->addRect(mode_x, mode_y, mode_w - 0.02f, mode_h - 0.015f, 0.1f, 0.8f, 0.2f, 0.9f);
+      renderer->drawText(mode_x, mode_y, "AUTO", 0.020f, 0.1f, 0.1f, 0.1f, 0.9f, false, Renderer::CENTER);
     } else {
-      // 橙色 MANUAL 指示
-      renderer->addRect(mode_x, mode_y, 0.20f, 0.04f, 1.0f, 0.6f, 0.1f, 0.9f);
+      renderer->addRect(mode_x, mode_y, mode_w - 0.02f, mode_h - 0.015f, 1.0f, 0.6f, 0.1f, 0.9f);
+      renderer->drawText(mode_x, mode_y, "MANUAL", 0.020f, 0.1f, 0.1f, 0.1f, 0.9f, false, Renderer::CENTER);
     }
+
+    // --- 7. Mission Status (Far Right) ---
+    renderer->drawText(num_x - 0.08f, 0.80f, "[MISSION CONTROL]", 0.016f, 0.4f, 1.0f, 0.4f, hud_opacity);
+    renderer->drawText(num_x - 0.08f, 0.76f, rocket_state.mission_msg.c_str(), 0.015f, 0.8f, 0.8f, 1.0f, hud_opacity);
 
     // --- 6. 油门指示条 (HUD 底部中央) ---
     float thr_bar_x = 0.0f;

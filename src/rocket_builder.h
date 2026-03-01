@@ -289,7 +289,7 @@ inline void drawBuilderUI_KSP(Renderer* r, BuilderState& bs, float time) {
 
     // ---- Title Bar ----
     r->addRect(0.0f, 0.92f, 2.0f, 0.12f, 0.08f, 0.10f, 0.18f, 0.85f);
-    drawBuilderText(r, -0.42f, 0.925f, "ROCKET ASSEMBLY", 0.030f, 0.3f, 0.85f, 1.0f);
+    drawBuilderText(r, -0.42f, 0.925f, "ROCKET ASSEMBLY", 0.028f, 0.3f, 0.85f, 1.0f);
 
     // ---- Left Panel: Part Catalog ----
     float panel_left = -0.98f;
@@ -318,7 +318,7 @@ inline void drawBuilderUI_KSP(Renderer* r, BuilderState& bs, float time) {
         float tr = active ? 0.5f : 0.35f;
         float tg = active ? 1.0f : 0.45f;
         float tb = active ? 0.6f : 0.45f;
-        drawBuilderText(r, tx - 0.03f, tab_y, abbr, 0.012f, tr, tg, tb);
+        drawBuilderText(r, tx - 0.03f, tab_y, abbr, 0.011f, tr, tg, tb);
     }
 
     // Part list in current category
@@ -380,7 +380,7 @@ inline void drawBuilderUI_KSP(Renderer* r, BuilderState& bs, float time) {
 
     if (bs.assembly.parts.empty()) {
         drawBuilderText(r, asm_panel_x - 0.15f, 0.45f, "ADD PARTS", 0.012f, 0.3f, 0.3f, 0.35f);
-        drawBuilderText(r, asm_panel_x - 0.15f, 0.35f, "ENTER=ADD", 0.010f, 0.2f, 0.5f, 0.3f);
+        drawBuilderText(r, asm_panel_x - 0.14f, 0.35f, "ENTER=ADD", 0.010f, 0.2f, 0.5f, 0.3f);
     } else {
         // List assembly parts (bottom-to-top, but display top-to-bottom)
         float asm_list_y = 0.72f;
@@ -409,7 +409,7 @@ inline void drawBuilderUI_KSP(Renderer* r, BuilderState& bs, float time) {
             // Truncate name to ~12 chars
             char short_name[16] = {0};
             for (int j = 0; j < 14 && def.name[j]; j++) short_name[j] = def.name[j];
-            drawBuilderText(r, asm_panel_x - asm_panel_w / 2.0f + 0.06f, iy, short_name, 0.008f, nr, ng, nb);
+            drawBuilderText(r, asm_panel_x - asm_panel_w / 2.0f + 0.06f, iy, short_name, 0.0085f, nr, ng, nb);
         }
     }
 
@@ -493,34 +493,34 @@ inline void drawBuilderUI_KSP(Renderer* r, BuilderState& bs, float time) {
     float stat_y2 = -0.82f;
 
     // Mass
-    drawBuilderText(r, -0.88f, stat_y, "MASS", 0.009f, 0.5f, 0.5f, 0.5f);
+    drawBuilderText(r, -0.88f, stat_y, "MASS", 0.0085f, 0.5f, 0.5f, 0.5f);
     float total_mass = bs.assembly.total_dry_mass + bs.assembly.total_fuel;
-    drawBuilderInt(r, -0.88f, stat_y2, (int)(total_mass / 1000), 0.018f, 0.9f, 0.9f, 0.9f);
-    drawBuilderText(r, -0.70f, stat_y2, "t", 0.012f, 0.5f, 0.5f, 0.5f);
-
+    drawBuilderInt(r, -0.88f, stat_y2, (int)(total_mass / 1000), 0.016f, 0.9f, 0.9f, 0.9f);
+    drawBuilderText(r, -0.72f, stat_y2, "t", 0.011f, 0.5f, 0.5f, 0.5f);
+ 
     // Fuel
-    drawBuilderText(r, -0.50f, stat_y, "FUEL", 0.009f, 0.5f, 0.5f, 0.5f);
-    drawBuilderInt(r, -0.50f, stat_y2, (int)(bs.assembly.total_fuel / 1000), 0.018f, 0.9f, 0.7f, 0.2f);
-    drawBuilderText(r, -0.32f, stat_y2, "t", 0.012f, 0.6f, 0.5f, 0.2f);
-
+    drawBuilderText(r, -0.50f, stat_y, "FUEL", 0.0085f, 0.5f, 0.5f, 0.5f);
+    drawBuilderInt(r, -0.50f, stat_y2, (int)(bs.assembly.total_fuel / 1000), 0.016f, 0.9f, 0.7f, 0.2f);
+    drawBuilderText(r, -0.34f, stat_y2, "t", 0.011f, 0.6f, 0.5f, 0.2f);
+ 
     // Delta-V
-    drawBuilderText(r, -0.12f, stat_y, "DELTA V", 0.009f, 0.5f, 0.5f, 0.5f);
-    drawBuilderInt(r, -0.12f, stat_y2, (int)bs.assembly.total_delta_v, 0.018f, 0.3f, 0.9f, 0.4f);
-    drawBuilderText(r, 0.12f, stat_y2, "m/s", 0.012f, 0.2f, 0.6f, 0.3f);
-
+    drawBuilderText(r, -0.12f, stat_y, "DELTA V", 0.0085f, 0.5f, 0.5f, 0.5f);
+    drawBuilderInt(r, -0.12f, stat_y2, (int)bs.assembly.total_delta_v, 0.016f, 0.3f, 0.9f, 0.4f);
+    drawBuilderText(r, 0.10f, stat_y2, "m/s", 0.011f, 0.2f, 0.6f, 0.3f);
+ 
     // TWR
-    drawBuilderText(r, 0.32f, stat_y, "TWR", 0.009f, 0.5f, 0.5f, 0.5f);
+    drawBuilderText(r, 0.32f, stat_y, "TWR", 0.0085f, 0.5f, 0.5f, 0.5f);
     int twr_int = (int)(bs.assembly.twr * 100);
-    drawBuilderInt(r, 0.32f, stat_y2, twr_int, 0.018f,
+    drawBuilderInt(r, 0.32f, stat_y2, twr_int, 0.016f,
                    bs.assembly.twr >= 1.0f ? 0.3f : 1.0f,
                    bs.assembly.twr >= 1.0f ? 0.9f : 0.3f,
                    bs.assembly.twr >= 1.0f ? 0.4f : 0.3f);
-    drawBuilderText(r, 0.48f, stat_y2, "/100", 0.009f, 0.4f, 0.4f, 0.4f);
-
+    drawBuilderText(r, 0.46f, stat_y2, "/100", 0.0085f, 0.4f, 0.4f, 0.4f);
+ 
     // Height
-    drawBuilderText(r, 0.65f, stat_y, "HEIGHT", 0.009f, 0.5f, 0.5f, 0.5f);
-    drawBuilderInt(r, 0.65f, stat_y2, (int)bs.assembly.total_height, 0.018f, 0.6f, 0.7f, 0.9f);
-    drawBuilderText(r, 0.82f, stat_y2, "m", 0.012f, 0.4f, 0.5f, 0.6f);
+    drawBuilderText(r, 0.65f, stat_y, "HEIGHT", 0.0085f, 0.5f, 0.5f, 0.5f);
+    drawBuilderInt(r, 0.65f, stat_y2, (int)bs.assembly.total_height, 0.016f, 0.6f, 0.7f, 0.9f);
+    drawBuilderText(r, 0.82f, stat_y2, "m", 0.011f, 0.4f, 0.5f, 0.6f);
 
     // ---- Launch Button / Prompt ----
     bool can_launch = bs.assembly.hasEngine() && !bs.assembly.parts.empty();
@@ -537,15 +537,15 @@ inline void drawBuilderUI_KSP(Renderer* r, BuilderState& bs, float time) {
     // ---- Controls Help ----
     float help_y = 0.82f;
     float help_x = 0.05f;
-    drawBuilderText(r, help_x - 0.07f, help_y, "TAB=MODE", 0.007f, 0.3f, 0.3f, 0.35f);
-
+    drawBuilderText(r, help_x - 0.07f, help_y, "TAB=MODE", 0.0075f, 0.3f, 0.3f, 0.35f);
+ 
     // Mode indicator
     if (bs.in_assembly_mode) {
-        drawBuilderText(r, help_x - 0.07f, help_y - 0.03f, "DEL=REMOVE", 0.007f, 0.3f, 0.3f, 0.35f);
-        drawBuilderText(r, help_x - 0.07f, help_y - 0.05f, "PGUP/DN=MOVE", 0.007f, 0.3f, 0.3f, 0.35f);
+        drawBuilderText(r, help_x - 0.07f, help_y - 0.03f, "DEL=REMOVE", 0.0075f, 0.3f, 0.3f, 0.35f);
+        drawBuilderText(r, help_x - 0.07f, help_y - 0.05f, "PGUP/DN=MOVE", 0.0075f, 0.3f, 0.3f, 0.35f);
     } else {
-        drawBuilderText(r, help_x - 0.07f, help_y - 0.03f, "ENTER=ADD", 0.007f, 0.3f, 0.3f, 0.35f);
-        drawBuilderText(r, help_x - 0.07f, help_y - 0.05f, "<>=CATEGORY", 0.007f, 0.3f, 0.3f, 0.35f);
+        drawBuilderText(r, help_x - 0.07f, help_y - 0.03f, "ENTER=ADD", 0.0075f, 0.3f, 0.3f, 0.35f);
+        drawBuilderText(r, help_x - 0.07f, help_y - 0.05f, "<>=CATEGORY", 0.0075f, 0.3f, 0.3f, 0.35f);
     }
 }
 
