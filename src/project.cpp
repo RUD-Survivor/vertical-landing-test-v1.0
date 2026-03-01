@@ -580,7 +580,7 @@ int main() {
   // 初始化 3D 渲染器和网格
   // =========================================================
   Renderer3D* r3d = new Renderer3D();
-  Mesh earthMesh = MeshGen::sphere(48, 64, 1.0f);  // 单位球，用 model 矩阵缩放
+  Mesh earthMesh = MeshGen::sphere(96, 128, 1.0f);  // High-res unit sphere for RSS-Reborn quality
   Mesh ringMesh = MeshGen::ring(64, 0.45f, 1.0f);   // 环形网格(内径0.45, 外径1.0)
   Mesh rocketBody = MeshGen::cylinder(32, 1.0f, 1.0f);
   Mesh rocketNose = MeshGen::cone(32, 1.0f, 1.0f);
@@ -1027,6 +1027,9 @@ int main() {
       Mat4 macroProjMat = Mat4::perspective(0.8f, aspect, macro_near, far_plane);
       r3d->beginFrame(viewMat, macroProjMat, camEye_rel);
 
+      // ===== SKYBOX: Procedural Starfield + Milky Way =====
+      r3d->drawSkybox();
+
       // ===== 太阳物理本体 =====
       if (cam_mode_3d == 2) { 
           // 仅在全景模式渲染巨型的物理太阳模型避免遮盖火箭本体细节
@@ -1068,10 +1071,11 @@ int main() {
                   r3d->lightDir = Vec3((float)(light_dx/light_len), (float)(light_dy/light_len), (float)(light_dz/light_len));
               }
           }
-          r3d->drawPlanet(earthMesh, planetModel, b.type, b.r, b.g, b.b, 1.0f);
+          r3d->drawPlanet(earthMesh, planetModel, b.type, b.r, b.g, b.b, 1.0f, (float)rocket_state.sim_time, (int)i);
           
-          if (b.type == TERRESTRIAL || b.type == GAS_GIANT) {
-              Mat4 atmoModel = Mat4::scale(Vec3(r * 1.025f, r * 1.025f, r * 1.025f));
+          if ((b.type == TERRESTRIAL || b.type == GAS_GIANT) && i != 1 && i != 4) {
+              // Atmosphere shell (skip Mercury=1 and Moon=4: no atmosphere)
+              Mat4 atmoModel = Mat4::scale(Vec3(r * 1.04f, r * 1.04f, r * 1.04f));
               atmoModel = Mat4::translate(renderPlanet) * atmoModel;
               r3d->drawAtmosphere(earthMesh, atmoModel);
           }
