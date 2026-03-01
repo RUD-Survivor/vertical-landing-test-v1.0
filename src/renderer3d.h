@@ -320,7 +320,7 @@ public:
   // Atmosphere uniforms
   GLint ua_mvp = -1, ua_model = -1, ua_lightDir = -1, ua_viewPos = -1;
   // Skybox uniforms
-  GLint us_invViewProj = -1;
+  GLint us_invViewProj = -1, us_skyVibrancy = -1;
 
   // ===== RSS-Reborn Per-Planet Shader Programs =====
   GLuint mercuryProgram = 0, venusProgram = 0, moonProgram = 0, marsProgram = 0;
@@ -1644,80 +1644,158 @@ public:
     glEnableVertexAttribArray(0);
     glBindVertexArray(0);
 
-    // --- Atmosphere Shader (Rayleigh + Mie Scattering) ---
+    // --- Atmosphere Shader (Volumetric Raymarching Scattering) ---
+    const char* atmoVertSrc = R"(
+      #version 330 core
+      layout(location=0) in vec3 aPos;
+      uniform mat4 uMVP;
+      uniform mat4 uModel;
+      out vec3 vWorldPos;
+      void main() {
+        vWorldPos = (uModel * vec4(aPos, 1.0)).xyz;
+        gl_Position = uMVP * vec4(aPos, 1.0);
+      }
+    )";
+
+    // --- Atmosphere Shader (Rayleigh + Mie Volumetric Raymarching) ---
     const char* atmoFragSrc = R"(
       #version 330 core
       in vec3 vWorldPos;
-      in vec3 vNormal;
-      in vec2 vUV;
-      in vec4 vColor;
+      
+      uniform vec3 uCamPos;
       uniform vec3 uLightDir;
-      uniform vec3 uViewPos;
+      uniform vec3 uPlanetCenter;
+      uniform float uInnerRadius;
+      uniform float uOuterRadius;
+      
       out vec4 FragColor;
+
+      #define PI 3.14159265359
+
+      const int PRIMARY_STEPS = 16;
+      const int LIGHT_STEPS = 6;
+      
+      // === 电影级大气参数 (Cinematic Parameters) ===
+      // 我们将瑞利系数放大 3.5 倍，制造出 KSP 级别厚重、高密度的蓝色大气！
+      const vec3 RAYLEIGH_COEFF = vec3(0.0058, 0.0135, 0.0331) * 3.5; 
+      const float MIE_COEFF = 0.003 * 3.0; // 放大米氏系数，增强太阳周围的光晕
+      const float H_RAYLEIGH = 8.0;  // 8 km 瑞利衰减高度
+      const float H_MIE = 1.2;       // 1.2 km 米氏衰减高度
+      const float G_MIE = 0.85;      // 光晕集中度
+
+      bool intersectSphere(vec3 ro, vec3 rd, float radius, out float t0, out float t1) {
+          vec3 L = ro - uPlanetCenter;
+          float a = dot(rd, rd);
+          float b = 2.0 * dot(rd, L);
+          float c = dot(L, L) - radius * radius;
+          float delta = b * b - 4.0 * a * c;
+          if (delta < 0.0) return false;
+          float sqrtDelta = sqrt(delta);
+          t0 = (-b - sqrtDelta) / (2.0 * a);
+          t1 = (-b + sqrtDelta) / (2.0 * a);
+          return true;
+      }
+
+      float rayleighPhase(float cosTheta) {
+          return 3.0 / (16.0 * PI) * (1.0 + cosTheta * cosTheta);
+      }
+
+      float miePhase(float cosTheta) {
+          float g2 = G_MIE * G_MIE;
+          return (1.0 - g2) / (4.0 * PI * pow(1.0 + g2 - 2.0 * G_MIE * cosTheta, 1.5));
+      }
+
+      void getOpticalDepth(vec3 p, vec3 lightDir, out float dRayleigh, out float dMie) {
+          dRayleigh = 0.0; dMie = 0.0;
+          float t0, t1;
+          if (!intersectSphere(p, lightDir, uOuterRadius, t0, t1) || t1 <= 0.0) return;
+          float stepSize = t1 / float(LIGHT_STEPS);
+          for (int i = 0; i < LIGHT_STEPS; i++) {
+              vec3 pos = p + lightDir * (float(i) + 0.5) * stepSize;
+              float h = length(pos - uPlanetCenter) - uInnerRadius;
+              
+              // 关键物理修复：如果采样点在地表以下，说明光线被星球本体彻底遮挡
+              // 光学厚度设为无穷大，这样夜晚的大气就会真正变成纯黑！
+              if (h < 0.0) {
+                  dRayleigh = 1e6; 
+                  dMie = 1e6;
+                  return;
+              }
+              dRayleigh += exp(-h / H_RAYLEIGH) * stepSize;
+              dMie += exp(-h / H_MIE) * stepSize;
+          }
+      }
+
       void main() {
-        vec3 N = normalize(vNormal);
-        vec3 V = normalize(uViewPos - vWorldPos);
-        vec3 L = normalize(uLightDir);
-
-        // Geometry
-        float NdotV = dot(N, V);
-        float NdotL = dot(N, L);
-        float VdotL = dot(V, L);
-
-        // Rim intensity (atmosphere optical depth increases at limb)
-        float rim = 1.0 - abs(NdotV);
-        float rimSoft = pow(rim, 2.0);   // Outer glow visible at wider angles
-        float rimHard = pow(rim, 5.0);   // Sharp inner limb
-
-        // --- Rayleigh Scattering ---
-        // Wavelength-dependent: blue strongest, red weakest
-        vec3 rayleighCoeff = vec3(0.15, 0.35, 0.95); // λ^-4 approximation
-        // Phase function: (1 + cos²θ) where θ = angle between view and light
-        float cosTheta = VdotL;
-        float rayleighPhase = 0.75 * (1.0 + cosTheta * cosTheta);
-        vec3 rayleigh = rayleighCoeff * rayleighPhase;
-
-        // --- Mie Scattering (forward-peaked haze) ---
-        float g = 0.76; // Asymmetry factor
-        float g2 = g * g;
-        float miePhase = 1.5 * ((1.0 - g2) / (2.0 + g2)) *
-                         (1.0 + cosTheta * cosTheta) /
-                         pow(1.0 + g2 - 2.0 * g * cosTheta, 1.5);
-        vec3 mieColor = vec3(0.95, 0.85, 0.7); // Warm white-gold haze
-        vec3 mie = mieColor * miePhase * 0.15;
-
-        // --- Sunset / Sunrise coloring ---
-        // At low sun angles, blue is scattered out, leaving orange/red
-        float sunsetFactor = smoothstep(-0.05, 0.15, NdotL) * smoothstep(0.35, 0.0, NdotL);
-        vec3 sunsetColor = vec3(1.0, 0.30, 0.05);
-        vec3 deepSunset = vec3(0.6, 0.1, 0.3); // Purple twilight
-
-        // Combine scattering
-        vec3 scatter = rayleigh + mie;
-        // Add sunset warmth
-        scatter += sunsetColor * sunsetFactor * 1.8;
-        // Purple twilight at deep terminator
-        float twilightZone = smoothstep(0.05, -0.08, NdotL) * smoothstep(-0.2, -0.05, NdotL);
-        scatter += deepSunset * twilightZone * 0.6;
-
-        // --- Visibility control ---
-        // Atmosphere visible from day limb through twilight; fully dark on deep night side
-        float visibility = smoothstep(-0.18, 0.05, NdotL);
-        // Extra glow at backlit limb (light shining through atmosphere from behind)
-        float backlitGlow = pow(max(0.0, -NdotV), 3.0) * smoothstep(-0.3, -0.05, NdotL) * 0.3;
-
-        float alpha = (rimSoft * visibility + rimHard * 0.3 + backlitGlow) * 0.8;
-        alpha = min(alpha, 0.92); // Never fully opaque
-
-        vec3 finalColor = scatter;
-        FragColor = vec4(finalColor, alpha);
+          vec3 rayDir = normalize(vWorldPos - uCamPos);
+          float tNear, tFar;
+          if (!intersectSphere(uCamPos, rayDir, uOuterRadius, tNear, tFar)) discard;
+          
+          float tSurf0, tSurf1;
+          if (intersectSphere(uCamPos, rayDir, uInnerRadius, tSurf0, tSurf1)) {
+              if (tSurf0 > 0.0) tFar = min(tFar, tSurf0);
+          }
+          
+          tNear = max(tNear, 0.0);
+          float segmentLength = tFar - tNear;
+          if (segmentLength <= 0.0) discard;
+          
+          float stepSize = segmentLength / float(PRIMARY_STEPS);
+          
+          vec3 sumRayleigh = vec3(0.0);
+          vec3 sumMie = vec3(0.0);
+          float optDepthRayleigh = 0.0;
+          float optDepthMie = 0.0;
+          float cosTheta = dot(rayDir, uLightDir);
+          
+          for (int i = 0; i < PRIMARY_STEPS; i++) {
+              vec3 pos = uCamPos + rayDir * (tNear + (float(i) + 0.5) * stepSize);
+              float h = length(pos - uPlanetCenter) - uInnerRadius;
+              if (h < 0.0) h = 0.0; 
+              
+              float dR = exp(-h / H_RAYLEIGH) * stepSize;
+              float dM = exp(-h / H_MIE) * stepSize;
+              optDepthRayleigh += dR;
+              optDepthMie += dM;
+              
+              float dRayleighLight, dMieLight;
+              getOpticalDepth(pos, uLightDir, dRayleighLight, dMieLight);
+              
+              vec3 tau = RAYLEIGH_COEFF * (optDepthRayleigh + dRayleighLight) + MIE_COEFF * 1.1 * (optDepthMie + dMieLight);
+              vec3 attenuation = exp(-tau);
+              
+              sumRayleigh += dR * attenuation;
+              sumMie += dM * attenuation;
+          }
+          
+          vec3 color = sumRayleigh * RAYLEIGH_COEFF * rayleighPhase(cosTheta) + 
+                       sumMie * MIE_COEFF * miePhase(cosTheta);
+          
+          // 增加曝光度，让大气层在高空看起来也极其显眼
+          color *= 18.0;
+          // === 核心修复：计算大气的物理遮挡率 ===
+          // 1. 计算从相机一直到宇宙深处的总光学厚度
+          vec3 tau_view = RAYLEIGH_COEFF * optDepthRayleigh + MIE_COEFF * optDepthMie;
+          vec3 viewTransmittance = exp(-tau_view); // 光线穿透率
+          float transLuma = dot(viewTransmittance, vec3(0.299, 0.587, 0.114));
+          
+          // 2. 气体本身的物理不透明度（夜晚时体现，使得地平线星星变暗）
+          float opacity = clamp(1.0 - transLuma, 0.0, 1.0);
+          
+          // 3. 强光致盲效应 (Washout)：白天的天空极亮，会在视觉上彻底遮盖星星
+          float brightness = dot(color, vec3(0.299, 0.587, 0.114));
+          float finalAlpha = clamp(opacity + brightness * 1.5, 0.0, 1.0);
+          
+          // HDR 色调映射
+          color = 1.0 - exp(-color);
+          
+          // 输出预乘 Alpha
+          FragColor = vec4(color, finalAlpha);
       }
     )";
-    atmoProg = compileProgram(vertSrc, atmoFragSrc);
+    atmoProg = compileProgram(atmoVertSrc, atmoFragSrc);
     ua_mvp = glGetUniformLocation(atmoProg, "uMVP");
     ua_model = glGetUniformLocation(atmoProg, "uModel");
-    ua_lightDir = glGetUniformLocation(atmoProg, "uLightDir");
-    ua_viewPos = glGetUniformLocation(atmoProg, "uViewPos");
 
     // --- Ribbon Shader (Trajectory Trails) ---
     const char* ribbonVertSrc = R"(
@@ -1863,6 +1941,8 @@ public:
       in vec3 vRayDir;
       out vec4 FragColor;
 
+      uniform float uSkyVibrancy; // 1.0 = full space visibility, 0.0 = washed out by atmosphere
+
       // --- High quality noise ---
       float hash13(vec3 p) {
         p = fract(p * vec3(443.897, 441.423, 437.195));
@@ -1891,6 +1971,11 @@ public:
         vec3 rd = normalize(vRayDir);
         vec3 col = vec3(0.0);
 
+        if (uSkyVibrancy < 0.01) {
+            FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+            return;
+        }
+
         // === STAR FIELD (4 density layers) ===
         for (int layer = 0; layer < 4; layer++) {
           float cellSize = 60.0 + float(layer) * 100.0;
@@ -1904,31 +1989,32 @@ public:
           float dist = length(localPos - starPos);
           float mag = hash13(cell + vec3(2,3,float(layer)*7.0));
 
-          if (mag > 0.68) {
-            float brt = (mag - 0.68) / 0.32;
-            brt = brt * brt * brt * 3.0;
-            float sz2 = 0.006 + brt * 0.012;
+          if (mag > 0.65) {
+            float brt = (mag - 0.65) / 0.35;
+            brt = brt * brt * brt * 8.0; // Boosted brightness
+            float sz2 = 0.006 + brt * 0.015;
             float star = smoothstep(sz2, sz2 * 0.1, dist);
 
             // Spectral class coloring (O B A F G K M)
             float temp = hash13(cell + vec3(5,7,float(layer)));
             vec3 sc;
-            if (temp < 0.08) sc = vec3(0.6, 0.7, 1.0);       // O/B blue
-            else if (temp < 0.25) sc = vec3(0.75, 0.85, 1.0); // A blue-white
-            else if (temp < 0.50) sc = vec3(1.0, 0.98, 0.95); // F/G white
-            else if (temp < 0.75) sc = vec3(1.0, 0.90, 0.70); // K yellow
-            else sc = vec3(1.0, 0.65, 0.35);                  // M red
+            if (temp < 0.10) sc = vec3(0.5, 0.7, 1.0);       // O/B bright blue
+            else if (temp < 0.30) sc = vec3(0.8, 0.9, 1.0);   // A white-blue
+            else if (temp < 0.55) sc = vec3(1.0, 1.0, 0.95);  // F/G pure white
+            else if (temp < 0.80) sc = vec3(1.0, 0.95, 0.8);  // K warm white
+            else sc = vec3(1.0, 0.7, 0.5);                    // M red-orange
 
             // Diffraction cross for brightest stars
             float cross = 0.0;
-            if (brt > 0.7) {
+            if (brt > 0.8) {
               float dx = abs(localPos.x - starPos.x);
               float dy = abs(localPos.y - starPos.y);
-              cross = exp(-dx*80.0)*exp(-dy*300.0) + exp(-dy*80.0)*exp(-dx*300.0);
-              cross *= (brt - 0.7) * 1.5;
+              // Bolder spikes
+              cross = exp(-dx*60.0)*exp(-dy*250.0) + exp(-dy*60.0)*exp(-dx*250.0);
+              cross *= (brt - 0.8) * 3.0; // Boosted spikes
             }
 
-            col += sc * (star * brt + cross * 0.4);
+            col += sc * (star * brt + cross * 0.6);
           }
         }
 
@@ -1939,53 +2025,57 @@ public:
         float galLon = atan(rd.z, rd.x);
 
         // Gaussian band with varying width
-        float bandWidth = 0.08 + 0.04 * sin(galLon * 2.0);
+        float bandWidth = 0.10 + 0.05 * sin(galLon * 2.0);
         float band = exp(-galLat * galLat / (2.0 * bandWidth * bandWidth));
 
         // Smooth nebulosity using FBM noise
-        vec3 galCoord = rd * 5.0;
+        vec3 galCoord = rd * 4.0;
         float neb = fbm(galCoord * 1.5, 6);
         float nebDetail = fbm(galCoord * 4.0 + vec3(100.0), 5);
 
         // Dark dust lanes (absorption)
-        float dust = fbm(galCoord * 3.0 + vec3(50.0, -30.0, 20.0), 5);
-        float dustAbsorption = smoothstep(0.35, 0.65, dust) * band;
+        float dust = fbm(galCoord * 3.5 + vec3(50.0, -30.0, 20.0), 5);
+        float dustAbsorption = smoothstep(0.3, 0.7, dust) * band;
 
         // Milky Way emission
-        float galEmission = neb * band * 0.4;
-        galEmission += nebDetail * band * 0.15;
-        galEmission *= (1.0 - dustAbsorption * 0.7);
+        float galEmission = neb * band * 0.8; // Boosted
+        galEmission += nebDetail * band * 0.4; // Boosted
+        galEmission *= (1.0 - dustAbsorption * 0.75);
 
-        // Color: warm brown core with amber nebulae (matching RSS-Reborn)
-        vec3 galCore = vec3(0.20, 0.14, 0.08) * galEmission;
-        vec3 warmNeb = vec3(0.25, 0.12, 0.05) * nebDetail * band * 0.15;
-        vec3 blueNeb = vec3(0.08, 0.06, 0.12) * smoothstep(0.5, 0.8, neb) * band * 0.10;
+        // Color: warm brown core with amber nebulae
+        vec3 galCore = vec3(0.35, 0.25, 0.15) * galEmission; // More saturated/bright
+        vec3 warmNeb = vec3(1.2, 0.6, 0.2) * nebDetail * band * 0.4; // Intense amber
+        vec3 blueNeb = vec3(0.2, 0.3, 0.8) * smoothstep(0.4, 0.9, neb) * band * 0.3; // More vivid blue
 
         // Dense star clusters within the band
-        for (int cl = 0; cl < 2; cl++) {
-          float cs = 300.0 + float(cl) * 200.0;
+        for (int cl = 0; cl < 3; cl++) {
+          float cs = 250.0 + float(cl) * 150.0;
           vec3 cc = floor(rd * cs);
           float cm = hash13(cc + vec3(99.0 + float(cl)*50.0));
-          if (cm > 0.90 && band > 0.15) {
+          if (cm > 0.88 && band > 0.1) {
             vec3 lp = fract(rd * cs) - 0.5;
             float cd = length(lp);
-            col += vec3(1.0, 0.90, 0.70) * smoothstep(0.015, 0.0, cd) * (cm-0.90)*12.0 * band;
+            col += vec3(1.0, 0.95, 0.8) * smoothstep(0.012, 0.0, cd) * (cm-0.88)*15.0 * band;
           }
         }
 
         col += galCore + warmNeb + blueNeb;
 
         // Very subtle cosmic background
-        col += vec3(0.001, 0.002, 0.004);
+        col += vec3(0.002, 0.003, 0.006);
 
-        // Tone mapping for HDR stars
-        col = col / (col + 0.8);
+        // Apply vibrancy (atmosphere washout)
+        col *= uSkyVibrancy;
+
+        // Tone mapping for HDR stars - adjusted for punchier highlights
+        col = col / (col + 0.5);
 
         FragColor = vec4(col, 1.0);
       }
     )";
     skyboxProg = compileProgram(skyboxVertSrc, skyboxFragSrc);
     us_invViewProj = glGetUniformLocation(skyboxProg, "uInvViewProj");
+    us_skyVibrancy = glGetUniformLocation(skyboxProg, "uSkyVibrancy");
 
     // Fullscreen quad VAO for skybox
     float fsQuad[] = { -1,-1,  1,-1,  -1,1,  1,1 };
@@ -2086,6 +2176,7 @@ public:
      float aspect = (float)screenW / (float)screenH;
      glUniform1f(ulf_aspect, aspect);
      
+     glEnable(GL_BLEND);
      glBlendFunc(GL_SRC_ALPHA, GL_ONE); // Additive blending for light
      glDepthMask(GL_FALSE);
      glDisable(GL_DEPTH_TEST);
@@ -2127,6 +2218,7 @@ public:
      glEnable(GL_DEPTH_TEST);
      glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
      glDepthMask(GL_TRUE);
+     glDisable(GL_BLEND);
   }
 
   void drawPlanet(const Mesh& mesh, const Mat4& model, BodyType type, float cr, float cg, float cb, float ca, float time = 0.0f, int bodyIdx = -1) {
@@ -2200,6 +2292,7 @@ public:
     glUniform4f(ub_color, cr, cg, cb, ca);
     
     // 加法混合 (火焰发光)
+    glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE);
     glDepthMask(GL_FALSE);
     glDisable(GL_CULL_FACE); // 防止视口翻转导致背面剔除
@@ -2215,32 +2308,67 @@ public:
     glEnable(GL_CULL_FACE);
     glDepthMask(GL_TRUE);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDisable(GL_BLEND);
   }
 
-  // 大气层散射壳
-  void drawAtmosphere(const Mesh& sphereMesh, const Mat4& model) {
+  // 大气层散射壳 (Volumetric Scattering)
+  void drawAtmosphere(const Mesh& sphereMesh, const Mat4& model, 
+                      const Vec3& camPos, const Vec3& lightDir, 
+                      const Vec3& planetCenter, float innerRadius, float outerRadius) {
     glUseProgram(atmoProg);
+
     Mat4 mvp = proj * view * model;
-    glUniformMatrix4fv(ua_mvp, 1, GL_FALSE, mvp.m);
-    glUniformMatrix4fv(ua_model, 1, GL_FALSE, model.m);
-    glUniform3f(ua_lightDir, lightDir.x, lightDir.y, lightDir.z);
-    glUniform3f(ua_viewPos, camPos.x, camPos.y, camPos.z);
-    // 加法混合 (大气光晕)
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
-    glDepthMask(GL_FALSE);
-    glCullFace(GL_FRONT); // 只绘制内表面
+    GLint u_atmo_mvp = glGetUniformLocation(atmoProg, "uMVP");
+    GLint u_atmo_model = glGetUniformLocation(atmoProg, "uModel");
+    GLint u_camPos = glGetUniformLocation(atmoProg, "uCamPos");
+    GLint u_lightDir = glGetUniformLocation(atmoProg, "uLightDir");
+    GLint u_planetCenter = glGetUniformLocation(atmoProg, "uPlanetCenter");
+    GLint u_innerRadius = glGetUniformLocation(atmoProg, "uInnerRadius");
+    GLint u_outerRadius = glGetUniformLocation(atmoProg, "uOuterRadius");
+
+    glUniformMatrix4fv(u_atmo_mvp, 1, GL_FALSE, mvp.m);
+    glUniformMatrix4fv(u_atmo_model, 1, GL_FALSE, model.m);
+    glUniform3f(u_camPos, camPos.x, camPos.y, camPos.z);
+    glUniform3f(u_lightDir, lightDir.x, lightDir.y, lightDir.z);
+    glUniform3f(u_planetCenter, planetCenter.x, planetCenter.y, planetCenter.z);
+    glUniform1f(u_innerRadius, innerRadius);
+    glUniform1f(u_outerRadius, outerRadius);
+
+    // --- Graphics State for Volumetric Shell ---
+    // IMPORTANT: Depth test must be OFF. With glCullFace(GL_FRONT) we render back faces,
+    // which are behind the planet in depth space. The raymarching shader handles
+    // planet occlusion mathematically via ray-sphere intersection.
+    glDisable(GL_DEPTH_TEST);
+    glEnable(GL_BLEND);
+    // 核心修复：使用预乘 Alpha 混合。
+    // 渲染方程变为：最终画面 = 大气颜色*1.0 + 宇宙背景*(1.0 - 大气遮挡率)
+    glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+    glCullFace(GL_FRONT); // Render back faces
     glEnable(GL_CULL_FACE);
+    glDepthMask(GL_FALSE);
+    
     sphereMesh.draw();
+
+    // Revert ALL state
     glDisable(GL_CULL_FACE);
+    glDisable(GL_BLEND);
+    glEnable(GL_DEPTH_TEST);
     glDepthMask(GL_TRUE);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glUseProgram(0);
   }
 
   // Procedural Starfield + Milky Way background
-  void drawSkybox() {
+  void drawSkybox(float vibrancy = 1.0f) {
     glUseProgram(skyboxProg);
+    glUniform1f(us_skyVibrancy, vibrancy);
     // Compute inverse view-projection matrix for ray reconstruction
-    Mat4 vp = proj * view;
+    // FIX: Use a stable projection matrix and a view matrix with zero translation
+    // This avoids numerical instability when the global macro_near is extreme.
+    Mat4 stableProj = Mat4::perspective(0.8f, 1.0f, 0.1f, 10.0f); // Fixed aspect 1.0 is fine for rays
+    Mat4 viewNoTrans = view;
+    viewNoTrans.m[12] = 0.0f; viewNoTrans.m[13] = 0.0f; viewNoTrans.m[14] = 0.0f;
+    Mat4 vp = stableProj * viewNoTrans;
     // Simple 4x4 matrix inverse (brute force cofactor expansion)
     float inv[16];
     float* m = vp.m;
@@ -2279,6 +2407,7 @@ public:
 
     glEnable(GL_DEPTH_TEST);
     glDepthMask(GL_TRUE);
+    glEnable(GL_CULL_FACE);
   }
 
   // Camera-facing dynamic ribbon (trajectory trail) with per-vertex colors

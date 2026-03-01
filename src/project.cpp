@@ -803,55 +803,9 @@ int main() {
 
     this_thread::sleep_for(chrono::milliseconds(20)); // 限制帧率
 
-    // 画面刷新
-    float alt_factor = (float)min(rocket_state.altitude / 50000.0, 1.0);
-    if (cam_mode_3d == 2) {
-       // 全景视角(Panorama)下背景应该始终为全黑(太空)
-       glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    } else {
-       // === Cylindrical Umbra Shadow Check ===
-       // Cast ray from rocket (absolute helio) to Sun (origin 0,0,0).
-       // If the current SOI body blocks it, the rocket is in shadow → night.
-       double day_blend = 1.0;
-       {
-           CelestialBody& soi_body = SOLAR_SYSTEM[current_soi_index];
-           // Vector from rocket to Sun (heliocentric, meters)
-           double to_sun_x = -rocket_state.abs_px;
-           double to_sun_y = -rocket_state.abs_py;
-           double to_sun_z = -rocket_state.abs_pz;
-           double to_sun_len = sqrt(to_sun_x*to_sun_x + to_sun_y*to_sun_y + to_sun_z*to_sun_z);
-           if (to_sun_len > 1.0) {
-               double d_x = to_sun_x / to_sun_len;
-               double d_y = to_sun_y / to_sun_len;
-               double d_z = to_sun_z / to_sun_len;
-               // Vector from rocket to SOI body center (heliocentric)
-               double oc_x = soi_body.px - rocket_state.abs_px;
-               double oc_y = soi_body.py - rocket_state.abs_py;
-               double oc_z = soi_body.pz - rocket_state.abs_pz;
-               // Project oc onto ray direction
-               double t_closest = oc_x*d_x + oc_y*d_y + oc_z*d_z;
-               if (t_closest > 0 && t_closest < to_sun_len) {
-                   // Closest point on ray to planet center
-                   double cp_x = oc_x - d_x * t_closest;
-                   double cp_y = oc_y - d_y * t_closest;
-                   double cp_z = oc_z - d_z * t_closest;
-                   double closest_dist = sqrt(cp_x*cp_x + cp_y*cp_y + cp_z*cp_z);
-                   double R = soi_body.radius;
-                   // Smooth transition across the terminator (penumbra zone)
-                   if (closest_dist < R) {
-                       day_blend = 0.0; // Full shadow (umbra)
-                   } else if (closest_dist < R * 1.02) {
-                       day_blend = (closest_dist - R) / (R * 0.02); // Penumbra fade
-                   }
-               }
-           }
-       }
-       // 地球表面起飞的蓝天渐变, modulated by day/night
-       float sky_day = (float)(day_blend * (1.0 - alt_factor));
-       glClearColor(0.5f * sky_day, 0.7f * sky_day,
-                    1.0f * sky_day, 1.0f);
-    }
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    //画面刷新
+    // NOTE: We move camera-centric logic into the rendering pass below to ensure
+    // that visuals respond to the camera's location, not just the rocket's.
 
     // ================= 3D 渲染通道 =================
     {
@@ -990,14 +944,74 @@ int main() {
         camUpVec = cam_quat.rotate(Vec3(0.0f, 1.0f, 0.0f));
       }
 
+      Mat4 viewMat = Mat4::lookAt(camEye_rel, camTarget_rel, camUpVec);
+
+      // --- Camera-Centric Visuals (Day/Night & Atmosphere) ---
+      double day_blend = 1.0;
+      float alt_factor = 1.0f;
+      {
+          // Absolute camera position in heliocentric km (ws_d already applied)
+          double cam_abs_x = camEye_rel.x + ro_x;
+          double cam_abs_y = camEye_rel.y + ro_y;
+          double cam_abs_z = camEye_rel.z + ro_z;
+
+          // Find closest celestial body to the camera to determine local environment
+          int closest_idx = 0;
+          double min_dist_sq = 1e30;
+          for (int i = 1; i < SOLAR_SYSTEM.size(); i++) {
+              double dx = SOLAR_SYSTEM[i].px * ws_d - cam_abs_x;
+              double dy = SOLAR_SYSTEM[i].py * ws_d - cam_abs_y;
+              double dz = SOLAR_SYSTEM[i].pz * ws_d - cam_abs_z;
+              double d2 = dx*dx + dy*dy + dz*dz;
+              if (d2 < min_dist_sq) { min_dist_sq = d2; closest_idx = i; }
+          }
+
+          CelestialBody& near_body = SOLAR_SYSTEM[closest_idx];
+          double dist_to_center = sqrt(min_dist_sq);
+          double body_r_km = near_body.radius * ws_d;
+          double cam_alt_km = dist_to_center - body_r_km;
+          
+          // Atmosphere factor (0.0 at ground, 1.0 in space)
+          alt_factor = (float)fmin(fmax(cam_alt_km / 50.0, 0.0), 1.0);
+
+          // Shadow check (is this body blocking the sun from the camera's POV?)
+          double to_sun_x = -cam_abs_x;
+          double to_sun_y = -cam_abs_y;
+          double to_sun_z = -cam_abs_z;
+          double to_sun_len = sqrt(to_sun_x*to_sun_x + to_sun_y*to_sun_y + to_sun_z*to_sun_z);
+          if (to_sun_len > 1.0) {
+              double d_x = to_sun_x / to_sun_len;
+              double d_y = to_sun_y / to_sun_len;
+              double d_z = to_sun_z / to_sun_len;
+              // Vector from camera to body center
+              double oc_x = near_body.px * ws_d - cam_abs_x;
+              double oc_y = near_body.py * ws_d - cam_abs_y;
+              double oc_z = near_body.pz * ws_d - cam_abs_z;
+              double t_closest = oc_x*d_x + oc_y*d_y + oc_z*d_z;
+              if (t_closest > 0 && t_closest < to_sun_len) {
+                  double cp_x = oc_x - d_x * t_closest;
+                  double cp_y = oc_y - d_y * t_closest;
+                  double cp_z = oc_z - d_z * t_closest;
+                  double closest_dist = sqrt(cp_x*cp_x + cp_y*cp_y + cp_z*cp_z);
+                  if (closest_dist < body_r_km) day_blend = 0.0;
+                  else if (closest_dist < body_r_km * 1.02) day_blend = (closest_dist - body_r_km) / (body_r_km * 0.02);
+              }
+          }
+      }
+
+      // Clear screen with camera-centric sky color
+      if (cam_mode_3d == 2) {
+          glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+      } else {
+          float sky_day = (float)(day_blend * (1.0 - alt_factor));
+          glClearColor(0.5f * sky_day, 0.7f * sky_day, 1.0f * sky_day, 1.0f);
+      }
+      glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
       // 动态远裁剪面 
       float cam_dist = (camEye_rel - camTarget_rel).length();
-      float dist_to_earth_surf = fmaxf(1.0f, (camEye_rel - renderEarth).length() - earth_r);
-      
       // Ensure far clipping plane covers the entire solar system (expanded to 1000 AU)
       float far_plane = 1000.0f * 149597870.0f; // 1000 AU in km (ws_d)
-      
-      Mat4 viewMat = Mat4::lookAt(camEye_rel, camTarget_rel, camUpVec);
 
       // =========== PASS 1: MACRO BACKGROUND ===========
       // Compute a smart near plane that keeps the depth buffer ratio (far/near) within
@@ -1028,7 +1042,11 @@ int main() {
       r3d->beginFrame(viewMat, macroProjMat, camEye_rel);
 
       // ===== SKYBOX: Procedural Starfield + Milky Way =====
-      r3d->drawSkybox();
+      // Calculate vibrancy: 1.0 in space or at night, 0.0 during bright day on ground
+      // Note: sky_day factor is used to wash out stars when looking through a lit atmosphere
+      float sky_day_local = (float)(day_blend * (1.0 - alt_factor));
+      float sky_vibrancy = 1.0f - sky_day_local; 
+      r3d->drawSkybox(sky_vibrancy);
 
       // ===== 太阳物理本体 =====
       if (cam_mode_3d == 2) { 
@@ -1075,9 +1093,12 @@ int main() {
           
           if ((b.type == TERRESTRIAL || b.type == GAS_GIANT) && i != 1 && i != 4) {
               // Atmosphere shell (skip Mercury=1 and Moon=4: no atmosphere)
-              Mat4 atmoModel = Mat4::scale(Vec3(r * 1.04f, r * 1.04f, r * 1.04f));
+              float atmo_radius = r * 1.12f;
+              Mat4 atmoModel = Mat4::scale(Vec3(atmo_radius, atmo_radius, atmo_radius));
               atmoModel = Mat4::translate(renderPlanet) * atmoModel;
-              r3d->drawAtmosphere(earthMesh, atmoModel);
+              
+              // New Volumetric Scattering integration
+              r3d->drawAtmosphere(earthMesh, atmoModel, camEye_rel, r3d->lightDir, renderPlanet, r, atmo_radius);
           }
           if (b.type == RINGED_GAS_GIANT) {
               Mat4 ringModel = Mat4::scale(Vec3(r * 2.2f, r * 0.001f, r * 2.2f));

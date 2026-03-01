@@ -27,6 +27,7 @@
   <ItemGroup>
     <ClInclude Include="..\src\physics_system.h" />
     <ClInclude Include="..\src\control_system.h" />
+    <ClInclude Include="..\src\renderer3d.h" />
     <ClInclude Include="..\src\rocket_state.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
