@@ -457,9 +457,6 @@ public:
         vec3 texCoord = normalize(vLocalPos) * 3.0;
         float continent = fbm(texCoord * 1.5);
 
-        // Latitude for ice caps
-        float lat = abs(N.y);
-
         // Color mapping
         vec3 ocean = vec3(0.05, 0.15, 0.45);
         vec3 shallow = vec3(0.1, 0.3, 0.6);
@@ -484,7 +481,8 @@ public:
           surfColor = mountain;
         }
 
-        // Ice caps at poles
+        // Use local position for latitude to ensure ice caps are at the poles
+        float lat = abs(normalize(vLocalPos).y);
         if (lat > 0.85) {
           float ice = smoothstep(0.85, 0.95, lat);
           surfColor = mix(surfColor, snow, ice);
