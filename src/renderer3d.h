@@ -324,7 +324,7 @@ public:
 
   // Ribbon Renderer properties
   GLuint ribbonProg, ribbonVAO, ribbonVBO;
-  GLint ur_mvp, ur_color;
+  GLint ur_mvp;
 
   // Lens Flare properties
   GLuint lensFlareProg, lfVAO, lfVBO;
@@ -779,31 +779,36 @@ public:
     const char* ribbonVertSrc = R"(
       #version 330 core
       layout(location=0) in vec3 aPos;
+      layout(location=1) in vec4 aColor;
       uniform mat4 uMVP;
+      out vec4 vColor;
       void main() {
+        vColor = aColor;
         gl_Position = uMVP * vec4(aPos, 1.0);
       }
     )";
     const char* ribbonFragSrc = R"(
       #version 330 core
-      uniform vec4 uColor;
+      in vec4 vColor;
       out vec4 FragColor;
       void main() {
-        FragColor = uColor;
+        FragColor = vColor;
       }
     )";
     ribbonProg = compileProgram(ribbonVertSrc, ribbonFragSrc);
     ur_mvp = glGetUniformLocation(ribbonProg, "uMVP");
-    ur_color = glGetUniformLocation(ribbonProg, "uColor");
 
     glGenVertexArrays(1, &ribbonVAO);
     glGenBuffers(1, &ribbonVBO);
     glBindVertexArray(ribbonVAO);
     glBindBuffer(GL_ARRAY_BUFFER, ribbonVBO);
-    // Allocate an initial buffer size (e.g., 2000 points * 2 edges * sizeof(Vec3))
-    glBufferData(GL_ARRAY_BUFFER, sizeof(Vec3) * 4000, nullptr, GL_DYNAMIC_DRAW);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vec3), (void*)0);
+    glBufferData(GL_ARRAY_BUFFER, (sizeof(Vec3) + sizeof(Vec4)) * 4000, nullptr, GL_DYNAMIC_DRAW);
+    
+    struct RibVert { Vec3 p; Vec4 c; };
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(RibVert), (void*)0);
     glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(RibVert), (void*)(sizeof(Vec3)));
+    glEnableVertexAttribArray(1);
     glBindVertexArray(0);
 
     // --- Lens Flare Shader (Procedural 2D Screen-Space) ---
@@ -1101,17 +1106,17 @@ public:
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
   }
 
-  // Camera-facing dynamic ribbon (trajectory trail)
-  void drawRibbon(const std::vector<Vec3>& points, float width, float r, float g, float b, float a) {
-    if (points.size() < 2) return;
+  // Camera-facing dynamic ribbon (trajectory trail) with per-vertex colors
+  void drawRibbon(const std::vector<Vec3>& points, const std::vector<Vec4>& colors, float width) {
+    if (points.size() < 2 || points.size() != colors.size()) return;
 
-    std::vector<Vec3> stripVerts;
+    struct RibVert { Vec3 p; Vec4 c; };
+    std::vector<RibVert> stripVerts;
     stripVerts.reserve(points.size() * 2);
 
     for (size_t i = 0; i < points.size(); ++i) {
       Vec3 p = points[i];
       
-      // forward vector along the path
       Vec3 forward;
       if (i < points.size() - 1) {
         forward = (points[i+1] - p);
@@ -1120,14 +1125,11 @@ public:
       }
       if (forward.length() < 1e-6f) forward = Vec3(0.0f, 1.0f, 0.0f); else forward = forward.normalized();
 
-      // Vector from point to camera
       Vec3 toCam = (camPos - p);
       if (toCam.length() < 1e-6f) toCam = Vec3(1.0f, 0.0f, 0.0f); else toCam = toCam.normalized();
 
-      // Right vector (perpendicular to path and facing camera)
       Vec3 right = forward.cross(toCam);
       if (right.length() < 1e-6f) {
-          // Fallback if aligned with camera
           right = forward.cross(Vec3(0.0f, 1.0f, 0.0f));
           if (right.length() < 1e-6f) right = forward.cross(Vec3(1.0f, 0.0f, 0.0f));
       }
@@ -1135,41 +1137,43 @@ public:
 
       float halfW = width * 0.5f;
       // Zigzag for triangle strip: first left, then right
-      stripVerts.push_back(p + right * halfW); 
-      stripVerts.push_back(p - right * halfW);
+      stripVerts.push_back({p + right * halfW, colors[i]});
+      stripVerts.push_back({p - right * halfW, colors[i]});
     }
 
     glUseProgram(ribbonProg);
     Mat4 mvp = proj * view; // No model matrix needed, points are in world space
     glUniformMatrix4fv(ur_mvp, 1, GL_FALSE, mvp.m);
-    glUniform4f(ur_color, r, g, b, a);
 
     // Buffer dynamic data
     glBindVertexArray(ribbonVAO);
     glBindBuffer(GL_ARRAY_BUFFER, ribbonVBO);
-    if (stripVerts.size() * sizeof(Vec3) > sizeof(Vec3) * 1000 * 2) {
-      // Reallocate if somehow we exceed initial buffer size
-      glBufferData(GL_ARRAY_BUFFER, stripVerts.size() * sizeof(Vec3), stripVerts.data(), GL_DYNAMIC_DRAW);
-    } else {
-      glBufferSubData(GL_ARRAY_BUFFER, 0, stripVerts.size() * sizeof(Vec3), stripVerts.data());
-    }
-
-    // Force re-bind attribute pointer just in case another mesh corrupted our VAO state
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vec3), (void*)0);
+    glBufferData(GL_ARRAY_BUFFER, stripVerts.size() * sizeof(RibVert), stripVerts.data(), GL_DYNAMIC_DRAW);
+    
+    // Re-establish vertex layout
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(RibVert), (void*)0);
     glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(RibVert), (void*)(sizeof(Vec3)));
+    glEnableVertexAttribArray(1);
 
-    // Glow blending
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
-    glDepthMask(GL_FALSE); // Disable depth write so trails don't occlude themselves
-    glDisable(GL_CULL_FACE); // Ensure triangle strips are never culled
+    glDisable(GL_CULL_FACE);
+    glDepthMask(GL_FALSE);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE); // Additive blending for glows
 
-    glDrawArrays(GL_TRIANGLE_STRIP, 0, stripVerts.size());
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, (GLsizei)stripVerts.size());
 
-    // Restore
     glEnable(GL_CULL_FACE);
     glDepthMask(GL_TRUE);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glBindVertexArray(0);
+  }
+
+  // Convenience overload: single uniform color for all points
+  void drawRibbon(const std::vector<Vec3>& points, float width,
+                  float cr, float cg, float cb, float ca) {
+    std::vector<Vec4> colors(points.size(), Vec4(cr, cg, cb, ca));
+    drawRibbon(points, colors, width);
   }
 
   void endFrame() {

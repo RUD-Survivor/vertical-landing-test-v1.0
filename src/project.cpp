@@ -18,7 +18,7 @@
 using namespace std;
 
 // ==========================================
-// Part X: 火箭建造系统部件定义
+// Part X: 火箭建造系统 -> moved to rocket_builder.h
 // ==========================================
 
 // 鼠标滚轮全局变量
@@ -351,6 +351,8 @@ public:
   }
 };
 
+#include "rocket_builder.h"
+
 // ==========================================
 // Part 2: Explorer Class -> Replaced by ECS (RocketState, PhysicsSystem)
 // ==========================================
@@ -461,178 +463,10 @@ void drawOrbit(Renderer *renderer, double px, double py, double vx, double vy,
 }
 
 // ==========================================================
-// Part 5: 火箭建造系统 (Rocket Builder)
+// Part 5: 火箭建造系统 (Rocket Builder) -> see rocket_builder.h
 // ==========================================================
-struct RocketPart {
-  const char* name;
-  float dry_mass;     // 干重 (kg)
-  float fuel;         // 燃料量 (kg)
-  float isp;          // 比冲 (s)，仅引擎有效
-  float consumption;  // 燃料消耗率 (kg/s)，仅引擎有效
-  float height_add;   // 增加的高度 (m)
-  float r, g, b;      // 显示颜色
-};
 
-// 鼻锥选项
-const RocketPart NOSE_OPTIONS[] = {
-  {"Standard",    500,  0, 0, 0, 8,   0.85f, 0.85f, 0.9f},
-  {"Aerodynamic", 350,  0, 0, 0, 10,  0.7f,  0.7f,  0.75f},
-  {"Payload",     1200, 0, 0, 0, 12,  0.9f,  0.9f,  0.85f},
-};
-// 燃料箱选项
-const RocketPart TANK_OPTIONS[] = {
-  {"Small 50t",   3000,  50000,  0, 0, 30, 0.92f, 0.92f, 0.92f},
-  {"Medium 100t", 5000,  100000, 0, 0, 40, 0.90f, 0.90f, 0.92f},
-  {"Large 200t",  8000,  200000, 0, 0, 55, 0.88f, 0.88f, 0.92f},
-};
-// 引擎选项
-const RocketPart ENGINE_OPTIONS[] = {
-  {"Raptor",   2000, 0, 1500, 100, 4,  0.35f, 0.35f, 0.38f},
-  {"Merlin",   1500, 0, 1200, 80,  3,  0.4f,  0.35f, 0.3f},
-  {"SRB",      3000, 0, 800,  200, 5,  0.5f,  0.4f,  0.3f},
-};
-const int NUM_OPTIONS = 3;
-
-void drawBuilderUI(Renderer* r, int col, int nose_sel, int tank_sel, int eng_sel) {
-  // 背景
-  r->addRect(0.0f, 0.0f, 2.0f, 2.0f, 0.08f, 0.08f, 0.12f, 1.0f);
-
-  // 星空点缀
-  for (int i = 0; i < 80; i++) {
-    float sx = hash11(i * 3917) * 2.0f - 1.0f;
-    float sy = hash11(i * 7121) * 2.0f - 1.0f;
-    float ss = 0.002f + hash11(i * 2131) * 0.003f;
-    r->addRect(sx, sy, ss, ss, 1.0f, 1.0f, 1.0f, 0.4f + hash11(i * 991) * 0.4f);
-  }
-
-  // 标题
-  float title_size = 0.04f;
-  r->drawLabel(-0.15f, 0.85f, "m", title_size * 1.5f, 0.3f, 0.8f, 1.0f);
-
-  // === 三列部件选择 ===
-  const char* col_names[] = {"nose", "tank", "engine"};  // 显示用 (不使用)  
-  float col_x[] = {-0.65f, -0.65f, -0.65f};
-  float col_y_start[] = {0.65f, 0.25f, -0.15f};
-  int selections[] = {nose_sel, tank_sel, eng_sel};
-  const RocketPart* options[] = {NOSE_OPTIONS, TANK_OPTIONS, ENGINE_OPTIONS};
-  const char* headers[] = {"< NOSE >", "< TANK >", "< ENGINE >"};
-
-  for (int c = 0; c < 3; c++) {
-    float hx = -0.65f, hy = col_y_start[c] + 0.12f;
-    // 分类标题
-    float hdr_r = (c == col) ? 0.2f : 0.5f;
-    float hdr_g = (c == col) ? 0.9f : 0.5f;
-    float hdr_b = (c == col) ? 0.4f : 0.5f;
-    // 用数码管画列号
-    r->drawNumber(hx - 0.15f, hy, c + 1, 0.025f, hdr_r, hdr_g, hdr_b);
-
-    for (int i = 0; i < NUM_OPTIONS; i++) {
-      float iy = col_y_start[c] - i * 0.1f;
-      bool selected = (selections[c] == i);
-      bool active_col = (col == c);
-
-      // 选中高亮背景
-      if (selected) {
-        float bg_alpha = active_col ? 0.4f : 0.15f;
-        float bg_r = active_col ? 0.1f : 0.15f;
-        float bg_g = active_col ? 0.4f : 0.2f;
-        float bg_b = active_col ? 0.2f : 0.25f;
-        r->addRect(hx + 0.1f, iy, 0.35f, 0.08f, bg_r, bg_g, bg_b, bg_alpha);
-        // 选中指示器
-        r->addRect(hx - 0.05f, iy, 0.015f, 0.04f, 0.2f, 1.0f, 0.4f, 0.9f);
-      }
-
-      // 部件颜色块
-      const RocketPart& part = options[c][i];
-      r->addRect(hx, iy, 0.03f, 0.05f, part.r, part.g, part.b, 0.9f);
-
-      // 参数数字
-      float nr = selected ? 0.9f : 0.5f;
-      float ng = selected ? 0.9f : 0.5f;
-      float nb = selected ? 0.9f : 0.5f;
-      if (c == 1) { // 燃料箱显示燃料量
-        r->drawNumber(hx + 0.12f, iy, (int)(part.fuel / 1000), 0.02f, nr, ng, nb);
-        r->drawLabel(hx + 0.23f, iy, "kg", 0.015f, nr * 0.7f, ng * 0.7f, nb * 0.7f);
-      } else if (c == 2) { // 引擎显示ISP
-        r->drawNumber(hx + 0.12f, iy, (int)part.isp, 0.02f, nr, ng, nb);
-        r->drawLabel(hx + 0.23f, iy, "s", 0.015f, nr * 0.7f, ng * 0.7f, nb * 0.7f);
-      } else { // 鼻锥显示质量
-        r->drawNumber(hx + 0.12f, iy, (int)part.dry_mass, 0.02f, nr, ng, nb);
-        r->drawLabel(hx + 0.23f, iy, "kg", 0.015f, nr * 0.7f, ng * 0.7f, nb * 0.7f);
-      }
-    }
-  }
-
-  // === 右侧：火箭预览 ===
-  float preview_x = 0.35f;
-  float preview_y = 0.1f;
-  float rw = 0.06f; // 火箭宽度
-
-  const RocketPart& nose = NOSE_OPTIONS[nose_sel];
-  const RocketPart& tank = TANK_OPTIONS[tank_sel];
-  const RocketPart& eng  = ENGINE_OPTIONS[eng_sel];
-
-  float total_h = (nose.height_add + tank.height_add + eng.height_add) * 0.005f;
-
-  // 引擎（底部）
-  float eng_h = eng.height_add * 0.005f;
-  float eng_y = preview_y - total_h / 2.0f + eng_h / 2.0f;
-  r->addRotatedTri(preview_x, eng_y - eng_h * 0.3f, rw * 1.3f, eng_h * 0.6f,
-                   PI, eng.r, eng.g, eng.b);
-  r->addRect(preview_x, eng_y + eng_h * 0.1f, rw, eng_h * 0.4f,
-             eng.r * 0.8f, eng.g * 0.8f, eng.b * 0.8f);
-
-  // 燃料箱（中段）
-  float tank_h = tank.height_add * 0.005f;
-  float tank_y = eng_y + eng_h / 2.0f + tank_h / 2.0f;
-  r->addRect(preview_x, tank_y, rw, tank_h, tank.r, tank.g, tank.b);
-  // 级间段
-  r->addRect(preview_x, tank_y + tank_h / 2.0f, rw * 1.05f, 0.008f,
-             0.2f, 0.2f, 0.2f);
-  r->addRect(preview_x, tank_y - tank_h / 2.0f, rw * 1.05f, 0.008f,
-             0.2f, 0.2f, 0.2f);
-
-  // 鼻锥（顶部）
-  float nose_h = nose.height_add * 0.005f;
-  float nose_y = tank_y + tank_h / 2.0f + nose_h / 2.0f;
-  r->addRotatedTri(preview_x, nose_y + nose_h * 0.2f, rw * 0.9f, nose_h * 0.7f,
-                   0.0f, nose.r, nose.g, nose.b);
-  r->addRect(preview_x, nose_y - nose_h * 0.15f, rw * 0.95f, nose_h * 0.3f,
-             nose.r * 0.95f, nose.g * 0.95f, nose.b * 0.95f);
-
-  // === 底部统计面板 ===
-  float stat_y = -0.65f;
-  r->addRect(0.0f, stat_y, 1.6f, 0.2f, 0.05f, 0.05f, 0.08f, 0.7f);
-
-  float total_mass = nose.dry_mass + tank.dry_mass + eng.dry_mass + tank.fuel;
-  float dry_mass = nose.dry_mass + tank.dry_mass + eng.dry_mass;
-  float delta_v = (float)(eng.isp * G0 * log((double)total_mass / (double)dry_mass));
-
-  // 总质量
-  r->drawNumber(-0.55f, stat_y + 0.03f, (int)(total_mass / 1000), 0.025f,
-                0.9f, 0.9f, 0.9f);
-  r->drawLabel(-0.4f, stat_y + 0.03f, "kg", 0.018f, 0.6f, 0.6f, 0.6f);
-
-  // 燃料
-  r->drawNumber(-0.1f, stat_y + 0.03f, (int)(tank.fuel / 1000), 0.025f,
-                0.9f, 0.7f, 0.2f);
-  r->drawLabel(0.05f, stat_y + 0.03f, "kg", 0.018f, 0.6f, 0.5f, 0.2f);
-
-  // ΔV
-  r->drawNumber(0.35f, stat_y + 0.03f, (int)delta_v, 0.025f,
-                0.3f, 0.9f, 0.4f);
-  r->drawLabel(0.5f, stat_y + 0.03f, "m/s", 0.018f, 0.2f, 0.6f, 0.3f);
-
-  // 标签行
-  r->drawNumber(-0.55f, stat_y - 0.04f, 0, 0.0f, 0, 0, 0, 0); // spacer
-  r->drawLabel(-0.55f, stat_y - 0.04f, "m", 0.013f, 0.4f, 0.4f, 0.4f); // "mass" 简写
-
-  // === 发射提示 ===
-  // 闪烁效果
-  float blink = 0.5f + 0.5f * (float)sin(glfwGetTime() * 3.0);
-  r->addRect(0.35f, -0.85f, 0.25f, 0.06f, 0.1f, 0.4f * blink, 0.1f, 0.6f);
-  r->drawLabel(0.28f, -0.85f, "s", 0.025f, 0.3f, 1.0f * blink, 0.4f);
-}
+// drawBuilderUI -> replaced by drawBuilderUI_KSP in rocket_builder.h
 
 void Report_Status(const RocketState& state, const ControlInput& input) {
   double apo = 0, peri = 0;
@@ -691,53 +525,43 @@ int main() {
   PhysicsSystem::InitSolarSystem();
 
   // =========================================================
-  // BUILD 阶段：火箭组装界面
+  // BUILD 阶段：KSP-like 火箭组装界面
   // =========================================================
-  int build_col = 0;     // 0=鼻锥, 1=燃料箱, 2=引擎
-  int nose_sel = 0, tank_sel = 1, eng_sel = 0; // 默认选择
+  BuilderState builder_state;
+  // Add default parts for a starter rocket
+  builder_state.assembly.addPart(9);   // Raptor engine
+  builder_state.assembly.addPart(6);   // Medium fuel tank 100t
+  builder_state.assembly.addPart(0);   // Standard fairing nosecone
   bool build_done = false;
 
-  // 方向键防抖
-  bool up_prev = false, down_prev = false, left_prev = false, right_prev = false;
+  BuilderKeyState bk_prev = {false,false,false,false,false,false,false,false,false,false};
 
   while (!build_done && !glfwWindowShouldClose(window)) {
     glfwPollEvents();
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
       glfwSetWindowShouldClose(window, true);
 
-    // 方向键导航（带防抖）
-    bool up_now = glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS;
-    bool down_now = glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS;
-    bool left_now = glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS;
-    bool right_now = glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS;
+    // Read builder inputs
+    BuilderKeyState bk_now;
+    bk_now.up    = glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS;
+    bk_now.down  = glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS;
+    bk_now.left  = glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS;
+    bk_now.right = glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS;
+    bk_now.enter = glfwGetKey(window, GLFW_KEY_ENTER) == GLFW_PRESS;
+    bk_now.del   = glfwGetKey(window, GLFW_KEY_DELETE) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_BACKSPACE) == GLFW_PRESS;
+    bk_now.tab   = glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS;
+    bk_now.pgup  = glfwGetKey(window, GLFW_KEY_PAGE_UP) == GLFW_PRESS;
+    bk_now.pgdn  = glfwGetKey(window, GLFW_KEY_PAGE_DOWN) == GLFW_PRESS;
+    bk_now.space = glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS;
 
-    int* current_sel = (build_col == 0) ? &nose_sel : (build_col == 1) ? &tank_sel : &eng_sel;
+    build_done = builderHandleInput(builder_state, bk_now, bk_prev);
+    bk_prev = bk_now;
 
-    if (up_now && !up_prev) {
-      *current_sel = (*current_sel - 1 + NUM_OPTIONS) % NUM_OPTIONS;
-    }
-    if (down_now && !down_prev) {
-      *current_sel = (*current_sel + 1) % NUM_OPTIONS;
-    }
-    if (left_now && !left_prev) {
-      build_col = (build_col - 1 + 3) % 3;
-    }
-    if (right_now && !right_prev) {
-      build_col = (build_col + 1) % 3;
-    }
-    up_prev = up_now; down_prev = down_now;
-    left_prev = left_now; right_prev = right_now;
-
-    // SPACE = 发射
-    if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) {
-      build_done = true;
-    }
-
-    // 渲染
-    glClearColor(0.08f, 0.08f, 0.12f, 1.0f);
+    // Render builder UI
+    glClearColor(0.05f, 0.06f, 0.10f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
     renderer->beginFrame();
-    drawBuilderUI(renderer, build_col, nose_sel, tank_sel, eng_sel);
+    drawBuilderUI_KSP(renderer, builder_state, (float)glfwGetTime());
     renderer->endFrame();
     glfwSwapBuffers(window);
 
@@ -745,31 +569,18 @@ int main() {
   }
 
   // =========================================================
-  // 用选好的部件构造 Explorer
+  // Build RocketConfig from assembled parts
   // =========================================================
-  const RocketPart& sel_nose = NOSE_OPTIONS[nose_sel];
-  const RocketPart& sel_tank = TANK_OPTIONS[tank_sel];
-  const RocketPart& sel_eng  = ENGINE_OPTIONS[eng_sel];
-
-  float total_dry = sel_nose.dry_mass + sel_tank.dry_mass + sel_eng.dry_mass;
-  float total_fuel = sel_tank.fuel;
-  float total_height = sel_nose.height_add + sel_tank.height_add + sel_eng.height_add;
-
-  RocketConfig rocket_config = {
-      total_dry,          // dry_mass
-      3.7,                // diameter
-      total_height,       // height
-      1,                  // stages
-      sel_eng.isp,        // specific_impulse
-      sel_eng.consumption,// cosrate
-      0.5                 // nozzle_area
-  };
+  RocketConfig rocket_config = builder_state.assembly.buildRocketConfig();
 
   RocketState rocket_state;
-  rocket_state.fuel = total_fuel;
+  rocket_state.fuel = builder_state.assembly.total_fuel;
   rocket_state.status = PRE_LAUNCH;
   
   ControlInput control_input;
+
+  // Keep a reference to the assembly for rendering
+  const RocketAssembly& assembly = builder_state.assembly;
 
   // =========================================================
   // 初始化 3D 渲染器和网格
@@ -789,11 +600,13 @@ int main() {
   double prev_mx = 0, prev_my = 0;
   bool mouse_dragging = false;
 
-  cout << ">> ROCKET ASSEMBLED!" << endl;
-  cout << ">>   Dry Mass: " << (int)total_dry << " kg" << endl;
-  cout << ">>   Fuel: " << (int)total_fuel << " kg" << endl;
-  cout << ">>   Height: " << (int)total_height << " m" << endl;
-  cout << ">>   Engine ISP: " << (int)sel_eng.isp << " s" << endl;
+  cout << ">> ROCKET ASSEMBLED! (" << assembly.parts.size() << " parts)" << endl;
+  cout << ">>   Dry Mass: " << (int)assembly.total_dry_mass << " kg" << endl;
+  cout << ">>   Fuel: " << (int)assembly.total_fuel << " kg" << endl;
+  cout << ">>   Height: " << (int)assembly.total_height << " m" << endl;
+  cout << ">>   ISP: " << (int)assembly.avg_isp << " s" << endl;
+  cout << ">>   Delta-V: " << (int)assembly.total_delta_v << " m/s" << endl;
+  cout << ">>   TWR: " << assembly.twr << endl;
   cout << ">> PRESS [SPACE] TO LAUNCH!" << endl;
   cout << ">> [TAB] Toggle Auto/Manual | [WASD] Thrust & Attitude" << endl;
   cout << ">> [Z] Full Throttle | [X] Kill Throttle | [1-4] Time Warp" << endl;
@@ -997,15 +810,52 @@ int main() {
     this_thread::sleep_for(chrono::milliseconds(20)); // 限制帧率
 
     // 画面刷新
-    // 画面刷新
     float alt_factor = (float)min(rocket_state.altitude / 50000.0, 1.0);
     if (cam_mode_3d == 2) {
        // 全景视角(Panorama)下背景应该始终为全黑(太空)
        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     } else {
-       // 地球表面起飞的蓝天渐变
-       glClearColor(my_lerp(0.5f, 0.0f, alt_factor), my_lerp(0.7f, 0.0f, alt_factor),
-                    my_lerp(1.0f, 0.0f, alt_factor), 1.0f);
+       // === Cylindrical Umbra Shadow Check ===
+       // Cast ray from rocket (absolute helio) to Sun (origin 0,0,0).
+       // If the current SOI body blocks it, the rocket is in shadow → night.
+       double day_blend = 1.0;
+       {
+           CelestialBody& soi_body = SOLAR_SYSTEM[current_soi_index];
+           // Vector from rocket to Sun (heliocentric, meters)
+           double to_sun_x = -rocket_state.abs_px;
+           double to_sun_y = -rocket_state.abs_py;
+           double to_sun_z = -rocket_state.abs_pz;
+           double to_sun_len = sqrt(to_sun_x*to_sun_x + to_sun_y*to_sun_y + to_sun_z*to_sun_z);
+           if (to_sun_len > 1.0) {
+               double d_x = to_sun_x / to_sun_len;
+               double d_y = to_sun_y / to_sun_len;
+               double d_z = to_sun_z / to_sun_len;
+               // Vector from rocket to SOI body center (heliocentric)
+               double oc_x = soi_body.px - rocket_state.abs_px;
+               double oc_y = soi_body.py - rocket_state.abs_py;
+               double oc_z = soi_body.pz - rocket_state.abs_pz;
+               // Project oc onto ray direction
+               double t_closest = oc_x*d_x + oc_y*d_y + oc_z*d_z;
+               if (t_closest > 0 && t_closest < to_sun_len) {
+                   // Closest point on ray to planet center
+                   double cp_x = oc_x - d_x * t_closest;
+                   double cp_y = oc_y - d_y * t_closest;
+                   double cp_z = oc_z - d_z * t_closest;
+                   double closest_dist = sqrt(cp_x*cp_x + cp_y*cp_y + cp_z*cp_z);
+                   double R = soi_body.radius;
+                   // Smooth transition across the terminator (penumbra zone)
+                   if (closest_dist < R) {
+                       day_blend = 0.0; // Full shadow (umbra)
+                   } else if (closest_dist < R * 1.02) {
+                       day_blend = (closest_dist - R) / (R * 0.02); // Penumbra fade
+                   }
+               }
+           }
+       }
+       // 地球表面起飞的蓝天渐变, modulated by day/night
+       float sky_day = (float)(day_blend * (1.0 - alt_factor));
+       glClearColor(0.5f * sky_day, 0.7f * sky_day,
+                    1.0f * sky_day, 1.0f);
     }
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -1150,14 +1000,35 @@ int main() {
       float cam_dist = (camEye_rel - camTarget_rel).length();
       float dist_to_earth_surf = fmaxf(1.0f, (camEye_rel - renderEarth).length() - earth_r);
       
-      // Ensure far clipping plane covers the entire solar system (Neptune is ~30 AU)
-      float far_plane = 50.0f * 149597870.0f; // 50 AU in km (ws_d)
+      // Ensure far clipping plane covers the entire solar system (expanded to 1000 AU)
+      float far_plane = 1000.0f * 149597870.0f; // 1000 AU in km (ws_d)
       
       Mat4 viewMat = Mat4::lookAt(camEye_rel, camTarget_rel, camUpVec);
 
       // =========== PASS 1: MACRO BACKGROUND ===========
-      // 宏观天体专用的相机矩阵：使用基于 cam_dist 的 near plane 解决由于远裁剪面过大导致的 Z-fighting (深度闪烁)
-      float macro_near = fmaxf(0.01f, cam_dist * 0.001f);
+      // Compute a smart near plane that keeps the depth buffer ratio (far/near) within
+      // ~1e6 to avoid z-fighting on planet surfaces. Find the closest planet surface
+      // distance from the camera and use a fraction of that as the near plane.
+      float closest_planet_dist = far_plane;
+      for (size_t i = 1; i < SOLAR_SYSTEM.size(); i++) {
+          Vec3 rp((float)(SOLAR_SYSTEM[i].px * ws_d - ro_x),
+                  (float)(SOLAR_SYSTEM[i].py * ws_d - ro_y),
+                  (float)(SOLAR_SYSTEM[i].pz * ws_d - ro_z));
+          float surf_dist = (camEye_rel - rp).length() - (float)SOLAR_SYSTEM[i].radius * (float)ws_d;
+          if (surf_dist > 0.0f && surf_dist < closest_planet_dist)
+              closest_planet_dist = surf_dist;
+      }
+      // Also consider distance to the Sun
+      {
+          float sun_surf = (camEye_rel - renderSun).length() - sun_radius;
+          if (sun_surf > 0.0f && sun_surf < closest_planet_dist)
+              closest_planet_dist = sun_surf;
+      }
+      // Near plane = 10% of closest planet surface distance.
+      // At low altitude this stays tiny (ground visible); at high altitude it grows
+      // large enough to give the depth buffer sufficient precision on planet surfaces.
+      float macro_near = fmaxf(0.001f, closest_planet_dist * 0.1f);
+      macro_near = fmaxf(macro_near, cam_dist * 0.001f); // never clip behind target
       
       Mat4 macroProjMat = Mat4::perspective(0.8f, aspect, macro_near, far_plane);
       r3d->beginFrame(viewMat, macroProjMat, camEye_rel);
@@ -1193,6 +1064,16 @@ int main() {
           planetModel = Mat4::translate(renderPlanet) * planetModel;
           
           // DO NOT dim the base color with rocket occlusion (that makes the darkest side of Earth pitch black void).
+           // Compute per-planet lightDir in double precision for correct sun-facing
+          {
+              double light_dx = sun_body.px - b.px;
+              double light_dy = sun_body.py - b.py;
+              double light_dz = sun_body.pz - b.pz;
+              double light_len = sqrt(light_dx*light_dx + light_dy*light_dy + light_dz*light_dz);
+              if (light_len > 1.0) {
+                  r3d->lightDir = Vec3((float)(light_dx/light_len), (float)(light_dy/light_len), (float)(light_dz/light_len));
+              }
+          }
           r3d->drawPlanet(earthMesh, planetModel, b.type, b.r, b.g, b.b, 1.0f);
           
           if (b.type == TERRESTRIAL || b.type == GAS_GIANT) {
@@ -1208,81 +1089,80 @@ int main() {
           }
           
           // 渲染行星轨道和标签 (仅在全景模式下显示)
-          if (cam_mode_3d == 2 && cam_zoom_pan > 0.05f) {
+          if (cam_mode_3d == 2) {
               double a = b.sma_base;
               double e = b.ecc_base;
               double i_inc = b.inc_base;
               double lan = b.lan_base;
               double arg_p = b.arg_peri_base;
               
-              // Determine current anomaly angle to center the gradient brightness 
               double planet_px = b.px; double planet_py = b.py; double planet_pz = b.pz;
               if (i == 4) { planet_px -= SOLAR_SYSTEM[3].px; planet_py -= SOLAR_SYSTEM[3].py; planet_pz -= SOLAR_SYSTEM[3].pz; }
               
-              int segs = 120;
-              float ring_w = earth_r * 0.002f * fmaxf(1.0f, cam_zoom_pan * 0.5f);
-              if (i == 4) ring_w = earth_r * 0.0005f * cam_zoom_pan; // Thin moon orbit
-              float macro_fade = fminf(1.0f, fmaxf(0.0f, (cam_zoom_pan - 0.05f) / 0.1f));
+              int segs = 181; // 181 points = 180 segments + closure
               
-              if (macro_fade > 0.01f) {
-                  for(int k=0; k<segs; k++) {
-                      double E1 = (double)k/segs * 2.0 * PI;
-                      double nu1 = 2.0 * atan2(sqrt(1.0+e)*sin(E1/2.0), sqrt(1.0-e)*cos(E1/2.0));
-                      double r_dist1 = a * (1.0 - e * cos(E1));
-                      double o_x1 = r_dist1 * cos(nu1);
-                      double o_y1 = r_dist1 * sin(nu1);
-                      
-                      double E2 = (double)(k+1)/segs * 2.0 * PI;
-                      double nu2 = 2.0 * atan2(sqrt(1.0+e)*sin(E2/2.0), sqrt(1.0-e)*cos(E2/2.0));
-                      double r_dist2 = a * (1.0 - e * cos(E2));
-                      double o_x2 = r_dist2 * cos(nu2);
-                      double o_y2 = r_dist2 * sin(nu2);
-                      
-                      double c_O = cos(lan), s_O = sin(lan);
-                      double c_w = cos(arg_p), s_w = sin(arg_p);
-                      double c_i = cos(i_inc), s_i = sin(i_inc);
-                      
-                      auto local_to_world = [&](double ox, double oy) {
-                          double px = (c_O*c_w - s_O*s_w*c_i)*ox + (-c_O*s_w - s_O*c_w*c_i)*oy;
-                          double py = (s_O*c_w + c_O*s_w*c_i)*ox + (-s_O*s_w + c_O*c_w*c_i)*oy;
-                          double pz = (s_w*s_i)*ox + (c_w*s_i)*oy;
-                          return Vec3((float)px, (float)py, (float)pz);
-                      };
-                      
-                      Vec3 v1 = local_to_world(o_x1, o_y1);
-                      Vec3 v2 = local_to_world(o_x2, o_y2);
-                      Vec3 planet_local_vec = Vec3((float)planet_px, (float)planet_py, (float)planet_pz);
-                      
-                      // Calculate angular distance to current planet position to create a beautiful gradient fade
-                      float ang1 = atan2f(v1.z, v1.x);
-                      float e_ang = atan2f(planet_local_vec.z, planet_local_vec.x);
-                      float delta = fmodf(fabsf(ang1 - e_ang), 2.0f * (float)PI);
-                      if (delta > (float)PI) delta = 2.0f * (float)PI - delta;
-                      float brightness = 1.0f - delta / (2.0f * (float)PI);
-                      brightness = fmaxf(0.1f, brightness);
-                      // Make the orbit brightest near the planet
-                      brightness = powf(brightness, 2.0f);
-                      
-                      if (i == 4) { // Moon orbits Earth
-                          v1.x += (float)SOLAR_SYSTEM[3].px; v1.y += (float)SOLAR_SYSTEM[3].py; v1.z += (float)SOLAR_SYSTEM[3].pz;
-                          v2.x += (float)SOLAR_SYSTEM[3].px; v2.y += (float)SOLAR_SYSTEM[3].py; v2.z += (float)SOLAR_SYSTEM[3].pz;
-                      }
-                      
-                      std::vector<Vec3> seg = {
-                          Vec3(v1.x * (float)ws_d - (float)ro_x, v1.y * (float)ws_d - (float)ro_y, v1.z * (float)ws_d - (float)ro_z),
-                          Vec3(v2.x * (float)ws_d - (float)ro_x, v2.y * (float)ws_d - (float)ro_y, v2.z * (float)ws_d - (float)ro_z)
-                      };
-                      
-                      r3d->drawRibbon(seg, ring_w, b.r * brightness + 0.1f, b.g * brightness + 0.1f, b.b * brightness + 0.1f, fmaxf(0.2f, brightness) * macro_fade);
+              // Scale orbit line width relative to camera distance so all orbits are visible
+              float orbit_center_dist = renderPlanet.length(); // approx dist from render origin to planet
+              float cam_to_origin = camEye_rel.length();
+              float ref_dist = fmaxf(cam_to_origin, orbit_center_dist);
+              float ring_w = fmaxf(earth_r * 0.002f, ref_dist * 0.0015f);
+              if (i == 4) ring_w *= 0.4f; // Moon orbit thinner
+              
+              // Precompute trig for orbital transform
+              double c_O = cos(lan), s_O = sin(lan);
+              double c_w = cos(arg_p), s_w = sin(arg_p);
+              double c_i = cos(i_inc), s_i = sin(i_inc);
+              
+              // Build ONE continuous ribbon — UNIFORM brightness, fully visible
+              std::vector<Vec3> orbit_pts;
+              std::vector<Vec4> orbit_cols;
+              orbit_pts.reserve(segs);
+              orbit_cols.reserve(segs);
+              
+              // Uniform orbit color — bright, like the rocket orbit reference
+              float orb_r = fminf(1.0f, b.r * 0.6f + 0.3f);
+              float orb_g = fminf(1.0f, b.g * 0.6f + 0.3f);
+              float orb_b = fminf(1.0f, b.b * 0.6f + 0.3f);
+              float orb_a = 0.7f;
+              
+              for(int k = 0; k < segs; k++) {
+                  double E_k = (double)k / (segs - 1) * 2.0 * PI;
+                  double nu_k = 2.0 * atan2(sqrt(1.0+e)*sin(E_k/2.0), sqrt(1.0-e)*cos(E_k/2.0));
+                  double r_dist_k = a * (1.0 - e * cos(E_k));
+                  double o_xk = r_dist_k * cos(nu_k);
+                  double o_yk = r_dist_k * sin(nu_k);
+                  
+                  // Transform to heliocentric coordinates (double precision)
+                  double wx = (c_O*c_w - s_O*s_w*c_i)*o_xk + (-c_O*s_w - s_O*c_w*c_i)*o_yk;
+                  double wy = (s_O*c_w + c_O*s_w*c_i)*o_xk + (-s_O*s_w + c_O*c_w*c_i)*o_yk;
+                  double wz = (s_w*s_i)*o_xk + (c_w*s_i)*o_yk;
+                  
+                  if (i == 4) { // Moon orbits Earth
+                      wx += SOLAR_SYSTEM[3].px;
+                      wy += SOLAR_SYSTEM[3].py;
+                      wz += SOLAR_SYSTEM[3].pz;
                   }
                   
-                  // Draw planet marker label - size stabilized relative to camera distance to prevent vanishing or blowing up!
-                  float dist_to_cam = (renderPlanet - camEye_rel).length();
-                  float marker_size = fmaxf((float)b.radius * (float)ws_d * 1.5f, dist_to_cam * 0.012f);
-                  r3d->drawBillboard(renderPlanet, marker_size, b.r, b.g, b.b, 0.9f * macro_fade);
+                  orbit_pts.push_back(Vec3(
+                      (float)(wx * ws_d - ro_x),
+                      (float)(wy * ws_d - ro_y),
+                      (float)(wz * ws_d - ro_z)
+                  ));
+                  orbit_cols.push_back(Vec4(orb_r, orb_g, orb_b, orb_a));
               }
+              
+              r3d->drawRibbon(orbit_pts, orbit_cols, ring_w);
+              
+              // Draw planet marker label - size scales with camera distance
+              float dist_to_cam = (renderPlanet - camEye_rel).length();
+              float marker_size = fmaxf((float)b.radius * (float)ws_d * 2.0f, dist_to_cam * 0.015f);
+              r3d->drawBillboard(renderPlanet, marker_size, b.r, b.g, b.b, 0.9f);
           }
       }
+
+      // Restore lightDir to rocket's own Sun direction (for rocket mesh, trajectory rendering, etc.)
+      lightVec = renderSun - renderRocketBase;
+      r3d->lightDir = lightVec.normalized();
 
       // ===== 太阳与镜头光晕 (所有模式可见) =====
       std::vector<Vec4> sun_occluders;
@@ -1524,61 +1404,95 @@ int main() {
 
 
 
-      // ===== 火箭涂装 (Builder颜色) =====
-      // 1. 机体 (主燃料箱与分段)
-      Mat4 bodyModel = Mat4::TRS(renderRocketPos, rocketQuat,
-                                  Vec3(rw_3d, rh * 0.6f, rw_3d));
-      r3d->drawMesh(rocketBody, bodyModel,
-                     sel_tank.r, sel_tank.g, sel_tank.b, 1.0f, 0.25f);
+      // ===== 火箭涂装 (Assembly-based per-part rendering) =====
+      Vec3 engNozzlePos = renderRocketPos - rocketDir * (rh * 0.50f); // default engine pos for flame
+      {
+        float total_h_3d = (float)rocket_config.height;
+        float scale_3d = rh / fmaxf(total_h_3d, 1.0f); // meters-to-world scale
+        Vec3 rocketBottom = renderRocketPos - rocketDir * (rh * 0.5f);
 
-      // 级间段/结构环 (Interstage Ring) - 金属灰暗色
-      Vec3 interstagePos = renderRocketPos - rocketDir * (rh * 0.325f);
-      Mat4 interstageModel = Mat4::TRS(interstagePos, rocketQuat,
-                                  Vec3(rw_3d * 1.02f, rh * 0.05f, rw_3d * 1.02f));
-      r3d->drawMesh(rocketBody, interstageModel, 0.2f, 0.2f, 0.25f, 1.0f, 0.4f);
+        for (int pi = 0; pi < (int)assembly.parts.size(); pi++) {
+          const PlacedPart& pp = assembly.parts[pi];
+          const PartDef& def = PART_CATALOG[pp.def_id];
+          float part_h_3d = def.height * scale_3d;
+          float part_w_3d = (def.diameter / fmaxf((float)rocket_config.diameter, 1.0f)) * rw_3d;
+          float part_center_y = pp.stack_y * scale_3d + part_h_3d * 0.5f;
+          Vec3 partPos = rocketBottom + rocketDir * part_center_y;
+          // Bottom and top edges of this part's slot
+          Vec3 partBot = rocketBottom + rocketDir * (pp.stack_y * scale_3d);
+          Vec3 partTop = rocketBottom + rocketDir * (pp.stack_y * scale_3d + part_h_3d);
 
-      // 2. 鼻锥头部
-      Vec3 nosePos = renderRocketPos + rocketDir * (rh * 0.30f);
-      Mat4 noseModel = Mat4::TRS(nosePos, rocketQuat,
-                                  Vec3(rw_3d, rh * 0.25f, rw_3d));
-      r3d->drawMesh(rocketNose, noseModel,
-                     sel_nose.r, sel_nose.g, sel_nose.b, 1.0f, 0.25f);
-
-      // 前端热盾/整流罩尖顶 (钛合金黑色)
-      Vec3 tipPos = renderRocketPos + rocketDir * (rh * 0.50f);
-      Mat4 tipModel = Mat4::TRS(tipPos, rocketQuat,
-                                  Vec3(rw_3d * 0.2f, rh * 0.05f, rw_3d * 0.2f));
-      r3d->drawMesh(rocketNose, tipModel, 0.15f, 0.15f, 0.15f, 1.0f, 0.5f);
-
-      // 3. 气动翼片/栅格舵 (Fins & Grid Fins)
-      for (int i = 0; i < 4; i++) {
-        float angle = i * 1.570796f; // 90 degrees
-        Quat finRot = rocketQuat * Quat::fromAxisAngle(Vec3(0.0f, 1.0f, 0.0f), angle);
-        
-        // 尾部主翼
-        Vec3 mainFinPos = renderRocketPos - rocketDir * (rh * 0.25f) + finRot.rotate(Vec3(rw_3d * 1.2f, 0.0f, 0.0f));
-        Mat4 mainFinModel = Mat4::TRS(mainFinPos, finRot, Vec3(rw_3d * 1.5f, rh * 0.1f, rw_3d * 0.05f));
-        r3d->drawMesh(rocketBox, mainFinModel, sel_tank.r * 0.8f, sel_tank.g * 0.8f, sel_tank.b * 0.8f, 1.0f, 0.2f);
-        
-        // 头部栅格舵
-        Vec3 gridFinPos = renderRocketPos + rocketDir * (rh * 0.2f) + finRot.rotate(Vec3(rw_3d * 1.1f, 0.0f, 0.0f));
-        Mat4 gridFinModel = Mat4::TRS(gridFinPos, finRot, Vec3(rw_3d * 0.4f, rh * 0.02f, rw_3d * 0.3f));
-        r3d->drawMesh(rocketBox, gridFinModel, 0.2f, 0.2f, 0.2f, 1.0f, 0.3f);
+          if (def.category == CAT_NOSE_CONE) {
+            // Lower 40%: cylinder body flush with part below
+            float bodyFrac = 0.4f;
+            Vec3 bodyCenter = partBot + rocketDir * (part_h_3d * bodyFrac * 0.5f);
+            Mat4 bodyMdl = Mat4::TRS(bodyCenter, rocketQuat, Vec3(part_w_3d, part_h_3d * bodyFrac, part_w_3d));
+            r3d->drawMesh(rocketBody, bodyMdl, def.r * 0.95f, def.g * 0.95f, def.b * 0.95f, 1.0f, 0.25f);
+            // Upper 60%: cone from body top to part top
+            float coneFrac = 1.0f - bodyFrac;
+            Vec3 coneCenter = partBot + rocketDir * (part_h_3d * (bodyFrac + coneFrac * 0.5f));
+            Mat4 coneMdl = Mat4::TRS(coneCenter, rocketQuat, Vec3(part_w_3d, part_h_3d * coneFrac, part_w_3d));
+            r3d->drawMesh(rocketNose, coneMdl, def.r, def.g, def.b, 1.0f, 0.25f);
+          } else if (def.category == CAT_ENGINE) {
+            // Upper 40%: cylinder body flush with part above
+            float bodyFrac = 0.4f;
+            Vec3 bodyCenter = partTop - rocketDir * (part_h_3d * bodyFrac * 0.5f);
+            Mat4 bodyMdl = Mat4::TRS(bodyCenter, rocketQuat, Vec3(part_w_3d * 0.55f, part_h_3d * bodyFrac, part_w_3d * 0.55f));
+            r3d->drawMesh(rocketBody, bodyMdl, 0.18f, 0.18f, 0.20f, 1.0f, 0.4f);
+            // Lower 60%: bell nozzle (cone, wide end down)
+            float nozzleFrac = 1.0f - bodyFrac;
+            Vec3 nozzleCenter = partBot + rocketDir * (part_h_3d * nozzleFrac * 0.5f);
+            Mat4 nozzleMdl = Mat4::TRS(nozzleCenter, rocketQuat, Vec3(part_w_3d * 0.85f, part_h_3d * nozzleFrac, part_w_3d * 0.85f));
+            r3d->drawMesh(rocketNose, nozzleMdl, def.r, def.g, def.b, 1.0f, 0.4f);
+            engNozzlePos = nozzleCenter; // update for flame rendering
+          } else if (def.category == CAT_STRUCTURAL && def.drag_coeff < 0) {
+            // Fin set: 4 fins around this part (no body needed)
+            for (int fi = 0; fi < 4; fi++) {
+              float fin_angle = fi * 1.570796f;
+              Quat finRot = rocketQuat * Quat::fromAxisAngle(Vec3(0.0f, 1.0f, 0.0f), fin_angle);
+              Vec3 finPos = partPos + finRot.rotate(Vec3(part_w_3d * 1.2f, 0.0f, 0.0f));
+              Mat4 finMdl = Mat4::TRS(finPos, finRot, Vec3(part_w_3d * 1.5f, part_h_3d * 0.8f, part_w_3d * 0.05f));
+              r3d->drawMesh(rocketBox, finMdl, def.r, def.g, def.b, 1.0f, 0.2f);
+            }
+          } else if (def.category == CAT_BOOSTER) {
+            // Full-height body
+            Mat4 bstBody = Mat4::TRS(partPos, rocketQuat, Vec3(part_w_3d * 0.7f, part_h_3d, part_w_3d * 0.7f));
+            r3d->drawMesh(rocketBody, bstBody, def.r, def.g, def.b, 1.0f, 0.25f);
+            for (int si = 0; si < 2; si++) {
+              float side_angle = si * 3.14159f;
+              Quat sideRot = rocketQuat * Quat::fromAxisAngle(Vec3(0.0f, 1.0f, 0.0f), side_angle);
+              Vec3 sidePos = partPos + sideRot.rotate(Vec3(part_w_3d * 0.6f, 0.0f, 0.0f));
+              Mat4 sideMdl = Mat4::TRS(sidePos, rocketQuat, Vec3(part_w_3d * 0.25f, part_h_3d * 0.8f, part_w_3d * 0.25f));
+              r3d->drawMesh(rocketBody, sideMdl, def.r * 0.8f, def.g * 0.8f, def.b * 0.8f, 1.0f, 0.3f);
+            }
+          } else if (def.category == CAT_COMMAND_POD) {
+            // Lower 50%: cylinder body
+            float bodyFrac = 0.5f;
+            Vec3 bodyCenter = partBot + rocketDir * (part_h_3d * bodyFrac * 0.5f);
+            Mat4 bodyMdl = Mat4::TRS(bodyCenter, rocketQuat, Vec3(part_w_3d, part_h_3d * bodyFrac, part_w_3d));
+            r3d->drawMesh(rocketBody, bodyMdl, def.r, def.g, def.b, 1.0f, 0.3f);
+            // Upper 50%: cone top
+            float coneFrac = 1.0f - bodyFrac;
+            Vec3 coneCenter = partBot + rocketDir * (part_h_3d * (bodyFrac + coneFrac * 0.5f));
+            Mat4 coneMdl = Mat4::TRS(coneCenter, rocketQuat, Vec3(part_w_3d * 0.9f, part_h_3d * coneFrac, part_w_3d * 0.9f));
+            r3d->drawMesh(rocketNose, coneMdl, def.r * 1.1f, def.g * 1.1f, def.b * 1.1f, 1.0f, 0.3f);
+          } else if (def.category == CAT_STRUCTURAL && def.drag_coeff >= 0) {
+            // Decoupler/adapter
+            Mat4 decMdl = Mat4::TRS(partPos, rocketQuat, Vec3(part_w_3d * 1.05f, part_h_3d, part_w_3d * 1.05f));
+            r3d->drawMesh(rocketBody, decMdl, def.r, def.g, def.b, 1.0f, 0.4f);
+          } else {
+            // Default: fuel tank — full-height cylinder + inter-stage rings
+            Mat4 tankMdl = Mat4::TRS(partPos, rocketQuat, Vec3(part_w_3d, part_h_3d, part_w_3d));
+            r3d->drawMesh(rocketBody, tankMdl, def.r, def.g, def.b, 1.0f, 0.25f);
+            Vec3 ringTopP = partTop;
+            Mat4 ringTopMdl = Mat4::TRS(ringTopP, rocketQuat, Vec3(part_w_3d * 1.02f, part_h_3d * 0.02f, part_w_3d * 1.02f));
+            r3d->drawMesh(rocketBody, ringTopMdl, 0.2f, 0.2f, 0.25f, 1.0f, 0.4f);
+            Vec3 ringBotP = partBot;
+            Mat4 ringBotMdl = Mat4::TRS(ringBotP, rocketQuat, Vec3(part_w_3d * 1.02f, part_h_3d * 0.02f, part_w_3d * 1.02f));
+            r3d->drawMesh(rocketBody, ringBotMdl, 0.2f, 0.2f, 0.25f, 1.0f, 0.4f);
+          }
+        }
       }
-
-      // 4. 引擎喷管 (Detailed Engine)
-      Vec3 engBasePos = renderRocketPos - rocketDir * (rh * 0.375f);
-      // 发动机机械基座
-      Mat4 engBaseModel = Mat4::TRS(engBasePos, rocketQuat, Vec3(rw_3d * 0.6f, rh * 0.05f, rw_3d * 0.6f));
-      r3d->drawMesh(rocketBody, engBaseModel, 0.15f, 0.15f, 0.15f, 1.0f, 0.5f);
-
-      // 喷管钟罩
-      // 我们用无翻转的锥体，宽底面朝下，尖端朝上刺入发动机基座，来模拟真实的钟形喷口 (Bell Nozzle)
-      Vec3 engNozzlePos = renderRocketPos - rocketDir * (rh * 0.50f);
-      Mat4 engNozzleModel = Mat4::TRS(engNozzlePos, rocketQuat,
-                                  Vec3(rw_3d * 0.9f, rh * 0.10f, rw_3d * 0.9f));
-      r3d->drawMesh(rocketNose, engNozzleModel,
-                     sel_eng.r, sel_eng.g, sel_eng.b, 1.0f, 0.4f);
 
       // ===== 3D 火焰/尾焰粒子 =====
       if (rocket_state.thrust_power > 0.0) {

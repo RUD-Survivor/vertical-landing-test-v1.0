@@ -1,0 +1,60 @@
+**********************************************************************
+** Visual Studio 2026 Developer Command Prompt v18.2.2
+** Copyright (c) 2025 Microsoft Corporation
+**********************************************************************
+[DEBUG:ext\vcvars.bat] Found potential v145 version file: 'Microsoft.VCToolsVersion.VC.14.50.18.0.txt'
+[DEBUG:ext\vcvars.bat] Testing v145 version file: 'Microsoft.VCToolsVersion.VC.14.50.18.0.txt'
+[vcvarsall.bat] Environment initialized for: 'x64'
+用于 x64 的 Microsoft (R) C/C++ 优化编译器 19.50.35724 版
+版权所有(C) Microsoft Corporation。保留所有权利。
+
+project.cpp
+C:\antigravity_code\vertical-landing-test-v1.0\src\math3d.h(1): warning C4819: 该文件包含不能在当前代码页(936)中表示的字符。请将该文件保存为 Unicode 格式以防止数据丢失
+C:\antigravity_code\vertical-landing-test-v1.0\src\renderer3d.h(1): warning C4819: 该文件包含不能在当前代码页(936)中表示的字符。请将该文件保存为 Unicode 格式以防止数据丢失
+C:\antigravity_code\vertical-landing-test-v1.0\src\renderer3d.h(822): warning C4819: 该文件包含不能在当前代码页(936)中表示的字符。请将该文件保存为 Unicode 格式以防止数据丢失
+C:\antigravity_code\vertical-landing-test-v1.0\src\rocket_builder.h(1): warning C4819: 该文件包含不能在当前代码页(936)中表示的字符。请将该文件保存为 Unicode 格式以防止数据丢失
+C:\antigravity_code\vertical-landing-test-v1.0\src\rocket_builder.h(260): error C2065: “Renderer”: 未声明的标识符
+C:\antigravity_code\vertical-landing-test-v1.0\src\rocket_builder.h(260): error C2065: “r”: 未声明的标识符
+C:\antigravity_code\vertical-landing-test-v1.0\src\rocket_builder.h(260): error C2062: 意外的类型“float” 
+C:\antigravity_code\vertical-landing-test-v1.0\src\rocket_builder.h(261): error C2143: 语法错误: 缺少“;”(在“{”的前面)
+C:\antigravity_code\vertical-landing-test-v1.0\src\rocket_builder.h(261): error C2447: “{”: 缺少函数标题(是否是老式的形式表?)
+C:\antigravity_code\vertical-landing-test-v1.0\src\rocket_builder.h(346): error C2065: “Renderer”: 未声明的标识符
+C:\antigravity_code\vertical-landing-test-v1.0\src\rocket_builder.h(346): error C2065: “r”: 未声明的标识符
+C:\antigravity_code\vertical-landing-test-v1.0\src\rocket_builder.h(346): error C2062: 意外的类型“float” 
+C:\antigravity_code\vertical-landing-test-v1.0\src\rocket_builder.h(347): error C2143: 语法错误: 缺少“;”(在“{”的前面)
+C:\antigravity_code\vertical-landing-test-v1.0\src\rocket_builder.h(347): error C2447: “{”: 缺少函数标题(是否是老式的形式表?)
+C:\antigravity_code\vertical-landing-test-v1.0\src\rocket_builder.h(371): error C2065: “Renderer”: 未声明的标识符
+C:\antigravity_code\vertical-landing-test-v1.0\src\rocket_builder.h(371): error C2065: “r”: 未声明的标识符
+C:\antigravity_code\vertical-landing-test-v1.0\src\rocket_builder.h(371): error C2065: “bs”: 未声明的标识符
+C:\antigravity_code\vertical-landing-test-v1.0\src\rocket_builder.h(371): error C2275: “BuilderState”: 应为表达式而不是类型
+C:\antigravity_code\vertical-landing-test-v1.0\src\rocket_builder.h(371): error C2062: 意外的类型“float” 
+C:\antigravity_code\vertical-landing-test-v1.0\src\rocket_builder.h(371): error C2143: 语法错误: 缺少“;”(在“{”的前面)
+C:\antigravity_code\vertical-landing-test-v1.0\src\rocket_builder.h(371): error C2447: “{”: 缺少函数标题(是否是老式的形式表?)
+src\project.cpp(563): error C3861: “drawBuilderUI_KSP”: 找不到标识符
+src\project.cpp(1088): error C2660: “Renderer3D::drawRibbon”: 函数不接受 6 个参数
+C:\antigravity_code\vertical-landing-test-v1.0\src\renderer3d.h(1110): note: 参见“Renderer3D::drawRibbon”的声明
+src\project.cpp(1088): note: 尝试匹配参数列表“(std::vector<Vec3,std::allocator<Vec3>>, float, float, float, float, float)”时
+src\project.cpp(1147): error C2660: “Renderer3D::drawRibbon”: 函数不接受 6 个参数
+C:\antigravity_code\vertical-landing-test-v1.0\src\renderer3d.h(1110): note: 参见“Renderer3D::drawRibbon”的声明
+src\project.cpp(1147): note: 尝试匹配参数列表“(std::vector<Vec3,std::allocator<Vec3>>, float, float, float, float, float)”时
+src\project.cpp(1232): error C2660: “Renderer3D::drawRibbon”: 函数不接受 6 个参数
+C:\antigravity_code\vertical-landing-test-v1.0\src\renderer3d.h(1110): note: 参见“Renderer3D::drawRibbon”的声明
+src\project.cpp(1232): note: 尝试匹配参数列表“(std::vector<Vec3,std::allocator<Vec3>>, float, float, float, float, float)”时
+src\project.cpp(1235): error C2660: “Renderer3D::drawRibbon”: 函数不接受 6 个参数
+C:\antigravity_code\vertical-landing-test-v1.0\src\renderer3d.h(1110): note: 参见“Renderer3D::drawRibbon”的声明
+src\project.cpp(1235): note: 尝试匹配参数列表“(std::vector<Vec3,std::allocator<Vec3>>, float, float, float, float, float)”时
+src\project.cpp(1237): error C2660: “Renderer3D::drawRibbon”: 函数不接受 6 个参数
+C:\antigravity_code\vertical-landing-test-v1.0\src\renderer3d.h(1110): note: 参见“Renderer3D::drawRibbon”的声明
+src\project.cpp(1237): note: 尝试匹配参数列表“(std::vector<Vec3,std::allocator<Vec3>>, float, float, float, float, float)”时
+src\project.cpp(1301): error C2660: “Renderer3D::drawRibbon”: 函数不接受 6 个参数
+C:\antigravity_code\vertical-landing-test-v1.0\src\renderer3d.h(1110): note: 参见“Renderer3D::drawRibbon”的声明
+src\project.cpp(1301): note: 尝试匹配参数列表“(std::vector<Vec3,std::allocator<Vec3>>, float, float, float, float, float)”时
+src\project.cpp(1303): error C2660: “Renderer3D::drawRibbon”: 函数不接受 6 个参数
+C:\antigravity_code\vertical-landing-test-v1.0\src\renderer3d.h(1110): note: 参见“Renderer3D::drawRibbon”的声明
+src\project.cpp(1303): note: 尝试匹配参数列表“(std::vector<Vec3,std::allocator<Vec3>>, float, float, float, float, float)”时
+physics_system.cpp
+control_system.cpp
+正在生成代码...
+正在编译...
+glad.c
+正在生成代码...
