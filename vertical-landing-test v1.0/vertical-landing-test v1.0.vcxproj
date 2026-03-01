@@ -30,6 +30,9 @@
     <ClInclude Include="..\src\renderer3d.h" />
     <ClInclude Include="..\src\rocket_state.h" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="..\src\atmo.frag" />
+  </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>18.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>

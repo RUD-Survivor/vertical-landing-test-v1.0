@@ -1020,11 +1020,21 @@ int main() {
       float closest_planet_dist = far_plane;
       for (size_t i = 1; i < SOLAR_SYSTEM.size(); i++) {
           Vec3 rp((float)(SOLAR_SYSTEM[i].px * ws_d - ro_x),
-                  (float)(SOLAR_SYSTEM[i].py * ws_d - ro_y),
-                  (float)(SOLAR_SYSTEM[i].pz * ws_d - ro_z));
-          float surf_dist = (camEye_rel - rp).length() - (float)SOLAR_SYSTEM[i].radius * (float)ws_d;
-          if (surf_dist > 0.0f && surf_dist < closest_planet_dist)
-              closest_planet_dist = surf_dist;
+              (float)(SOLAR_SYSTEM[i].py * ws_d - ro_y),
+              (float)(SOLAR_SYSTEM[i].pz * ws_d - ro_z));
+
+          float body_r = (float)SOLAR_SYSTEM[i].radius * (float)ws_d;
+          float atmo_thickness = (SOLAR_SYSTEM[i].type == GAS_GIANT || SOLAR_SYSTEM[i].type == RINGED_GAS_GIANT) ? body_r * 0.05f : 160.0f;
+          float dist_to_center = (camEye_rel - rp).length();
+
+          float true_surf_dist = dist_to_center - body_r;
+          float atmo_surf_dist = dist_to_center - (body_r + atmo_thickness);
+
+          // Use the atmosphere boundary for camera clipping if it exists
+          float geo_dist = (atmo_surf_dist > 0.0f) ? atmo_surf_dist : true_surf_dist;
+          if (geo_dist > 0.0f && geo_dist < closest_planet_dist) {
+              closest_planet_dist = geo_dist;
+          }
       }
       // Also consider distance to the Sun
       {
@@ -1035,8 +1045,10 @@ int main() {
       // Near plane = 10% of closest planet surface distance.
       // At low altitude this stays tiny (ground visible); at high altitude it grows
       // large enough to give the depth buffer sufficient precision on planet surfaces.
+      // Near plane cap to prevent clipping volumetric atmosphere shells
       float macro_near = fmaxf(0.001f, closest_planet_dist * 0.1f);
-      macro_near = fmaxf(macro_near, cam_dist * 0.001f); // never clip behind target
+      macro_near = fminf(macro_near, 10.0f); // Cap at 10 meters
+      macro_near = fmaxf(macro_near, cam_dist * 0.001f); // but never clip behind target
       
       Mat4 macroProjMat = Mat4::perspective(0.8f, aspect, macro_near, far_plane);
       r3d->beginFrame(viewMat, macroProjMat, camEye_rel);
@@ -1092,11 +1104,13 @@ int main() {
           r3d->drawPlanet(earthMesh, planetModel, b.type, b.r, b.g, b.b, 1.0f, (float)rocket_state.sim_time, (int)i);
           
           if ((b.type == TERRESTRIAL || b.type == GAS_GIANT) && i != 1 && i != 4) {
-              // Atmosphere shell (skip Mercury=1 and Moon=4: no atmosphere)
-              float atmo_radius = r * 1.12f;
+              // 修改前：float atmo_radius = r * 1.12f;
+              // 修改后：使用恒定的物理边界，剥离厚重的多余网格
+              float atmo_radius = r + 160.0f;
+
               Mat4 atmoModel = Mat4::scale(Vec3(atmo_radius, atmo_radius, atmo_radius));
               atmoModel = Mat4::translate(renderPlanet) * atmoModel;
-              
+
               // New Volumetric Scattering integration
               r3d->drawAtmosphere(earthMesh, atmoModel, camEye_rel, r3d->lightDir, renderPlanet, r, atmo_radius);
           }

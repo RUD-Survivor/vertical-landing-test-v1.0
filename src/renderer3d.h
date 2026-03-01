@@ -1657,7 +1657,8 @@ public:
       }
     )";
 
-    // --- Atmosphere Shader (Rayleigh + Mie Volumetric Raymarching) ---
+    // --- Atmosphere Shader (HARDCORE Rayleigh + Mie + Ozone Volumetric Raymarching) ---
+    // Designed for smooth ground-to-space transition with dramatic scattering
     const char* atmoFragSrc = R"(
       #version 330 core
       in vec3 vWorldPos;
@@ -1672,16 +1673,22 @@ public:
 
       #define PI 3.14159265359
 
-      const int PRIMARY_STEPS = 16;
-      const int LIGHT_STEPS = 6;
+      // High step counts for quality inside-atmosphere rendering
+      const int PRIMARY_STEPS = 32;
+      const int LIGHT_STEPS = 8;
       
-      // === 电影级大气参数 (Cinematic Parameters) ===
-      // 我们将瑞利系数放大 3.5 倍，制造出 KSP 级别厚重、高密度的蓝色大气！
-      const vec3 RAYLEIGH_COEFF = vec3(0.0058, 0.0135, 0.0331) * 3.5; 
-      const float MIE_COEFF = 0.003 * 3.0; // 放大米氏系数，增强太阳周围的光晕
-      const float H_RAYLEIGH = 8.0;  // 8 km 瑞利衰减高度
-      const float H_MIE = 1.2;       // 1.2 km 米氏衰减高度
-      const float G_MIE = 0.85;      // 光晕集中度
+      // === HARDCORE Atmosphere Parameters (km units) ===
+      // Boosted 7x over physical values for dramatic KSP-style thick atmosphere
+      const vec3 RAYLEIGH_COEFF = vec3(0.0058, 0.0135, 0.0331) * 7.0;
+      const float MIE_COEFF = 0.021;       // Heavy Mie for sun halo and haze
+      const float H_RAYLEIGH = 8.5;        // Rayleigh scale height (km)
+      const float H_MIE = 1.8;             // Mie scale height (km) - thicker haze layer
+      const float G_MIE = 0.76;            // Mie asymmetry - strong forward scattering
+
+      // Ozone absorption for realistic blue-violet zenith and orange-red horizon
+      const vec3 OZONE_COEFF = vec3(0.00035, 0.00085, 0.00009);
+      const float H_OZONE_CENTER = 25.0;   // Ozone layer center altitude (km)
+      const float H_OZONE_WIDTH = 15.0;    // Ozone layer width (km)
 
       bool intersectSphere(vec3 ro, vec3 rd, float radius, out float t0, out float t1) {
           vec3 L = ro - uPlanetCenter;
@@ -1701,41 +1708,63 @@ public:
       }
 
       float miePhase(float cosTheta) {
+          // Cornette-Shanks phase function (improved Henyey-Greenstein)
           float g2 = G_MIE * G_MIE;
-          return (1.0 - g2) / (4.0 * PI * pow(1.0 + g2 - 2.0 * G_MIE * cosTheta, 1.5));
+          float num = 3.0 * (1.0 - g2) * (1.0 + cosTheta * cosTheta);
+          float denom = 8.0 * PI * (2.0 + g2) * pow(1.0 + g2 - 2.0 * G_MIE * cosTheta, 1.5);
+          return num / max(denom, 1e-6);
       }
 
-      void getOpticalDepth(vec3 p, vec3 lightDir, out float dRayleigh, out float dMie) {
-          dRayleigh = 0.0; dMie = 0.0;
+      // Ozone density at altitude h (Gaussian profile around 25km)
+      float ozoneDensity(float h) {
+          float d = (h - H_OZONE_CENTER) / H_OZONE_WIDTH;
+          return exp(-0.5 * d * d);
+      }
+
+      void getOpticalDepth(vec3 p, vec3 lightDir, out float dR, out float dM, out float dO) {
+          dR = 0.0; dM = 0.0; dO = 0.0;
+
+          // Ground shadow check: if light ray hits planet surface, full occlusion
+          float tS0, tS1;
+          if (intersectSphere(p, lightDir, uInnerRadius, tS0, tS1) && tS0 > 0.0) {
+              dR = 1e6; dM = 1e6; dO = 1e6;
+              return;
+          }
+
           float t0, t1;
           if (!intersectSphere(p, lightDir, uOuterRadius, t0, t1) || t1 <= 0.0) return;
-          float stepSize = t1 / float(LIGHT_STEPS);
+          float start = max(t0, 0.0);
+          float stepSize = (t1 - start) / float(LIGHT_STEPS);
           for (int i = 0; i < LIGHT_STEPS; i++) {
-              vec3 pos = p + lightDir * (float(i) + 0.5) * stepSize;
+              vec3 pos = p + lightDir * (start + (float(i) + 0.5) * stepSize);
               float h = length(pos - uPlanetCenter) - uInnerRadius;
-              
-              // 关键物理修复：如果采样点在地表以下，说明光线被星球本体彻底遮挡
-              // 光学厚度设为无穷大，这样夜晚的大气就会真正变成纯黑！
-              if (h < 0.0) {
-                  dRayleigh = 1e6; 
-                  dMie = 1e6;
-                  return;
-              }
-              dRayleigh += exp(-h / H_RAYLEIGH) * stepSize;
-              dMie += exp(-h / H_MIE) * stepSize;
+              if (h < 0.0) { dR = 1e6; dM = 1e6; dO = 1e6; return; }
+              dR += exp(-h / H_RAYLEIGH) * stepSize;
+              dM += exp(-h / H_MIE) * stepSize;
+              dO += ozoneDensity(h) * stepSize;
           }
       }
 
       void main() {
           vec3 rayDir = normalize(vWorldPos - uCamPos);
+          
+          // Compute camera altitude for adaptive behavior
+          float camDist = length(uCamPos - uPlanetCenter);
+          float camAlt = max(camDist - uInnerRadius, 0.0);
+          float atmoThickness = uOuterRadius - uInnerRadius;
+          bool cameraInside = camDist < uOuterRadius;
+          
           float tNear, tFar;
           if (!intersectSphere(uCamPos, rayDir, uOuterRadius, tNear, tFar)) discard;
           
+          // Clamp surface intersection
           float tSurf0, tSurf1;
-          if (intersectSphere(uCamPos, rayDir, uInnerRadius, tSurf0, tSurf1)) {
-              if (tSurf0 > 0.0) tFar = min(tFar, tSurf0);
+          bool hitSurface = intersectSphere(uCamPos, rayDir, uInnerRadius, tSurf0, tSurf1);
+          if (hitSurface && tSurf0 > 0.0) {
+              tFar = min(tFar, tSurf0);
           }
           
+          // When camera is inside, ray starts from camera position
           tNear = max(tNear, 0.0);
           float segmentLength = tFar - tNear;
           if (segmentLength <= 0.0) discard;
@@ -1744,53 +1773,78 @@ public:
           
           vec3 sumRayleigh = vec3(0.0);
           vec3 sumMie = vec3(0.0);
-          float optDepthRayleigh = 0.0;
-          float optDepthMie = 0.0;
+          float optDepthR = 0.0;
+          float optDepthM = 0.0;
+          float optDepthO = 0.0;
           float cosTheta = dot(rayDir, uLightDir);
           
           for (int i = 0; i < PRIMARY_STEPS; i++) {
               vec3 pos = uCamPos + rayDir * (tNear + (float(i) + 0.5) * stepSize);
-              float h = length(pos - uPlanetCenter) - uInnerRadius;
-              if (h < 0.0) h = 0.0; 
+              float h = max(length(pos - uPlanetCenter) - uInnerRadius, 0.0);
               
               float dR = exp(-h / H_RAYLEIGH) * stepSize;
               float dM = exp(-h / H_MIE) * stepSize;
-              optDepthRayleigh += dR;
-              optDepthMie += dM;
+              float dO = ozoneDensity(h) * stepSize;
+              optDepthR += dR;
+              optDepthM += dM;
+              optDepthO += dO;
               
-              float dRayleighLight, dMieLight;
-              getOpticalDepth(pos, uLightDir, dRayleighLight, dMieLight);
+              // Light ray optical depth to sun
+              float lightR, lightM, lightO;
+              getOpticalDepth(pos, uLightDir, lightR, lightM, lightO);
               
-              vec3 tau = RAYLEIGH_COEFF * (optDepthRayleigh + dRayleighLight) + MIE_COEFF * 1.1 * (optDepthMie + dMieLight);
+              // Total extinction including ozone absorption
+              vec3 tau = RAYLEIGH_COEFF * (optDepthR + lightR) 
+                       + MIE_COEFF * 1.1 * (optDepthM + lightM)
+                       + OZONE_COEFF * (optDepthO + lightO);
               vec3 attenuation = exp(-tau);
               
               sumRayleigh += dR * attenuation;
               sumMie += dM * attenuation;
           }
           
-          vec3 color = sumRayleigh * RAYLEIGH_COEFF * rayleighPhase(cosTheta) + 
-                       sumMie * MIE_COEFF * miePhase(cosTheta);
+          // Phase functions
+          float phaseR = rayleighPhase(cosTheta);
+          float phaseM = miePhase(cosTheta);
           
-          // 增加曝光度，让大气层在高空看起来也极其显眼
-          color *= 18.0;
-          // === 核心修复：计算大气的物理遮挡率 ===
-          // 1. 计算从相机一直到宇宙深处的总光学厚度
-          vec3 tau_view = RAYLEIGH_COEFF * optDepthRayleigh + MIE_COEFF * optDepthMie;
-          vec3 viewTransmittance = exp(-tau_view); // 光线穿透率
+          // Inscattering color
+          vec3 color = sumRayleigh * RAYLEIGH_COEFF * phaseR + 
+                       sumMie * MIE_COEFF * phaseM;
+          
+          // === Altitude-adaptive exposure ===
+          // Ground level: very bright (saturated blue sky)
+          // Mid-altitude (20-60km): transitioning, sky darkens
+          // Space (>100km): faint limb glow only
+          float altNorm = clamp(camAlt / atmoThickness, 0.0, 1.0);
+          float exposure = mix(45.0, 6.0, smoothstep(0.0, 0.6, altNorm));
+
+          // Extra boost when looking horizontally at ground level (longest path = most scattering)
+          if (cameraInside) {
+              vec3 localUp = normalize(uCamPos - uPlanetCenter);
+              float upDot = dot(rayDir, localUp);
+              // Horizontal views (upDot near 0) get extra boost
+              float horizBoost = 1.0 + 0.5 * exp(-upDot * upDot * 8.0) * (1.0 - altNorm);
+              exposure *= horizBoost;
+          }
+          
+          color *= exposure;
+          
+          // === Physical transmittance-based opacity ===
+          vec3 tau_view = RAYLEIGH_COEFF * optDepthR + MIE_COEFF * optDepthM + OZONE_COEFF * optDepthO;
+          vec3 viewTransmittance = exp(-tau_view);
           float transLuma = dot(viewTransmittance, vec3(0.299, 0.587, 0.114));
-          
-          // 2. 气体本身的物理不透明度（夜晚时体现，使得地平线星星变暗）
           float opacity = clamp(1.0 - transLuma, 0.0, 1.0);
           
-          // 3. 强光致盲效应 (Washout)：白天的天空极亮，会在视觉上彻底遮盖星星
-          float brightness = dot(color, vec3(0.299, 0.587, 0.114));
-          float finalAlpha = clamp(opacity + brightness * 1.5, 0.0, 1.0);
+          // Boost opacity when inside atmosphere for solid sky appearance
+          if (cameraInside) {
+              opacity = clamp(opacity * mix(3.0, 1.0, smoothstep(0.0, 0.4, altNorm)), 0.0, 1.0);
+          }
           
-          // HDR 色调映射
-          color = 1.0 - exp(-color);
+          // ACES filmic tone mapping (richer sunset/sunrise colors than Reinhard)
+          vec3 x = max(color, vec3(0.0));
+          color = (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);
           
-          // 输出预乘 Alpha
-          FragColor = vec4(color, finalAlpha);
+          FragColor = vec4(color, opacity);
       }
     )";
     atmoProg = compileProgram(atmoVertSrc, atmoFragSrc);
@@ -2335,16 +2389,13 @@ public:
     glUniform1f(u_outerRadius, outerRadius);
 
     // --- Graphics State for Volumetric Shell ---
-    // IMPORTANT: Depth test must be OFF. With glCullFace(GL_FRONT) we render back faces,
-    // which are behind the planet in depth space. The raymarching shader handles
-    // planet occlusion mathematically via ray-sphere intersection.
+    // Depth test OFF: raymarching handles planet occlusion mathematically.
+    // Face culling DISABLED: ensures fragments are generated when camera is
+    // inside the atmosphere shell (near clip plane can clip back faces).
     glDisable(GL_DEPTH_TEST);
     glEnable(GL_BLEND);
-    // 核心修复：使用预乘 Alpha 混合。
-    // 渲染方程变为：最终画面 = 大气颜色*1.0 + 宇宙背景*(1.0 - 大气遮挡率)
     glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-    glCullFace(GL_FRONT); // Render back faces
-    glEnable(GL_CULL_FACE);
+    glDisable(GL_CULL_FACE);
     glDepthMask(GL_FALSE);
     
     sphereMesh.draw();
