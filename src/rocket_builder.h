@@ -259,111 +259,15 @@ struct BuilderState {
 // ==========================================================
 inline void drawBuilderText(Renderer* r, float x, float y, const char* text, float size,
                             float cr, float cg, float cb, float ca = 1.0f) {
-    // Use the existing drawLabel for supported chars, drawNumber for digits
-    // We extend with a simple uppercase block-font renderer
-    float px = size * 0.22f;
-    float cw = px * 4.5f;
-    int idx = 0;
-    while (text[idx]) {
-        char c = text[idx];
-
-        // Map character to a 3x5 bitmap. Each int = 15 bits (3 cols x 5 rows, MSB first)
-        int gl = 0;
-        switch (c) {
-            // Letters
-            case 'A': case 'a': gl = 0b010101111101101; break;
-            case 'B': case 'b': gl = 0b110101110101110; break;
-            case 'C': case 'c': gl = 0b011100100100011; break;
-            case 'D': case 'd': gl = 0b110101101101110; break;
-            case 'E': case 'e': gl = 0b111100110100111; break;
-            case 'F': case 'f': gl = 0b111100110100100; break;
-            case 'G': case 'g': gl = 0b011100101101011; break;
-            case 'H': case 'h': gl = 0b101101111101101; break;
-            case 'I': case 'i': gl = 0b111010010010111; break;
-            case 'J': case 'j': gl = 0b001001001101010; break;
-            case 'K': case 'k': gl = 0b101110100110101; break;
-            case 'L': case 'l': gl = 0b100100100100111; break;
-            case 'M': case 'm': gl = 0b101111101101101; break;
-            case 'N': case 'n': gl = 0b101111111101101; break;
-            case 'O': case 'o': gl = 0b010101101101010; break;
-            case 'P': case 'p': gl = 0b110101110100100; break;
-            case 'Q': case 'q': gl = 0b010101101011011; break;
-            case 'R': case 'r': gl = 0b110101110101101; break;
-            case 'S': case 's': gl = 0b011100010001110; break;
-            case 'T': case 't': gl = 0b111010010010010; break;
-            case 'U': case 'u': gl = 0b101101101101010; break;
-            case 'V': case 'v': gl = 0b101101101010010; break;
-            case 'W': case 'w': gl = 0b101101101111101; break;
-            case 'X': case 'x': gl = 0b101101010101101; break;
-            case 'Y': case 'y': gl = 0b101101010010010; break;
-            case 'Z': case 'z': gl = 0b111001010100111; break;
-            // Digits
-            case '0': gl = 0b010101101101010; break;
-            case '1': gl = 0b010110010010111; break;
-            case '2': gl = 0b110001010100111; break;
-            case '3': gl = 0b110001110001110; break;
-            case '4': gl = 0b101101111001001; break;
-            case '5': gl = 0b111100110001110; break;
-            case '6': gl = 0b011100110101010; break;
-            case '7': gl = 0b111001010010010; break;
-            case '8': gl = 0b010101010101010; break;
-            case '9': gl = 0b010101011001010; break;
-            // Symbols
-            case '/': gl = 0b001001010100100; break;
-            case '.': gl = 0b000000000000010; break;
-            case ':': gl = 0b000010000010000; break;
-            case '-': gl = 0b000000111000000; break;
-            case '(': gl = 0b010100100100010; break;
-            case ')': gl = 0b010001001001010; break;
-            case '<': gl = 0b001010100010001; break;
-            case '>': gl = 0b100010001010100; break;
-            case '[': gl = 0b110100100100110; break;
-            case ']': gl = 0b011001001001011; break;
-            case '%': gl = 0b101001010100101; break;
-            case '+': gl = 0b000010111010000; break;
-            case '=': gl = 0b000111000111000; break;
-            case '!': gl = 0b010010010000010; break;
-            case ' ': gl = 0; break;
-            default:  gl = 0b111111111111111; break; // block for unknown
-        }
-
-        if (gl) {
-            float ox = x + idx * cw;
-            for (int row = 0; row < 5; row++) {
-                for (int col = 0; col < 3; col++) {
-                    if (gl & (1 << (14 - row * 3 - col))) {
-                        r->addRect(ox + col * px, y + (2.0f - row) * px,
-                                   px * 0.85f, px * 0.85f, cr, cg, cb, ca);
-                    }
-                }
-            }
-        }
-        idx++;
-    }
+    r->drawText(x, y, text, size, cr, cg, cb, ca);
 }
 
 // Draw an integer value at position
 inline void drawBuilderInt(Renderer* r, float x, float y, int value, float size,
                            float cr, float cg, float cb, float ca = 1.0f) {
-    char buf[32];
-    int len = 0;
-    bool neg = value < 0;
-    if (neg) value = -value;
-    if (value == 0) {
-        buf[len++] = '0';
-    } else {
-        while (value > 0 && len < 30) {
-            buf[len++] = '0' + (value % 10);
-            value /= 10;
-        }
-    }
-    if (neg) buf[len++] = '-';
-    // Reverse
-    char str[32];
-    for (int i = 0; i < len; i++) str[i] = buf[len - 1 - i];
-    str[len] = 0;
-    drawBuilderText(r, x, y, str, size, cr, cg, cb, ca);
+    r->drawInt(x, y, value, size, cr, cg, cb, ca);
 }
+
 
 // ==========================================================
 // Main Builder UI Rendering

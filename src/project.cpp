@@ -251,88 +251,68 @@ public:
     }
   }
 
-  // 七段数码管渲染器
-  void drawDigit(float x, float y, int digit, float size, float r, float g,
-                 float b, float a = 1.0f) {
-    float sw = size * 0.6f, sh = size * 0.12f;
-    float hw = sw / 2.0f, hh = size / 2.0f, qh = size / 4.0f;
-    const int segs[10][7] = {{1, 1, 1, 0, 1, 1, 1}, {0, 1, 1, 0, 0, 0, 0},
-                             {1, 1, 0, 1, 0, 1, 1}, {1, 1, 1, 1, 0, 0, 1},
-                             {0, 1, 1, 1, 1, 0, 0}, {1, 0, 1, 1, 1, 0, 1},
-                             {1, 0, 1, 1, 1, 1, 1}, {1, 1, 1, 0, 0, 0, 0},
-                             {1, 1, 1, 1, 1, 1, 1}, {1, 1, 1, 1, 1, 0, 1}};
-    if (digit < 0 || digit > 9)
-      return;
-    float d = 0.25f;
-    auto segH = [&](float sx, float sy, bool on) {
-      addRect(sx, sy, sw, sh, on ? r : r * d, on ? g : g * d, on ? b : b * d,
-              on ? a : a * 0.2f);
-    };
-    auto segV = [&](float sx, float sy, bool on) {
-      addRect(sx, sy, sh, qh, on ? r : r * d, on ? g : g * d, on ? b : b * d,
-              on ? a : a * 0.2f);
-    };
-    segH(x, y + hh, segs[digit][0]);
-    segV(x + hw, y + qh, segs[digit][1]);
-    segV(x + hw, y - qh, segs[digit][2]);
-    segH(x, y, segs[digit][3]);
-    segV(x - hw, y + qh, segs[digit][4]);
-    segV(x - hw, y - qh, segs[digit][5]);
-    segH(x, y - hh, segs[digit][6]);
-  }
-  void drawNumber(float x, float y, int number, float digitSize, float r,
-                  float g, float b, float a = 1.0f) {
-    bool neg = number < 0;
-    if (neg)
-      number = -number;
-    char buf[16];
-    int len = 0;
-    if (number == 0) {
-      buf[len++] = 0;
-    } else {
-      while (number > 0 && len < 15) {
-        buf[len++] = (char)(number % 10);
-        number /= 10;
-      }
+  // --- Improved 5x7 Procedural Font ---
+  void drawText(float x, float y, const char* text, float size, float r, float g, float b, float a = 1.0f, bool shadow = true) {
+    if (shadow) {
+        // Render a subtle drop shadow for maximum clarity against any background
+        drawText(x + size * 0.1f, y - size * 0.1f, text, size, 0.0f, 0.0f, 0.0f, a * 0.8f, false);
     }
-    float sp = digitSize * 0.8f;
-    float sx = x - (len * sp) / 2.0f + sp / 2.0f;
-    for (int i = len - 1; i >= 0; i--)
-      drawDigit(sx + (len - 1 - i) * sp, y, buf[i], digitSize, r, g, b, a);
-    if (neg)
-      addRect(sx - sp, y, digitSize * 0.4f, digitSize * 0.1f, r, g, b, a);
-  }
 
-  // 3x5 像素字体绘制单位标签
-  void drawLabel(float x, float y, const char* text, float size, float r,
-                 float g, float b, float a = 1.0f) {
-    auto getGlyph = [](char c) -> int {
+    auto getGlyph5x7 = [](char c) -> uint64_t {
       switch (c) {
-        case 'm': return 0b101111101101101;
-        case 's': return 0b011100010001110;
-        case 'k': return 0b101110100110101;
-        case 'g': return 0b011101011011010;
-        case '/': return 0b001001010100100;
-        case '%': return 0b101001010100101;
-        default:  return 0;
+        case '0': return 0x1C22262A32221C; case '1': return 0x080C080808081C;
+        case '2': return 0x1C22020C10203E; case '3': return 0x1C22020C02221C;
+        case '4': return 0x040C14243E0404; case '5': return 0x3E203C0202221C;
+        case '6': return 0x1C22203C22221C; case '7': return 0x3E020408101010;
+        case '8': return 0x1C22221C22221C; case '9': return 0x1C22221E02221C;
+        case 'A': return 0x1C22223E222222; case 'B': return 0x3C22223C22223C;
+        case 'C': return 0x1C22202020221C; case 'D': return 0x3C22222222223C;
+        case 'E': return 0x3E20203C20203E; case 'F': return 0x3E20203C202020;
+        case 'G': return 0x1C22202E22221C; case 'H': return 0x2222223E222222;
+        case 'I': return 0x1C08080808081C; case 'J': return 0x0E040404042418;
+        case 'K': return 0x22242830282422; case 'L': return 0x2020202020203E;
+        case 'M': return 0x22362A22222222; case 'N': return 0x22322A26222222;
+        case 'O': return 0x1C22222222221C; case 'P': return 0x3C22223C202020;
+        case 'Q': return 0x1C2222222A241A; case 'R': return 0x3C22223C282422;
+        case 'S': return 0x1C22100C02221C; case 'T': return 0x3E080808080808;
+        case 'U': return 0x2222222222221C; case 'V': return 0x22222222221408;
+        case 'W': return 0x2222222A2A3622; case 'X': return 0x22221408142222;
+        case 'Y': return 0x22222214080808; case 'Z': return 0x3E02040810203E;
+        case 'm': return 0x00001A2D292929; case 's': return 0x00001E201C023C;
+        case 'k': return 0x2020262A322A26; case 'g': return 0x00001E22221E021C;
+        case '.': return 0x00000000000008; case ':': return 0x00080000000800;
+        case '-': return 0x0000001C000000; case '/': return 0x02040810204000;
+        case '%': return 0x22040810220000; case '(': return 0x04080808080804;
+        case ')': return 0x08040404040408; case '+': return 0x0008083E080800;
+        default: return 0;
       }
     };
-    float px = size * 0.18f;
-    float cw = px * 4.0f;
+
+    float px = size * 0.15f;
+    float cw = px * 6.0f;
     int idx = 0;
     while (text[idx]) {
-      int gl = getGlyph(text[idx]);
-      if (gl) {
+      uint64_t gl = getGlyph5x7(text[idx]);
+      if (gl != 0 || text[idx] == ' ') {
         float ox = x + idx * cw;
-        for (int row = 0; row < 5; row++)
-          for (int col = 0; col < 3; col++)
-            if (gl & (1 << (14 - row * 3 - col)))
-              addRect(ox + col * px, y + (2 - row) * px,
-                      px * 0.9f, px * 0.9f, r, g, b, a);
+        for (int row = 0; row < 7; row++) {
+          int row_data = (int)((gl >> ((6 - row) * 8)) & 0xFF);
+          for (int col = 0; col < 5; col++) {
+            if (row_data & (1 << (5 - col))) {
+              addRect(ox + col * px, y + (3 - row) * px, px * 1.1f, px * 1.1f, r, g, b, a);
+            }
+          }
+        }
       }
       idx++;
     }
   }
+
+  void drawInt(float x, float y, int val, float size, float r, float g, float b, float a = 1.0f) {
+      char buf[32]; snprintf(buf, sizeof(buf), "%d", val);
+      drawText(x, y, buf, size, r, g, b, a);
+  }
+
 
   void endFrame() {
     if (vertices.empty())
@@ -1708,38 +1688,28 @@ int main() {
 
     // 速度读数 + m/s
     renderer->addRect(num_x, 0.7f, bg_w, bg_h, 0.0f, 0.0f, 0.0f, 0.5f);
-    renderer->drawNumber(num_x - 0.02f, 0.7f, (int)current_vel, num_size, 1.0f, 0.4f,
-                         0.4f, hud_opacity);
-    renderer->drawLabel(label_x, 0.7f, "m/s", num_size * 0.7f,
-                        1.0f, 0.6f, 0.6f, hud_opacity);
+    renderer->drawInt(num_x - 0.04f, 0.7f, (int)current_vel, num_size, 1.0f, 0.4f, 0.4f, hud_opacity);
+    renderer->drawText(label_x, 0.7f, "m/s", num_size * 0.7f, 1.0f, 0.6f, 0.6f, hud_opacity);
 
     // 海拔读数 + m 或 km
     renderer->addRect(num_x, 0.55f, bg_w, bg_h, 0.0f, 0.0f, 0.0f, 0.5f);
     if (current_alt > 10000) {
-      renderer->drawNumber(num_x - 0.02f, 0.55f, (int)(current_alt / 1000.0), num_size,
-                           0.4f, 0.7f, 1.0f, hud_opacity);
-      renderer->drawLabel(label_x, 0.55f, "km", num_size * 0.7f,
-                          0.5f, 0.8f, 1.0f, hud_opacity);
+      renderer->drawInt(num_x - 0.04f, 0.55f, (int)(current_alt / 1000.0), num_size, 0.4f, 0.7f, 1.0f, hud_opacity);
+      renderer->drawText(label_x, 0.55f, "km", num_size * 0.7f, 0.5f, 0.8f, 1.0f, hud_opacity);
     } else {
-      renderer->drawNumber(num_x - 0.02f, 0.55f, (int)current_alt, num_size, 0.4f, 0.7f,
-                           1.0f, hud_opacity);
-      renderer->drawLabel(label_x, 0.55f, "m", num_size * 0.7f,
-                          0.5f, 0.8f, 1.0f, hud_opacity);
+      renderer->drawInt(num_x - 0.04f, 0.55f, (int)current_alt, num_size, 0.4f, 0.7f, 1.0f, hud_opacity);
+      renderer->drawText(label_x, 0.55f, "m", num_size * 0.7f, 0.5f, 0.8f, 1.0f, hud_opacity);
     }
 
     // 燃油读数 + kg
     renderer->addRect(num_x, 0.4f, bg_w, bg_h, 0.0f, 0.0f, 0.0f, 0.5f);
-    renderer->drawNumber(num_x - 0.02f, 0.4f, (int)current_fuel, num_size, 0.9f, 0.7f,
-                         0.2f, hud_opacity);
-    renderer->drawLabel(label_x, 0.4f, "kg", num_size * 0.7f,
-                        1.0f, 0.8f, 0.3f, hud_opacity);
+    renderer->drawInt(num_x - 0.04f, 0.4f, (int)current_fuel, num_size, 0.9f, 0.7f, 0.2f, hud_opacity);
+    renderer->drawText(label_x, 0.4f, "kg", num_size * 0.7f, 1.0f, 0.8f, 0.3f, hud_opacity);
 
     // 油门读数 + %
     renderer->addRect(num_x, 0.25f, bg_w * 0.8f, bg_h * 0.8f, 0.0f, 0.0f, 0.0f, 0.5f);
-    renderer->drawNumber(num_x - 0.02f, 0.25f, (int)(control_input.throttle * 100),
-                         num_size * 0.8f, 0.8f, 0.8f, 0.8f, hud_opacity);
-    renderer->drawLabel(label_x - 0.01f, 0.25f, "%", num_size * 0.6f,
-                        0.8f, 0.8f, 0.8f, hud_opacity);
+    renderer->drawInt(num_x - 0.03f, 0.25f, (int)(control_input.throttle * 100), num_size * 0.8f, 0.8f, 0.8f, 0.8f, hud_opacity);
+    renderer->drawText(label_x - 0.02f, 0.25f, "%", num_size * 0.6f, 0.8f, 0.8f, 0.8f, hud_opacity);
 
     // 俯仰读数 (Pitch) + 度数
     renderer->addRect(num_x, 0.10f, bg_w * 0.8f, bg_h * 0.8f, 0.0f, 0.0f, 0.0f, 0.5f);
@@ -1750,19 +1720,16 @@ int main() {
     } else if (pitch_deg > 20) {
         pr = 1.0f; pg = 0.7f; pb = 0.2f; // Yellow Warning (Safe speed)
     }
-    renderer->drawNumber(num_x - 0.02f, 0.10f, pitch_deg, num_size * 0.8f,
-                         pr, pg, pb, hud_opacity);
-    renderer->drawLabel(label_x - 0.01f, 0.10f, "deg", num_size * 0.5f,
-                        pr, pg, pb, hud_opacity);
+    renderer->drawInt(num_x - 0.03f, 0.10f, pitch_deg, num_size * 0.8f, pr, pg, pb, hud_opacity);
+    renderer->drawText(label_x - 0.02f, 0.10f, "deg", num_size * 0.5f, pr, pg, pb, hud_opacity);
 
     // 垂直速度读数 + m/s (右侧 HUD)
     renderer->addRect(0.85f, 0.4f, 0.22f, 0.06f, 0.05f, 0.05f, 0.05f, 0.5f);
     float vr = current_vvel < 0 ? 1.0f : 0.3f;
     float vg = current_vvel >= 0 ? 1.0f : 0.3f;
-    renderer->drawNumber(0.83f, 0.4f, current_vvel, num_size * 0.9f, vr, vg, 0.3f,
-                         hud_opacity);
-    renderer->drawLabel(0.93f, 0.4f, "m/s", num_size * 0.5f,
-                        0.7f, 0.7f, 0.7f, hud_opacity);
+    renderer->drawInt(0.81f, 0.4f, current_vvel, num_size * 0.9f, vr, vg, 0.3f, hud_opacity);
+    renderer->drawText(0.91f, 0.4f, "m/s", num_size * 0.5f, 0.7f, 0.7f, 0.7f, hud_opacity);
+
 
     // --- 6. 控制模式指示器 (HUD 右上角) ---
     float mode_x = 0.85f;
