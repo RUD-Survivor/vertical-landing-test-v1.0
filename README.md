@@ -1,31 +1,5 @@
-# Vertical-Lander-GNC
-
-一个基于 C++ 的物理模拟和飞行控制系统，用于垂直火箭着陆，灵感来自 SpaceX 星舰 (Starship)。
-
-## 项目概览
-本项目模拟了火箭助推器着陆所需的 **制导、导航与控制 (GNC)** 逻辑。它实现了：
-* **物理引擎：** 模拟重力、大气压、变质量（燃料消耗）和推力。
-* **PID 控制：** 在“精准着陆”阶段使用比例控制 (Proportional Control) 回路。
-* **自杀燃烧 (Suicide Burn) 算法：** 实时计算停止距离以实现高效减速。
-* **状态机：** 管理飞行阶段（上升、滑行、自杀燃烧、软着陆）。
-
-## 🛠️ 技术栈
-* **语言：** C++ (标准 11/17)
-* **核心概念：** 运动学、控制理论、面向对象编程 (OOP)。
-* **零依赖：** 纯 C++ 实现，可在任何控制台上运行。
-
-## 📉 开发历程（失败与修复）
-开发过程并非一帆风顺。以下是算法的演变过程：
-
-### 尝试 1：“太晚”的燃烧
-* **问题：** 在计算制动距离时，未考虑因气压变化导致的推重比变化。
-* **结果：** 以 -415 m/s 的速度撞击（RUD/计划外快速拆解）。
-
-### 尝试 2：“震荡”
-* **问题：** 使用 Bang-Bang 控制（全油门 / 零油门）导致在接近地面时产生剧烈震荡。
-* **结果：** 以 -32 m/s 的速度撞击。
-
-### 最终成功：“亲吻式”着陆
-* **解决方案：** 实施了连续油门调节（P-Control），根据高度瞄准特定的下降速度。
-* **结果：** 着陆速度 **-0.49 m/s**。
+<img width="1919" height="970" alt="image" src="https://github.com/user-attachments/assets/a3ac51da-4c77-4e9e-81c5-0df93e099f7f" />
+<img width="1918" height="985" alt="屏幕截图 2026-03-01 151733" src="https://github.com/user-attachments/assets/20a8c097-572a-48ac-a731-3dedce01dcec" />
+<img width="1919" height="1001" alt="image" src="https://github.com/user-attachments/assets/942c6b18-c17d-441c-b446-bebda39ab9b7" />
+<img width="1919" height="966" alt="image" src="https://github.com/user-attachments/assets/a472b14a-d84e-440f-a146-474a0545c02c" />
 
