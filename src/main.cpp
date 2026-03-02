@@ -27,6 +27,8 @@ static void scroll_callback(GLFWwindow* /*w*/, double /*xoffset*/, double yoffse
 
 
 #include "simulation/rocket_builder.h"
+#include "save_system.h"
+#include "menu_system.h"
 
 // ==========================================
 // Part 2: Explorer Class -> Replaced by ECS (RocketState, PhysicsSystem)
@@ -106,14 +108,80 @@ int main() {
   PhysicsSystem::InitSolarSystem();
 
   // =========================================================
+  // 主菜单阶段：显示启动菜单
+  // =========================================================
+  MenuSystem::MenuState menu_state;
+  menu_state.has_save = SaveSystem::HasSaveFile();
+  
+  if (menu_state.has_save) {
+      SaveSystem::GetSaveInfo(menu_state.save_time, menu_state.save_parts);
+  }
+  
+  MenuSystem::MenuChoice menu_choice = MenuSystem::MENU_NONE;
+  bool up_pressed = false, down_pressed = false, enter_pressed = false;
+  
+  // 主菜单循环
+  while (menu_choice == MenuSystem::MENU_NONE && !glfwWindowShouldClose(window)) {
+      glfwPollEvents();
+      
+      if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
+          glfwSetWindowShouldClose(window, true);
+          break;
+      }
+      
+      menu_choice = MenuSystem::HandleMenuInput(window, menu_state, up_pressed, down_pressed, enter_pressed);
+      
+      glClearColor(0.02f, 0.03f, 0.08f, 1.0f);
+      glClear(GL_COLOR_BUFFER_BIT);
+      renderer->beginFrame();
+      MenuSystem::DrawMainMenu(renderer, menu_state, (float)glfwGetTime());
+      renderer->endFrame();
+      glfwSwapBuffers(window);
+      
+      std::this_thread::sleep_for(std::chrono::milliseconds(16));
+  }
+  
+  // 处理菜单选择
+  if (menu_choice == MenuSystem::MENU_EXIT || glfwWindowShouldClose(window)) {
+      delete renderer;
+      glfwTerminate();
+      return 0;
+  }
+  
+  bool load_from_save = (menu_choice == MenuSystem::MENU_CONTINUE);
+  
+  if (menu_choice == MenuSystem::MENU_NEW_GAME && menu_state.has_save) {
+      SaveSystem::DeleteSaveFile();
+  }
+
+  // =========================================================
   // BUILD 阶段：KSP-like 火箭组装界面
   // =========================================================
   BuilderState builder_state;
-  // Add default parts for a starter rocket
-  builder_state.assembly.addPart(9);   // Raptor engine
-  builder_state.assembly.addPart(6);   // Medium fuel tank 100t
-  builder_state.assembly.addPart(0);   // Standard fairing nosecone
-  bool build_done = false;
+  RocketState loaded_state;
+  ControlInput loaded_input;
+  bool skip_builder = false;
+  
+  if (load_from_save) {
+      // 从存档加载
+      if (SaveSystem::LoadGame(builder_state.assembly, loaded_state, loaded_input)) {
+          skip_builder = true;
+          cout << ">> SAVE FILE LOADED SUCCESSFULLY!" << endl;
+      } else {
+          cout << ">> FAILED TO LOAD SAVE FILE, STARTING NEW GAME" << endl;
+          // 加载失败,使用默认火箭
+          builder_state.assembly.addPart(9);   // Raptor engine
+          builder_state.assembly.addPart(6);   // Medium fuel tank 100t
+          builder_state.assembly.addPart(0);   // Standard fairing nosecone
+      }
+  } else {
+      // 新游戏,使用默认火箭
+      builder_state.assembly.addPart(9);   // Raptor engine
+      builder_state.assembly.addPart(6);   // Medium fuel tank 100t
+      builder_state.assembly.addPart(0);   // Standard fairing nosecone
+  }
+  
+  bool build_done = skip_builder;
 
   BuilderKeyState bk_prev = {false,false,false,false,false,false,false,false,false,false};
 
@@ -155,10 +223,17 @@ int main() {
   RocketConfig rocket_config = builder_state.assembly.buildRocketConfig();
 
   RocketState rocket_state;
-  rocket_state.fuel = builder_state.assembly.total_fuel;
-  rocket_state.status = PRE_LAUNCH;
-  
   ControlInput control_input;
+  
+  if (skip_builder) {
+      // 使用加载的状态
+      rocket_state = loaded_state;
+      control_input = loaded_input;
+  } else {
+      // 新游戏初始化
+      rocket_state.fuel = builder_state.assembly.total_fuel;
+      rocket_state.status = PRE_LAUNCH;
+  }
 
   // Keep a reference to the assembly for rendering
   const RocketAssembly& assembly = builder_state.assembly;
@@ -201,7 +276,9 @@ int main() {
   struct TrajPoint { DVec3 e; DVec3 s; };
   std::vector<TrajPoint> traj_history; // 记录火箭历史飞行的 3D 轨迹点
 
+  int frame = 0;
   while ((rocket_state.status == PRE_LAUNCH || rocket_state.status == ASCEND || rocket_state.status == DESCEND) && !glfwWindowShouldClose(window)) {
+    frame++;
     glfwPollEvents();
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
       glfwSetWindowShouldClose(window, true);
@@ -1388,6 +1465,20 @@ int main() {
     // --- 7. Mission Status (Far Right) ---
     renderer->drawText(num_x - 0.08f, 0.80f, "[MISSION CONTROL]", 0.016f, 0.4f, 1.0f, 0.4f, hud_opacity);
     renderer->drawText(num_x - 0.08f, 0.76f, rocket_state.mission_msg.c_str(), 0.015f, 0.8f, 0.8f, 1.0f, hud_opacity);
+    
+    // 保存指示器 (每次保存后闪烁3秒)
+    static int last_save_frame = -1000;
+    if (frame % 300 == 0 && rocket_state.status != PRE_LAUNCH) {
+        last_save_frame = frame;
+        SaveSystem::SaveGame(assembly, rocket_state, control_input);
+    }
+    int frames_since_save = frame - last_save_frame;
+    if (frames_since_save < 180) { // 3秒 = 180帧
+        float save_alpha = 1.0f - (float)frames_since_save / 180.0f;
+        float save_pulse = 0.5f + 0.5f * sinf((float)frames_since_save * 0.3f);
+        renderer->drawText(-0.88f, -0.85f, "AUTOSAVED", 0.012f, 
+                          0.3f, 1.0f * save_pulse, 0.4f, save_alpha * hud_opacity);
+    }
 
     // --- 6. 油门指示条 (HUD 底部中央) ---
     float thr_bar_x = 0.0f;
@@ -1423,6 +1514,13 @@ int main() {
   rocketNose.destroy();
   rocketBox.destroy();
   delete r3d;
+  
+  // 游戏结束时保存最终状态
+  if (rocket_state.status == LANDED || rocket_state.status == CRASHED) {
+    SaveSystem::SaveGame(assembly, rocket_state, control_input);
+    cout << "\n>> GAME SAVED." << endl;
+  }
+  
   glfwTerminate();
   if (rocket_state.status == LANDED || rocket_state.status == CRASHED) {
     cout << "\n>> SIMULATION ENDED. PRESS ENTER." << endl;

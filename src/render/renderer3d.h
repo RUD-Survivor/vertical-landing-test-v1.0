@@ -2145,6 +2145,9 @@ public:
     proj = projMat;
     camPos = cameraPos;
     glEnable(GL_DEPTH_TEST);
+    glEnable(GL_CULL_FACE);
+    glCullFace(GL_BACK);
+    glFrontFace(GL_CW);
     glClear(GL_DEPTH_BUFFER_BIT);
   }
 
@@ -2398,7 +2401,7 @@ public:
     sphereMesh.draw();
 
     // Revert ALL state
-    glDisable(GL_CULL_FACE);
+    glEnable(GL_CULL_FACE);
     glDisable(GL_BLEND);
     glEnable(GL_DEPTH_TEST);
     glDepthMask(GL_TRUE);
