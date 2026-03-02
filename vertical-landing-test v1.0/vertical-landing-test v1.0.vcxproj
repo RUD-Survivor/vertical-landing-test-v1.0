@@ -19,19 +19,18 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="..\src\glad.c" />
-    <ClCompile Include="..\src\project.cpp" />
-    <ClCompile Include="..\src\physics_system.cpp" />
-    <ClCompile Include="..\src\control_system.cpp" />
+    <ClCompile Include="..\vendor\glad\glad.c" />
+    <ClCompile Include="..\src\main.cpp" />
+    <ClCompile Include="..\src\physics\physics_system.cpp" />
+    <ClCompile Include="..\src\control\control_system.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\src\physics_system.h" />
-    <ClInclude Include="..\src\control_system.h" />
-    <ClInclude Include="..\src\renderer3d.h" />
-    <ClInclude Include="..\src\rocket_state.h" />
+    <ClInclude Include="..\src\physics\physics_system.h" />
+    <ClInclude Include="..\src\control\control_system.h" />
+    <ClInclude Include="..\src\render\renderer3d.h" />
+    <ClInclude Include="..\src\simulation\rocket_state.h" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="..\src\atmo.frag" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>18.0</VCProjectVersion>
@@ -120,13 +119,13 @@
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <AdditionalIncludeDirectories>c:\antigravity_code\vertical-landing-test-v1.0\dependencires\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\src;..\dependencires\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>glfw3.lib;opengl32.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>c:\antigravity_code\vertical-landing-test-v1.0\dependencires\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>..\dependencires\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -138,13 +137,13 @@
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <AdditionalIncludeDirectories>c:\antigravity_code\vertical-landing-test-v1.0\dependencires\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\src;..\dependencires\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>glfw3.lib;opengl32.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>c:\antigravity_code\vertical-landing-test-v1.0\dependencires\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>..\dependencires\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

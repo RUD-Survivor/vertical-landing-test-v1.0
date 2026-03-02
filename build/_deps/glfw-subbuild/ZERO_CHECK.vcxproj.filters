@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="18.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="C:\antigravity_code\RocketSim3D\build\_deps\glfw-subbuild\CMakeFiles\84630521e6f9a5cef6690620de7f072f\generate.stamp.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{0F0D5F23-1157-3C08-9485-F07712B49551}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

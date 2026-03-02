@@ -1,0 +1,44 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="18.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="C:\antigravity_code\RocketSim3D\build\_deps\glfw-subbuild\CMakeFiles\dff92593fc8326731bbc05a578b4455a\glfw-populate-mkdir.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\antigravity_code\RocketSim3D\build\_deps\glfw-subbuild\CMakeFiles\dff92593fc8326731bbc05a578b4455a\glfw-populate-download.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\antigravity_code\RocketSim3D\build\_deps\glfw-subbuild\CMakeFiles\dff92593fc8326731bbc05a578b4455a\glfw-populate-update.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\antigravity_code\RocketSim3D\build\_deps\glfw-subbuild\CMakeFiles\dff92593fc8326731bbc05a578b4455a\glfw-populate-patch.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\antigravity_code\RocketSim3D\build\_deps\glfw-subbuild\CMakeFiles\dff92593fc8326731bbc05a578b4455a\glfw-populate-configure.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\antigravity_code\RocketSim3D\build\_deps\glfw-subbuild\CMakeFiles\dff92593fc8326731bbc05a578b4455a\glfw-populate-build.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\antigravity_code\RocketSim3D\build\_deps\glfw-subbuild\CMakeFiles\dff92593fc8326731bbc05a578b4455a\glfw-populate-install.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\antigravity_code\RocketSim3D\build\_deps\glfw-subbuild\CMakeFiles\dff92593fc8326731bbc05a578b4455a\glfw-populate-test.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\antigravity_code\RocketSim3D\build\_deps\glfw-subbuild\CMakeFiles\59fcb71bf0ef3f92de8f3035271c82c1\glfw-populate-complete.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\antigravity_code\RocketSim3D\build\_deps\glfw-subbuild\CMakeFiles\84630521e6f9a5cef6690620de7f072f\glfw-populate.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\antigravity_code\RocketSim3D\build\_deps\glfw-subbuild\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="C:\antigravity_code\RocketSim3D\build\_deps\glfw-subbuild\CMakeFiles\glfw-populate" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{0F0D5F23-1157-3C08-9485-F07712B49551}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>
