@@ -775,8 +775,8 @@ int main() {
               Mat4 atmoModel = Mat4::scale(Vec3(atmo_radius, atmo_radius, atmo_radius));
               atmoModel = Mat4::translate(renderPlanet) * atmoModel;
 
-              // New Volumetric Scattering integration
-              r3d->drawAtmosphere(earthMesh, atmoModel, camEye_rel, r3d->lightDir, renderPlanet, r, atmo_radius);
+              // New Volumetric Scattering integration with animated hardcore clouds
+              r3d->drawAtmosphere(earthMesh, atmoModel, camEye_rel, r3d->lightDir, renderPlanet, r, atmo_radius, (float)rocket_state.sim_time);
           }
           if (b.type == RINGED_GAS_GIANT) {
               Mat4 ringModel = Mat4::scale(Vec3(r * 2.2f, r * 0.001f, r * 2.2f));

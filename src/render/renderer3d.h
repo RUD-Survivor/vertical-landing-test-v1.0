@@ -574,41 +574,7 @@ public:
           specMask = mix(specMask, 0.3, ice); // Ice has some specular
         }
 
-        // ---- CLOUD LAYERS (3 types) ----
-        float timeOff = uTime * 0.0001;
-        // Cumulus (large convective clouds)
-        float clouds1 = fbm(texCoord * 2.0 + vec3(timeOff, 50.0, timeOff * 0.5), 7);
-        clouds1 = smoothstep(0.36, 0.62, clouds1);
-        // Stratocumulus (mid-level blankets)
-        float clouds2 = fbm(texCoord * 3.5 + vec3(-timeOff * 0.8, 120.0, timeOff * 0.3), 5);
-        clouds2 = smoothstep(0.42, 0.68, clouds2) * 0.6;
-        // Cirrus (high, thin, wispy)
-        float clouds3 = fbm(texCoord * 6.0 + vec3(-timeOff * 1.5, 200.0, timeOff * 0.7), 4);
-        clouds3 = smoothstep(0.52, 0.78, clouds3) * 0.3;
-        float cloudCover = min(1.0, clouds1 + clouds2 + clouds3);
-
-        // Cloud self-shadowing (lit side brighter)
-        float cloudLit = max(0.6, dot(N, L) * 0.5 + 0.5);
-        vec3 cloudColorDay = vec3(0.95, 0.96, 0.98) * cloudLit;
-        vec3 cloudShadowColor = vec3(0.45, 0.48, 0.55);
-
-        // Sunset/sunrise cloud coloring (golden-orange at low sun angles)
-        float sunAngle = dot(N, L);
-        float sunsetZone = smoothstep(-0.05, 0.15, sunAngle) * smoothstep(0.40, 0.05, sunAngle);
-        vec3 sunsetCloudLit = vec3(1.0, 0.72, 0.30);    // Golden tops
-        vec3 sunsetCloudDark = vec3(0.85, 0.35, 0.10);   // Deep orange-red underside
-        vec3 cloudColorSunset = mix(sunsetCloudDark, sunsetCloudLit, cloudLit);
-
-        // Blend between day and sunset cloud colors
-        vec3 cloudColor = mix(cloudColorDay, cloudColorSunset, sunsetZone);
-        cloudColor = mix(cloudShadowColor, cloudColor, smoothstep(-0.12, 0.25, sunAngle));
-
-        // Cloud shadow on surface
-        float cloudShadow = 1.0 - cloudCover * 0.35;
-        surfColor *= cloudShadow;
-
-        // Blend clouds over surface
-        surfColor = mix(surfColor, cloudColor, cloudCover * 0.88);
+        // ---- CLOUD LAYERS REMOVED (Replaced by Volumetric Atmo Shader) ----
 
         // ---- LIGHTING ----
         float NdotL = dot(N, L);
@@ -1448,19 +1414,31 @@ public:
         float lat = sph.y;
         float timeOff = uTime * 0.00004;
 
+        // Apply wind rotation around Z-axis (poles are on Z)
+        float w1 = timeOff * -2.0; // Slow, uniform rotation
+        float s1 = sin(w1); float c1 = cos(w1);
+        vec3 windSph = vec3(sph.x * c1 - sph.y * s1, sph.x * s1 + sph.y * c1, sph.z);
+
         // === Strong banding (Neptune has more visible features than Uranus) ===
-        float bandWarp = fbm(sph * vec3(2.0, 1.0, 2.0) + vec3(timeOff * 0.5, 0.0, timeOff * 0.3), 5);
+        float bandWarp = fbm(windSph * vec3(2.0, 1.0, 2.0), 5);
         float bands = sin(lat * 16.0 + bandWarp * 3.5) * 0.5 + 0.5;
         float fineBands = sin(lat * 40.0 + bandWarp * 1.5) * 0.1;
         bands = clamp(bands + fineBands, 0.0, 1.0);
 
         // === Great Dark Spot (GDS) analog ===
-        vec3 gdsCenter = vec3(-0.3, -0.3, 0.5);
+        float gAngle = timeOff * -2.0;
+        float sg = sin(gAngle); float cg = cos(gAngle);
+        vec3 gCenter = vec3(-0.3, -0.3, 0.5);
+        vec3 gdsCenter = vec3(gCenter.x * cg - gCenter.z * sg, gCenter.y, gCenter.x * sg + gCenter.z * cg);
         float gdsDist = length(sph - normalize(gdsCenter));
         float gdsMask = smoothstep(0.2, 0.0, gdsDist);
 
         // === Methane cirrus streaks (bright white wispy clouds) ===
-        float cirrus = fbm(sph * vec3(8.0, 2.0, 8.0) + vec3(timeOff * 3.0, lat * 5.0, timeOff * 1.5), 6);
+        // Slightly faster uniform wind for cirrus clouds (Z-axis rotation)
+        float w2 = timeOff * -4.0;
+        float s2 = sin(w2); float c2 = cos(w2);
+        vec3 windSph2 = vec3(sph.x * c2 - sph.y * s2, sph.x * s2 + sph.y * c2, sph.z);
+        float cirrus = fbm(windSph2 * vec3(8.0, 2.0, 8.0) + vec3(0.0, lat * 5.0, 0.0), 6);
         float cirrusMask = smoothstep(0.55, 0.75, cirrus) * 0.6;
 
         // === Color palette ===
@@ -1475,7 +1453,7 @@ public:
         surfColor = mix(surfColor, indigo, (1.0 - bands) * 0.3);
 
         // Wind-driven streaky detail
-        float streaks = fbm(tc * 4.0 + vec3(timeOff * 2.0, 0.0, 0.0), 5) * 0.15;
+        float streaks = fbm(windSph * 20.0, 5) * 0.15;
         surfColor += vec3(streaks * 0.3, streaks * 0.4, streaks);
 
         // Great Dark Spot
@@ -1483,7 +1461,7 @@ public:
 
         // Bright companion clouds near the GDS
         float companion = smoothstep(0.18, 0.22, gdsDist) * smoothstep(0.30, 0.22, gdsDist);
-        companion *= fbm(sph * 12.0 + vec3(timeOff * 5.0), 4);
+        companion *= fbm(windSph2 * 12.0, 4);
         surfColor = mix(surfColor, cirrusWhite, companion * 0.5);
 
         // Methane cirrus streaks
@@ -1668,6 +1646,7 @@ public:
       uniform vec3 uPlanetCenter;
       uniform float uInnerRadius;
       uniform float uOuterRadius;
+      uniform float uTime;
       
       out vec4 FragColor;
 
@@ -1689,6 +1668,12 @@ public:
       const vec3 OZONE_COEFF = vec3(0.00035, 0.00085, 0.00009);
       const float H_OZONE_CENTER = 25.0;   // Ozone layer center altitude (km)
       const float H_OZONE_WIDTH = 15.0;    // Ozone layer width (km)
+
+      // === VOLUMETRIC CLOUD PARAMETERS ===
+      const float CLOUD_MIN_ALT = 3.0;
+      const float CLOUD_MAX_ALT = 14.0;
+      const vec3 CLOUD_EXTINCTION = vec3(0.04);
+      const vec3 CLOUD_SCATTERING = vec3(0.75); // Drastically increased to fix black clouds
 
       bool intersectSphere(vec3 ro, vec3 rd, float radius, out float t0, out float t1) {
           vec3 L = ro - uPlanetCenter;
@@ -1721,13 +1706,91 @@ public:
           return exp(-0.5 * d * d);
       }
 
-      void getOpticalDepth(vec3 p, vec3 lightDir, out float dR, out float dM, out float dO) {
-          dR = 0.0; dM = 0.0; dO = 0.0;
+      // --- NOISE & CLOUDS ---
+      float hash(vec3 p) {
+        p = fract(p * vec3(443.897, 441.423, 437.195));
+        p += dot(p, p.yzx + 19.19);
+        return fract((p.x + p.y) * p.z);
+      }
+      float noise3d(vec3 p) {
+        vec3 i = floor(p); vec3 f = fract(p);
+        f = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+        float n000 = hash(i); float n100 = hash(i + vec3(1,0,0));
+        float n010 = hash(i + vec3(0,1,0)); float n110 = hash(i + vec3(1,1,0));
+        float n001 = hash(i + vec3(0,0,1)); float n101 = hash(i + vec3(1,0,1));
+        float n011 = hash(i + vec3(0,1,1)); float n111 = hash(i + vec3(1,1,1));
+        float nx00 = mix(n000, n100, f.x); float nx10 = mix(n010, n110, f.x);
+        float nx01 = mix(n001, n101, f.x); float nx11 = mix(n011, n111, f.x);
+        float nxy0 = mix(nx00, nx10, f.y); float nxy1 = mix(nx01, nx11, f.y);
+        return mix(nxy0, nxy1, f.z);
+      }
+      float fbm(vec3 p, int octaves) {
+        float v = 0.0, amp = 0.5;
+        for (int i = 0; i < octaves; i++) {
+          v += noise3d(p) * amp;
+          p = p * 2.07 + vec3(0.131, -0.217, 0.344);
+          amp *= 0.48;
+        }
+        return v;
+      }
+      
+      float cloudDensity(vec3 p, float h) {
+          if (h < CLOUD_MIN_ALT || h > CLOUD_MAX_ALT) return 0.0;
+          
+          vec3 sph = normalize(p - uPlanetCenter);
+          float t = uTime * 0.015;
+          float density = 0.0;
+          
+          // Layer 1: Low-altitude Cumulus/Stratus (Dense, massive blobs)
+          if (h >= 3.0 && h <= 7.0) {
+              float altNorm = (h - 3.0) / 4.0;
+              float altShape = 4.0 * altNorm * (1.0 - altNorm);
+              // Uniform wind rotation around Z-axis (poles)
+              float angle1 = t * -0.5; // Slow, steady drift
+              float s1 = sin(angle1); float c1 = cos(angle1);
+              vec3 windSph1 = vec3(sph.x * c1 - sph.y * s1, sph.x * s1 + sph.y * c1, sph.z);
+              vec3 tc = windSph1 * 4.5;
+              float warp = fbm(tc * 0.8, 2);
+              float n = fbm(tc + vec3(warp * 1.5) + vec3(t * 0.05), 3); // Very subtle internal morphing
+              // Thick clouds: low cut-off threshold
+              float mask = smoothstep(0.35 + altNorm * 0.15, 0.65, n) * altShape;
+              density = max(density, mask * 1.0); // Full density
+          }
+          
+          // Layer 2: High-altitude Cirrus/Anvils (Thin, sweeping streaks)
+          if (h >= 8.0 && h <= 14.0) {
+              float altNorm = (h - 8.0) / 6.0;
+              // Flatter top shape for anvils
+              float altShape = 1.0 - pow(abs(altNorm * 2.0 - 1.0), 2.0);
+              // Slightly faster uniform wind for cirrus (Z-axis)
+              float angle2 = t * -1.2;
+              float s2 = sin(angle2); float c2 = cos(angle2);
+              vec3 windSph2 = vec3(sph.x * c2 - sph.y * s2, sph.x * s2 + sph.y * c2, sph.z);
+              vec3 tc = windSph2 * 12.0;
+              float warp = fbm(tc * 1.2, 2);
+              float n = fbm(tc + vec3(warp * 2.5) + vec3(t * 0.1), 4);
+              // Thin clouds: tighter threshold, less solid mass
+              float mask = smoothstep(0.55 + altNorm * 0.1, 0.70, n) * altShape;
+              density = max(density, mask * 0.4); // Thinner density
+          }
+          
+          return density;
+      }
+      
+      float cloudPhase(float cosTheta) {
+          float g = 0.8; float g2 = g * g;
+          float num = 0.25 / PI * (1.0 - g2);
+          float denom = pow(1.0 + g2 - 2.0 * g * cosTheta, 1.5);
+          return num / max(denom, 1e-6);
+      }
+
+      void getOpticalDepth(vec3 p, vec3 lightDir, out float dR, out float dM, out float dO, out float dC) {
+          dR = 0.0; dM = 0.0; dO = 0.0; dC = 0.0;
 
           // Ground shadow check: if light ray hits planet surface, full occlusion
           float tS0, tS1;
           if (intersectSphere(p, lightDir, uInnerRadius, tS0, tS1) && tS0 > 0.0) {
-              dR = 1e6; dM = 1e6; dO = 1e6;
+              dR = 1e6; dM = 1e6; dO = 1e6; dC = 1e6;
               return;
           }
 
@@ -1738,10 +1801,11 @@ public:
           for (int i = 0; i < LIGHT_STEPS; i++) {
               vec3 pos = p + lightDir * (start + (float(i) + 0.5) * stepSize);
               float h = length(pos - uPlanetCenter) - uInnerRadius;
-              if (h < 0.0) { dR = 1e6; dM = 1e6; dO = 1e6; return; }
+              if (h < 0.0) { dR = 1e6; dM = 1e6; dO = 1e6; dC = 1e6; return; }
               dR += exp(-h / H_RAYLEIGH) * stepSize;
               dM += exp(-h / H_MIE) * stepSize;
               dO += ozoneDensity(h) * stepSize;
+              dC += cloudDensity(pos, h) * stepSize;
           }
       }
 
@@ -1773,9 +1837,11 @@ public:
           
           vec3 sumRayleigh = vec3(0.0);
           vec3 sumMie = vec3(0.0);
+          vec3 sumCloud = vec3(0.0);
           float optDepthR = 0.0;
           float optDepthM = 0.0;
           float optDepthO = 0.0;
+          float optDepthC = 0.0;
           float cosTheta = dot(rayDir, uLightDir);
           
           for (int i = 0; i < PRIMARY_STEPS; i++) {
@@ -1785,31 +1851,43 @@ public:
               float dR = exp(-h / H_RAYLEIGH) * stepSize;
               float dM = exp(-h / H_MIE) * stepSize;
               float dO = ozoneDensity(h) * stepSize;
+              float dC = cloudDensity(pos, h) * stepSize;
               optDepthR += dR;
               optDepthM += dM;
               optDepthO += dO;
+              optDepthC += dC;
               
               // Light ray optical depth to sun
-              float lightR, lightM, lightO;
-              getOpticalDepth(pos, uLightDir, lightR, lightM, lightO);
+              float lightR, lightM, lightO, lightC;
+              getOpticalDepth(pos, uLightDir, lightR, lightM, lightO, lightC);
               
-              // Total extinction including ozone absorption
+              // Total extinction including ozone absorption and clouds
               vec3 tau = RAYLEIGH_COEFF * (optDepthR + lightR) 
                        + MIE_COEFF * 1.1 * (optDepthM + lightM)
-                       + OZONE_COEFF * (optDepthO + lightO);
+                       + OZONE_COEFF * (optDepthO + lightO)
+                       + CLOUD_EXTINCTION * (optDepthC + lightC);
               vec3 attenuation = exp(-tau);
               
               sumRayleigh += dR * attenuation;
               sumMie += dM * attenuation;
+              sumCloud += dC * attenuation;
           }
           
           // Phase functions
           float phaseR = rayleighPhase(cosTheta);
           float phaseM = miePhase(cosTheta);
+          float phaseC = cloudPhase(cosTheta);
+          
+          // Ambient multi-scattering for clouds (prevents black clouds on day side)
+          // Uses a broader, softer phase approximation and less attenuation
+          float ambientPhaseC = 0.5; // Isotropic-ish
+          vec3 ambientCloud = sumCloud * CLOUD_SCATTERING * ambientPhaseC * 0.4; // 40% ambient boost
           
           // Inscattering color
           vec3 color = sumRayleigh * RAYLEIGH_COEFF * phaseR + 
-                       sumMie * MIE_COEFF * phaseM;
+                       sumMie * MIE_COEFF * phaseM + 
+                       sumCloud * CLOUD_SCATTERING * phaseC +
+                       ambientCloud;
           
           // === Altitude-adaptive exposure ===
           // Earth-like exposure values for a natural look
@@ -1827,7 +1905,7 @@ public:
           color *= exposure;
           
           // === Physical transmittance-based opacity ===
-          vec3 tau_view = RAYLEIGH_COEFF * optDepthR + MIE_COEFF * optDepthM + OZONE_COEFF * optDepthO;
+          vec3 tau_view = RAYLEIGH_COEFF * optDepthR + MIE_COEFF * optDepthM + OZONE_COEFF * optDepthO + CLOUD_EXTINCTION * optDepthC;
           vec3 viewTransmittance = exp(-tau_view);
           float transLuma = dot(viewTransmittance, vec3(0.299, 0.587, 0.114));
           float opacity = clamp(1.0 - transLuma, 0.0, 1.0);
@@ -2368,7 +2446,7 @@ public:
   // 大气层散射壳 (Volumetric Scattering)
   void drawAtmosphere(const Mesh& sphereMesh, const Mat4& model, 
                       const Vec3& camPos, const Vec3& lightDir, 
-                      const Vec3& planetCenter, float innerRadius, float outerRadius) {
+                      const Vec3& planetCenter, float innerRadius, float outerRadius, float time) {
     glUseProgram(atmoProg);
 
     Mat4 mvp = proj * view * model;
@@ -2379,6 +2457,7 @@ public:
     GLint u_planetCenter = glGetUniformLocation(atmoProg, "uPlanetCenter");
     GLint u_innerRadius = glGetUniformLocation(atmoProg, "uInnerRadius");
     GLint u_outerRadius = glGetUniformLocation(atmoProg, "uOuterRadius");
+    GLint u_time = glGetUniformLocation(atmoProg, "uTime");
 
     glUniformMatrix4fv(u_atmo_mvp, 1, GL_FALSE, mvp.m);
     glUniformMatrix4fv(u_atmo_model, 1, GL_FALSE, model.m);
@@ -2387,6 +2466,7 @@ public:
     glUniform3f(u_planetCenter, planetCenter.x, planetCenter.y, planetCenter.z);
     glUniform1f(u_innerRadius, innerRadius);
     glUniform1f(u_outerRadius, outerRadius);
+    glUniform1f(u_time, time);
 
     // --- Graphics State for Volumetric Shell ---
     // Depth test OFF: raymarching handles planet occlusion mathematically.
