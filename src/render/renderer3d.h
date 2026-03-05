@@ -1785,6 +1785,9 @@ public:
       // Produces much more uniform spatial distribution than white noise,
       // reducing visible clumping artifacts dramatically.
       uniform int uFrameIndex; // Animated frame counter for temporal variation
+      uniform float uCloudTime;
+      uniform float uCloudPhaseSin;
+      uniform float uCloudPhaseCos;
       float screenHash(vec2 uv) {
           // IGN base: very uniform spatial distribution
           float ign = fract(52.9829189 * fract(dot(uv, vec2(0.06711056, 0.00583715))));
@@ -1831,7 +1834,7 @@ public:
           if (h < gCloudMinAlt || h > gCloudMaxAlt) return 0.0;
           
           vec3 sph = normalize(p - uPlanetCenter);
-          float t = uTime * 0.004; // Much slower base time for planetary scale
+          float t = uCloudTime * 0.004; // Wrapped time for noise
           float density = 0.0;
           
           if (uPlanetIdx == 3) {
@@ -1840,14 +1843,17 @@ public:
               if (h >= gCloudMinAlt && h <= 7.0) {
                   float altNorm = (h - gCloudMinAlt) / (7.0 - gCloudMinAlt);
                   float altShape = 4.0 * altNorm * (1.0 - altNorm);
-                  // Uniform wind rotation around Z-axis (poles)
-                  float angle1 = t * -0.2; // Slower drift
-                  // Coriolis Warping: Wind shear based on latitude
-                  // Use cubic ease so equator stays calm, twist rises toward poles
-                  float latWarp = sph.z * sph.z * sph.z * 0.8; // Z is the polar axis
-                  float s1 = sin(angle1 + latWarp); 
-                  float c1 = cos(angle1 + latWarp);
-                  vec3 windSph1 = vec3(sph.x * c1 - sph.y * s1, sph.x * s1 + sph.y * c1, sph.z); // Rotate around Z axis
+
+                  // Industrial Grade: Phase Separation for rotation
+                  // Replace sin(t*speed + warp) with sin(A + B) = sinA*cosB + cosA*sinB
+                  // uCloudPhaseSin/Cos represent the temporal rotation component
+                  float latWarp = sph.z * sph.z * sph.z * 0.8;
+                  float sB = sin(latWarp);
+                  float cB = cos(latWarp);
+                  float s1 = uCloudPhaseSin * cB + uCloudPhaseCos * sB;
+                  float c1 = uCloudPhaseCos * cB - uCloudPhaseSin * sB;
+                  
+                  vec3 windSph1 = vec3(sph.x * c1 - sph.y * s1, sph.x * s1 + sph.y * c1, sph.z);
                   
                   // ====== CYCLONE ATTRACTOR (Hurricane) ======
                   float cycAngle = t * -0.1; // Slower cyclone movement
@@ -2841,7 +2847,7 @@ R"(
   // 大气层散射壳 (Volumetric Scattering)
   void drawAtmosphere(const Mesh& sphereMesh, const Mat4& model, 
                       const Vec3& camPos, const Vec3& lightDir, 
-                      const Vec3& planetCenter, float surfaceRadius, float outerRadius, float time, int planetIdx) {
+                      const Vec3& planetCenter, float surfaceRadius, float outerRadius, double time, int planetIdx) {
     glUseProgram(atmoProg);
 
     Mat4 mvp = proj * view * model;
@@ -2868,8 +2874,24 @@ R"(
     glUniform1f(u_innerRadius, innerRadius);
     glUniform1f(u_outerRadius, outerRadius);
     glUniform1f(u_surfaceRadius, surfaceRadius);
-    glUniform1f(u_time, time);
+    glUniform1f(u_time, (float)time);
     glUniform1i(u_planetIdx, planetIdx);
+
+    // Industrial Grade: Phase Separation & Time Wrapping
+    GLint u_cloudTime = glGetUniformLocation(atmoProg, "uCloudTime");
+    GLint u_cloudPhaseSin = glGetUniformLocation(atmoProg, "uCloudPhaseSin");
+    GLint u_cloudPhaseCos = glGetUniformLocation(atmoProg, "uCloudPhaseCos");
+
+    // Wrap time for noise (reset every 10,000s) to keep float precision high
+    float wrappedTime = (float)fmod(time, 10000.0);
+    glUniform1f(u_cloudTime, wrappedTime);
+
+    // Precompute global phase for clouds on CPU using double precision
+    // Speed matches shader logic (t * -0.2 * 0.004)
+    double phase = time * 0.004 * -0.2;
+    glUniform1f(u_cloudPhaseSin, (float)sin(phase));
+    glUniform1f(u_cloudPhaseCos, (float)cos(phase));
+
     // Pass frame index for animated noise (TAA jitter)
     GLint u_frameIdx = glGetUniformLocation(atmoProg, "uFrameIndex");
     glUniform1i(u_frameIdx, taaFrameIndex);
