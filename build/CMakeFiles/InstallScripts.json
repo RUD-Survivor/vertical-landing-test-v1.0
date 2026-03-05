@@ -1,9 +1,0 @@
-{
-	"InstallScripts" : 
-	[
-		"C:/antigravity_code/RocketSim3D/build/cmake_install.cmake",
-		"C:/antigravity_code/RocketSim3D/build/_deps/glfw-build/cmake_install.cmake",
-		"C:/antigravity_code/RocketSim3D/build/_deps/glfw-build/src/cmake_install.cmake"
-	],
-	"Parallel" : false
-}
