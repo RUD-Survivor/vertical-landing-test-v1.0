@@ -234,6 +234,7 @@ int main() {
       // 新游戏初始化
       rocket_state.fuel = builder_state.assembly.total_fuel;
       rocket_state.status = PRE_LAUNCH;
+      rocket_state.mission_msg = "READY ON PAD - PRESS SPACE TO LAUNCH";
   }
 
   // Keep a reference to the assembly for rendering
@@ -293,7 +294,7 @@ int main() {
     if (space_now && !space_was_pressed) {
       if (rocket_state.status == PRE_LAUNCH) {
           rocket_state.status = ASCEND;
-          rocket_state.mission_msg = ">> LIFTOFF! ENGINES IGNITED.";
+          rocket_state.mission_msg = "T-0: IGNITION! LIFTOFF!";
       }
     }
     space_was_pressed = space_now;

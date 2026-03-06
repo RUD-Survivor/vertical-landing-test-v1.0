@@ -616,9 +616,18 @@ void Update(RocketState& state, const RocketConfig& config, const ControlInput& 
             Fgz += GM * (rdz / r_rocket3 - dz_body / dist_body3) * total_mass;
         }
         
-        // Air Drag
+        // Air Drag (Atmosphere rotates with the planet)
         double Fdx = 0, Fdy = 0, Fdz = 0;
-        double temp_v_sq = temp_vx * temp_vx + temp_vy * temp_vy + temp_vz * temp_vz;
+        double omega = (2.0 * PI) / current_body.rotation_period;
+        double v_atmo_x = -omega * temp_py;
+        double v_atmo_y = omega * temp_px;
+        double v_atmo_z = 0;
+        
+        double rel_vx = temp_vx - v_atmo_x;
+        double rel_vy = temp_vy - v_atmo_y;
+        double rel_vz = temp_vz - v_atmo_z;
+        
+        double temp_v_sq = rel_vx * rel_vx + rel_vy * rel_vy + rel_vz * rel_vz;
         double temp_v_mag = std::sqrt(temp_v_sq);
         double alt = r_inner - current_body.radius;
         if (temp_v_mag > 0.1 && alt < 80000) {
@@ -627,9 +636,9 @@ void Update(RocketState& state, const RocketConfig& config, const ControlInput& 
             double side_area = config.height * config.diameter;
             double effective_area = base_area + side_area * std::abs(std::sin(state.angle_z));
             double drag_mag = 0.5 * rho * temp_v_sq * 0.5 * effective_area;
-            Fdx = -drag_mag * (temp_vx / temp_v_mag);
-            Fdy = -drag_mag * (temp_vy / temp_v_mag);
-            Fdz = -drag_mag * (temp_vz / temp_v_mag);
+            Fdx = -drag_mag * (rel_vx / temp_v_mag);
+            Fdy = -drag_mag * (rel_vy / temp_v_mag);
+            Fdz = -drag_mag * (rel_vz / temp_v_mag);
         }
         
         out_ax = (Fgx + Ft_x + Fdx) / total_mass;
