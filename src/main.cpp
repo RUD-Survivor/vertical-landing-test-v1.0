@@ -468,15 +468,16 @@ int main() {
     if (time_warp > 1000) {
         // 超级时间加速！
         if (is_parked) {
-            // 确保坐标在加速前已同步到表面且速度归零
+            // 确保状态正确并强制静止，不再重新计算 surf_px/py/pz 以免误差累加
             if (rocket_state.status != PRE_LAUNCH && rocket_state.status != LANDED) {
                 rocket_state.status = LANDED;
+                // 仅在首次切换到 LANDED 时捕捉地面坐标
+                CelestialBody& cur_b = SOLAR_SYSTEM[current_soi_index];
+                double theta = cur_b.prime_meridian_epoch + (rocket_state.sim_time * 2.0 * PI / cur_b.rotation_period);
+                rocket_state.surf_px = rocket_state.px * std::cos(-theta) - rocket_state.py * std::sin(-theta);
+                rocket_state.surf_py = rocket_state.px * std::sin(-theta) + rocket_state.py * std::cos(-theta);
+                rocket_state.surf_pz = rocket_state.pz;
             }
-            CelestialBody& cur_b = SOLAR_SYSTEM[current_soi_index];
-            double theta = cur_b.prime_meridian_epoch + (rocket_state.sim_time * 2.0 * PI / cur_b.rotation_period);
-            rocket_state.surf_px = rocket_state.px * std::cos(-theta) - rocket_state.py * std::sin(-theta);
-            rocket_state.surf_py = rocket_state.px * std::sin(-theta) + rocket_state.py * std::cos(-theta);
-            rocket_state.surf_pz = rocket_state.pz;
             
             rocket_state.vx = 0; rocket_state.vy = 0; rocket_state.vz = 0;
             rocket_state.velocity = 0; rocket_state.local_vx = 0;
