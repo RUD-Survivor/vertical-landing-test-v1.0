@@ -66,6 +66,7 @@ bool SaveGame(const RocketAssembly& assembly, const RocketState& state,
     file << state.fuel << "\n";
     file << state.px << " " << state.py << " " << state.pz << "\n";
     file << state.vx << " " << state.vy << " " << state.vz << "\n";
+    file << state.surf_px << " " << state.surf_py << " " << state.surf_pz << "\n";
     file << state.abs_px << " " << state.abs_py << " " << state.abs_pz << "\n";
     file << state.angle << " " << state.ang_vel << "\n";
     file << state.angle_z << " " << state.ang_vel_z << "\n";
@@ -135,6 +136,7 @@ bool LoadGame(RocketAssembly& assembly, RocketState& state,
         file >> state.fuel;
         file >> state.px >> state.py >> state.pz;
         file >> state.vx >> state.vy >> state.vz;
+        file >> state.surf_px >> state.surf_py >> state.surf_pz;
         file >> state.abs_px >> state.abs_py >> state.abs_pz;
         file >> state.angle >> state.ang_vel;
         file >> state.angle_z >> state.ang_vel_z;

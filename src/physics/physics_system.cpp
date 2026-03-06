@@ -431,29 +431,32 @@ void Update(RocketState& state, const RocketConfig& config, const ControlInput& 
     CelestialBody& current_body_launch = SOLAR_SYSTEM[current_soi_index];
 
     if (state.status == PRE_LAUNCH) {
-        // Calculate current rotation angle
-        double theta = current_body_launch.prime_meridian_epoch + (state.sim_time * 2.0 * PI / current_body_launch.rotation_period);
-        double cos_t = std::cos(theta);
-        double sin_t = std::sin(theta);
-
-        // Rotate surface coordinates (body-fixed) to inertial coordinates
-        // Assuming rotation around Z axis (XY plane is equatorial)
-        state.px = state.surf_px * cos_t - state.surf_py * sin_t;
-        state.py = state.surf_px * sin_t + state.surf_py * cos_t;
-        state.pz = state.surf_pz;
-        
-        // Velocity includes tangential velocity from rotation
-        double omega = (2.0 * PI) / current_body_launch.rotation_period;
-        state.vx = -omega * state.py;
-        state.vy = omega * state.px;
-        state.vz = 0;
-        
-        state.altitude = 0;
-        CheckSOI_Transitions(state);
-        return;
+        if (input.throttle > 0.01) {
+             state.status = ASCEND;
+             state.mission_msg = "LIFTOFF!";
+        } else {
+            // Calculate current rotation angle
+            double theta = current_body_launch.prime_meridian_epoch + (state.sim_time * 2.0 * PI / current_body_launch.rotation_period);
+            double cos_t = std::cos(theta);
+            double sin_t = std::sin(theta);
+            state.px = state.surf_px * cos_t - state.surf_py * sin_t;
+            state.py = state.surf_px * sin_t + state.surf_py * cos_t;
+            state.pz = state.surf_pz;
+            double omega = (2.0 * PI) / current_body_launch.rotation_period;
+            state.vx = -omega * state.py;
+            state.vy = omega * state.px;
+            state.vz = 0;
+            state.altitude = 0;
+            state.velocity = 0; state.local_vx = 0;
+            CheckSOI_Transitions(state);
+            return;
+        }
     }
-    if (state.status == LANDED || state.status == CRASHED) {
-        if (state.status == LANDED) {
+    if (state.status == LANDED) {
+        if (input.throttle > 0.01) {
+            state.status = ASCEND;
+            state.mission_msg = "TOUCHDOWN TO LIFTOFF!";
+        } else {
             CelestialBody& near_body = SOLAR_SYSTEM[current_soi_index];
             double theta = near_body.prime_meridian_epoch + (state.sim_time * 2.0 * PI / near_body.rotation_period);
             double cos_t = std::cos(theta);
@@ -466,7 +469,12 @@ void Update(RocketState& state, const RocketConfig& config, const ControlInput& 
             state.vy = omega * state.px;
             state.vz = 0;
             state.altitude = 0;
+            state.velocity = 0; state.local_vx = 0;
+            CheckSOI_Transitions(state);
+            return;
         }
+    }
+    if (state.status == CRASHED) {
         CheckSOI_Transitions(state);
         return;
     }
@@ -724,9 +732,13 @@ void Update(RocketState& state, const RocketConfig& config, const ControlInput& 
                     state.surf_py = state.px * std::sin(-theta) + state.py * std::cos(-theta);
                     state.surf_pz = state.pz;
                 }
-                state.vx = 0; state.vy = 0;
+                double omega = (2.0 * PI) / current_body.rotation_period;
+                state.vx = -omega * state.py;
+                state.vy = omega * state.px;
+                state.vz = 0;
                 state.ang_vel = 0; state.ang_vel_z = 0;
                 state.angle = 0; state.angle_z = 0;
+                state.velocity = 0; state.local_vx = 0;
                 state.suicide_burn_locked = false; 
             }
         } else {

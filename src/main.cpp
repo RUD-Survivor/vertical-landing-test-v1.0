@@ -292,7 +292,7 @@ int main() {
   std::vector<TrajPoint> traj_history; // 记录火箭历史飞行的 3D 轨迹点
 
   int frame = 0;
-  while ((rocket_state.status == PRE_LAUNCH || rocket_state.status == ASCEND || rocket_state.status == DESCEND) && !glfwWindowShouldClose(window)) {
+  while (!glfwWindowShouldClose(window)) {
     frame++;
     glfwPollEvents();
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
