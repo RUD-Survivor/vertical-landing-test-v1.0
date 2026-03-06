@@ -288,9 +288,15 @@ int main() {
     glfwPollEvents();
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
       glfwSetWindowShouldClose(window, true);
-    if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) {
-      if (rocket_state.status == PRE_LAUNCH) rocket_state.status = ASCEND;
+    static bool space_was_pressed = true; // Start true to ignore the Builder's enter/space
+    bool space_now = glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS;
+    if (space_now && !space_was_pressed) {
+      if (rocket_state.status == PRE_LAUNCH) {
+          rocket_state.status = ASCEND;
+          rocket_state.mission_msg = ">> LIFTOFF! ENGINES IGNITED.";
+      }
     }
+    space_was_pressed = space_now;
 
     // --- C 键切换 3D 视角 ---
     bool c_now = glfwGetKey(window, GLFW_KEY_C) == GLFW_PRESS;
@@ -1206,36 +1212,58 @@ int main() {
       // ===== 发射台渲染 (Launch Pad Generation / Rendering) =====
       if (rocket_state.altitude < 2000.0 && current_soi_index == 3) {
           CelestialBody& earth = SOLAR_SYSTEM[3];
-          // Launch pad is fixed at inertial (0, R, 0) relative to Earth center
-          Vec3 padCenter(
-              (float)(earth.px * ws_d - ro_x), 
-              (float)((earth.py + earth.radius) * ws_d - ro_y), 
-              (float)(earth.pz * ws_d - ro_z)
-          );
-          Vec3 padUp(0.0f, 1.0f, 0.0f);
-          Vec3 padRight(1.0f, 0.0f, 0.0f);
           
+          // Launch pad should rotate with the Earth
+          double theta = earth.prime_meridian_epoch + (rocket_state.sim_time * 2.0 * PI / earth.rotation_period);
+          double cos_t = std::cos(theta);
+          double sin_t = std::sin(theta);
+          
+          // Original surface position (0, R, 0)
+          double s_px = 0, s_py = earth.radius, s_pz = 0;
+          // Rotate to inertial
+          double i_px = s_px * cos_t - s_py * sin_t;
+          double i_py = s_px * sin_t + s_py * cos_t;
+          double i_pz = s_pz;
+
+          Vec3 padCenter(
+              (float)((earth.px + i_px) * ws_d - ro_x), 
+              (float)((earth.py + i_py) * ws_d - ro_y), 
+              (float)((earth.pz + i_pz) * ws_d - ro_z)
+          );
+          
+          // Calculate local up vector at pad
+          Vec3 padUp((float)(i_px / earth.radius), (float)(i_py / earth.radius), (float)(i_pz / earth.radius));
+          // Calculate a local right/forward to orient the pad (perpendicular to padUp in plane)
+          Vec3 padRight( (float)-cos_t, (float)-sin_t, 0.0f );
+          Vec3 padForward = padUp.cross(padRight);
+          
+          // Construct rotation matrix for the pad to face "up"
+          Mat4 padRot;
+          padRot.m[0] = padRight.x; padRot.m[1] = padRight.y; padRot.m[2] = padRight.z; padRot.m[3] = 0;
+          padRot.m[4] = padUp.x;    padRot.m[5] = padUp.y;    padRot.m[6] = padUp.z;    padRot.m[7] = 0;
+          padRot.m[8] = padForward.x; padRot.m[9] = padForward.y; padRot.m[10] = padForward.z; padRot.m[11] = 0;
+          padRot.m[12] = 0;         padRot.m[13] = 0;         padRot.m[14] = 0;         padRot.m[15] = 1;
+
           if (has_launch_pad) {
-              // 有自定义OBJ模型：缩放并放置于发射位
-              float pad_scale = earth_r * 0.005f; // 根据模型本身缩放调整
+              float pad_scale = earth_r * 0.005f;
               Mat4 padModel = Mat4::scale(Vec3(pad_scale, pad_scale, pad_scale));
+              padModel = padRot * padModel; // Orient pad
               padModel = Mat4::translate(padCenter) * padModel;
               r3d->drawMesh(launchPadMesh, padModel, 0.4f, 0.4f, 0.42f, 1.0f, 0.2f);
           } else {
-              // 备用发射台
-              float pad_w = rw_3d * 20.0f; // 发射台底座宽度 (火箭宽度的20倍)
-              float pad_h = rh * 0.2f;    // 发射台底座高度
+              float pad_w = rw_3d * 20.0f;
+              float pad_h = rh * 0.2f;
               
-              // 基座 (灰色混凝土)
               Mat4 baseMdl = Mat4::scale(Vec3(pad_w, pad_h, pad_w));
+              baseMdl = padRot * baseMdl;
               baseMdl = Mat4::translate(padCenter - padUp * (pad_h * 0.5f)) * baseMdl;
               r3d->drawMesh(rocketBox, baseMdl, 0.4f, 0.4f, 0.4f, 1.0f, 0.1f);
               
-              // 简易红色脐带塔架 (站在基座旁边)
-              float tower_h = rh * 1.5f;   // 塔架比火箭高50%
-              float tower_w = rw_3d * 3.0f; // 塔架宽度
+              float tower_h = rh * 1.5f;
+              float tower_w = rw_3d * 3.0f;
               Vec3 towerCenter = padCenter + padRight * (rw_3d * 4.0f) + padUp * (tower_h * 0.5f - pad_h * 0.5f);
               Mat4 towerMdl = Mat4::scale(Vec3(tower_w, tower_h, tower_w));
+              towerMdl = padRot * towerMdl;
               towerMdl = Mat4::translate(towerCenter) * towerMdl;
               r3d->drawMesh(rocketBox, towerMdl, 0.7f, 0.15f, 0.15f, 1.0f, 0.3f);
           }
@@ -1247,9 +1275,11 @@ int main() {
         // 大气压力膨胀系数: 高空膨胀 (Expansion) = 1.0 - Density_Ratio
         float expansion = (float)fmax(0.0, 1.0 - PhysicsSystem::get_air_density(rocket_state.altitude) / 1.225);
         
-        // 尾焰尺寸：由于增加了末端渐变 (Tapering)，稍微增加代理长度以保持视觉平衡
-        float plume_len = rh * 3.8f * (0.5f + thrust * 0.5f) * (1.0f + expansion * 1.0f);
-        float plume_dia = rw_3d * 6.5f * (1.1f + expansion * 4.0f);
+        // 尾焰尺寸：提高节流阀敏感度，增加动态比例变化
+        // 非线性映射让长度随推力更剧烈地改变 (0.1 推力时只有初始长度的 25%)
+        float thrust_scale = 0.25f + 0.75f * powf(thrust, 1.5f);
+        float plume_len = rh * 4.2f * thrust_scale * (1.0f + expansion * 1.0f);
+        float plume_dia = rw_3d * 6.5f * (1.1f + expansion * 4.2f);
         
         // 尾焰渲染锚点：从发动机喷口向后延伸
         Vec3 plumePos = engNozzlePos - rocketDir * (plume_len * 0.5f);

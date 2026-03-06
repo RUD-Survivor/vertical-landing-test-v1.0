@@ -422,24 +422,54 @@ void getOrbitParams(const RocketState& state, double& apoapsis, double& periapsi
 
 void Update(RocketState& state, const RocketConfig& config, const ControlInput& input, double dt) {
     if (SOLAR_SYSTEM.empty()) return;
+    
+    state.sim_time += dt;
+    
+    // Ensure celestial bodies are at the correct positions for this sim time
+    UpdateCelestialBodies(state.sim_time);
+    
     CelestialBody& current_body_launch = SOLAR_SYSTEM[current_soi_index];
 
     if (state.status == PRE_LAUNCH) {
-        state.px = 0;
-        state.py = current_body_launch.radius;
-        state.pz = 0;
+        // Calculate current rotation angle
+        double theta = current_body_launch.prime_meridian_epoch + (state.sim_time * 2.0 * PI / current_body_launch.rotation_period);
+        double cos_t = std::cos(theta);
+        double sin_t = std::sin(theta);
+
+        // Rotate surface coordinates (body-fixed) to inertial coordinates
+        // Assuming rotation around Z axis (XY plane is equatorial)
+        state.px = state.surf_px * cos_t - state.surf_py * sin_t;
+        state.py = state.surf_px * sin_t + state.surf_py * cos_t;
+        state.pz = state.surf_pz;
         
-        // Planet rotates around local Z axis (Equator = XY plane)
+        // Velocity includes tangential velocity from rotation
         double omega = (2.0 * PI) / current_body_launch.rotation_period;
-        state.vx = -omega * current_body_launch.radius;
-        state.vy = 0;
+        state.vx = -omega * state.py;
+        state.vy = omega * state.px;
         state.vz = 0;
         
         state.altitude = 0;
+        CheckSOI_Transitions(state);
         return;
     }
-    if (state.status == LANDED || state.status == CRASHED)
+    if (state.status == LANDED || state.status == CRASHED) {
+        if (state.status == LANDED) {
+            CelestialBody& near_body = SOLAR_SYSTEM[current_soi_index];
+            double theta = near_body.prime_meridian_epoch + (state.sim_time * 2.0 * PI / near_body.rotation_period);
+            double cos_t = std::cos(theta);
+            double sin_t = std::sin(theta);
+            state.px = state.surf_px * cos_t - state.surf_py * sin_t;
+            state.py = state.surf_px * sin_t + state.surf_py * cos_t;
+            state.pz = state.surf_pz;
+            double omega = (2.0 * PI) / near_body.rotation_period;
+            state.vx = -omega * state.py;
+            state.vy = omega * state.px;
+            state.vz = 0;
+            state.altitude = 0;
+        }
+        CheckSOI_Transitions(state);
         return;
+    }
 
     // A. Base State Calculation
     CelestialBody& current_body = SOLAR_SYSTEM[current_soi_index];
@@ -457,7 +487,6 @@ void Update(RocketState& state, const RocketConfig& config, const ControlInput& 
     double total_mass = config.dry_mass + state.fuel;
 
     // We will do Gravity inside calc_accel directly now
-    state.sim_time += dt;
 
     // 2. Thrust
     state.thrust_power = 0;
@@ -645,7 +674,12 @@ void Update(RocketState& state, const RocketConfig& config, const ControlInput& 
 
     // Derived velocities
     state.velocity = state.vx * std::cos(local_up_angle) + state.vy * std::sin(local_up_angle);
-    state.local_vx = -state.vx * std::sin(local_up_angle) + state.vy * std::cos(local_up_angle);
+    double tangential_vel = -state.vx * std::sin(local_up_angle) + state.vy * std::cos(local_up_angle);
+    
+    // Make ground horizontal velocity relative to the rotating surface
+    double omega = (2.0 * PI) / current_body.rotation_period;
+    double surface_rotation_speed = omega * std::sqrt(state.px * state.px + state.py * state.py);
+    state.local_vx = tangential_vel - surface_rotation_speed;
 
     // E. Collision Detection
     double current_r = std::sqrt(state.px * state.px + state.py * state.py + state.pz * state.pz);
@@ -653,18 +687,31 @@ void Update(RocketState& state, const RocketConfig& config, const ControlInput& 
 
     if (current_alt <= 0.0) {
         if (state.status == ASCEND) {
-            state.px = 0; state.py = current_body.radius;
-            state.vx = 0; state.vy = 0;
+            // Keep surface lock until thrust overcomes weight
+            double theta = current_body.prime_meridian_epoch + (state.sim_time * 2.0 * PI / current_body.rotation_period);
+            double cos_t = std::cos(theta);
+            double sin_t = std::sin(theta);
+            state.px = state.surf_px * cos_t - state.surf_py * sin_t;
+            state.py = state.surf_px * sin_t + state.surf_py * cos_t;
+            state.pz = state.surf_pz;
+            double omega = (2.0 * PI) / current_body.rotation_period;
+            state.vx = -omega * state.py;
+            state.vy = omega * state.px;
+            state.vz = 0;
             state.altitude = 0;
         } else if (state.velocity < 0.1) {
             state.altitude = 0;
-            state.px = 0; state.py = current_body.radius;
-
-            if (state.status != PRE_LAUNCH) {
+            
+            if (state.status != PRE_LAUNCH && state.status != LANDED) {
                 if (std::abs(state.velocity) > 10 || std::abs(state.local_vx) > 10) {
                     state.status = CRASHED;
                 } else {
                     state.status = LANDED;
+                    // Capture body-fixed coordinates
+                    double theta = current_body.prime_meridian_epoch + (state.sim_time * 2.0 * PI / current_body.rotation_period);
+                    state.surf_px = state.px * std::cos(-theta) - state.py * std::sin(-theta);
+                    state.surf_py = state.px * std::sin(-theta) + state.py * std::cos(-theta);
+                    state.surf_pz = state.pz;
                 }
                 state.vx = 0; state.vy = 0;
                 state.ang_vel = 0; state.ang_vel_z = 0;

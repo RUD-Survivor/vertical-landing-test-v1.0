@@ -144,6 +144,9 @@ struct RocketState {
     // Absolute Heliocentric Position (used for continuous global tracking and Eclipse checks)
     double abs_px = 0.0, abs_py = 0.0, abs_pz = 0.0;
     
+    // Body-fixed surface coordinates (relative to planet center, rotated frame)
+    double surf_px = 0.0, surf_py = EARTH_RADIUS, surf_pz = 0.0;
+    
     // Attitude
     double angle = 0.0;      // Yaw (in 2D plane)
     double ang_vel = 0.0;
