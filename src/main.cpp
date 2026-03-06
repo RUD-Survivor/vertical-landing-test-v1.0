@@ -1247,11 +1247,12 @@ int main() {
         // 大气压力膨胀系数: 高空膨胀 (Expansion) = 1.0 - Density_Ratio
         float expansion = (float)fmax(0.0, 1.0 - PhysicsSystem::get_air_density(rocket_state.altitude) / 1.225);
         
-        // 尾焰尺寸：Box 代理需要包含整个膨胀区域
-        float plume_len = rh * 6.0f * (0.4f + thrust * 0.6f);
-        float plume_dia = rw_3d * 4.0f * (1.0f + expansion * 3.5f);
+        // 尾焰尺寸：优化比例，避免“激光针”感
+        // 海平面短而粗，高空宽而长
+        float plume_len = rh * 4.5f * (0.5f + thrust * 0.5f) * (1.0f + expansion * 0.8f);
+        float plume_dia = rw_3d * 4.5f * (1.0f + expansion * 3.0f);
         
-        // 尾焰渲染锚点：从发动机喷口向后延伸。MeshGen::box 中心在原点，所以偏移 plume_len * 0.5
+        // 尾焰渲染锚点：从发动机喷口向后延伸
         Vec3 plumePos = engNozzlePos - rocketDir * (plume_len * 0.5f);
         Mat4 plumeMdl = Mat4::TRS(plumePos, rocketQuat, Vec3(plume_dia, plume_len, plume_dia));
         
