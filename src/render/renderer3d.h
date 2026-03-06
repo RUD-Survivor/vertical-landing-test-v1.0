@@ -1667,6 +1667,7 @@ public:
       uniform float uSurfaceRadius;
       uniform float uTime;
       uniform int uPlanetIdx;
+      uniform float uSunVisibility; // Global sun visibility from camera (0 to 1)
       
       out vec4 FragColor;
 
@@ -1981,6 +1982,8 @@ R"(
           dR = 0.0; dM = 0.0; dO = 0.0; dC = 0.0;
 
           // Ground shadow check: if light ray hits planet surface, full occlusion
+          // Physically, the sun should be blocked as soon as it touches the horizon.
+          // Using a slight offset to account for non-zero planet height features.
           float tS0, tS1;
           if (intersectSphere(p, lightDir, uInnerRadius, tS0, tS1) && tS0 > 0.0) {
               dR = 1e6; dM = 1e6; dO = 1e6; dC = 1e6;
@@ -1994,7 +1997,8 @@ R"(
           for (int i = 0; i < LIGHT_STEPS; i++) {
               vec3 pos = p + lightDir * (start + (float(i) + 0.5) * stepSize);
               float h = length(pos - uPlanetCenter) - uSurfaceRadius;
-              if (h < -1.0) { dR = 1e6; dM = 1e6; dO = 1e6; dC = 1e6; return; }
+              // Hard cutoff for underground points to prevent light leaking through the planet core
+              if (h < -0.1) { dR = 1e6; dM = 1e6; dO = 1e6; dC = 1e6; return; }
               dR += exp(-h / gHRayleigh) * stepSize;
               dM += exp(-h / gHMie) * stepSize;
               dO += ozoneDensity(h) * stepSize;
@@ -2112,7 +2116,9 @@ R"(
           // === Altitude-adaptive exposure ===
           // Earth-like exposure values for a natural look
           float altNorm = clamp(camAlt / atmoThickness, 0.0, 1.0);
-          float exposure = mix(10.0, 5.0, smoothstep(0.0, 0.6, altNorm));
+          // Darken exposure significantly at night to mimic human eye adaptation and prevent amplification of residual twilight
+          float nightFactor = mix(0.01, 1.0, uSunVisibility);
+          float exposure = mix(10.0, 5.0, smoothstep(0.0, 0.6, altNorm)) * nightFactor;
 
           // Subtle boost when looking horizontally at ground level
           if (cameraInside) {
@@ -2130,6 +2136,12 @@ R"(
           float transLuma = dot(viewTransmittance, vec3(0.299, 0.587, 0.114));
           float opacity = clamp(1.0 - transLuma, 0.0, 1.0);
           
+          // Night-side opacity: reduce opacity at the horizon at night to let stars shine through
+          // This prevents the "milky black horizon" effect
+          if (uSunVisibility < 0.1) {
+              opacity *= smoothstep(0.0, 0.1, uSunVisibility + 0.05);
+          }
+
           // Minimal opacity boost when inside for a clear sky appearance
           if (cameraInside) {
               opacity = clamp(opacity * mix(1.2, 1.0, smoothstep(0.0, 0.5, altNorm)), 0.0, 1.0);
@@ -3025,10 +3037,9 @@ R"(
     glUseProgram(0);
   }
 
-  // 大气层散射壳 (Volumetric Scattering)
   void drawAtmosphere(const Mesh& sphereMesh, const Mat4& model, 
                       const Vec3& camPos, const Vec3& lightDir, 
-                      const Vec3& planetCenter, float surfaceRadius, float outerRadius, double time, int planetIdx) {
+                      const Vec3& planetCenter, float surfaceRadius, float outerRadius, double time, int planetIdx, float sunVisibility) {
     glUseProgram(atmoProg);
 
     Mat4 mvp = proj * view * model;
@@ -3042,6 +3053,7 @@ R"(
     GLint u_surfaceRadius = glGetUniformLocation(atmoProg, "uSurfaceRadius");
     GLint u_time = glGetUniformLocation(atmoProg, "uTime");
     GLint u_planetIdx = glGetUniformLocation(atmoProg, "uPlanetIdx");
+    GLint u_sunVisibility = glGetUniformLocation(atmoProg, "uSunVisibility");
 
     glUniformMatrix4fv(u_atmo_mvp, 1, GL_FALSE, mvp.m);
     glUniformMatrix4fv(u_atmo_model, 1, GL_FALSE, model.m);
@@ -3051,12 +3063,13 @@ R"(
     
     // Slightly push inner radius into the planet to hide mesh-sphere gaps
     // Increased safety margin to 0.998 to resolve edge cases in terminator shadowing
-    float innerRadius = surfaceRadius * 0.998f; 
+    float innerRadius = surfaceRadius * 0.9995f; // Tighter shadow sphere for realism
     glUniform1f(u_innerRadius, innerRadius);
     glUniform1f(u_outerRadius, outerRadius);
     glUniform1f(u_surfaceRadius, surfaceRadius);
     glUniform1f(u_time, (float)time);
     glUniform1i(u_planetIdx, planetIdx);
+    glUniform1f(u_sunVisibility, sunVisibility);
 
     // Industrial Grade: Phase Separation & Time Wrapping
     GLint u_cloudTime = glGetUniformLocation(atmoProg, "uCloudTime");

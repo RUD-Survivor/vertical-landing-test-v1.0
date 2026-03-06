@@ -696,18 +696,20 @@ void Update(RocketState& state, const RocketConfig& config, const ControlInput& 
 
     if (current_alt <= 0.0) {
         if (state.status == ASCEND) {
-            // Keep surface lock until thrust overcomes weight
-            double theta = current_body.prime_meridian_epoch + (state.sim_time * 2.0 * PI / current_body.rotation_period);
-            double cos_t = std::cos(theta);
-            double sin_t = std::sin(theta);
-            state.px = state.surf_px * cos_t - state.surf_py * sin_t;
-            state.py = state.surf_px * sin_t + state.surf_py * cos_t;
-            state.pz = state.surf_pz;
-            double omega = (2.0 * PI) / current_body.rotation_period;
-            state.vx = -omega * state.py;
-            state.vy = omega * state.px;
-            state.vz = 0;
-            state.altitude = 0;
+            // Keep surface lock ONLY if vertical velocity is not significantly positive
+            if (state.velocity < 0.01) {
+                double theta = current_body.prime_meridian_epoch + (state.sim_time * 2.0 * PI / current_body.rotation_period);
+                double cos_t = std::cos(theta);
+                double sin_t = std::sin(theta);
+                state.px = state.surf_px * cos_t - state.surf_py * sin_t;
+                state.py = state.surf_px * sin_t + state.surf_py * cos_t;
+                state.pz = state.surf_pz;
+                double omega = (2.0 * PI) / current_body.rotation_period;
+                state.vx = -omega * state.py;
+                state.vy = omega * state.px;
+                state.vz = 0;
+                state.altitude = 0;
+            }
         } else if (state.velocity < 0.1) {
             state.altitude = 0;
             

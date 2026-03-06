@@ -235,6 +235,11 @@ int main() {
       rocket_state.fuel = builder_state.assembly.total_fuel;
       rocket_state.status = PRE_LAUNCH;
       rocket_state.mission_msg = "READY ON PAD - PRESS SPACE TO LAUNCH";
+      
+      // Initialize surface coordinates exactly at the planet's radius
+      rocket_state.surf_px = 0.0;
+      rocket_state.surf_py = SOLAR_SYSTEM[current_soi_index].radius;
+      rocket_state.surf_pz = 0.0;
   }
 
   // Keep a reference to the assembly for rendering
@@ -792,7 +797,7 @@ int main() {
               atmoModel = Mat4::translate(renderPlanet) * atmoModel;
 
               // New Volumetric Scattering integration with animated hardcore clouds
-              r3d->drawAtmosphere(earthMesh, atmoModel, camEye_rel, r3d->lightDir, renderPlanet, r, atmo_radius, (float)rocket_state.sim_time, (int)i);
+              r3d->drawAtmosphere(earthMesh, atmoModel, camEye_rel, r3d->lightDir, renderPlanet, r, atmo_radius, (float)rocket_state.sim_time, (int)i, (float)day_blend);
           }
           if (b.type == RINGED_GAS_GIANT) {
               Mat4 ringModel = Mat4::scale(Vec3(r * 2.2f, r * 0.001f, r * 2.2f));
