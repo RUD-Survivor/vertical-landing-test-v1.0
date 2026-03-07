@@ -1679,7 +1679,10 @@ int main() {
         Vec3 plumePos = engNozzlePos - rocketDir * (plume_len * 0.5f);
         Mat4 plumeMdl = Mat4::TRS(plumePos, rocketQuat, Vec3(plume_dia, plume_len, plume_dia));
         
-        r3d->drawExhaustVolumetric(rocketBox, plumeMdl, thrust, expansion, (float)glfwGetTime());
+        // 传递地面高度：rocket_state.altitude 是相对于地面的高度
+        // 我们假设 engNozzlePos 相对地面的距离近似为 altitude
+        float groundDist = (float)rocket_state.altitude * (float)ws_d;
+        r3d->drawExhaustVolumetric(rocketBox, plumeMdl, thrust, expansion, (float)glfwGetTime(), groundDist, plume_len);
       }
 
       r3d->endFrame();

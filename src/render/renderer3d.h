@@ -326,6 +326,7 @@ public:
   GLuint exhaustProg = 0;
   GLint uex_mvp = -1, uex_model = -1, uex_invModel = -1, uex_viewPos = -1, uex_time = -1;
   GLint uex_throttle = -1, uex_expansion = -1;
+  GLint uex_groundDist = -1, uex_plumeLen = -1;
 
   // ===== RSS-Reborn Per-Planet Shader Programs =====
   GLuint mercuryProgram = 0, venusProgram = 0, moonProgram = 0, marsProgram = 0;
@@ -2472,6 +2473,8 @@ R"(
       uniform float uTime;
       uniform float uThrottle;
       uniform float uExpansion;
+      uniform float uGroundDist;
+      uniform float uPlumeLen;
       out vec4 FragColor;
 
       float hash(float n) { return fract(sin(n) * 43758.5453123); }
@@ -2520,17 +2523,35 @@ R"(
         float t = start + dither;
         
         vec4 finalCol = vec4(0.0);
-        int steps = 50; // Increased for Waterfall quality
+        int steps = 56; 
         float stepSize = (end - start) / float(steps);
+
+        // Ground collision normalized height (0 at end of box, 1 at nozzle)
+        // No clamping here to allow proper ray termination and dispersion fade
+        float zGround = 1.0 - uGroundDist / uPlumeLen;
 
         for (int i=0; i<steps; i++) {
           vec3 p = ro + rd * t;
           float z = p.y + 0.5; // 0 (end) to 1 (nozzle)
+          
+          // GROUND CLIP - stop ray or skip points below ground
+          if (z < zGround) {
+             t += stepSize;
+             continue;
+          }
+
+          float distToGround = z - zGround;
+          // Dispersion only applies when ground is within the plume range
+          float dispersionBoost = smoothstep(0.4, 0.0, distToGround) * smoothstep(-0.2, 0.05, zGround);
+          
           float r = length(p.xz) * 2.0; 
           
           // Waterfall-style Flare: Multi-stage expansion
-          // Tight core expansion + broad vacuum sheath
           float coreFlare = mix(0.35, 1.0 + uExpansion * 4.0, pow(1.0 - z, 1.4));
+          
+          // APPLY GROUND DISPERSION SPREAD
+          coreFlare += dispersionBoost * 3.5 * (1.1 - z);
+          
           float sheathFlare = coreFlare * (1.1 + uExpansion * 2.0);
           
           if (r < sheathFlare) {
@@ -2539,17 +2560,20 @@ R"(
             // 1. Base Physic-Informed Density (Solid Core Focus)
             float d = exp(-normR * 6.0) * pow(z, 0.45) * (1.1 - normR);
             
+            // SPREAD DENSITY BOOST NEAR GROUND
+            d += dispersionBoost * 0.5 * (1.0 - normR * 0.8);
+
             // Tail Billowing: High-frequency radial distortion at the dissipation zone
             float billow = noise(vec3(p.xz * 12.0, uTime * 20.0)) * (1.0 - z) * 0.15;
             float taperedR = normR + billow;
             
-            // Tail Tapering: Smooth falloff at the bottom (z=0)
-            float tailTaper = smoothstep(0.0, 0.2, z);
+            // Tail Tapering: Smooth falloff at the bottom/ground
+            // If ground is nearby, taper to ground. Otherwise taper to box end.
+            float tailTaper = (zGround > -0.2) ? smoothstep(-0.02, 0.08, distToGround) : smoothstep(0.0, 0.2, z);
             d *= tailTaper * (1.0 / (1.0 + billow * 5.0));
             d = max(0.0, d);
 
             // 2. High-Velocity Dynamics & FBM Turbulence
-            // Vertical streaks + multi-layer ultra-high-speed fluid turbulence
             float gasSpeed = uTime * (40.0 + uThrottle * 20.0);
             float streaks = noise(vec3(atan(p.x, p.z) * 8.0, p.y * 50.0, gasSpeed * 0.8)); 
             float turb = fbm(p * 18.0 - vec3(0, gasSpeed, 0)); 
@@ -2565,14 +2589,17 @@ R"(
             d *= (flicker * pulse);
 
             // 5. High-Dynamic Color Profiling (Aggressive Glow)
-            vec3 core = vec3(1.2, 1.2, 1.1);   // Over-bright core
-            vec3 mid = vec3(1.0, 0.5, 0.05);   // Primary orange
-            vec3 outer = vec3(0.6, 0.12, 0.04); // Red edge
+            vec3 core = vec3(1.2, 1.2, 1.1);
+            vec3 mid = vec3(1.0, 0.5, 0.05);
+            vec3 outer = vec3(0.6, 0.12, 0.04);
             
+            // Splash color shift near ground (brighter/more yellow)
+            mid = mix(mid, vec3(1.2, 0.9, 0.3), dispersionBoost * 0.6);
+
             vec3 col = mix(outer, mid, smoothstep(0.05, 0.4, d));
             col = mix(col, core, smoothstep(0.4, 0.9, d));
             
-            float alpha = d * stepSize * 65.0; // High density for viscous look
+            float alpha = d * stepSize * 65.0; 
             finalCol.rgb += (1.0 - finalCol.a) * col * alpha;
             finalCol.a += (1.0 - finalCol.a) * alpha;
           }
@@ -2581,7 +2608,6 @@ R"(
           if (finalCol.a > 0.99) break;
         }
 
-        // Final saturation and glow multiplier
         FragColor = vec4(finalCol.rgb * uThrottle * 5.0, finalCol.a * uThrottle);
       }
     )";
@@ -2593,6 +2619,8 @@ R"(
     uex_time = glGetUniformLocation(exhaustProg, "uTime");
     uex_throttle = glGetUniformLocation(exhaustProg, "uThrottle");
     uex_expansion = glGetUniformLocation(exhaustProg, "uExpansion");
+    uex_groundDist = glGetUniformLocation(exhaustProg, "uGroundDist");
+    uex_plumeLen = glGetUniformLocation(exhaustProg, "uPlumeLen");
 
     // --- TAA Resolve Shader ---
     const char* taaVertSrc = R"(
@@ -3008,7 +3036,8 @@ R"(
 
   // 工业级 3D 体积尾焰 (Raymarched Plume)
   void drawExhaustVolumetric(const Mesh& cylinderMesh, const Mat4& model, 
-                             float throttle, float expansion, float time) {
+                             float throttle, float expansion, float time,
+                             float groundDist, float plumeLen) {
     glUseProgram(exhaustProg);
     
     // Enable additive blending for the flame glow
@@ -3026,6 +3055,8 @@ R"(
     glUniform1f(uex_time, time);
     glUniform1f(uex_throttle, throttle);
     glUniform1f(uex_expansion, expansion);
+    glUniform1f(uex_groundDist, groundDist);
+    glUniform1f(uex_plumeLen, plumeLen);
 
     cylinderMesh.draw();
 
