@@ -822,15 +822,24 @@ int main() {
 
       Vec3 camEye_rel, camTarget_rel, camUpVec;
       if (cam_mode_3d == 0) {
-        // --- 优化型 Orbit 视角 (带平滑过渡) ---
+        // --- 优化型 Orbit 视角 (带平滑过渡与时间平滑) ---
         double apo_tmp = 0, peri_tmp = 0;
         PhysicsSystem::getOrbitParams(rocket_state, apo_tmp, peri_tmp);
         
-        // 过渡区间: 100km ~ 140km
-        float peri_min = 100000.0f;
-        float peri_max = 140000.0f;
-        float t = (float)(peri_tmp - peri_min) / (peri_max - peri_min);
-        t = std::max(0.0f, std::min(1.0f, t)); // 限制在 0.0 ~ 1.0
+        // 1. 物理上的融合因子 (target_t)
+        // 扩大过渡区间: 80km ~ 160km 让物理变化更平级
+        float peri_min = 80000.0f;
+        float peri_max = 160000.0f;
+        float target_t = (float)(peri_tmp - peri_min) / (peri_max - peri_min);
+        target_t = std::max(0.0f, std::min(1.0f, target_t));
+
+        // 2. 时间上的融合因子 (current_t)
+        // 使用静态变量存储当前视觉状态，实现“平滑延迟”效果
+        // 这样即使时间加速或参数突变，视觉上也会在 1-2 秒内平滑过渡
+        static float current_t = target_t;
+        float lerp_speed = 1.5f; // 数值越小过渡越慢越丝滑
+        float visual_dt = 0.02f; // 假设 ~50fps 的渲染间隔
+        current_t += (target_t - current_t) * (1.0f - expf(-lerp_speed * visual_dt));
 
         float orbit_dist = rh * 8.0f * cam_zoom_chase;
         
@@ -843,9 +852,9 @@ int main() {
                            radial_rel   * sinf(orbit_yaw) * cosf(orbit_pitch) + 
                            orbit_normal_rel * sinf(orbit_pitch);
 
-        // 插值融合
-        Vec3 view_dir = Vec3::lerp(ground_view, orbit_view, t).normalized();
-        camUpVec = Vec3::lerp(rocketUp, orbit_normal_rel, t).normalized();
+        // 使用 current_t 进行插值融合
+        Vec3 view_dir = Vec3::lerp(ground_view, orbit_view, current_t).normalized();
+        camUpVec = Vec3::lerp(rocketUp, orbit_normal_rel, current_t).normalized();
         
         camEye_rel = renderRocketPos + view_dir * orbit_dist;
         camTarget_rel = renderRocketPos;
