@@ -1,4 +1,4 @@
-﻿#include<glad/glad.h>
+#include<glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <algorithm>
 #include <chrono>
@@ -223,18 +223,30 @@ int main() {
     bk_now.space = glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS;
 
     // Workshop camera controls (scroll and right click drag)
+    static double workshop_prev_mx = 0, workshop_prev_my = 0;
+    static bool workshop_is_dragging = false;
+
     if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS) {
         double mx, my;
         glfwGetCursorPos(window, &mx, &my);
-        static double prev_mx = mx, prev_my = my;
-        float dx = (float)(mx - prev_mx) * 0.005f;
-        float dy = (float)(my - prev_my) * 0.005f;
-        builder_state.orbit_angle -= dx;
-        builder_state.orbit_pitch = std::max(-0.5f, std::min(1.5f, builder_state.orbit_pitch + dy));
-        prev_mx = mx;
-        prev_my = my;
+        
+        if (!workshop_is_dragging) {
+            // Start of a new drag: anchor here
+            workshop_prev_mx = mx;
+            workshop_prev_my = my;
+            workshop_is_dragging = true;
+        } else {
+            // Dragging: calculate delta
+            float dx = (float)(mx - workshop_prev_mx) * 0.005f;
+            float dy = (float)(my - workshop_prev_my) * 0.005f;
+            builder_state.orbit_angle -= dx;
+            builder_state.orbit_pitch = std::max(-0.5f, std::min(1.5f, builder_state.orbit_pitch + dy));
+            workshop_prev_mx = mx;
+            workshop_prev_my = my;
+        }
     } else {
-        // Auto rotate slowly
+        // Button released: stop dragging and resume auto-rotate
+        workshop_is_dragging = false;
         builder_state.orbit_angle += 0.001f;
     }
     
@@ -311,20 +323,50 @@ int main() {
         float py = stack_y + half_h;
         float pd = def.diameter;
         
-        Mat4 partMat = Mat4::translate(Vec3(0.0f, py, 0.0f)) * Mat4::scale(Vec3(pd, def.height, pd));
-
         if (def.category == CAT_NOSE_CONE) {
+            // Nose cones are pivoted at the base (y=0 in MeshGen::cone)
+            Mat4 partMat = Mat4::translate(Vec3(0.0f, stack_y, 0.0f)) * Mat4::scale(Vec3(pd, def.height, pd));
             r3d->drawMesh(rocketNose, partMat, r, g, b, 1.0f, 0.2f);
         } else if (def.category == CAT_ENGINE) {
-            Mat4 bellMat = Mat4::translate(Vec3(0, stack_y + def.height * 0.4f, 0)) * Mat4::scale(Vec3(pd*0.8f, def.height*0.8f, pd*0.8f));
-            r3d->drawMesh(rocketNose, bellMat, r*0.8f, g*0.8f, b*0.8f, 1.0f, 0.1f);
+            // Engine Rendering (matching in-flight style: cylinder body + nozzle)
+            float bodyFrac = 0.4f;
+            float nozzleFrac = 1.0f - bodyFrac;
+            float body_y = stack_y + def.height * (1.0f - bodyFrac * 0.5f);
+            
+            // Upper cylinder body
+            Mat4 bodyMat = Mat4::translate(Vec3(0.0f, body_y, 0.0f)) * Mat4::scale(Vec3(pd * 0.6f, def.height * bodyFrac, pd * 0.6f));
+            r3d->drawMesh(rocketBody, bodyMat, 0.2f, 0.2f, 0.22f, 1.0f, 0.4f);
+            
+            // Lower nozzle bell (cone mesh base at y=0)
+            Mat4 bellMat = Mat4::translate(Vec3(0.0f, stack_y, 0.0f)) * Mat4::scale(Vec3(pd * 0.85f, def.height * nozzleFrac, pd * 0.85f));
+            r3d->drawMesh(rocketNose, bellMat, r * 0.8f, g * 0.8f, b * 0.8f, 1.0f, 0.1f);
+        } else if (def.category == CAT_COMMAND_POD) {
+            // Command Pod Rendering (matching in-flight style: cylinder + cone)
+            float bodyFrac = 0.5f;
+            float coneFrac = 1.0f - bodyFrac;
+            
+            // Base cylinder
+            Mat4 bodyMat = Mat4::translate(Vec3(0.0f, stack_y + half_h * bodyFrac, 0.0f)) * Mat4::scale(Vec3(pd, def.height * bodyFrac, pd));
+            r3d->drawMesh(rocketBody, bodyMat, r, g, b, 1.0f, 0.3f);
+            
+            // Tapered top
+            Mat4 capMat = Mat4::translate(Vec3(0.0f, stack_y + def.height * bodyFrac, 0.0f)) * Mat4::scale(Vec3(pd * 0.9f, def.height * coneFrac, pd * 0.9f));
+            r3d->drawMesh(rocketNose, capMat, r * 1.1f, g * 1.1f, b * 1.1f, 1.0f, 0.3f);
         } else if (def.category == CAT_BOOSTER) {
-            Mat4 boostMat1 = Mat4::translate(Vec3(def.diameter, py, 0)) * Mat4::scale(Vec3(pd*0.4f, def.height, pd*0.4f));
-            Mat4 boostMat2 = Mat4::translate(Vec3(-def.diameter, py, 0)) * Mat4::scale(Vec3(pd*0.4f, def.height, pd*0.4f));
-            r3d->drawMesh(rocketBody, partMat, r, g, b, 1.0f, 0.2f);
-            r3d->drawMesh(rocketBody, boostMat1, r*0.9f, g*0.9f, b*0.9f, 1.0f, 0.2f);
-            r3d->drawMesh(rocketBody, boostMat2, r*0.9f, g*0.9f, b*0.9f, 1.0f, 0.2f);
+            // Booster: Main body + side strap-ons
+            Mat4 mainMat = Mat4::translate(Vec3(0.0f, py, 0.0f)) * Mat4::scale(Vec3(pd, def.height, pd));
+            r3d->drawMesh(rocketBody, mainMat, r, g, b, 1.0f, 0.2f);
+            
+            for (int si = 0; si < 2; si++) {
+                float side_angle = si * 3.14159f;
+                float sx = cosf(side_angle) * pd * 0.6f;
+                float sz = sinf(side_angle) * pd * 0.6f;
+                Mat4 strapMat = Mat4::translate(Vec3(sx, py, sz)) * Mat4::scale(Vec3(pd * 0.3f, def.height * 0.8f, pd * 0.3f));
+                r3d->drawMesh(rocketBody, strapMat, r * 0.9f, g * 0.9f, b * 0.9f, 1.0f, 0.2f);
+            }
         } else {
+            // Standard fuel tank/structural (center-pivoted cylinder)
+            Mat4 partMat = Mat4::translate(Vec3(0.0f, py, 0.0f)) * Mat4::scale(Vec3(pd, def.height, pd));
             r3d->drawMesh(rocketBody, partMat, r, g, b, 1.0f, 0.2f);
         }
         
