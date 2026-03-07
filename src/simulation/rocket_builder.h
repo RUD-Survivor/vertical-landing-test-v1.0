@@ -15,6 +15,14 @@ class Renderer;
 struct RocketAssembly;
 namespace StageManager { void BuildStages(const RocketAssembly& assembly, RocketConfig& config); }
 
+// Helper function for mouse click detection
+static bool pointInRect(float px, float py, float rectX, float rectY, float rectW, float rectH) {
+    float halfW = rectW * 0.5f;
+    float halfH = rectH * 0.5f;
+    return (px >= rectX - halfW && px <= rectX + halfW &&
+            py >= rectY - halfH && py <= rectY + halfH);
+}
+
 // ==========================================================
 // Part Categories
 // ==========================================================
@@ -495,14 +503,108 @@ inline void drawBuilderUI_KSP(Renderer* r, BuilderState& bs, float time) {
 }
 
 // ==========================================================
-// Builder Input Handling
+// Builder Mouse Input Handling
 // ==========================================================
+
+inline bool builderHandleMouseClick(BuilderState& bs, float mouseX, float mouseY, bool leftClick, bool rightClick) {
+    // 检查类别标签页点击
+    float panel_left = -0.98f;
+    float panel_width = 0.55f;
+    float tab_y = 0.82f;
+    float tab_w = panel_width / CAT_COUNT;
+    
+    for (int c = 0; c < CAT_COUNT; c++) {
+        float tx = panel_left + tab_w * c + tab_w / 2.0f;
+        if (pointInRect(mouseX, mouseY, tx, tab_y, tab_w - 0.005f, 0.06f)) {
+            if (leftClick) {
+                bs.selected_category = c;
+                bs.catalog_cursor = 0;
+                return false;
+            }
+        }
+    }
+    
+    // 检查零件列表项点击
+    std::vector<int> cat_parts;
+    bs.getPartsInCategory(cat_parts);
+    float list_y_start = 0.72f;
+    float item_h = 0.10f;
+    
+    for (int i = 0; i < (int)cat_parts.size(); i++) {
+        float iy = list_y_start - i * item_h;
+        if (pointInRect(mouseX, mouseY, panel_left + panel_width / 2.0f, iy, panel_width - 0.02f, item_h - 0.01f)) {
+            if (leftClick) {
+                bs.catalog_cursor = i;
+                // 如果双击或右键，添加零件
+                // 这里暂时只处理选择，添加逻辑在builderHandleInput中
+                return false;
+            }
+        }
+    }
+    
+    // 检查装配列表项点击
+    float asm_panel_x = 0.62f;
+    float asm_panel_w = 0.35f;
+    float asm_list_y = 0.72f;
+    float asm_item_h = 0.065f;
+    
+    for (int i = (int)bs.assembly.parts.size() - 1; i >= 0; i--) {
+        int display_idx = (int)bs.assembly.parts.size() - 1 - i;
+        float iy = asm_list_y - display_idx * asm_item_h;
+        if (pointInRect(mouseX, mouseY, asm_panel_x, iy, asm_panel_w - 0.02f, asm_item_h - 0.005f)) {
+            if (leftClick) {
+                bs.in_assembly_mode = true;
+                bs.assembly_cursor = i;
+                return false;
+            }
+        }
+    }
+    
+    // 检查发射按钮点击
+    if (bs.assembly.hasEngine() && !bs.assembly.parts.empty()) {
+        if (pointInRect(mouseX, mouseY, 0.0f, -0.93f, 0.60f, 0.08f)) {
+            if (leftClick) {
+                return true; // 发射
+            }
+        }
+    }
+    
+    return false;
+}
+
+// ==========================================================
+// Builder Key State
+// ==========================================================
+
 struct BuilderKeyState {
-    bool up, down, left, right, enter, del, tab, pgup, pgdn, space;
+    bool up = false;
+    bool down = false;
+    bool left = false;
+    bool right = false;
+    bool enter = false;
+    bool del = false;
+    bool tab = false;
+    bool pgup = false;
+    bool pgdn = false;
+    bool space = false;
 };
 
+// ==========================================================
+// Builder Input Handling
+// ==========================================================
+
 inline bool builderHandleInput(BuilderState& bs, const BuilderKeyState& keys,
-                               const BuilderKeyState& prev_keys) {
+                               const BuilderKeyState& prev_keys,
+                               float mouseX = 0.0f, float mouseY = 0.0f,
+                               bool leftClick = false, bool rightClick = false) {
+    // 处理鼠标点击
+    if (leftClick) {
+        bool launch = builderHandleMouseClick(bs, mouseX, mouseY, leftClick, rightClick);
+        if (launch) {
+            return true; // 发射
+        }
+    }
+    
     // TAB: toggle catalog/assembly mode
     if (keys.tab && !prev_keys.tab) {
         bs.in_assembly_mode = !bs.in_assembly_mode;

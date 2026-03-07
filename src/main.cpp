@@ -1,4 +1,4 @@
-#include<glad/glad.h>
+#include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <algorithm>
 #include <chrono>
@@ -26,6 +26,46 @@ static float g_scroll_y = 0.0f;
 static void scroll_callback(GLFWwindow* /*w*/, double /*xoffset*/, double yoffset) {
   g_scroll_y += (float)yoffset;
 }
+
+// 鼠标点击支持全局变量
+struct MouseState {
+    double x = 0.0;
+    double y = 0.0;
+    bool left_pressed = false;
+    bool left_was_pressed = false;
+    bool right_pressed = false;
+    bool right_was_pressed = false;
+    bool middle_pressed = false;
+    bool middle_was_pressed = false;
+};
+
+static MouseState g_mouse_state;
+
+// 鼠标按钮回调
+static void mouse_button_callback(GLFWwindow* window, int button, int action, int mods) {
+    if (button == GLFW_MOUSE_BUTTON_LEFT) {
+        g_mouse_state.left_pressed = (action == GLFW_PRESS);
+    } else if (button == GLFW_MOUSE_BUTTON_RIGHT) {
+        g_mouse_state.right_pressed = (action == GLFW_PRESS);
+    } else if (button == GLFW_MOUSE_BUTTON_MIDDLE) {
+        g_mouse_state.middle_pressed = (action == GLFW_PRESS);
+    }
+}
+
+// 鼠标位置回调
+static void cursor_position_callback(GLFWwindow* window, double xpos, double ypos) {
+    g_mouse_state.x = xpos;
+    g_mouse_state.y = ypos;
+}
+
+// 屏幕坐标到NDC坐标转换
+static void screenToNDC(double screenX, double screenY, int windowWidth, int windowHeight, float& ndcX, float& ndcY) {
+    // 将屏幕坐标转换为[-1, 1]范围的NDC坐标
+    ndcX = (float)(2.0 * screenX / windowWidth - 1.0);
+    ndcY = (float)(1.0 - 2.0 * screenY / windowHeight); // Y轴翻转
+}
+
+
 
 
 #include "simulation/rocket_builder.h"
@@ -100,6 +140,8 @@ int main() {
   glfwMakeContextCurrent(window);
   glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
   glfwSetScrollCallback(window, scroll_callback);
+  glfwSetMouseButtonCallback(window, mouse_button_callback);
+  glfwSetCursorPosCallback(window, cursor_position_callback);
 
   if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
     return -1;
@@ -172,6 +214,10 @@ int main() {
   // 尝试加载发射台模型 (如果存在)
   Mesh launchPadMesh = ModelLoader::loadOBJ("assets/launch_pad.obj");
   bool has_launch_pad = (launchPadMesh.indexCount > 0);
+  if (!has_launch_pad) {
+      // 如果发射台模型不存在，使用默认的立方体网格
+      launchPadMesh = MeshGen::box(1.0f, 1.0f, 1.0f);
+  }
 
   // =========================================================
   // BUILD 阶段：KSP-like 火箭组装界面
@@ -257,12 +303,19 @@ int main() {
         g_scroll_y = 0.0f;
     }
 
-    build_done = builderHandleInput(builder_state, bk_now, bk_prev);
-    bk_prev = bk_now;
-
     // --- 3D WORKSHOP RENDER PASS ---
     int ww, wh;
     glfwGetFramebufferSize(window, &ww, &wh);
+    
+    // 获取鼠标点击状态（按下时检测）
+    bool left_clicked = (g_mouse_state.left_pressed && !g_mouse_state.left_was_pressed);
+    
+    // 转换鼠标位置到NDC坐标
+    float ndcX, ndcY;
+    screenToNDC(g_mouse_state.x, g_mouse_state.y, ww, wh, ndcX, ndcY);
+    
+    build_done = builderHandleInput(builder_state, bk_now, bk_prev, ndcX, ndcY, left_clicked, false);
+    bk_prev = bk_now;
     r3d->lightDir = Vec3(0.5f, 1.0f, 0.3f).normalized(); // Angled floodlight
 
     // Dynamic camera based on rocket height
@@ -380,7 +433,12 @@ int main() {
     renderer->beginFrame();
     drawBuilderUI_KSP(renderer, builder_state, (float)glfwGetTime());
     renderer->endFrame();
-
+    
+    // 更新鼠标状态（用于下一帧的点击检测）
+    g_mouse_state.left_was_pressed = g_mouse_state.left_pressed;
+    g_mouse_state.right_was_pressed = g_mouse_state.right_pressed;
+    g_mouse_state.middle_was_pressed = g_mouse_state.middle_pressed;
+    
     glfwSwapBuffers(window);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(16));
@@ -458,9 +516,10 @@ int main() {
   struct TrajPoint { DVec3 e; DVec3 s; };
   std::vector<TrajPoint> traj_history; // 记录火箭历史飞行的 3D 轨迹点
 
-  int frame = 0;
+  int build_frame = 0;
+  static bool show_hud = true;
   while (!glfwWindowShouldClose(window)) {
-    frame++;
+    build_frame++;
     glfwPollEvents();
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
       glfwSetWindowShouldClose(window, true);
@@ -492,6 +551,71 @@ int main() {
       cout << ">> Camera: " << names[cam_mode_3d] << endl;
     }
     c_was_pressed = c_now;
+
+    // --- 鼠标点击检测 ---
+    {
+        // 获取窗口尺寸用于坐标转换
+        int ww, wh;
+        glfwGetFramebufferSize(window, &ww, &wh);
+        
+        // 转换鼠标位置到NDC坐标
+        float ndcX, ndcY;
+        screenToNDC(g_mouse_state.x, g_mouse_state.y, ww, wh, ndcX, ndcY);
+        
+        // 检查左键点击（按下时检测）
+        bool left_clicked = (g_mouse_state.left_pressed && !g_mouse_state.left_was_pressed);
+        
+        // 火箭建造系统的鼠标点击处理将在builderHandleInput中实现
+        
+        // HUD元素点击处理（仅在游戏主循环中，且HUD显示时）
+        if (left_clicked && show_hud) {
+            // 控制模式指示器点击
+            float mode_x = 0.88f;
+            float mode_y = 0.85f;
+            float mode_w = 0.15f;
+            float mode_h = 0.04f;
+            
+            if (pointInRect(ndcX, ndcY, mode_x, mode_y, mode_w, mode_h)) {
+                rocket_state.auto_mode = !rocket_state.auto_mode;
+                if (rocket_state.auto_mode) {
+                    rocket_state.pid_vert.reset();
+                    rocket_state.pid_pos.reset();
+                    rocket_state.pid_att.reset();
+                    rocket_state.pid_att_z.reset();
+                    rocket_state.mission_msg = ">> AUTOPILOT ENGAGED";
+                } else {
+                    rocket_state.mission_msg = ">> MANUAL CONTROL ACTIVE";
+                }
+            }
+            
+            // 阶段指示器点击（手动触发阶段分离）
+            if (rocket_state.total_stages > 1) {
+                float stage_x = 0.88f;
+                float stage_y = mode_y - 0.06f;
+                float stage_w = 0.15f;
+                float stage_h = 0.04f;
+                
+                if (pointInRect(ndcX, ndcY, stage_x, stage_y, stage_w, stage_h)) {
+                    if (rocket_state.status == ASCEND || rocket_state.status == DESCEND) {
+                        StageManager::SeparateStage(rocket_state, rocket_config);
+                    }
+                }
+            }
+            
+            // 油门指示条点击（设置油门值）
+            float thr_bar_x = 0.0f;
+            float thr_bar_y = -0.92f;
+            float thr_bar_w = 0.50f;
+            float thr_bar_h = 0.025f;
+            
+            if (pointInRect(ndcX, ndcY, thr_bar_x, thr_bar_y, thr_bar_w, thr_bar_h)) {
+                // 计算点击位置对应的油门值（0.0到1.0）
+                float relative_x = (ndcX - thr_bar_x + thr_bar_w * 0.5f) / thr_bar_w;
+                relative_x = std::max(0.0f, std::min(1.0f, relative_x));
+                control_input.throttle = relative_x;
+            }
+        }
+    }
 
     // --- 鼠标轨道控制 (3D模式下右键拖动) ---
     {
@@ -540,7 +664,6 @@ int main() {
     }
 
     // --- H 键切换 HUD 显示 ---
-    static bool show_hud = true;
     static bool h_was_pressed = false;
     if (glfwGetKey(window, GLFW_KEY_H) == GLFW_PRESS) {
       if (!h_was_pressed) {
@@ -1870,15 +1993,16 @@ int main() {
     } // end if (show_hud)
     
     renderer->endFrame();
+    
+    // 更新鼠标状态（用于下一帧的点击检测）
+    g_mouse_state.left_was_pressed = g_mouse_state.left_pressed;
+    g_mouse_state.right_was_pressed = g_mouse_state.right_pressed;
+    g_mouse_state.middle_was_pressed = g_mouse_state.middle_pressed;
+    
     glfwSwapBuffers(window);
   }
 
   delete renderer;
-  earthMesh.destroy();
-  ringMesh.destroy();
-  rocketBody.destroy();
-  rocketNose.destroy();
-  rocketBox.destroy();
   delete r3d;
   
   // 游戏结束时保存最终状态

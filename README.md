@@ -103,15 +103,15 @@ build.cmd
 
 ```
 src/
-├── project.cpp          # 主程序
-├── rocket_state.h       # 火箭状态定义
-├── rocket_builder.h     # 火箭构建系统
-├── physics_system.h/cpp # 物理引擎
-├── control_system.h/cpp # 控制系统
-├── renderer3d.h         # 3D渲染引擎
-├── math3d.h            # 3D数学库
-├── save_system.h       # 保存系统 (新增)
-└── menu_system.h       # 菜单系统 (新增)
+├── main.cpp            # 主程序
+├── core/rocket_state.h # 火箭状态定义
+├── simulation/rocket_builder.h # 火箭构建系统
+├── physics/physics_system.h/cpp # 物理引擎
+├── control/control_system.h/cpp # 控制系统
+├── render/renderer3d.h # 3D渲染引擎
+├── math/math3d.h      # 3D数学库
+├── save_system.h      # 保存系统 (新增)
+└── menu_system.h      # 菜单系统 (新增)
 ```
 
 ## 技术亮点

@@ -36,7 +36,7 @@ FetchContent_MakeAvailable(glfw)
 # 这样在代码里就可以直接写 #include "math/math3d.h" 或 #include "glad/glad.h"
 include_directories(src)
 include_directories(vendor)
-include_directories(dependencires/include)
+include_directories(dependencies/include)
 
 # 6. 把所有需要编译的源文件 (.cpp 和 .c) 收集起来
 # 这里不需要列出 .h 文件和 shader 文件，因为它们不直接参与编译生成对象
