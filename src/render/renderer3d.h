@@ -2552,8 +2552,9 @@ R"(
           // Radius is proportional to the depth of truncated plume (zGround)
           float truncDepth = max(0.0, zGround);
           float radAngle = atan(p.x, p.z);
-          float radialWildness = 0.8 + 0.4 * noise(vec3(radAngle * 5.0, uTime * 15.0, zGround * 10.0));
-          float splashRadiusBoost = truncDepth * 18.0 * splashZone * radialWildness;
+          float radialWildness = 0.7 + 0.6 * noise(vec3(radAngle * 4.0, uTime * 18.0, zGround * 8.0));
+          // splashRadiusBoost covers more of the local box radius (0.5-0.7)
+          float splashRadiusBoost = truncDepth * 1.6 * splashZone * radialWildness;
           
           coreFlare += splashRadiusBoost;
           
