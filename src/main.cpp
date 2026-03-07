@@ -1,4 +1,4 @@
-#include<glad/glad.h>
+#include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <algorithm>
 #include <chrono>
@@ -26,6 +26,46 @@ static float g_scroll_y = 0.0f;
 static void scroll_callback(GLFWwindow* /*w*/, double /*xoffset*/, double yoffset) {
   g_scroll_y += (float)yoffset;
 }
+
+// 鼠标点击支持全局变量
+struct MouseState {
+    double x = 0.0;
+    double y = 0.0;
+    bool left_pressed = false;
+    bool left_was_pressed = false;
+    bool right_pressed = false;
+    bool right_was_pressed = false;
+    bool middle_pressed = false;
+    bool middle_was_pressed = false;
+};
+
+static MouseState g_mouse_state;
+
+// 鼠标按钮回调
+static void mouse_button_callback(GLFWwindow* window, int button, int action, int mods) {
+    if (button == GLFW_MOUSE_BUTTON_LEFT) {
+        g_mouse_state.left_pressed = (action == GLFW_PRESS);
+    } else if (button == GLFW_MOUSE_BUTTON_RIGHT) {
+        g_mouse_state.right_pressed = (action == GLFW_PRESS);
+    } else if (button == GLFW_MOUSE_BUTTON_MIDDLE) {
+        g_mouse_state.middle_pressed = (action == GLFW_PRESS);
+    }
+}
+
+// 鼠标位置回调
+static void cursor_position_callback(GLFWwindow* window, double xpos, double ypos) {
+    g_mouse_state.x = xpos;
+    g_mouse_state.y = ypos;
+}
+
+// 屏幕坐标到NDC坐标转换
+static void screenToNDC(double screenX, double screenY, int windowWidth, int windowHeight, float& ndcX, float& ndcY) {
+    // 将屏幕坐标转换为[-1, 1]范围的NDC坐标
+    ndcX = (float)(2.0 * screenX / windowWidth - 1.0);
+    ndcY = (float)(1.0 - 2.0 * screenY / windowHeight); // Y轴翻转
+}
+
+
 
 
 #include "simulation/rocket_builder.h"
@@ -100,6 +140,8 @@ int main() {
   glfwMakeContextCurrent(window);
   glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
   glfwSetScrollCallback(window, scroll_callback);
+  glfwSetMouseButtonCallback(window, mouse_button_callback);
+  glfwSetCursorPosCallback(window, cursor_position_callback);
 
   if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
     return -1;
@@ -172,6 +214,10 @@ int main() {
   // 尝试加载发射台模型 (如果存在)
   Mesh launchPadMesh = ModelLoader::loadOBJ("assets/launch_pad.obj");
   bool has_launch_pad = (launchPadMesh.indexCount > 0);
+  if (!has_launch_pad) {
+      // 如果发射台模型不存在，使用默认的立方体网格
+      launchPadMesh = MeshGen::box(1.0f, 1.0f, 1.0f);
+  }
 
   // =========================================================
   // BUILD 阶段：KSP-like 火箭组装界面
@@ -257,12 +303,19 @@ int main() {
         g_scroll_y = 0.0f;
     }
 
-    build_done = builderHandleInput(builder_state, bk_now, bk_prev);
-    bk_prev = bk_now;
-
     // --- 3D WORKSHOP RENDER PASS ---
     int ww, wh;
     glfwGetFramebufferSize(window, &ww, &wh);
+    
+    // 获取鼠标点击状态（按下时检测）
+    bool left_clicked = (g_mouse_state.left_pressed && !g_mouse_state.left_was_pressed);
+    
+    // 转换鼠标位置到NDC坐标
+    float ndcX, ndcY;
+    screenToNDC(g_mouse_state.x, g_mouse_state.y, ww, wh, ndcX, ndcY);
+    
+    build_done = builderHandleInput(builder_state, bk_now, bk_prev, ndcX, ndcY, left_clicked, false);
+    bk_prev = bk_now;
     r3d->lightDir = Vec3(0.5f, 1.0f, 0.3f).normalized(); // Angled floodlight
 
     // Dynamic camera based on rocket height
@@ -380,7 +433,12 @@ int main() {
     renderer->beginFrame();
     drawBuilderUI_KSP(renderer, builder_state, (float)glfwGetTime());
     renderer->endFrame();
-
+    
+    // 更新鼠标状态（用于下一帧的点击检测）
+    g_mouse_state.left_was_pressed = g_mouse_state.left_pressed;
+    g_mouse_state.right_was_pressed = g_mouse_state.right_pressed;
+    g_mouse_state.middle_was_pressed = g_mouse_state.middle_pressed;
+    
     glfwSwapBuffers(window);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(16));
@@ -458,9 +516,10 @@ int main() {
   struct TrajPoint { DVec3 e; DVec3 s; };
   std::vector<TrajPoint> traj_history; // 记录火箭历史飞行的 3D 轨迹点
 
-  int frame = 0;
+  int build_frame = 0;
+  static bool show_hud = true;
   while (!glfwWindowShouldClose(window)) {
-    frame++;
+    build_frame++;
     glfwPollEvents();
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
       glfwSetWindowShouldClose(window, true);
@@ -492,6 +551,71 @@ int main() {
       cout << ">> Camera: " << names[cam_mode_3d] << endl;
     }
     c_was_pressed = c_now;
+
+    // --- 鼠标点击检测 ---
+    {
+        // 获取窗口尺寸用于坐标转换
+        int ww, wh;
+        glfwGetFramebufferSize(window, &ww, &wh);
+        
+        // 转换鼠标位置到NDC坐标
+        float ndcX, ndcY;
+        screenToNDC(g_mouse_state.x, g_mouse_state.y, ww, wh, ndcX, ndcY);
+        
+        // 检查左键点击（按下时检测）
+        bool left_clicked = (g_mouse_state.left_pressed && !g_mouse_state.left_was_pressed);
+        
+        // 火箭建造系统的鼠标点击处理将在builderHandleInput中实现
+        
+        // HUD元素点击处理（仅在游戏主循环中，且HUD显示时）
+        if (left_clicked && show_hud) {
+            // 控制模式指示器点击
+            float mode_x = 0.88f;
+            float mode_y = 0.85f;
+            float mode_w = 0.15f;
+            float mode_h = 0.04f;
+            
+            if (pointInRect(ndcX, ndcY, mode_x, mode_y, mode_w, mode_h)) {
+                rocket_state.auto_mode = !rocket_state.auto_mode;
+                if (rocket_state.auto_mode) {
+                    rocket_state.pid_vert.reset();
+                    rocket_state.pid_pos.reset();
+                    rocket_state.pid_att.reset();
+                    rocket_state.pid_att_z.reset();
+                    rocket_state.mission_msg = ">> AUTOPILOT ENGAGED";
+                } else {
+                    rocket_state.mission_msg = ">> MANUAL CONTROL ACTIVE";
+                }
+            }
+            
+            // 阶段指示器点击（手动触发阶段分离）
+            if (rocket_state.total_stages > 1) {
+                float stage_x = 0.88f;
+                float stage_y = mode_y - 0.06f;
+                float stage_w = 0.15f;
+                float stage_h = 0.04f;
+                
+                if (pointInRect(ndcX, ndcY, stage_x, stage_y, stage_w, stage_h)) {
+                    if (rocket_state.status == ASCEND || rocket_state.status == DESCEND) {
+                        StageManager::SeparateStage(rocket_state, rocket_config);
+                    }
+                }
+            }
+            
+            // 油门指示条点击（设置油门值）
+            float thr_bar_x = 0.0f;
+            float thr_bar_y = -0.92f;
+            float thr_bar_w = 0.50f;
+            float thr_bar_h = 0.025f;
+            
+            if (pointInRect(ndcX, ndcY, thr_bar_x, thr_bar_y, thr_bar_w, thr_bar_h)) {
+                // 计算点击位置对应的油门值（0.0到1.0）
+                float relative_x = (ndcX - thr_bar_x + thr_bar_w * 0.5f) / thr_bar_w;
+                relative_x = std::max(0.0f, std::min(1.0f, relative_x));
+                control_input.throttle = relative_x;
+            }
+        }
+    }
 
     // --- 鼠标轨道控制 (3D模式下右键拖动) ---
     {
@@ -540,7 +664,6 @@ int main() {
     }
 
     // --- H 键切换 HUD 显示 ---
-    static bool show_hud = true;
     static bool h_was_pressed = false;
     if (glfwGetKey(window, GLFW_KEY_H) == GLFW_PRESS) {
       if (!h_was_pressed) {
@@ -822,24 +945,15 @@ int main() {
 
       Vec3 camEye_rel, camTarget_rel, camUpVec;
       if (cam_mode_3d == 0) {
-        // --- 优化型 Orbit 视角 (带平滑过渡与时间平滑) ---
+        // --- 优化型 Orbit 视角 (带平滑过渡) ---
         double apo_tmp = 0, peri_tmp = 0;
         PhysicsSystem::getOrbitParams(rocket_state, apo_tmp, peri_tmp);
         
-        // 1. 物理上的融合因子 (target_t)
-        // 扩大过渡区间: 80km ~ 160km 让物理变化更平级
-        float peri_min = 80000.0f;
-        float peri_max = 160000.0f;
-        float target_t = (float)(peri_tmp - peri_min) / (peri_max - peri_min);
-        target_t = std::max(0.0f, std::min(1.0f, target_t));
-
-        // 2. 时间上的融合因子 (current_t)
-        // 使用静态变量存储当前视觉状态，实现“平滑延迟”效果
-        // 这样即使时间加速或参数突变，视觉上也会在 1-2 秒内平滑过渡
-        static float current_t = target_t;
-        float lerp_speed = 1.5f; // 数值越小过渡越慢越丝滑
-        float visual_dt = 0.02f; // 假设 ~50fps 的渲染间隔
-        current_t += (target_t - current_t) * (1.0f - expf(-lerp_speed * visual_dt));
+        // 过渡区间: 100km ~ 140km
+        float peri_min = 100000.0f;
+        float peri_max = 140000.0f;
+        float t = (float)(peri_tmp - peri_min) / (peri_max - peri_min);
+        t = std::max(0.0f, std::min(1.0f, t)); // 限制在 0.0 ~ 1.0
 
         float orbit_dist = rh * 8.0f * cam_zoom_chase;
         
@@ -852,9 +966,9 @@ int main() {
                            radial_rel   * sinf(orbit_yaw) * cosf(orbit_pitch) + 
                            orbit_normal_rel * sinf(orbit_pitch);
 
-        // 使用 current_t 进行插值融合
-        Vec3 view_dir = Vec3::lerp(ground_view, orbit_view, current_t).normalized();
-        camUpVec = Vec3::lerp(rocketUp, orbit_normal_rel, current_t).normalized();
+        // 插值融合
+        Vec3 view_dir = Vec3::lerp(ground_view, orbit_view, t).normalized();
+        camUpVec = Vec3::lerp(rocketUp, orbit_normal_rel, t).normalized();
         
         camEye_rel = renderRocketPos + view_dir * orbit_dist;
         camTarget_rel = renderRocketPos;
@@ -995,7 +1109,7 @@ int main() {
       // Note: sky_day factor is used to wash out stars when looking through a lit atmosphere
       float sky_day_local = (float)(day_blend * (1.0 - alt_factor));
       float sky_vibrancy = 1.0f - sky_day_local; 
-      r3d->drawSkybox(sky_vibrancy, aspect);
+      r3d->drawSkybox(sky_vibrancy);
 
       // ===== 太阳物理本体 =====
       if (cam_mode_3d == 2) { 
@@ -1552,19 +1666,11 @@ int main() {
         float plume_len = rh * 4.2f * thrust_scale * (1.0f + expansion * 1.0f);
         float plume_dia = rw_3d * 6.5f * (1.1f + expansion * 4.2f);
         
-        // 动态增加包围盒宽度：当尾焰撞击地面时，必须增加包围盒直径以允许横向“飞溅”渲染，否则会被裁剪成方形
-        float ground_contact_depth = fmaxf(0.0f, plume_len - (float)rocket_state.altitude * (float)ws_d);
-        float splash_factor = ground_contact_depth / fmaxf(0.001f, plume_len);
-        plume_dia *= (1.0f + splash_factor * 12.0f); // 显著增加包围盒宽度以解除裁剪限制
-        
         // 尾焰渲染锚点：从发动机喷口向后延伸
         Vec3 plumePos = engNozzlePos - rocketDir * (plume_len * 0.5f);
         Mat4 plumeMdl = Mat4::TRS(plumePos, rocketQuat, Vec3(plume_dia, plume_len, plume_dia));
         
-        // 传递地面高度：rocket_state.altitude 是相对于地面的高度
-        // 我们假设 engNozzlePos 相对地面的距离近似为 altitude
-        float groundDist = (float)rocket_state.altitude * (float)ws_d;
-        r3d->drawExhaustVolumetric(rocketBox, plumeMdl, thrust, expansion, (float)glfwGetTime(), groundDist, plume_len);
+        r3d->drawExhaustVolumetric(rocketBox, plumeMdl, thrust, expansion, (float)glfwGetTime());
       }
 
       r3d->endFrame();
@@ -1887,15 +1993,16 @@ int main() {
     } // end if (show_hud)
     
     renderer->endFrame();
+    
+    // 更新鼠标状态（用于下一帧的点击检测）
+    g_mouse_state.left_was_pressed = g_mouse_state.left_pressed;
+    g_mouse_state.right_was_pressed = g_mouse_state.right_pressed;
+    g_mouse_state.middle_was_pressed = g_mouse_state.middle_pressed;
+    
     glfwSwapBuffers(window);
   }
 
   delete renderer;
-  earthMesh.destroy();
-  ringMesh.destroy();
-  rocketBody.destroy();
-  rocketNose.destroy();
-  rocketBox.destroy();
   delete r3d;
   
   // 游戏结束时保存最终状态

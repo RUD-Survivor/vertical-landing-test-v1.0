@@ -11,7 +11,7 @@ index 0000000..fa317c8
 +    exit /b 1
 +)
 +call "%VCVARS%"
-+cl /EHsc /MD /O2 src/project.cpp dependencires/library/glad.c -I dependencires/include /link /LIBPATH:dependencires/library glfw3dll.lib opengl32.lib /OUT:space_game.exe
++cl /EHsc /MD /O2 src/main.cpp vendor/glad/glad.c -I dependencies/include /link /LIBPATH:dependencies/lib glfw3.lib opengl32.lib /OUT:vertical-landing-test.exe
 diff --git a/src/math3d.h b/src/math3d.h
 new file mode 100644
 index 0000000..9010694

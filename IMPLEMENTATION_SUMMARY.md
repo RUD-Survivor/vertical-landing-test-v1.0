@@ -40,12 +40,12 @@
 src/
 ├── save_system.h       # 保存/加载核心功能
 ├── menu_system.h       # 启动菜单界面和逻辑
-└── project.cpp         # 主程序（已修改）
+└── main.cpp            # 主程序（已修改）
 ```
 
 ### 关键代码修改
 
-#### 1. 主程序初始化 (project.cpp)
+#### 1. 主程序初始化 (main.cpp)
 ```cpp
 // 添加头文件
 #include "save_system.h"
@@ -105,7 +105,7 @@ TIMESTAMP
 ### 新增代码
 - `save_system.h`: ~200 行
 - `menu_system.h`: ~180 行
-- `project.cpp` 修改: ~100 行
+- `main.cpp` 修改: ~100 行
 
 ### 总计
 - 新增文件: 2 个
