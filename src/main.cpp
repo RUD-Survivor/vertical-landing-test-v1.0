@@ -134,7 +134,17 @@ int main() {
           break;
       }
       
-      menu_choice = MenuSystem::HandleMenuInput(window, menu_state, up_pressed, down_pressed, enter_pressed);
+      // 获取鼠标状态
+      double mx, my;
+      glfwGetCursorPos(window, &mx, &my);
+      int ww, wh;
+      glfwGetWindowSize(window, &ww, &wh);
+      // 转换为渲染坐标 [-1, 1]
+      float mouse_x = (float)(mx / ww * 2.0 - 1.0);
+      float mouse_y = (float)(1.0 - my / wh * 2.0);
+      bool mouse_left = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+
+      menu_choice = MenuSystem::HandleMenuInput(window, menu_state, up_pressed, down_pressed, enter_pressed, mouse_x, mouse_y, mouse_left);
       
       glClearColor(0.02f, 0.03f, 0.08f, 1.0f);
       glClear(GL_COLOR_BUFFER_BIT);
@@ -221,6 +231,15 @@ int main() {
     bk_now.pgup  = glfwGetKey(window, GLFW_KEY_PAGE_UP) == GLFW_PRESS;
     bk_now.pgdn  = glfwGetKey(window, GLFW_KEY_PAGE_DOWN) == GLFW_PRESS;
     bk_now.space = glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS;
+
+    // Mouse for builder
+    double bmx, bmy;
+    glfwGetCursorPos(window, &bmx, &bmy);
+    int bww, bwh;
+    glfwGetWindowSize(window, &bww, &bwh);
+    bk_now.mx = (float)(bmx / bww * 2.0 - 1.0);
+    bk_now.my = (float)(1.0 - bmy / bwh * 2.0);
+    bk_now.lmb = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
 
     // Workshop camera controls (scroll and right click drag)
     static double workshop_prev_mx = 0, workshop_prev_my = 0;
@@ -1787,17 +1806,47 @@ int main() {
     renderer->drawText(label_x, -0.05f, "v_m/s", num_size * 0.5f, 0.7f, 0.7f, 0.7f, hud_opacity);
 
 
-    // --- 6. 控制模式指示器 (HUD 右上角, 更加收缩) ---
+    // --- 6. 控制模式指示器 (HUD 右上角 - 点击切换) ---
     float mode_x = 0.88f; 
     float mode_y = 0.85f;
     float mode_w = 0.15f;
     float mode_h = 0.04f;
+    
+    // 获取鼠标状态用于 HUD 点击
+    double hmx, hmy;
+    glfwGetCursorPos(window, &hmx, &hmy);
+    int hww, hwh;
+    glfwGetWindowSize(window, &hww, &hwh);
+    float hmouse_x = (float)(hmx / hww * 2.0 - 1.0);
+    float hmouse_y = (float)(1.0 - hmy / hwh * 2.0);
+    bool hlmb = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+    static bool hlmb_prev = false;
+    
+    bool is_hover_mode = (hmouse_x >= mode_x - mode_w/2.0f && hmouse_x <= mode_x + mode_w/2.0f &&
+                          hmouse_y >= mode_y - mode_h/2.0f && hmouse_y <= mode_y + mode_h/2.0f);
+    
+    if (is_hover_mode && hlmb && !hlmb_prev) {
+        rocket_state.auto_mode = !rocket_state.auto_mode;
+        if (rocket_state.auto_mode) {
+           rocket_state.pid_vert.reset();
+           rocket_state.pid_pos.reset();
+           rocket_state.pid_att.reset();
+           rocket_state.pid_att_z.reset();
+           rocket_state.mission_msg = ">> AUTOPILOT ENGAGED (MOUSE)";
+        } else {
+           rocket_state.mission_msg = ">> MANUAL CONTROL ACTIVE (MOUSE)";
+        }
+    }
+    hlmb_prev = hlmb;
+
     renderer->addRect(mode_x, mode_y, mode_w, mode_h, 0.05f, 0.05f, 0.05f, 0.7f);
     if (rocket_state.auto_mode) {
-      renderer->addRect(mode_x, mode_y, mode_w - 0.02f, mode_h - 0.015f, 0.1f, 0.8f, 0.2f, 0.9f);
+      float pulse = is_hover_mode ? 1.0f : 0.8f;
+      renderer->addRect(mode_x, mode_y, mode_w - 0.02f, mode_h - 0.15f, 0.1f * pulse, 0.8f * pulse, 0.2f * pulse, 0.9f);
       renderer->drawText(mode_x, mode_y, "AUTO", 0.020f, 0.1f, 0.1f, 0.1f, 0.9f, false, Renderer::CENTER);
     } else {
-      renderer->addRect(mode_x, mode_y, mode_w - 0.02f, mode_h - 0.015f, 1.0f, 0.6f, 0.1f, 0.9f);
+      float pulse = is_hover_mode ? 1.0f : 0.8f;
+      renderer->addRect(mode_x, mode_y, mode_w - 0.02f, mode_h - 0.15f, 1.0f * pulse, 0.6f * pulse, 0.1f * pulse, 0.9f);
       renderer->drawText(mode_x, mode_y, "MANUAL", 0.020f, 0.1f, 0.1f, 0.1f, 0.9f, false, Renderer::CENTER);
     }
 

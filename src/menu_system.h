@@ -137,13 +137,55 @@ void DrawMainMenu(Renderer* r, MenuState& menu, float time) {
     r->drawText(0.0f, -0.90f, "PRESS ENTER TO CONFIRM", 0.014f, 0.4f, 0.4f, 0.5f, 0.7f, true, Renderer::CENTER);
 }
 
+// 处理菜单选项点击检测
+inline bool CheckRectHit(float mx, float my, float cx, float cy, float w, float h) {
+    return (mx >= cx - w / 2.0f && mx <= cx + w / 2.0f &&
+            my >= cy - h / 2.0f && my <= cy + h / 2.0f);
+}
+
 // 处理菜单输入
-MenuChoice HandleMenuInput(GLFWwindow* window, MenuState& menu, bool& up_pressed, bool& down_pressed, bool& enter_pressed) {
+MenuChoice HandleMenuInput(GLFWwindow* window, MenuState& menu, bool& up_pressed, bool& down_pressed, bool& enter_pressed, float mx, float my, bool lmb) {
+    static bool lmb_pressed = false;
     bool up_now = glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS;
     bool down_now = glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS;
     bool enter_now = glfwGetKey(window, GLFW_KEY_ENTER) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS;
     
     int max_option = menu.has_save ? 2 : 1;
+    
+    // 鼠标点击检测
+    if (lmb && !lmb_pressed) {
+        float option_y_start = 0.25f;
+        float option_spacing = 0.15f;
+        float box_w = 0.50f;
+        float box_h = 0.10f;
+
+        if (menu.has_save) {
+            if (CheckRectHit(mx, my, 0.0f, option_y_start, box_w, box_h)) return MENU_CONTINUE;
+            if (CheckRectHit(mx, my, 0.0f, option_y_start - option_spacing, box_w, box_h)) return MENU_NEW_GAME;
+            if (CheckRectHit(mx, my, 0.0f, option_y_start - option_spacing * 2.0f, box_w, box_h)) return MENU_EXIT;
+        } else {
+            if (CheckRectHit(mx, my, 0.0f, option_y_start, box_w, box_h)) return MENU_NEW_GAME;
+            if (CheckRectHit(mx, my, 0.0f, option_y_start - option_spacing, box_w, box_h)) return MENU_EXIT;
+        }
+    }
+    lmb_pressed = lmb;
+
+    // 鼠标悬停检测
+    {
+        float option_y_start = 0.25f;
+        float option_spacing = 0.15f;
+        float box_w = 0.50f;
+        float box_h = 0.10f;
+        
+        if (menu.has_save) {
+            if (CheckRectHit(mx, my, 0.0f, option_y_start, box_w, box_h)) menu.selected_option = 0;
+            else if (CheckRectHit(mx, my, 0.0f, option_y_start - option_spacing, box_w, box_h)) menu.selected_option = 1;
+            else if (CheckRectHit(mx, my, 0.0f, option_y_start - option_spacing * 2.0f, box_w, box_h)) menu.selected_option = 2;
+        } else {
+            if (CheckRectHit(mx, my, 0.0f, option_y_start, box_w, box_h)) menu.selected_option = 0;
+            else if (CheckRectHit(mx, my, 0.0f, option_y_start - option_spacing, box_w, box_h)) menu.selected_option = 1;
+        }
+    }
     
     // 上下键导航
     if (up_now && !up_pressed) {

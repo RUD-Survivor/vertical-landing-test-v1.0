@@ -499,10 +499,88 @@ inline void drawBuilderUI_KSP(Renderer* r, BuilderState& bs, float time) {
 // ==========================================================
 struct BuilderKeyState {
     bool up, down, left, right, enter, del, tab, pgup, pgdn, space;
+    float mx, my; // Normalized mouse coordinates [-1, 1]
+    bool lmb;     // Left mouse button pressed
 };
+
+// 辅助检测矩形碰撞
+inline bool builderCheckHit(float mx, float my, float cx, float cy, float w, float h) {
+    return (mx >= cx - w/2.0f && mx <= cx + w/2.0f &&
+            my >= cy - h/2.0f && my <= cy + h/2.0f);
+}
 
 inline bool builderHandleInput(BuilderState& bs, const BuilderKeyState& keys,
                                const BuilderKeyState& prev_keys) {
+    static bool lmb_pressed = false;
+    bool lmb_clicked = keys.lmb && !lmb_pressed;
+    lmb_pressed = keys.lmb;
+
+    // --- MOUSE INTERACTION ---
+    if (keys.lmb || true) { // Always check for hover if needed, but here we focus on clicks
+        // 1. Category Tabs
+        float panel_left = -0.98f;
+        float panel_width = 0.55f;
+        float tab_y = 0.82f;
+        float tab_w = panel_width / CAT_COUNT;
+        for (int c = 0; c < CAT_COUNT; c++) {
+            float tx = panel_left + tab_w * c + tab_w / 2.0f;
+            if (builderCheckHit(keys.mx, keys.my, tx, tab_y, tab_w, 0.06f)) {
+                if (lmb_clicked) {
+                    bs.selected_category = c;
+                    bs.catalog_cursor = 0;
+                    bs.in_assembly_mode = false;
+                } else if (!keys.lmb) {
+                    // Hover effect: optionally switch mode or just highlight
+                }
+            }
+        }
+
+        // 2. Catalog Items
+        std::vector<int> cat_parts;
+        bs.getPartsInCategory(cat_parts);
+        float list_y_start = 0.72f;
+        float item_h = 0.10f;
+        for (int i = 0; i < (int)cat_parts.size(); i++) {
+            float iy = list_y_start - i * item_h;
+            if (builderCheckHit(keys.mx, keys.my, panel_left + panel_width / 2.0f, iy, panel_width, item_h)) {
+                if (lmb_clicked) {
+                    bs.catalog_cursor = i;
+                    bs.in_assembly_mode = false;
+                    bs.assembly.addPart(cat_parts[i]);
+                } else if (!keys.lmb) {
+                    bs.catalog_cursor = i;
+                    bs.in_assembly_mode = false;
+                }
+            }
+        }
+
+        // 3. Assembly Stack
+        float asm_panel_x = 0.62f;
+        float asm_panel_w = 0.35f;
+        float asm_list_y = 0.72f;
+        float asm_item_h = 0.065f;
+        for (int i = (int)bs.assembly.parts.size() - 1; i >= 0; i--) {
+            int display_idx = (int)bs.assembly.parts.size() - 1 - i;
+            float iy = asm_list_y - display_idx * asm_item_h;
+            if (builderCheckHit(keys.mx, keys.my, asm_panel_x, iy, asm_panel_w, asm_item_h)) {
+                if (lmb_clicked) {
+                    bs.in_assembly_mode = true;
+                    bs.assembly_cursor = i;
+                } else if (!keys.lmb) {
+                    // Hover
+                }
+            }
+        }
+
+        // 4. Launch Button
+        if (bs.assembly.hasEngine() && !bs.assembly.parts.empty()) {
+            if (builderCheckHit(keys.mx, keys.my, 0.0f, -0.93f, 0.60f, 0.08f)) {
+                if (lmb_clicked) return true;
+            }
+        }
+    }
+
+    // --- KEYBOARD INTERACTION (Keep existing) ---
     // TAB: toggle catalog/assembly mode
     if (keys.tab && !prev_keys.tab) {
         bs.in_assembly_mode = !bs.in_assembly_mode;
