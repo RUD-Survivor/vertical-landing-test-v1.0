@@ -202,6 +202,8 @@ struct RocketState {
     int mission_phase = 0;
     double mission_timer = 0.0;
     bool auto_mode = true;
+    bool sas_active = true;
+    bool rcs_active = true;
     double leg_deploy_progress = 0.0;
     
     // Particle System state 

@@ -239,10 +239,36 @@ public:
 
   // 姿态球 (Navball)
   // pitch: [-PI/2, PI/2], yaw: [0, 2*PI], roll: [-PI, PI]
-  void drawAttitudeSphere(float cx, float cy, float radius, const Quat& qRocket, const Vec3& localRight, const Vec3& localUp, const Vec3& localNorth) {
+  void drawAttitudeSphere(float cx, float cy, float radius, const Quat& qRocket, const Vec3& localRight, const Vec3& localUp, const Vec3& localNorth, bool sas_active, bool rcs_active) {
     // 1. 基础圆盘与底座
     addCircle(cx, cy, radius * 1.05f, 0.1f, 0.1f, 0.12f, 0.9f);
     addCircle(cx, cy, radius, 0.2f, 0.2f, 0.22f, 1.0f);
+
+    // --- SAS & RCS Indicators ---
+    float ind_r = radius * 0.15f;
+    float ind_y = cy + radius * 0.7f;
+    
+    // SAS Indicator (Left)
+    float sas_x = cx - radius * 1.25f;
+    addCircle(sas_x, ind_y, ind_r, 0.1f, 0.1f, 0.1f, 0.8f); // Background
+    if (sas_active) {
+        addCircle(sas_x, ind_y, ind_r * 0.8f, 0.2f, 1.0f, 0.4f, 1.0f); // Green Glow
+        drawText(sas_x, ind_y - ind_r * 2.2f, "SAS", radius * 0.12f, 0.2f, 1.0f, 0.4f, 1.0f, true, CENTER);
+    } else {
+        addCircle(sas_x, ind_y, ind_r * 0.8f, 0.3f, 0.1f, 0.1f, 1.0f); // Dim Red
+        drawText(sas_x, ind_y - ind_r * 2.2f, "SAS", radius * 0.12f, 0.5f, 0.5f, 0.5f, 0.6f, true, CENTER);
+    }
+
+    // RCS Indicator (Right)
+    float rcs_x = cx + radius * 1.25f;
+    addCircle(rcs_x, ind_y, ind_r, 0.1f, 0.1f, 0.1f, 0.8f); // Background
+    if (rcs_active) {
+        addCircle(rcs_x, ind_y, ind_r * 0.8f, 0.2f, 0.8f, 1.0f, 1.0f); // Blue Glow
+        drawText(rcs_x, ind_y - ind_r * 2.2f, "RCS", radius * 0.12f, 0.2f, 0.8f, 1.0f, 1.0f, true, CENTER);
+    } else {
+        addCircle(rcs_x, ind_y, ind_r * 0.8f, 0.3f, 0.1f, 0.1f, 1.0f); // Dim Red
+        drawText(rcs_x, ind_y - ind_r * 2.2f, "RCS", radius * 0.12f, 0.5f, 0.5f, 0.5f, 0.6f, true, CENTER);
+    }
 
     // 2. 坐标转换逻辑 (直接基于四元数投影，消除万向锁)
     // p 处于水平参考系 (X=East, Y=Up, Z=North)

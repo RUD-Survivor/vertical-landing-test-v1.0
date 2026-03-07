@@ -168,11 +168,27 @@ void UpdateManualControl(RocketState& state, ControlInput& input, const ManualIn
     input.torque_cmd = 0;
     input.torque_cmd_z = 0;
     
-    if (manual.pitch_left) input.torque_cmd = 30000.0;
-    if (manual.pitch_right) input.torque_cmd = -30000.0;
-    
-    if (manual.pitch_forward) input.torque_cmd_z = 30000.0;
-    if (manual.pitch_backward) input.torque_cmd_z = -30000.0;
+    // RCS provides torque. If RCS is off, manual input generates no torque.
+    if (state.rcs_active) {
+        bool manual_pitch = false;
+        if (manual.pitch_left) { input.torque_cmd = 60000.0; manual_pitch = true; }
+        if (manual.pitch_right) { input.torque_cmd = -60000.0; manual_pitch = true; }
+        
+        bool manual_pitch_z = false;
+        if (manual.pitch_forward) { input.torque_cmd_z = 60000.0; manual_pitch_z = true; }
+        if (manual.pitch_backward) { input.torque_cmd_z = -60000.0; manual_pitch_z = true; }
+
+        // SAS (Stability Assist) - Damps rotation if no manual input is given
+        if (state.sas_active) {
+            double damping_gain = 40000.0;
+            if (!manual_pitch) {
+                input.torque_cmd = -state.ang_vel * damping_gain;
+            }
+            if (!manual_pitch_z) {
+                input.torque_cmd_z = -state.ang_vel_z * damping_gain;
+            }
+        }
+    }
 
     if (state.status == ASCEND && state.velocity < 0 && state.altitude > 1000)
         state.status = DESCEND;

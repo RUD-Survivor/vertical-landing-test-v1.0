@@ -603,14 +603,36 @@ int main() {
     }
 
     static bool r_was_pressed = false;
-    if (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS) {
+    if (glfwGetKey(window, GLFW_KEY_T) == GLFW_PRESS) {
       if (!r_was_pressed) {
-        orbit_reference_sun = !orbit_reference_sun;
-        cout << "[REF FRAME] " << (orbit_reference_sun ? "SUN" : "EARTH") << endl;
+        rocket_state.sas_active = !rocket_state.sas_active;
+        cout << "[SAS] " << (rocket_state.sas_active ? "ON" : "OFF") << endl;
         r_was_pressed = true;
       }
     } else {
       r_was_pressed = false;
+    }
+
+    static bool rcs_key_prev = false;
+    if (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS) {
+      if (!rcs_key_prev) {
+        rocket_state.rcs_active = !rocket_state.rcs_active;
+        cout << "[RCS] " << (rocket_state.rcs_active ? "ON" : "OFF") << endl;
+        rcs_key_prev = true;
+      }
+    } else {
+      rcs_key_prev = false;
+    }
+
+    static bool k_was_pressed = false;
+    if (glfwGetKey(window, GLFW_KEY_K) == GLFW_PRESS) {
+      if (!k_was_pressed) {
+        orbit_reference_sun = !orbit_reference_sun;
+        cout << "[REF FRAME] " << (orbit_reference_sun ? "SUN" : "EARTH") << endl;
+        k_was_pressed = true;
+      }
+    } else {
+      k_was_pressed = false;
     }
     
     // 全局帧计数器 (用于限制控制台打印频率)
@@ -1938,7 +1960,7 @@ int main() {
     float nav_rad = 0.18f;
 
     // 直接使用四元数投影，彻底解决万向锁和翻转问题
-    renderer->drawAttitudeSphere(nav_x, nav_y, nav_rad, rocketQuat, localRight, rocketUp, localNorth);
+    renderer->drawAttitudeSphere(nav_x, nav_y, nav_rad, rocketQuat, localRight, rocketUp, localNorth, rocket_state.sas_active, rocket_state.rcs_active);
 
     // ========================================================================
     } // end if (show_hud)

@@ -755,11 +755,17 @@ void Update(RocketState& state, const RocketConfig& config, const ControlInput& 
     }
 
     // Angular Motion
-    double moment_of_inertia = 50000.0;
+    // Dynamic Moment of Inertia: Assuming a cylinder/rod shape approximation
+    // I = (1/12) * M * (3r^2 + h^2) but we simplify to proportional to mass
+    double base_moi = 50000.0;
+    double moment_of_inertia = base_moi * (total_mass / 50000.0); 
     
     double final_torque = input.torque_cmd;
     double ang_accel = (final_torque + aero_torque) / moment_of_inertia;
     state.ang_vel += ang_accel * dt;
+
+    // Apply some base angular air resistance (damping) even in vacuum for simulation stability if needed, 
+    // but here we keep it physical.
     state.angle += state.ang_vel * dt;
 
     // Z Axis Out of plane Pitch
@@ -768,8 +774,10 @@ void Update(RocketState& state, const RocketConfig& config, const ControlInput& 
     double ang_accel_z = (input.torque_cmd_z + aero_torque_z) / moment_of_inertia;
     state.ang_vel_z += ang_accel_z * dt;
 
-    if (state.altitude > 80000) {
-        state.ang_vel_z *= std::pow(0.95, dt);
+    // Subtle drift damping in deep space to prevent infinite tiny rotation accumulation
+    if (state.altitude > 80000 && std::abs(input.torque_cmd) < 0.1 && std::abs(input.torque_cmd_z) < 0.1) {
+        state.ang_vel *= std::pow(0.99, dt);
+        state.ang_vel_z *= std::pow(0.99, dt);
     }
     state.angle_z += state.ang_vel_z * dt;
 
