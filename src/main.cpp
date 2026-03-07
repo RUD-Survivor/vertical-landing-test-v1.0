@@ -1675,6 +1675,11 @@ int main() {
         float plume_len = rh * 4.2f * thrust_scale * (1.0f + expansion * 1.0f);
         float plume_dia = rw_3d * 6.5f * (1.1f + expansion * 4.2f);
         
+        // 动态增加包围盒宽度：当尾焰撞击地面时，必须增加包围盒直径以允许横向“飞溅”渲染，否则会被裁剪成方形
+        float ground_contact_depth = fmaxf(0.0f, plume_len - (float)rocket_state.altitude);
+        float splash_factor = ground_contact_depth / plume_len;
+        plume_dia *= (1.0f + splash_factor * 5.0f); // 允许飞溅延伸到原来的数倍宽度
+        
         // 尾焰渲染锚点：从发动机喷口向后延伸
         Vec3 plumePos = engNozzlePos - rocketDir * (plume_len * 0.5f);
         Mat4 plumeMdl = Mat4::TRS(plumePos, rocketQuat, Vec3(plume_dia, plume_len, plume_dia));

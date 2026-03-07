@@ -2523,34 +2523,39 @@ R"(
         float t = start + dither;
         
         vec4 finalCol = vec4(0.0);
-        int steps = 56; 
+        int steps = 60; // Slightly more steps for thin splash precision
         float stepSize = (end - start) / float(steps);
 
         // Ground collision normalized height (0 at end of box, 1 at nozzle)
-        // No clamping here to allow proper ray termination and dispersion fade
         float zGround = 1.0 - uGroundDist / uPlumeLen;
 
         for (int i=0; i<steps; i++) {
           vec3 p = ro + rd * t;
           float z = p.y + 0.5; // 0 (end) to 1 (nozzle)
           
-          // GROUND CLIP - stop ray or skip points below ground
+          // GROUND CLIP
           if (z < zGround) {
              t += stepSize;
              continue;
           }
 
           float distToGround = z - zGround;
-          // Dispersion only applies when ground is within the plume range
-          float dispersionBoost = smoothstep(0.4, 0.0, distToGround) * smoothstep(-0.2, 0.05, zGround);
+          // TIGHT LOCALIZED SPLASH: Only within few % of plume length near ground
+          float splashZone = smoothstep(0.06, 0.0, distToGround) * smoothstep(-0.2, 0.05, zGround);
           
           float r = length(p.xz) * 2.0; 
           
           // Waterfall-style Flare: Multi-stage expansion
           float coreFlare = mix(0.35, 1.0 + uExpansion * 4.0, pow(1.0 - z, 1.4));
           
-          // APPLY GROUND DISPERSION SPREAD
-          coreFlare += dispersionBoost * 3.5 * (1.1 - z);
+          // PROPORTIONAL RADIAL SPLASH
+          // Radius is proportional to the depth of truncated plume (zGround)
+          float truncDepth = max(0.0, zGround);
+          float radAngle = atan(p.x, p.z);
+          float radialWildness = 0.8 + 0.4 * noise(vec3(radAngle * 5.0, uTime * 15.0, zGround * 10.0));
+          float splashRadiusBoost = truncDepth * 18.0 * splashZone * radialWildness;
+          
+          coreFlare += splashRadiusBoost;
           
           float sheathFlare = coreFlare * (1.1 + uExpansion * 2.0);
           
@@ -2560,17 +2565,17 @@ R"(
             // 1. Base Physic-Informed Density (Solid Core Focus)
             float d = exp(-normR * 6.0) * pow(z, 0.45) * (1.1 - normR);
             
-            // SPREAD DENSITY BOOST NEAR GROUND
-            d += dispersionBoost * 0.5 * (1.0 - normR * 0.8);
+            // Splash Density Boost: Make the splash feel thick/viscous
+            // Density falloff is flatter horizontally
+            d += splashZone * 0.7 * exp(-normR * 2.0) * (1.0 - normR * 0.95);
 
             // Tail Billowing: High-frequency radial distortion at the dissipation zone
-            float billow = noise(vec3(p.xz * 12.0, uTime * 20.0)) * (1.0 - z) * 0.15;
-            float taperedR = normR + billow;
+            float billowValue = noise(vec3(p.xz * 12.0, uTime * 20.0)) * (1.0 - z) * 0.15;
+            float taperedR = normR + billowValue;
             
             // Tail Tapering: Smooth falloff at the bottom/ground
-            // If ground is nearby, taper to ground. Otherwise taper to box end.
-            float tailTaper = (zGround > -0.2) ? smoothstep(-0.02, 0.08, distToGround) : smoothstep(0.0, 0.2, z);
-            d *= tailTaper * (1.0 / (1.0 + billow * 5.0));
+            float tailTaper = (zGround > -0.2) ? smoothstep(-0.01, 0.04, distToGround) : smoothstep(0.0, 0.2, z);
+            d *= tailTaper * (1.0 / (1.0 + billowValue * 5.0));
             d = max(0.0, d);
 
             // 2. High-Velocity Dynamics & FBM Turbulence
@@ -2593,8 +2598,8 @@ R"(
             vec3 mid = vec3(1.0, 0.5, 0.05);
             vec3 outer = vec3(0.6, 0.12, 0.04);
             
-            // Splash color shift near ground (brighter/more yellow)
-            mid = mix(mid, vec3(1.2, 0.9, 0.3), dispersionBoost * 0.6);
+            // Splash color shift: brighter near the ground impact
+            mid = mix(mid, vec3(1.3, 1.0, 0.4), splashZone * 0.8);
 
             vec3 col = mix(outer, mid, smoothstep(0.05, 0.4, d));
             col = mix(col, core, smoothstep(0.4, 0.9, d));
