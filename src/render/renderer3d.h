@@ -3110,13 +3110,13 @@ R"(
   }
 
   // Procedural Starfield + Milky Way background
-  void drawSkybox(float vibrancy = 1.0f) {
+  void drawSkybox(float vibrancy = 1.0f, float aspect = 1.0f) {
     glUseProgram(skyboxProg);
     glUniform1f(us_skyVibrancy, vibrancy);
     // Compute inverse view-projection matrix for ray reconstruction
     // FIX: Use a stable projection matrix and a view matrix with zero translation
     // This avoids numerical instability when the global macro_near is extreme.
-    Mat4 stableProj = Mat4::perspective(0.8f, 1.0f, 0.1f, 10.0f); // Fixed aspect 1.0 is fine for rays
+    Mat4 stableProj = Mat4::perspective(0.8f, aspect, 0.1f, 10.0f); 
     Mat4 viewNoTrans = view;
     viewNoTrans.m[12] = 0.0f; viewNoTrans.m[13] = 0.0f; viewNoTrans.m[14] = 0.0f;
     Mat4 vp = stableProj * viewNoTrans;

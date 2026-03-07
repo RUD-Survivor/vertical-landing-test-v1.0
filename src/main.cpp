@@ -1118,7 +1118,7 @@ int main() {
       // Note: sky_day factor is used to wash out stars when looking through a lit atmosphere
       float sky_day_local = (float)(day_blend * (1.0 - alt_factor));
       float sky_vibrancy = 1.0f - sky_day_local; 
-      r3d->drawSkybox(sky_vibrancy);
+      r3d->drawSkybox(sky_vibrancy, aspect);
 
       // ===== 太阳物理本体 =====
       if (cam_mode_3d == 2) { 
