@@ -1,6 +1,7 @@
 #include "control_system.h"
 #include "physics/physics_system.h"
 #include <algorithm>
+#include <cmath>
 
 namespace ControlSystem {
 
@@ -156,7 +157,7 @@ void UpdateAutoPilot(RocketState& state, const RocketConfig& config, ControlInpu
     if (input.throttle < 0.0) input.throttle = 0.0;
 }
 
-void UpdateManualControl(RocketState& state, ControlInput& input, const ManualInputs& manual, double dt) {
+void UpdateManualControl(RocketState& state, const RocketConfig& config, ControlInput& input, const ManualInputs& manual, double dt) {
     if (state.status == PRE_LAUNCH || state.status == LANDED || state.status == CRASHED)
         return;
 
@@ -169,23 +170,21 @@ void UpdateManualControl(RocketState& state, ControlInput& input, const ManualIn
     input.torque_cmd_z = 0;
     input.torque_cmd_roll = 0;
     
-    // RCS provides torque. If RCS is off, manual input generates no torque.
     if (state.rcs_active) {
         double torque_magnitude = 60000.0;
 
         bool manual_pitch = false;
-        if (manual.pitch_up) { input.torque_cmd_z = torque_magnitude; manual_pitch = true; }   // W: Pitch Down/Up
-        if (manual.pitch_down) { input.torque_cmd_z = -torque_magnitude; manual_pitch = true; } // S
+        if (manual.pitch_up) { input.torque_cmd_z = torque_magnitude; manual_pitch = true; }
+        if (manual.pitch_down) { input.torque_cmd_z = -torque_magnitude; manual_pitch = true; }
 
         bool manual_yaw = false;
-        if (manual.yaw_left) { input.torque_cmd = torque_magnitude; manual_yaw = true; }    // A: Yaw Left
-        if (manual.yaw_right) { input.torque_cmd = -torque_magnitude; manual_yaw = true; }  // D
+        if (manual.yaw_left) { input.torque_cmd = torque_magnitude; manual_yaw = true; }
+        if (manual.yaw_right) { input.torque_cmd = -torque_magnitude; manual_yaw = true; }
 
         bool manual_roll = false;
-        if (manual.roll_left) { input.torque_cmd_roll = torque_magnitude; manual_roll = true; }   // Q: Roll CCW
-        if (manual.roll_right) { input.torque_cmd_roll = -torque_magnitude; manual_roll = true; } // E
+        if (manual.roll_left) { input.torque_cmd_roll = torque_magnitude; manual_roll = true; }
+        if (manual.roll_right) { input.torque_cmd_roll = -torque_magnitude; manual_roll = true; }
 
-        // SAS (Stability Assist) - Damps rotation or targets specific vector
         if (state.sas_active) {
             double damping_gain = 40000.0;
             
@@ -194,48 +193,64 @@ void UpdateManualControl(RocketState& state, ControlInput& input, const ManualIn
                 if (!manual_pitch) input.torque_cmd_z = -state.ang_vel_z * damping_gain;
                 if (!manual_roll) input.torque_cmd_roll = -state.ang_vel_roll * damping_gain;
             } else {
-                // Update target vector based on current orbital state every physics step
                 double rel_vx = state.vx, rel_vy = state.vy, rel_vz = state.vz;
                 double rel_px = state.px, rel_py = state.py, rel_pz = state.pz;
-                double speed = sqrt(rel_vx*rel_vx + rel_vy*rel_vy + rel_vz*rel_vz);
+                double speed = std::sqrt(rel_vx*rel_vx + rel_vy*rel_vy + rel_vz*rel_vz);
                 
                 if (speed > 0.1) {
-                    Vec3 vPrograde = Vec3((float)(rel_vx / speed), (float)(rel_vy / speed), (float)(rel_vz / speed));
-                    Vec3 posVec((float)rel_px, (float)rel_py, (float)rel_pz);
-                    Vec3 vNormal = vPrograde.cross(posVec).normalized();
-                    Vec3 vRadial = vNormal.cross(vPrograde).normalized();
+                    Vec3 vP = Vec3((float)(rel_vx / speed), (float)(rel_vy / speed), (float)(rel_vz / speed));
+                    Vec3 posV((float)rel_px, (float)rel_py, (float)rel_pz);
+                    Vec3 vN = vP.cross(posV).normalized();
+                    Vec3 vR = vN.cross(vP).normalized();
 
-                    if (state.sas_mode == SAS_PROGRADE) state.sas_target_vec = vPrograde;
-                    else if (state.sas_mode == SAS_RETROGRADE) state.sas_target_vec = vPrograde * -1.0f;
-                    else if (state.sas_mode == SAS_NORMAL) state.sas_target_vec = vNormal;
-                    else if (state.sas_mode == SAS_ANTINORMAL) state.sas_target_vec = vNormal * -1.0f;
-                    else if (state.sas_mode == SAS_RADIAL_IN) state.sas_target_vec = vRadial * -1.0f;
-                    else if (state.sas_mode == SAS_RADIAL_OUT) state.sas_target_vec = vRadial;
+                    if (state.sas_mode == SAS_PROGRADE) state.sas_target_vec = vP;
+                    else if (state.sas_mode == SAS_RETROGRADE) state.sas_target_vec = vP * -1.0f;
+                    else if (state.sas_mode == SAS_NORMAL) state.sas_target_vec = vN;
+                    else if (state.sas_mode == SAS_ANTINORMAL) state.sas_target_vec = vN * -1.0f;
+                    else if (state.sas_mode == SAS_RADIAL_IN) state.sas_target_vec = vR * -1.0f;
+                    else if (state.sas_mode == SAS_RADIAL_OUT) state.sas_target_vec = vR;
                 }
 
                 if (state.sas_target_vec.length() > 0.1f) {
-                    // Target orientation logic: Align rocket nose (forward/longitudinal axis) with sas_target_vec
-                    // According to PhysicsSystem, nose direction is state.attitude.forward()
                     Vec3 rocketNose = state.attitude.forward();
                     Vec3 targetDir = state.sas_target_vec;
+                    Vec3 errorVec = rocketNose.cross(targetDir);
+                    Vec3 localError = state.attitude.conjugate().rotate(errorVec);
                     
-                    // Simple version: Torque = k * cross(current, target) - damping * velocity
-                    Vec3 error = rocketNose.cross(targetDir);
+                    double torque_mag = 4000000.0;
+                    double base_moi = 50000.0;
+                    double total_mass = config.dry_mass + state.fuel + config.upper_stages_mass;
+                    double moi = base_moi * (total_mass / 50000.0);
+                    double max_a = torque_mag / moi;
                     
-                    // Transform world-space error to local-space torque
-                    Vec3 localError = state.attitude.conjugate().rotate(error);
+                    auto get_v = [&](float err) {
+                        float abs_e = std::abs(err);
+                        if (abs_e < 1e-6f) return 0.0;
+                        double v = std::sqrt(2.0 * (max_a * 0.8) * abs_e);
+                        return (double)(err > 0 ? v : -v);
+                    };
+
+                    double target_vx = get_v(localError.x);
+                    double target_vz = get_v(localError.z);
                     
-                    // Correct mapping based on PhysicsSystem::Update:
-                    // ang_vel_z (Local X) += torque_cmd_z
-                    // ang_vel (Local Z) += torque_cmd
-                    // Local X torque error is in localError.x, Local Z torque error is in localError.z
-                    
-                    double kp_sas = 80000.0;
-                    double kd_sas = 40000.0;
-                    
-                    if (!manual_pitch) input.torque_cmd_z = localError.x * kp_sas - state.ang_vel_z * kd_sas;
-                    if (!manual_yaw) input.torque_cmd = localError.z * kp_sas - state.ang_vel * kd_sas;
-                    if (!manual_roll) input.torque_cmd_roll = -state.ang_vel_roll * kd_sas; // Always damp roll for now
+                    double max_v = 1.5;
+                    if (target_vx > max_v) target_vx = max_v;
+                    if (target_vx < -max_v) target_vx = -max_v;
+                    if (target_vz > max_v) target_vz = max_v;
+                    if (target_vz < -max_v) target_vz = -max_v;
+
+                    double K = moi * 10.0; 
+                    double tx = (target_vx - state.ang_vel_z) * K;
+                    double tz = (target_vz - state.ang_vel) * K;
+
+                    if (tx > torque_mag) tx = torque_mag;
+                    if (tx < -torque_mag) tx = -torque_mag;
+                    if (tz > torque_mag) tz = torque_mag;
+                    if (tz < -torque_mag) tz = -torque_mag;
+
+                    if (!manual_pitch) input.torque_cmd_z = tx;
+                    if (!manual_yaw) input.torque_cmd = tz;
+                    if (!manual_roll) input.torque_cmd_roll = -state.ang_vel_roll * (moi * 5.0);
                 }
             }
         }

@@ -23,7 +23,7 @@ namespace ControlSystem {
         bool roll_right;
     };
     
-    void UpdateManualControl(RocketState& state, ControlInput& input, const ManualInputs& manual, double dt);
+    void UpdateManualControl(RocketState& state, const RocketConfig& config, ControlInput& input, const ManualInputs& manual, double dt);
 }
 
 #endif // CONTROL_SYSTEM_H

@@ -1,0 +1,9 @@
+﻿閫傜敤浜?.NET Framework MSBuild 鐗堟湰 18.0.5+e22287bf1
+
+  glfw.vcxproj -> C:\antigravity_code\RocketSim3D\build\_deps\glfw-build\src\Release\glfw3.lib
+  control_system.cpp
+C:\antigravity_code\RocketSim3D\src\math\math3d.h(1,1): warning C4819: 璇ユ枃浠跺寘鍚笉鑳藉湪褰撳墠浠ｇ爜椤?936)涓〃绀虹殑瀛楃銆傝灏嗚鏂囦欢淇濆瓨涓?Unicode 鏍煎紡浠ラ槻姝㈡暟鎹涪澶?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/control/control_system.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\control\control_system.cpp(222,41): error C2065: 鈥渃onfig鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\control\control_system.cpp(222,72): error C2065: 鈥渃onfig鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]

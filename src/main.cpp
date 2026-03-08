@@ -713,7 +713,7 @@ int main() {
         // 普通循环执行实现加速
         for (int i = 0; i < time_warp; i++) {
           if (rocket_state.auto_mode) ControlSystem::UpdateAutoPilot(rocket_state, rocket_config, control_input, dt);
-          else ControlSystem::UpdateManualControl(rocket_state, control_input, manual, dt);
+          else ControlSystem::UpdateManualControl(rocket_state, rocket_config, control_input, manual, dt);
           PhysicsSystem::Update(rocket_state, rocket_config, control_input, dt);
           
           // Auto-staging: when current stage fuel is depleted, advance to next
