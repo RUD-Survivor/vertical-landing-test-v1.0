@@ -215,6 +215,16 @@ void UpdateManualControl(RocketState& state, const RocketConfig& config, Control
                     Vec3 rocketNose = state.attitude.forward();
                     Vec3 targetDir = state.sas_target_vec;
                     Vec3 errorVec = rocketNose.cross(targetDir);
+
+                    // Singularity fix: if looking exactly AWAY from target, errorVec is zero.
+                    // Dot product will be -1.0 in this case.
+                    if (rocketNose.dot(targetDir) < -0.999f && errorVec.length() < 0.01f) {
+                        // Inject a small perturbation to break the symmetry
+                        // Pick an axis we aren't currently aligned with to start a turn
+                        errorVec = rocketNose.cross(Vec3(0, 0, 1.0f));
+                        if (errorVec.length() < 0.01f) errorVec = rocketNose.cross(Vec3(1.0f, 0, 0));
+                    }
+
                     Vec3 localError = state.attitude.conjugate().rotate(errorVec);
                     
                     double torque_mag = 60000.0; // Synchronized with manual control

@@ -159,6 +159,17 @@ public:
     }
   }
 
+  void addCircleOutline(float cx, float cy, float radius, float thick, float r, float g, float b, float a = 1.0f) {
+    int segments = 64;
+    for (int i = 0; i < segments; i++) {
+        float theta1 = 2.0f * PI * float(i) / float(segments);
+        float theta2 = 2.0f * PI * float(i + 1) / float(segments);
+        addLine(cx + radius * cosf(theta1), cy + radius * sinf(theta1),
+                cx + radius * cosf(theta2), cy + radius * sinf(theta2),
+                thick, r, g, b, a);
+    }
+  }
+
   // 画直线
   void addLine(float x1, float y1, float x2, float y2, float thick, float r, float g, float b, float a = 1.0f) {
       float dx = x2 - x1;
@@ -390,38 +401,51 @@ public:
         float alpha = fminf(1.0f, pR.y * 5.0f);
         float mx = cx + pR.x * radius;
         float my = cy + pR.z * radius;
-        float ms = radius * 0.14f; // 增大尺寸
-        float lw = 0.003f; // 增加线宽
+        float ms = radius * 0.14f;
+        float lw = 0.003f;
         
-        if (std::string(type) == "PRO") { // Prograde: Green Circle with wings
-            addCircle(mx, my, ms * 0.8f, r, g, b, alpha);
+        // Hollow designs: Use outlines only to avoid blocking text
+        if (std::string(type) == "PRO") { // Prograde: Hollow Green Circle with wings
+            addCircle(mx, my, ms * 0.8f, r, g, b, alpha * 0.3f); // Very faint internal circle
+            addCircleOutline(mx, my, ms * 0.8f, lw, r, g, b, alpha);
             addLine(mx, my - ms * 0.8f, mx, my - ms * 1.4f, lw, r, g, b, alpha);
             addLine(mx - ms * 0.8f, my, mx - ms * 1.4f, my, lw, r, g, b, alpha);
             addLine(mx + ms * 0.8f, my, mx + ms * 1.4f, my, lw, r, g, b, alpha);
-            addCircle(mx, my, ms * 0.2f, r, g, b, alpha); // Center dot
-        } else if (std::string(type) == "RET") { // Retrograde: Yellow Circle with wings pointing in
-            addCircle(mx, my, ms * 0.8f, r, g, b, alpha);
+            addCircle(mx, my, ms * 0.15f, r, g, b, alpha); // Small center dot
+        } else if (std::string(type) == "RET") { // Retrograde: Hollow Yellow Circle with wings
+            addCircleOutline(mx, my, ms * 0.8f, lw, r, g, b, alpha);
             addLine(mx, my - ms * 0.4f, mx, my - ms * 0.8f, lw, r, g, b, alpha);
             addLine(mx - ms * 0.4f, my, mx - ms * 0.8f, my, lw, r, g, b, alpha);
             addLine(mx + ms * 0.4f, my, mx + ms * 0.8f, my, lw, r, g, b, alpha);
             drawText(mx, my, "X", ms * 0.8f, r, g, b, alpha, true, Renderer::CENTER);
-        } else if (std::string(type) == "NRM") { // Normal: Purple Solid Triangle
-            addCircle(mx, my, ms * 0.5f, r, g, b, alpha * 0.5f);
-            addRotatedTri(mx, my - ms * 0.2f, ms * 1.8f, ms * 1.8f, 0, r, g, b, alpha);
-        } else if (std::string(type) == "ANT") { // Anti-normal: Purple Inverted Triangle with X
-            addRotatedTri(mx, my + ms * 0.2f, ms * 1.8f, ms * 1.8f, PI, r, g, b, alpha);
-            drawText(mx, my, "X", ms * 0.7f, r, g, b, alpha, true, Renderer::CENTER);
-        } else if (std::string(type) == "R-I") { // Radial In: Blue circle with inward lines
-            addCircle(mx, my, ms * 1.0f, r, g, b, alpha);
+        } else if (std::string(type) == "NRM") { // Normal: Hollow Purple Triangle
+            addCircleOutline(mx, my, ms * 0.4f, lw, r, g, b, alpha * 0.5f);
+            // Draw hollow triangle using 3 lines
+            float h = ms * 1.8f;
+            float w2 = h * 0.6f;
+            float ty = my - h * 0.4f;
+            addLine(mx, ty, mx - w2, ty + h, lw, r, g, b, alpha);
+            addLine(mx - w2, ty + h, mx + w2, ty + h, lw, r, g, b, alpha);
+            addLine(mx + w2, ty + h, mx, ty, lw, r, g, b, alpha);
+        } else if (std::string(type) == "ANT") { // Anti-normal: Hollow Purple Inv-Triangle with X
+            float h = ms * 1.8f;
+            float w2 = h * 0.6f;
+            float ty = my + h * 0.4f;
+            addLine(mx, ty, mx - w2, ty - h, lw, r, g, b, alpha);
+            addLine(mx - w2, ty - h, mx + w2, ty - h, lw, r, g, b, alpha);
+            addLine(mx + w2, ty - h, mx, ty, lw, r, g, b, alpha);
+            drawText(mx, my - ms * 0.2f, "X", ms * 0.7f, r, g, b, alpha, true, Renderer::CENTER);
+        } else if (std::string(type) == "R-I") { // Radial In: Deep Blue hollow circle with inward lines
+            addCircleOutline(mx, my, ms * 1.0f, lw, r, g, b, alpha);
             for(int k=0; k<4; k++){
                 float ang = k * PI/2.0f;
                 addLine(mx + cosf(ang)*ms, my + sinf(ang)*ms, mx + cosf(ang)*ms*0.4f, my + sinf(ang)*ms*0.4f, lw, r, g, b, alpha);
             }
-        } else if (std::string(type) == "R-O") { // Radial Out: Blue circle with outward lines
-            addCircle(mx, my, ms * 0.7f, r, g, b, alpha);
+        } else if (std::string(type) == "R-O") { // Radial Out: Deep Blue hollow circle with outward lines
+            addCircleOutline(mx, my, ms * 0.7f, lw, r, g, b, alpha);
             for(int k=0; k<4; k++){
                 float ang = (k * PI/2.0f) + (PI/4.0f);
-                addLine(mx + cosf(ang)*ms*0.7f, my + sinf(ang)*ms*0.7f, mx + cosf(ang)*ms*1.5f, my + sinf(ang)*ms*1.5f, lw, r, g, b, alpha);
+                addLine(mx + cosf(ang)*ms*0.7f, my + sinf(ang)*ms*0.7f, mx + cosf(ang)*ms*1.3f, my + sinf(ang)*ms*1.3f, lw, r, g, b, alpha);
             }
         }
     };
@@ -430,8 +454,9 @@ public:
     drawMarker(vPrograde * -1.0f, "RET", 0.8f, 0.8f, 0.1f);
     drawMarker(vNormal, "NRM", 0.7f, 0.2f, 0.8f);
     drawMarker(vNormal * -1.0f, "ANT", 0.7f, 0.2f, 0.8f);
-    drawMarker(vRadial, "R-I", 0.1f, 0.5f, 1.0f);
-    drawMarker(vRadial * -1.0f, "R-O", 0.1f, 0.5f, 1.0f);
+    // Deep blue for radial markers: R=0.1, G=0.2, B=0.9
+    drawMarker(vRadial, "R-I", 0.1f, 0.2f, 0.9f);
+    drawMarker(vRadial * -1.0f, "R-O", 0.1f, 0.2f, 0.9f);
   }
 
   enum Align { LEFT, CENTER, RIGHT };
