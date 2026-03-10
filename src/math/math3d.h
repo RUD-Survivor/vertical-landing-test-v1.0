@@ -15,6 +15,18 @@ struct Vec2 {
   float x, y;
   Vec2() : x(0), y(0) {}
   Vec2(float x, float y) : x(x), y(y) {}
+
+  Vec2 operator+(const Vec2& b) const { return Vec2(x + b.x, y + b.y); }
+  Vec2 operator-(const Vec2& b) const { return Vec2(x - b.x, y - b.y); }
+  Vec2 operator*(float s) const { return Vec2(x * s, y * s); }
+  Vec2 operator/(float s) const { float inv = 1.0f / s; return Vec2(x * inv, y * inv); }
+
+  float length() const { return sqrtf(x * x + y * y); }
+  Vec2 normalized() const {
+    float len = length();
+    if (len < 1e-12f) return Vec2(0.0f, 0.0f);
+    return *this / len;
+  }
 };
 
 // ==========================================================

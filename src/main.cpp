@@ -540,6 +540,16 @@ int main() {
     glfwPollEvents();
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
       glfwSetWindowShouldClose(window, true);
+    
+    int ww, wh;
+    glfwGetWindowSize(window, &ww, &wh);
+    static float global_best_ang = -1.0f;
+    static double global_best_mu = 0, global_best_a = 0, global_best_ecc = 0;
+    static double global_current_M0 = 0, global_current_n = 0;
+    static Vec3 global_best_pt, global_best_center, global_best_e_dir, global_best_perp_dir;
+    static bool rmb_prev_mnv = false;
+    static int global_best_ref_node = -1; // Index of SOI for node reference
+
     static bool space_was_pressed = true; // Start true to ignore the Builder's enter/space
     bool space_now = glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS;
     if (space_now && !space_was_pressed) {
@@ -620,22 +630,32 @@ int main() {
     static float last_drag_mx = 0;
     if (cam_mode_3d == 2) {
         double mx, my; glfwGetCursorPos(window, &mx, &my);
-        int ww, wh; glfwGetWindowSize(window, &ww, &wh);
         float mouse_x = (float)(mx / ww * 2.0 - 1.0);
+        float mouse_y = (float)(1.0 - my / wh * 2.0);
+        static float frame_delta_mx = 0;
+        frame_delta_mx = mouse_x - last_drag_mx;
         bool lmb = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
         if (!lmb) dragging_handle = -1;
         
-        if (dragging_handle != -1 && lmb) {
-            float dx = (mouse_x - last_drag_mx) * 1000.0f;
-            if (rocket_state.selected_maneuver_index != -1) {
-                ManeuverNode& node = rocket_state.maneuvers[rocket_state.selected_maneuver_index];
-                if (dragging_handle == 0) node.delta_v.x += dx;
-                else if (dragging_handle == 1) node.delta_v.x -= dx;
-                else if (dragging_handle == 2) node.delta_v.y += dx;
-                else if (dragging_handle == 3) node.delta_v.y -= dx;
-                else if (dragging_handle == 4) node.delta_v.z += dx;
-                else if (dragging_handle == 5) node.delta_v.z -= dx;
-                node.active = true;
+        if (dragging_handle != -1 && lmb && rocket_state.selected_maneuver_index != -1) {
+            ManeuverNode& node = rocket_state.maneuvers[rocket_state.selected_maneuver_index];
+            if (dragging_handle == -2) { // Dragging the node itself (Time Slider)
+                if (global_best_ang >= 0) {
+                    double mu_body = 6.67430e-11 * SOLAR_SYSTEM[current_soi_index].mass;
+                    double M_click = global_best_ang - global_best_ecc * sin(global_best_ang);
+                    double r_mag = sqrt(rocket_state.px*rocket_state.px + rocket_state.py*rocket_state.py + rocket_state.pz*rocket_state.pz);
+                    double cos_E = (global_best_a - r_mag) / (global_best_a * global_best_ecc);
+                    double sin_E = (rocket_state.px*rocket_state.vx + rocket_state.py*rocket_state.vy + rocket_state.pz*rocket_state.vz) / (global_best_ecc * sqrt(mu_body * global_best_a));
+                    double E0 = atan2(sin_E, cos_E);
+                    double M0 = E0 - global_best_ecc * sin(E0);
+                    double n = sqrt(mu_body / (global_best_a * global_best_a * global_best_a));
+                    double dM = M_click - M0;
+                    while (dM < 0) dM += 2.0 * PI;
+                    while (dM > 2.0 * PI) dM -= 2.0 * PI;
+                    node.sim_time = rocket_state.sim_time + (dM / n);
+                }
+            } else { // Dragging a Delta-V handle
+                // This logic is now handled in the rendering pass where screen-space axis vectors are available
             }
         }
         last_drag_mx = mouse_x;
@@ -1367,6 +1387,17 @@ int main() {
               // 生成预测轨迹点集
               std::vector<Vec3> orbit_points;
               int orbit_segs = 120;
+              float best_orb_dist = 1.0f;
+              float best_orb_ang = -1.0f;
+              Vec3 best_orb_pt_tmp;
+              
+              double n_mean_mot = sqrt(mu_body / (a * a * a));
+              
+              double mx_curr, my_curr; 
+              glfwGetCursorPos(window, &mx_curr, &my_curr);
+              float mxf = (float)(mx_curr / ww * 2.0 - 1.0);
+              float myf = (float)(1.0 - my_curr / wh * 2.0);
+
               for (int i = 0; i <= orbit_segs; i++) {
                 float ang = (float)i / orbit_segs * 6.2831853f;
                 Vec3 pt_rel = center_off + e_dir * ((float)a * cosf(ang)) + perp_dir * (b * sinf(ang));
@@ -1379,6 +1410,37 @@ int main() {
                 Vec3 pt = Vec3((float)(px * ws_d - ro_x), (float)(py * ws_d - ro_y), (float)(pz * ws_d - ro_z));
                 // Do not clip orbit points beneath the surface so users can see where they crash
                 orbit_points.push_back(pt);
+
+                // --- Maneuver Click Hit-test ---
+                if (is_sun_ref == orbit_reference_sun) {
+                    Vec2 scr = ManeuverSystem::projectToScreen(pt, viewMat, macroProjMat, (float)ww/wh);
+                    float d = sqrtf(powf(scr.x - mxf, 2) + powf(scr.y - myf, 2));
+                    if (d < best_orb_dist) {
+                        best_orb_dist = d;
+                        best_orb_ang = ang;
+                        best_orb_pt_tmp = pt;
+                    }
+                }
+              }
+              
+              // Store best hit for this ref frame if it's the active one
+              if (is_sun_ref == orbit_reference_sun && best_orb_dist < 0.05f) {
+                  global_best_ang = best_orb_ang;
+                  global_best_mu = mu_body;
+                  global_best_a = a;
+                  global_best_ecc = ecc;
+                  global_best_pt = best_orb_pt_tmp;
+                  global_best_center = center_off;
+                  global_best_e_dir = e_dir;
+                  global_best_perp_dir = perp_dir;
+                  global_best_ref_node = is_sun_ref ? 0 : current_soi_index;
+
+                  double n = sqrt(mu_body / (a * a * a));
+                  double cos_E = (a - r_len) / (a * ecc);
+                  double sin_E = (abs_px*abs_vx + abs_py*abs_vy + abs_pz*abs_vz) / (ecc * sqrt(mu_body * a));
+                  double E0 = atan2(sin_E, cos_E);
+                  global_current_M0 = E0 - ecc * sin(E0);
+                  global_current_n = n;
               }
               
               // 渲染预测轨迹
@@ -1479,81 +1541,112 @@ int main() {
 
         // --- Maneuver Nodes & Predicted Orbits ---
         double mx_raw, my_raw; glfwGetCursorPos(window, &mx_raw, &my_raw);
-        int ww_px, wh_px; glfwGetWindowSize(window, &ww_px, &wh_px);
-        float mouse_x = (float)(mx_raw / ww_px * 2.0 - 1.0);
-        float mouse_y = (float)(1.0 - my_raw / wh_px * 2.0);
+        float mouse_x = (float)(mx_raw / ww * 2.0 - 1.0);
+        float mouse_y = (float)(1.0 - my_raw / wh * 2.0);
         bool lmb = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+        bool rmb = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
         static bool lmb_prev_mnv = false;
 
+        // Render hover circle if mouse is over orbit
+        if (global_best_ang >= 0 && rocket_state.selected_maneuver_index == -1) {
+            float hover_size = earth_r * 0.03f * fmaxf(1.0f, cam_zoom_pan * 0.5f);
+            r3d->drawBillboard(global_best_pt, hover_size, 1.0f, 1.0f, 1.0f, 0.5f);
+        }
+
         double mu_body = 6.67430e-11 * SOLAR_SYSTEM[current_soi_index].mass;
-        float as_ratio = (float)ww_px / wh_px;
+        float as_ratio = (float)ww / wh;
+
+        // Use a local delta for dragging (calculate once per frame)
+        static float last_pass_mx = 0;
+        float dmx = mouse_x - last_pass_mx;
+        last_pass_mx = mouse_x;
 
         for (int i = 0; i < (int)rocket_state.maneuvers.size(); i++) {
             ManeuverNode& node = rocket_state.maneuvers[i];
             double dt_node = node.sim_time - rocket_state.sim_time;
-            double nx, ny, nvx, nvy;
-            getStateAtTime(rocket_state.px, rocket_state.py, rocket_state.vx, rocket_state.vy, mu_body, dt_node, nx, ny, nvx, nvy);
+
+            // 3D Reconstruction of node position at time sim_time + dt_node
+            double M_node = global_current_M0 + global_current_n * dt_node;
+            double E_node = M_node;
+            for (int k = 0; k < 5; k++) E_node -= (E_node - global_best_ecc * sin(E_node) - M_node) / (1.0 - global_best_ecc * cos(E_node));
+            float b_node = (float)global_best_a * sqrtf(fmaxf(0.0f, 1.0f - (float)global_best_ecc * (float)global_best_ecc));
+            Vec3 pt_node_rel = global_best_center + global_best_e_dir * ((float)global_best_a * cosf((float)E_node)) + global_best_perp_dir * (b_node * sinf((float)E_node));
             
-            Vec3 node_world((float)(SOLAR_SYSTEM[current_soi_index].px * ws_d + nx * ws_d - ro_x), 
-                           (float)(SOLAR_SYSTEM[current_soi_index].py * ws_d + ny * ws_d - ro_y), 
-                           (float)(SOLAR_SYSTEM[current_soi_index].pz * ws_d - ro_z));
-            
+            double ref_px = 0, ref_py = 0, ref_pz = 0;
+            if (global_best_ref_node >= 0) {
+                ref_px = SOLAR_SYSTEM[global_best_ref_node].px;
+                ref_py = SOLAR_SYSTEM[global_best_ref_node].py;
+                ref_pz = SOLAR_SYSTEM[global_best_ref_node].pz;
+            }
+            Vec3 node_world = Vec3((float)(ref_px * ws_d + pt_node_rel.x * ws_d - ro_x), 
+                              (float)(ref_py * ws_d + pt_node_rel.y * ws_d - ro_y), 
+                              (float)(ref_pz * ws_d + pt_node_rel.z * ws_d - ro_z));
             Vec2 n_scr = ManeuverSystem::projectToScreen(node_world, viewMat, macroProjMat, as_ratio);
             float d_mouse = sqrtf(powf(n_scr.x - mouse_x, 2) + powf(n_scr.y - mouse_y, 2));
 
             if (lmb && !lmb_prev_mnv && d_mouse < 0.04f) {
                 rocket_state.selected_maneuver_index = i;
+                dragging_handle = -2; // Dragging the node itself
             }
 
-            // Draw Icon
-            r3d->drawBillboard(node_world, earth_r * 0.08f, 0.2f, 0.6f, 1.0f, 0.9f);
+            // Draw Icon (Highlight if selected or hovered)
+            float icon_size = earth_r * (d_mouse < 0.04f ? 0.1f : 0.08f);
+            Vec3 icon_col = (rocket_state.selected_maneuver_index == i) ? Vec3(0.4f, 0.8f, 1.0f) : Vec3(0.2f, 0.6f, 1.0f);
+            r3d->drawBillboard(node_world, icon_size, icon_col.x, icon_col.y, icon_col.z, 0.9f);
             
             if (rocket_state.selected_maneuver_index == i) {
-                ManeuverFrame frame = ManeuverSystem::getFrame(Vec3((float)nx, (float)ny, 0), Vec3((float)nvx, (float)nvy, 0));
+                // Node relative state for handles (3D)
+                double E_dot = global_current_n / (1.0 - global_best_ecc * cos(E_node));
+                Vec3 v_node_rel = global_best_e_dir * (-(float)global_best_a * sinf((float)E_node) * (float)E_dot) + global_best_perp_dir * (b_node * cosf((float)E_node) * (float)E_dot);
+                ManeuverFrame m_frame = ManeuverSystem::getFrame(pt_node_rel, v_node_rel);
+
                 for (int h = 0; h < 6; h++) {
-                    Vec3 h_dir = ManeuverSystem::getHandleDir(frame, h);
-                    Vec3 h_world = node_world + h_dir * (earth_r * 0.2f);
+                    Vec3 h_dir = ManeuverSystem::getHandleDir(m_frame, h);
+                    float handle_dist = earth_r * (dragging_handle == h ? 0.35f : 0.2f);
+                    Vec3 h_world = node_world + h_dir * handle_dist;
                     Vec2 h_scr = ManeuverSystem::projectToScreen(h_world, viewMat, macroProjMat, as_ratio);
                     float hd = sqrtf(powf(h_scr.x - mouse_x, 2) + powf(h_scr.y - mouse_y, 2));
-                    if (lmb && !lmb_prev_mnv && hd < 0.03f) dragging_handle = h;
                     
+                    if (lmb && !lmb_prev_mnv && hd < 0.035f) dragging_handle = h;
+                    
+                    if (dragging_handle == h && lmb) {
+                        Vec3 h_world_next = node_world + h_dir * (handle_dist + 1.0f);
+                        Vec2 h_scr_next = ManeuverSystem::projectToScreen(h_world_next, viewMat, macroProjMat, as_ratio);
+                        Vec2 screen_axis = (h_scr_next - h_scr).normalized();
+                        float drag_amount = dmx * screen_axis.x * 800.0f;
+                        if (h == 0) node.delta_v.x += drag_amount; else if (h == 1) node.delta_v.x -= drag_amount;
+                        else if (h == 2) node.delta_v.y += drag_amount; else if (h == 3) node.delta_v.y -= drag_amount;
+                        else if (h == 4) node.delta_v.z += drag_amount; else if (h == 5) node.delta_v.z -= drag_amount;
+                        node.active = true;
+                    }
                     Vec3 h_col = ManeuverSystem::getHandleColor(h);
-                    r3d->drawBillboard(h_world, earth_r * 0.04f, h_col.x, h_col.y, h_col.z, 0.9f);
+                    if (hd < 0.035f || dragging_handle == h) h_col = h_col * 1.3f;
+                    r3d->drawBillboard(h_world, earth_r * (hd < 0.035f ? 0.05f : 0.04f), h_col.x, h_col.y, h_col.z, 0.9f);
                 }
                 
-                // Predicted Orbit (Dashed)
                 if (node.active) {
-                    double pvx = nvx + frame.prograde.x * node.delta_v.x + frame.normal.x * node.delta_v.y + frame.radial.x * node.delta_v.z;
-                    double pvy = nvy + frame.prograde.y * node.delta_v.x + frame.normal.y * node.delta_v.y + frame.radial.y * node.delta_v.z;
-                    
-                    // Predict orbit path from node position
-                    double p_energy = 0.5 * (pvx*pvx + pvy*pvy) - mu_body / sqrt(nx*nx + ny*ny);
-                    double p_a = -mu_body / (2.0 * p_energy);
-                    if (p_a > 0) { // Ellipse
-                        Vec3 p_h_vec = Vec3((float)nx, (float)ny, 0).cross(Vec3((float)pvx, (float)pvy, 0));
-                        Vec3 p_e_vec = Vec3((float)pvx, (float)pvy, 0).cross(p_h_vec) / (float)mu_body - Vec3((float)nx, (float)ny, 0) / (float)sqrt(nx*nx+ny*ny);
+                    // Predicted Orbit (Dashed)
+                    Vec3 p_pos = pt_node_rel;
+                    Vec3 p_vel = v_node_rel + m_frame.prograde * node.delta_v.x + m_frame.normal * node.delta_v.y + m_frame.radial * node.delta_v.z;
+                    double p_energy = 0.5 * (double)p_vel.lengthSq() - global_best_mu / (double)p_pos.length();
+                    double p_a = -global_best_mu / (2.0 * p_energy);
+                    if (p_a > 0) {
+                        Vec3 p_h_vec = p_pos.cross(p_vel);
+                        Vec3 p_e_vec = p_vel.cross(p_h_vec) / (float)global_best_mu - p_pos / (float)p_pos.length();
                         float p_ecc = p_e_vec.length();
                         float p_b = (float)p_a * sqrtf(fmaxf(0.0f, 1.0f - p_ecc * p_ecc));
                         Vec3 p_e_dir = p_ecc > 1e-6f ? p_e_vec / p_ecc : Vec3(1,0,0);
                         Vec3 p_perp = p_h_vec.normalized().cross(p_e_dir);
                         Vec3 p_center = p_e_dir * (-(float)p_a * p_ecc);
-
                         std::vector<Vec3> p_pts;
-                        int segs = 100;
-                        for (int s = 0; s <= segs; s++) {
-                            float ang = (float)s / segs * 2.0f * PI;
-                            Vec3 pt_rel = p_center + p_e_dir * ((float)p_a * cosf(ang)) + p_perp * (p_b * sinf(ang));
-                            Vec3 pt_w((float)(SOLAR_SYSTEM[current_soi_index].px * ws_d + pt_rel.x * ws_d - ro_x),
-                                      (float)(SOLAR_SYSTEM[current_soi_index].py * ws_d + pt_rel.y * ws_d - ro_y),
-                                      (float)(SOLAR_SYSTEM[current_soi_index].pz * ws_d - ro_z));
-                            
-                            p_pts.push_back(pt_w);
+                        for (int s = 0; s <= 100; s++) {
+                            float ang = (float)s / 100.0f * 2.0f * PI;
+                            Vec3 ptr = p_center + p_e_dir * ((float)p_a * cosf(ang)) + p_perp * (p_b * sinf(ang));
+                            p_pts.push_back(Vec3((float)(ref_px * ws_d + ptr.x * ws_d - ro_x), (float)(ref_py * ws_d + ptr.y * ws_d - ro_y), (float)(ref_pz * ws_d + ptr.z * ws_d - ro_z)));
                         }
-                        
-                        // Draw dashed segments
                         float ribbon_w = earth_r * 0.002f * fmaxf(1.0f, cam_zoom_pan * 0.5f);
                         for (size_t s = 0; s < p_pts.size() - 1; s += 4) {
-                            std::vector<Vec3> sub; sub.push_back(p_pts[s]); 
+                            std::vector<Vec3> sub; sub.push_back(p_pts[s]);
                             if (s+1 < p_pts.size()) sub.push_back(p_pts[s+1]);
                             if (s+2 < p_pts.size()) sub.push_back(p_pts[s+2]);
                             r3d->drawRibbon(sub, ribbon_w, 1.0f, 1.0f, 1.0f, 0.7f);
@@ -1563,18 +1656,23 @@ int main() {
             }
         }
         
-        // --- Click on empty orbit to create node ---
-        if (lmb && !lmb_prev_mnv && rocket_state.selected_maneuver_index == -1) {
-            if (rocket_state.maneuvers.empty()) {
-                ManeuverNode newNode;
-                newNode.sim_time = rocket_state.sim_time + 600.0; // 10 mins ahead
-                newNode.delta_v = Vec3(0,0,0);
-                newNode.active = true;
-                rocket_state.maneuvers.push_back(newNode);
-                rocket_state.selected_maneuver_index = 0;
-            }
+        // --- Click on empty orbit to create node (Changed to RMB) ---
+        if (rmb && !rmb_prev_mnv && rocket_state.selected_maneuver_index == -1 && global_best_ang >= 0) {
+            double M_click = global_best_ang - global_best_ecc * sin(global_best_ang);
+            double dM = M_click - global_current_M0;
+            while (dM < 0) dM += 2.0 * PI;
+            while (dM > 2.0 * PI) dM -= 2.0 * PI;
+            
+            ManeuverNode newNode;
+            newNode.sim_time = rocket_state.sim_time + (dM / global_current_n);
+            newNode.delta_v = Vec3(0,0,0);
+            newNode.active = true;
+            rocket_state.maneuvers.push_back(newNode);
+            rocket_state.selected_maneuver_index = (int)rocket_state.maneuvers.size() - 1;
         }
+        global_best_ang = -1.0f; // Reset for next frame
         lmb_prev_mnv = lmb;
+        rmb_prev_mnv = rmb;
       }
 
 
