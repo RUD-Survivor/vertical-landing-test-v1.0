@@ -1458,11 +1458,19 @@ int main() {
                 }
             };
 
-            for (int i = 0; i < STEPS; i++) {
-                double step_dt = dt;
+            double max_pred_time = rocket_state.sim_time + adv_orbit_pred_days * 86400.0;
+            const double FR_theta = 1.0 / (2.0 - cbrt(2.0));
+            const double c1 = FR_theta / 2.0, c2 = (1.0 - FR_theta) / 2.0;
+            const double d1 = FR_theta, d2 = 1.0 - 2.0 * FR_theta;
+
+            int actual_steps = 0;
+            while (t_sim < max_pred_time && actual_steps < adv_orbit_iters) {
+                actual_steps++;
                 
                 if (has_mnv && !mnv_executed) {
-                    if (t_sim >= trigger_t) {
+                    if (t_sim >= trigger_t - 1e-6) {
+                        t_sim = trigger_t; // Strict snap to maneuver time
+                        
                         // Extract point before applying burn
                         if (!adv_points.empty()) {
                             adv_mnv_world_pos = adv_points.back();
@@ -1482,12 +1490,12 @@ int main() {
                         
                         // Dynamically update the node's osculating Kepler parameters so the UI handles rotate correctly
                         double r_mag = sqrt(r_rel_x*r_rel_x + r_rel_y*r_rel_y + r_rel_z*r_rel_z);
-                        double v_sq = v_rel_x*v_rel_x + v_rel_y*v_rel_y + v_rel_z*v_rel_z;
+                        double v_sq_rel = v_rel_x*v_rel_x + v_rel_y*v_rel_y + v_rel_z*v_rel_z;
                         double mu = 6.67430e-11 * SOLAR_SYSTEM[current_soi_index].mass;
                         Vec3 r_vec((float)r_rel_x, (float)r_rel_y, (float)r_rel_z);
                         Vec3 v_vec((float)v_rel_x, (float)v_rel_y, (float)v_rel_z);
                         Vec3 h_vec = r_vec.cross(v_vec);
-                        double energy = 0.5 * v_sq - mu / r_mag;
+                        double energy = 0.5 * v_sq_rel - mu / r_mag;
                         double a = -mu / (2.0 * energy);
                         if (a != 0) {
                             Vec3 e_vec = v_vec.cross(h_vec) / (float)mu - r_vec / (float)r_mag;
@@ -1517,7 +1525,6 @@ int main() {
                         cur_h_vx += dv.x; cur_h_vy += dv.y; cur_h_vz += dv.z;
                         
                         // Snapshot the post-burn state ONLY ONCE for stable orbit prediction.
-                        // Once frozen, it stays stable no matter what the player does.
                         if (!rocket_state.maneuvers[0].snap_valid) {
                             rocket_state.maneuvers[0].snap_px = cur_h_px;
                             rocket_state.maneuvers[0].snap_py = cur_h_py;
@@ -1530,53 +1537,58 @@ int main() {
                         
                         mnv_executed = true;
                         continue; // Skip the integration time-step this loop, maneuver is applied instantly in-place!
-                    } else if (t_sim + dt > trigger_t) {
-                        step_dt = trigger_t - t_sim; // Sub-step exactly up to maneuver start time!
                     }
                 }
                 
-                // RK4 evaluate
-                double k1_vx, k1_vy, k1_vz; calc_acc(t_sim, cur_h_px, cur_h_py, cur_h_pz, k1_vx, k1_vy, k1_vz);
-                double k1_px = cur_h_vx, k1_py = cur_h_vy, k1_pz = cur_h_vz;
+                double min_dist_sq = 1e20;
+                for (size_t b = 0; b < SOLAR_SYSTEM.size(); b++) {
+                    double dx = cur_h_px - SOLAR_SYSTEM[b].px;
+                    double dy = cur_h_py - SOLAR_SYSTEM[b].py;
+                    double dz = cur_h_pz - SOLAR_SYSTEM[b].pz;
+                    double dsq = dx*dx + dy*dy + dz*dz;
+                    if (dsq > 1.0 && dsq < min_dist_sq) min_dist_sq = dsq;
+                }
+                double v_sq = cur_h_vx*cur_h_vx + cur_h_vy*cur_h_vy + cur_h_vz*cur_h_vz;
                 
-                double k2_vx, k2_vy, k2_vz; calc_acc(t_sim+step_dt/2, cur_h_px+step_dt/2*k1_px, cur_h_py+step_dt/2*k1_py, cur_h_pz+step_dt/2*k1_pz, k2_vx, k2_vy, k2_vz);
-                double k2_px = cur_h_vx+step_dt/2*k1_vx, k2_py = cur_h_vy+step_dt/2*k1_vy, k2_pz = cur_h_vz+step_dt/2*k1_vz;
+                // Sundman Time Transformation: dt scales strictly with local r/v curvature
+                double step_dt = 0.05 * sqrt(min_dist_sq / fmax(v_sq, 1.0));
                 
-                double k3_vx, k3_vy, k3_vz; calc_acc(t_sim+step_dt/2, cur_h_px+step_dt/2*k2_px, cur_h_py+step_dt/2*k2_py, cur_h_pz+step_dt/2*k2_pz, k3_vx, k3_vy, k3_vz);
-                double k3_px = cur_h_vx+step_dt/2*k2_vx, k3_py = cur_h_vy+step_dt/2*k2_vy, k3_pz = cur_h_vz+step_dt/2*k2_vz;
+                if (step_dt > 3600.0 * 24.0) step_dt = 3600.0 * 24.0;
+                if (step_dt < 0.1) step_dt = 0.1;
                 
-                double k4_vx, k4_vy, k4_vz; calc_acc(t_sim+step_dt, cur_h_px+step_dt*k3_px, cur_h_py+step_dt*k3_py, cur_h_pz+step_dt*k3_pz, k4_vx, k4_vy, k4_vz);
-                double k4_px = cur_h_vx+step_dt*k3_vx, k4_py = cur_h_vy+step_dt*k3_vy, k4_pz = cur_h_vz+step_dt*k3_vz;
-                
-                cur_h_px += step_dt/6.0*(k1_px + 2*k2_px + 2*k3_px + k4_px);
-                cur_h_py += step_dt/6.0*(k1_py + 2*k2_py + 2*k3_py + k4_py);
-                cur_h_pz += step_dt/6.0*(k1_pz + 2*k2_pz + 2*k3_pz + k4_pz);
-                cur_h_vx += step_dt/6.0*(k1_vx + 2*k2_vx + 2*k3_vx + k4_vx);
-                cur_h_vy += step_dt/6.0*(k1_vy + 2*k2_vy + 2*k3_vy + k4_vy);
-                cur_h_vz += step_dt/6.0*(k1_vz + 2*k2_vz + 2*k3_vz + k4_vz);
-                
-                if (mnv_executed) {
-                    double ok1_vx, ok1_vy, ok1_vz; calc_acc(t_sim, orig_px, orig_py, orig_pz, ok1_vx, ok1_vy, ok1_vz);
-                    double ok1_px = orig_vx, ok1_py = orig_vy, ok1_pz = orig_vz;
-                    
-                    double ok2_vx, ok2_vy, ok2_vz; calc_acc(t_sim+step_dt/2, orig_px+step_dt/2*ok1_px, orig_py+step_dt/2*ok1_py, orig_pz+step_dt/2*ok1_pz, ok2_vx, ok2_vy, ok2_vz);
-                    double ok2_px = orig_vx+step_dt/2*ok1_vx, ok2_py = orig_vy+step_dt/2*ok1_vy, ok2_pz = orig_vz+step_dt/2*ok1_vz;
-                    
-                    double ok3_vx, ok3_vy, ok3_vz; calc_acc(t_sim+step_dt/2, orig_px+step_dt/2*ok2_px, orig_py+step_dt/2*ok2_py, orig_pz+step_dt/2*ok2_pz, ok3_vx, ok3_vy, ok3_vz);
-                    double ok3_px = orig_vx+step_dt/2*ok2_vx, ok3_py = orig_vy+step_dt/2*ok2_vy, ok3_pz = orig_vz+step_dt/2*ok2_vz;
-                    
-                    double ok4_vx, ok4_vy, ok4_vz; calc_acc(t_sim+step_dt, orig_px+step_dt*ok3_px, orig_py+step_dt*ok3_py, orig_pz+step_dt*ok3_pz, ok4_vx, ok4_vy, ok4_vz);
-                    double ok4_px = orig_vx+step_dt*ok3_vx, ok4_py = orig_vy+step_dt*ok3_vy, ok4_pz = orig_vz+step_dt*ok3_vz;
-                    
-                    orig_px += step_dt/6.0*(ok1_px + 2*ok2_px + 2*ok3_px + ok4_px);
-                    orig_py += step_dt/6.0*(ok1_py + 2*ok2_py + 2*ok3_py + ok4_py);
-                    orig_pz += step_dt/6.0*(ok1_pz + 2*ok2_pz + 2*ok3_pz + ok4_pz);
-                    orig_vx += step_dt/6.0*(ok1_vx + 2*ok2_vx + 2*ok3_vx + ok4_vx);
-                    orig_vy += step_dt/6.0*(ok1_vy + 2*ok2_vy + 2*ok3_vy + ok4_vy);
-                    orig_vz += step_dt/6.0*(ok1_vz + 2*ok2_vz + 2*ok3_vz + ok4_vz);
+                if (has_mnv && !mnv_executed && t_sim + step_dt > trigger_t) {
+                    step_dt = trigger_t - t_sim; // strict sync at burn bounds
+                } else if (t_sim + step_dt > max_pred_time) {
+                    step_dt = max_pred_time - t_sim;
                 }
                 
-                t_sim += step_dt;
+                if (step_dt <= 0) break;
+                
+                // 4th-Order Symplectic LMM evaluate (Forest-Ruth)
+                // We use macros to cleanly represent the symmetric position and velocity stages
+                #define SYM_Q(C) \
+                    cur_h_px += (C) * cur_h_vx * step_dt; cur_h_py += (C) * cur_h_vy * step_dt; cur_h_pz += (C) * cur_h_vz * step_dt; \
+                    t_sim += (C) * step_dt; \
+                    if (mnv_executed) { orig_px += (C)*orig_vx*step_dt; orig_py += (C)*orig_vy*step_dt; orig_pz += (C)*orig_vz*step_dt; }
+
+                #define SYM_P(D) \
+                    { \
+                        double ax, ay, az; calc_acc(t_sim, cur_h_px, cur_h_py, cur_h_pz, ax, ay, az); \
+                        cur_h_vx += (D) * ax * step_dt; cur_h_vy += (D) * ay * step_dt; cur_h_vz += (D) * az * step_dt; \
+                        if (mnv_executed) { \
+                            double oax, oay, oaz; calc_acc(t_sim, orig_px, orig_py, orig_pz, oax, oay, oaz); \
+                            orig_vx += (D) * oax * step_dt; orig_vy += (D) * oay * step_dt; orig_vz += (D) * oaz * step_dt; \
+                        } \
+                    }
+
+                // Execute 4 completely symmetric stages to guarantee long term energy conservation
+                SYM_Q(c1); SYM_P(d1);
+                SYM_Q(c2); SYM_P(d2);
+                SYM_Q(c2); SYM_P(d1);
+                SYM_Q(c1);
+
+                #undef SYM_Q
+                #undef SYM_P
 
                 // Sync planets to new t_sim to extract rendering reference
                 PhysicsSystem::UpdateCelestialBodies(t_sim);
@@ -1718,23 +1730,41 @@ int main() {
                 double s_vz = rocket_state.maneuvers[0].snap_vz;
                 double s_t = trigger_t;
                 
-                for (int i = 0; i < STEPS; i++) {
-                    double k1_vx, k1_vy, k1_vz; calc_acc(s_t, s_px, s_py, s_pz, k1_vx, k1_vy, k1_vz);
-                    double k1_px = s_vx, k1_py = s_vy, k1_pz = s_vz;
-                    double k2_vx, k2_vy, k2_vz; calc_acc(s_t+dt/2, s_px+dt/2*k1_px, s_py+dt/2*k1_py, s_pz+dt/2*k1_pz, k2_vx, k2_vy, k2_vz);
-                    double k2_px = s_vx+dt/2*k1_vx, k2_py = s_vy+dt/2*k1_vy, k2_pz = s_vz+dt/2*k1_vz;
-                    double k3_vx, k3_vy, k3_vz; calc_acc(s_t+dt/2, s_px+dt/2*k2_px, s_py+dt/2*k2_py, s_pz+dt/2*k2_pz, k3_vx, k3_vy, k3_vz);
-                    double k3_px = s_vx+dt/2*k2_vx, k3_py = s_vy+dt/2*k2_vy, k3_pz = s_vz+dt/2*k2_vz;
-                    double k4_vx, k4_vy, k4_vz; calc_acc(s_t+dt, s_px+dt*k3_px, s_py+dt*k3_py, s_pz+dt*k3_pz, k4_vx, k4_vy, k4_vz);
-                    double k4_px = s_vx+dt*k3_vx, k4_py = s_vy+dt*k3_vy, k4_pz = s_vz+dt*k3_vz;
+                const double FR_theta = 1.0 / (2.0 - cbrt(2.0));
+                const double c1 = FR_theta / 2.0, c2 = (1.0 - FR_theta) / 2.0;
+                const double d1 = FR_theta, d2 = 1.0 - 2.0 * FR_theta;
+                
+                int actual_steps = 0;
+                double max_s_time = trigger_t + adv_orbit_pred_days * 86400.0;
+                
+                while (actual_steps < adv_orbit_iters && s_t < max_s_time) {
+                    actual_steps++;
                     
-                    s_px += dt/6.0*(k1_px + 2*k2_px + 2*k3_px + k4_px);
-                    s_py += dt/6.0*(k1_py + 2*k2_py + 2*k3_py + k4_py);
-                    s_pz += dt/6.0*(k1_pz + 2*k2_pz + 2*k3_pz + k4_pz);
-                    s_vx += dt/6.0*(k1_vx + 2*k2_vx + 2*k3_vx + k4_vx);
-                    s_vy += dt/6.0*(k1_vy + 2*k2_vy + 2*k3_vy + k4_vy);
-                    s_vz += dt/6.0*(k1_vz + 2*k2_vz + 2*k3_vz + k4_vz);
-                    s_t += dt;
+                    double min_dist_sq = 1e20;
+                    for (size_t b = 0; b < SOLAR_SYSTEM.size(); b++) {
+                        double dx = s_px - SOLAR_SYSTEM[b].px, dy = s_py - SOLAR_SYSTEM[b].py, dz = s_pz - SOLAR_SYSTEM[b].pz;
+                        double dsq = dx*dx + dy*dy + dz*dz;
+                        if (dsq > 1.0 && dsq < min_dist_sq) min_dist_sq = dsq;
+                    }
+                    double v_sq = s_vx*s_vx + s_vy*s_vy + s_vz*s_vz;
+                    
+                    double step_dt = 0.05 * sqrt(min_dist_sq / fmax(v_sq, 1.0));
+                    if (step_dt > 3600.0 * 24.0) step_dt = 3600.0 * 24.0;
+                    if (step_dt < 0.1) step_dt = 0.1;
+                    if (s_t + step_dt > max_s_time) step_dt = max_s_time - s_t;
+                    
+                    if (step_dt <= 0) break;
+                    
+                    #define SYM_S_Q(C) s_px += (C)*s_vx*step_dt; s_py += (C)*s_vy*step_dt; s_pz += (C)*s_vz*step_dt; s_t += (C)*step_dt;
+                    #define SYM_S_P(D) { double ax,ay,az; calc_acc(s_t, s_px,s_py,s_pz, ax,ay,az); s_vx+=(D)*ax*step_dt; s_vy+=(D)*ay*step_dt; s_vz+=(D)*az*step_dt; }
+                    
+                    SYM_S_Q(c1); SYM_S_P(d1);
+                    SYM_S_Q(c2); SYM_S_P(d2);
+                    SYM_S_Q(c2); SYM_S_P(d1);
+                    SYM_S_Q(c1);
+                    
+                    #undef SYM_S_Q
+                    #undef SYM_S_P
                     
                     PhysicsSystem::UpdateCelestialBodies(s_t);
                     double fp = s_px, fpy = s_py, fpz = s_pz;
@@ -3129,7 +3159,7 @@ int main() {
             bool hover_tog = (hmouse_x >= menu_x - menu_w/2 && hmouse_x <= menu_x + menu_w/2 && hmouse_y >= tog_y - 0.02f && hmouse_y <= tog_y + 0.02f);
             if (hover_tog && hlmb && !hlmb_prev) adv_orbit_enabled = !adv_orbit_enabled;
             renderer->drawText(menu_x - 0.12f, tog_y, "Mode:", 0.012f, 1, 1, 1, 1.0f);
-            renderer->drawText(menu_x + 0.02f, tog_y, adv_orbit_enabled ? "N-BODY (RK4)" : "KEPLER (SOI)", 0.012f, adv_orbit_enabled?1:0.6f, adv_orbit_enabled?0.5f:1, 0.4f, 1.0f);
+            renderer->drawText(menu_x + 0.02f, tog_y, adv_orbit_enabled ? "SYM-LMM4 (TRANS-DT)" : "KEPLER (SOI)", 0.012f, adv_orbit_enabled?1:0.6f, adv_orbit_enabled?0.5f:1, 0.4f, 1.0f);
 
             // Frame Type Switch (Inertial vs Co-rotating vs Surface)
             float fr_y = tog_y - 0.06f;
@@ -3205,12 +3235,9 @@ int main() {
 
             // Computed Step Info
             float info_y = iter_y - 0.04f;
-            double computed_step = (adv_orbit_pred_days * 86400.0) / (double)adv_orbit_iters;
             char step_info[64];
-            if (computed_step < 60.0) snprintf(step_info, sizeof(step_info), "Step: %.1f s", computed_step);
-            else if (computed_step < 3600.0) snprintf(step_info, sizeof(step_info), "Step: %.1f min", computed_step / 60.0);
-            else snprintf(step_info, sizeof(step_info), "Step: %.1f hr", computed_step / 3600.0);
-            renderer->drawText(menu_x - 0.12f, info_y, step_info, 0.009f, 0.6f, 0.6f, 0.6f, 0.8f);
+            snprintf(step_info, sizeof(step_info), "Step: Adaptive (Sym-4)");
+            renderer->drawText(menu_x - 0.12f, info_y, step_info, 0.009f, 0.6f, 0.8f, 0.6f, 0.8f);
             
             // Separator
             renderer->addRect(menu_x, info_y - 0.025f, menu_w - 0.04f, 0.002f, 0.3f, 0.5f, 0.7f, 0.5f);
