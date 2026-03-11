@@ -549,6 +549,18 @@ int main() {
     static Vec3 global_best_pt, global_best_center, global_best_e_dir, global_best_perp_dir;
     static bool rmb_prev_mnv = false;
     static int global_best_ref_node = -1; // Index of SOI for node reference
+    
+    // Maneuver popup deferred rendering state (computed in 3D pass, rendered in 2D HUD pass)
+    static bool mnv_popup_visible = false;
+    static float mnv_popup_px = 0, mnv_popup_py = 0, mnv_popup_pw = 0, mnv_popup_ph = 0;
+    static float mnv_popup_node_scr_x = 0, mnv_popup_node_scr_y = 0;
+    static Vec3 mnv_popup_dv;
+    static bool mnv_popup_close_hover = false, mnv_popup_del_hover = false;
+    static double mnv_popup_time_to_node = 0;   // seconds until maneuver
+    static double mnv_popup_burn_time = 0;       // estimated burn time
+    static int mnv_popup_ref_body = -1;          // reference body index
+    static int mnv_popup_slider_dragging = -1;   // -1=none, 0=prograde, 1=normal, 2=radial
+    static float mnv_popup_slider_drag_x = 0;    // mouse x at drag start
 
     static bool space_was_pressed = true; // Start true to ignore the Builder's enter/space
     bool space_now = glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS;
@@ -1556,6 +1568,17 @@ int main() {
         static int mnv_popup_index = -1;
         static bool popup_clicked_frame = false;
         popup_clicked_frame = false;
+        
+        // Early popup bounds check: if a popup is visible, pre-calculate whether the mouse is inside it
+        // to prevent clicks in the popup area from triggering icon/handle/orbit interactions
+        static float cached_popup_x = 0, cached_popup_y = 0, cached_popup_w = 0, cached_popup_h = 0;
+        if (mnv_popup_index != -1 && cached_popup_w > 0) {
+            bool mouse_in_popup_early = (mouse_x >= cached_popup_x - cached_popup_w/2 && mouse_x <= cached_popup_x + cached_popup_w/2 &&
+                                         mouse_y >= cached_popup_y - cached_popup_h/2 && mouse_y <= cached_popup_y + cached_popup_h/2);
+            if (mouse_in_popup_early) {
+                popup_clicked_frame = true;
+            }
+        }
 
         double mu_body = 6.67430e-11 * SOLAR_SYSTEM[current_soi_index].mass;
         float as_ratio = (float)ww / wh;
@@ -1606,11 +1629,15 @@ int main() {
             Vec2 n_scr = ManeuverSystem::projectToScreen(node_world, viewMat, macroProjMat, as_ratio);
             float d_mouse = sqrtf(powf(n_scr.x - mouse_x, 2) + powf(n_scr.y - mouse_y, 2));
 
-            // CLICK PRIORITY: Icon > Orbit
-            if (lmb && !lmb_prev_mnv && dragging_handle == -1) {
-                if (d_mouse < 0.04f) {
+            static bool hit_maneuver_icon = false;
+            if (i == 0) hit_maneuver_icon = false; // Reset start of list
+
+            // CLICK PRIORITY: Icon (only if popup isn't consuming the click)
+            if (lmb && !lmb_prev_mnv && dragging_handle == -1 && !popup_clicked_frame) {
+                if (d_mouse < 0.045f) {
                     rocket_state.selected_maneuver_index = i;
                     mnv_popup_index = i;
+                    hit_maneuver_icon = true;
                 }
             }
 
@@ -1633,9 +1660,10 @@ int main() {
                     Vec2 h_scr = ManeuverSystem::projectToScreen(h_world, viewMat, macroProjMat, as_ratio);
                     float hd = sqrtf(powf(h_scr.x - mouse_x, 2) + powf(h_scr.y - mouse_y, 2));
                     
-                    if (lmb && !lmb_prev_mnv && hd < 0.035f) {
+                    if (lmb && !lmb_prev_mnv && hd < 0.035f && !hit_maneuver_icon && !popup_clicked_frame) {
                         dragging_handle = h;
                         mnv_popup_index = -1; // Hide popup when dragging
+                        cached_popup_w = 0; // Clear cache
                     }
                     
                     if (dragging_handle == h && lmb) {
@@ -1706,7 +1734,9 @@ int main() {
             }
         }
 
-        // --- Maneuver Delete Popup ---
+        // --- Maneuver Node Popup: LOGIC ONLY (rendering deferred to 2D HUD pass) ---
+        // NOTE: renderer->addRect/drawText calls here would be cleared by renderer->beginFrame() later
+        mnv_popup_visible = false;
         if (mnv_popup_index != -1 && (size_t)mnv_popup_index < rocket_state.maneuvers.size()) {
             ManeuverNode& node = rocket_state.maneuvers[mnv_popup_index];
             float node_b = (float)node.ref_a * sqrtf(fmaxf(0.0f, 1.0f - (float)node.ref_ecc * (float)node.ref_ecc));
@@ -1716,28 +1746,141 @@ int main() {
                               (float)(SOLAR_SYSTEM[node.ref_body].pz * ws_d + pt_node_rel.z * ws_d - ro_z));
             Vec2 n_scr = ManeuverSystem::projectToScreen(node_world, viewMat, macroProjMat, as_ratio);
             
-            float pop_x = n_scr.x + 0.10f, pop_y = n_scr.y + 0.06f;
-            float pw = 0.12f, ph = 0.05f;
-            renderer->addRect(pop_x, pop_y, pw, ph, 0.1f, 0.1f, 0.15f, 0.95f);
-            renderer->addRectOutline(pop_x, pop_y, pw, ph, 0.6f, 0.6f, 1.0f, 1.0f);
+            // Popup layout - enlarged for sliders, time info, reference frame
+            float pop_x = n_scr.x + 0.22f, pop_y = n_scr.y;
+            float pw = 0.38f, ph = 0.48f;
             
-            bool btn_hover = (mouse_x >= pop_x - pw/2 && mouse_x <= pop_x + pw/2 && mouse_y >= pop_y - ph/2 && mouse_y <= pop_y + ph/2);
-            renderer->drawText(pop_x, pop_y, "DELETE", 0.015f, 1.0f, btn_hover ? 0.3f : 1.0f, btn_hover ? 0.3f : 1.0f, 1.0f, true, Renderer::CENTER);
+            // Clamp popup to stay within screen bounds
+            if (pop_x + pw/2 > 0.98f) pop_x = 0.98f - pw/2;
+            if (pop_x - pw/2 < -0.98f) pop_x = -0.98f + pw/2;
+            if (pop_y + ph/2 > 0.98f) pop_y = 0.98f - ph/2;
+            if (pop_y - ph/2 < -0.98f) pop_y = -0.98f + ph/2;
             
+            // Cache popup bounds
+            cached_popup_x = pop_x; cached_popup_y = pop_y;
+            cached_popup_w = pw; cached_popup_h = ph;
+            
+            // Cache state for deferred rendering
+            mnv_popup_visible = true;
+            mnv_popup_px = pop_x; mnv_popup_py = pop_y;
+            mnv_popup_pw = pw; mnv_popup_ph = ph;
+            mnv_popup_node_scr_x = n_scr.x; mnv_popup_node_scr_y = n_scr.y;
+            mnv_popup_dv = node.delta_v;
+            mnv_popup_ref_body = node.ref_body;
+            
+            // Compute time to node
+            mnv_popup_time_to_node = node.sim_time - rocket_state.sim_time;
+            if (mnv_popup_time_to_node < 0) mnv_popup_time_to_node = 0;
+            
+            // Compute estimated burn time using Tsiolkovsky equation: t = m0 * (1 - e^(-dv/ve)) / mdot
+            // Simplified: t ≈ dv / (thrust / current_mass)
+            float total_dv_val = node.delta_v.length();
+            double current_mass = rocket_state.fuel + rocket_config.dry_mass + rocket_config.upper_stages_mass;
+            double max_thrust = 0;
+            if (rocket_state.current_stage < (int)rocket_config.stage_configs.size()) {
+                max_thrust = rocket_config.stage_configs[rocket_state.current_stage].thrust;
+            }
+            if (max_thrust > 0 && current_mass > 0) {
+                double accel = max_thrust / current_mass;
+                // Use Tsiolkovsky: burn_time = Isp * g0 * ln(m0 / (m0 - mdot*t)) simplified
+                // For small dv, t ≈ dv / accel is accurate enough
+                double ve = rocket_config.specific_impulse * G0;
+                if (ve > 0 && total_dv_val > 0) {
+                    double mass_ratio = exp((double)total_dv_val / ve);
+                    double fuel_needed = current_mass * (1.0 - 1.0 / mass_ratio);
+                    double mdot = rocket_config.cosrate;
+                    mnv_popup_burn_time = (mdot > 0) ? fuel_needed / mdot : (double)total_dv_val / accel;
+                } else {
+                    mnv_popup_burn_time = 0;
+                }
+            } else {
+                mnv_popup_burn_time = (total_dv_val > 0) ? 9999.0 : 0;
+            }
+            
+            // --- Slider layout constants (for hit testing) ---
+            float slider_track_w = pw * 0.65f;
+            float slider_track_h = 0.012f;
+            float slider_thumb_w = 0.012f, slider_thumb_h = 0.022f;
+            float title_y_layout = pop_y + ph/2 - 0.025f;
+            float slider_base_y = title_y_layout - 0.06f;
+            float slider_spacing = 0.065f;
+            float slider_cx = pop_x + 0.02f; // center of slider track
+            
+            // Close [X] button hit test
+            float close_size = 0.028f;
+            float close_x = pop_x + pw/2 - close_size/2 - 0.008f;
+            float close_y = pop_y + ph/2 - close_size/2 - 0.008f;
+            mnv_popup_close_hover = (mouse_x >= close_x - close_size/2 && mouse_x <= close_x + close_size/2 &&
+                                mouse_y >= close_y - close_size/2 && mouse_y <= close_y + close_size/2);
+            
+            // DELETE button hit test
+            float del_btn_y = pop_y - ph/2 + 0.025f;
+            float del_btn_w = 0.10f, del_btn_h = 0.03f;
+            mnv_popup_del_hover = (mouse_x >= pop_x - del_btn_w/2 && mouse_x <= pop_x + del_btn_w/2 &&
+                              mouse_y >= del_btn_y - del_btn_h/2 && mouse_y <= del_btn_y + del_btn_h/2);
+            
+            // --- Slider dragging logic ---
+            // Each slider: drag left = decrease, drag right = increase
+            // Sensitivity increases exponentially with drag distance from center
+            for (int s = 0; s < 3; s++) {
+                float sy = slider_base_y - s * slider_spacing;
+                bool on_track = (mouse_x >= slider_cx - slider_track_w/2 - 0.02f && mouse_x <= slider_cx + slider_track_w/2 + 0.02f &&
+                                 mouse_y >= sy - slider_thumb_h && mouse_y <= sy + slider_thumb_h);
+                
+                if (lmb && !lmb_prev_mnv && on_track && mnv_popup_slider_dragging == -1) {
+                    mnv_popup_slider_dragging = s;
+                    mnv_popup_slider_drag_x = mouse_x;
+                }
+            }
+            
+            if (mnv_popup_slider_dragging >= 0 && lmb) {
+                float drag_offset = mouse_x - mnv_popup_slider_drag_x;
+                // Exponential sensitivity: small drags = fine control, large drags = fast
+                float sign = (drag_offset >= 0) ? 1.0f : -1.0f;
+                float abs_offset = fabsf(drag_offset);
+                // Scale: at 0.01 offset = 1 m/s per second, at 0.1 offset = 100 m/s per second
+                float rate = sign * abs_offset * abs_offset * 5000.0f * (float)dt;
+                
+                if (mnv_popup_slider_dragging == 0) node.delta_v.x += rate;
+                else if (mnv_popup_slider_dragging == 1) node.delta_v.y += rate;
+                else if (mnv_popup_slider_dragging == 2) node.delta_v.z += rate;
+                node.active = true;
+                mnv_popup_dv = node.delta_v; // Update cached value
+            }
+            if (!lmb) {
+                mnv_popup_slider_dragging = -1;
+            }
+            
+            // Check if mouse is inside the popup panel
+            bool mouse_in_popup = (mouse_x >= pop_x - pw/2 && mouse_x <= pop_x + pw/2 &&
+                                   mouse_y >= pop_y - ph/2 && mouse_y <= pop_y + ph/2);
+            if (mouse_in_popup || mnv_popup_slider_dragging >= 0) {
+                popup_clicked_frame = true;
+            }
+            
+            // Click handling: ONLY close via [X] button or DELETE button
             if (lmb && !lmb_prev_mnv) {
-                if (btn_hover) {
+                if (mnv_popup_close_hover) {
+                    mnv_popup_index = -1;
+                    mnv_popup_visible = false;
+                    mnv_popup_slider_dragging = -1;
+                    cached_popup_w = 0;
+                    popup_clicked_frame = true;
+                } else if (mnv_popup_del_hover) {
                     rocket_state.maneuvers.erase(rocket_state.maneuvers.begin() + mnv_popup_index);
                     if (rocket_state.selected_maneuver_index == mnv_popup_index) rocket_state.selected_maneuver_index = -1;
                     else if (rocket_state.selected_maneuver_index > mnv_popup_index) rocket_state.selected_maneuver_index--;
                     mnv_popup_index = -1;
+                    mnv_popup_visible = false;
+                    mnv_popup_slider_dragging = -1;
+                    cached_popup_w = 0;
                     popup_clicked_frame = true;
-                } else {
-                    float d_node_mouse = sqrtf(powf(n_scr.x - mouse_x, 2) + powf(n_scr.y - mouse_y, 2));
-                    if (d_node_mouse > 0.05f) { // Only close if clicking AWAY from the icon
-                        mnv_popup_index = -1; 
-                    }
+                } else if (mouse_in_popup) {
+                    popup_clicked_frame = true;
                 }
             }
+        } else {
+            mnv_popup_slider_dragging = -1;
         }
         
         // --- Click on empty orbit to create node (Moved to LMB) ---
@@ -1766,6 +1909,11 @@ int main() {
             rocket_state.selected_maneuver_index = (int)rocket_state.maneuvers.size() - 1;
         }
         
+        // Empty click to deselect if didn't hit anything
+        if (lmb && !lmb_prev_mnv && !popup_clicked_frame && mnv_popup_index == -1 && dragging_handle == -1 && global_best_ang < 0) {
+            rocket_state.selected_maneuver_index = -1;
+        }
+
         // Reset handles if mouse released
         if (!lmb) dragging_handle = -1;
         global_best_ang = -1.0f; // Reset for next frame
@@ -2421,6 +2569,143 @@ int main() {
 
     // ========================================================================
     } // end if (show_hud)
+    
+    // ===== Deferred Maneuver Node Popup Rendering (2D HUD pass) =====
+    if (mnv_popup_visible) {
+        float pop_x = mnv_popup_px, pop_y = mnv_popup_py;
+        float pw = mnv_popup_pw, ph = mnv_popup_ph;
+        
+        // Connector line from popup to node icon
+        renderer->addLine(pop_x - pw/2, pop_y, mnv_popup_node_scr_x, mnv_popup_node_scr_y, 0.002f, 0.4f, 0.6f, 1.0f, 0.6f);
+        
+        // Background panel with subtle gradient effect (two overlapping rects)
+        renderer->addRect(pop_x, pop_y, pw, ph, 0.06f, 0.06f, 0.12f, 0.95f);
+        renderer->addRect(pop_x, pop_y + ph * 0.35f, pw, ph * 0.3f, 0.08f, 0.08f, 0.18f, 0.3f); // Subtle highlight band
+        renderer->addRectOutline(pop_x, pop_y, pw, ph, 0.3f, 0.5f, 1.0f, 0.8f);
+        
+        // Close [X] button (top-right corner)
+        float close_size = 0.028f;
+        float close_x = pop_x + pw/2 - close_size/2 - 0.008f;
+        float close_y = pop_y + ph/2 - close_size/2 - 0.008f;
+        renderer->addRect(close_x, close_y, close_size, close_size, 
+                          mnv_popup_close_hover ? 0.8f : 0.3f, 0.15f, 0.15f, 0.9f);
+        renderer->drawText(close_x, close_y, "X", 0.014f, 1.0f, 1.0f, 1.0f, 1.0f, false, Renderer::CENTER);
+        
+        // Title
+        float title_y = pop_y + ph/2 - 0.025f;
+        renderer->drawText(pop_x, title_y, "MANEUVER NODE", 0.013f, 0.5f, 0.8f, 1.0f, 1.0f, true, Renderer::CENTER);
+        
+        // Reference body
+        char ref_buf[64];
+        if (mnv_popup_ref_body >= 0 && mnv_popup_ref_body < (int)SOLAR_SYSTEM.size()) {
+            snprintf(ref_buf, sizeof(ref_buf), "REF: %s", SOLAR_SYSTEM[mnv_popup_ref_body].name.c_str());
+        } else {
+            snprintf(ref_buf, sizeof(ref_buf), "REF: ---");
+        }
+        renderer->drawText(pop_x, title_y - 0.022f, ref_buf, 0.009f, 0.4f, 0.7f, 0.9f, 0.8f, true, Renderer::CENTER);
+        
+        // --- Delta-V Sliders ---
+        float slider_track_w = pw * 0.65f;
+        float slider_track_h = 0.012f;
+        float slider_base_y = title_y - 0.06f;
+        float slider_spacing = 0.065f;
+        float slider_cx = pop_x + 0.02f;
+        float label_x = pop_x - pw/2 + 0.012f;
+        
+        const char* slider_labels[] = {"PRO", "NRM", "RAD"};
+        float slider_colors[][3] = {{1.0f, 0.9f, 0.1f}, {1.0f, 0.1f, 1.0f}, {0.1f, 0.8f, 1.0f}};
+        float dv_vals[] = {mnv_popup_dv.x, mnv_popup_dv.y, mnv_popup_dv.z};
+        
+        for (int s = 0; s < 3; s++) {
+            float sy = slider_base_y - s * slider_spacing;
+            float cr = slider_colors[s][0], cg = slider_colors[s][1], cb = slider_colors[s][2];
+            
+            // Label
+            renderer->drawText(label_x, sy + 0.015f, slider_labels[s], 0.009f, cr, cg, cb, 0.9f, true, Renderer::LEFT);
+            
+            // Value display
+            char val_buf[32];
+            snprintf(val_buf, sizeof(val_buf), "%.1f", dv_vals[s]);
+            renderer->drawText(label_x, sy - 0.01f, val_buf, 0.009f, 1.0f, 1.0f, 1.0f, 0.9f, true, Renderer::LEFT);
+            renderer->drawText(label_x + 0.065f, sy - 0.01f, "M/S", 0.007f, 0.5f, 0.5f, 0.6f, 0.7f, false, Renderer::LEFT);
+            
+            // Track background
+            renderer->addRect(slider_cx, sy, slider_track_w, slider_track_h, 0.15f, 0.15f, 0.2f, 0.8f);
+            renderer->addRectOutline(slider_cx, sy, slider_track_w, slider_track_h, cr * 0.4f, cg * 0.4f, cb * 0.4f, 0.6f);
+            
+            // Center line (zero marker)
+            renderer->addRect(slider_cx, sy, 0.003f, slider_track_h * 1.5f, 0.5f, 0.5f, 0.5f, 0.7f);
+            
+            // Fill bar showing current value (clamped to track width)
+            float max_display_dv = 500.0f; // Max dv for full track
+            float fill_ratio = dv_vals[s] / max_display_dv;
+            fill_ratio = fmaxf(-1.0f, fminf(1.0f, fill_ratio));
+            float fill_w = fabsf(fill_ratio) * slider_track_w / 2.0f;
+            float fill_cx = slider_cx + (fill_ratio >= 0 ? fill_w/2 : -fill_w/2);
+            if (fill_w > 0.001f) {
+                renderer->addRect(fill_cx, sy, fill_w, slider_track_h * 0.7f, cr * 0.6f, cg * 0.6f, cb * 0.6f, 0.7f);
+            }
+            
+            // Thumb indicator (at current value position)
+            float thumb_x = slider_cx + fill_ratio * slider_track_w / 2.0f;
+            thumb_x = fmaxf(slider_cx - slider_track_w/2, fminf(slider_cx + slider_track_w/2, thumb_x));
+            bool is_dragging = (mnv_popup_slider_dragging == s);
+            float thumb_w = is_dragging ? 0.016f : 0.012f;
+            float thumb_h = is_dragging ? 0.026f : 0.022f;
+            renderer->addRect(thumb_x, sy, thumb_w, thumb_h, cr, cg, cb, is_dragging ? 1.0f : 0.85f);
+            renderer->addRectOutline(thumb_x, sy, thumb_w, thumb_h, 1.0f, 1.0f, 1.0f, 0.9f);
+        }
+        
+        // --- Separator line ---
+        float sep_y = slider_base_y - 3 * slider_spacing + 0.025f;
+        renderer->addRect(pop_x, sep_y, pw * 0.9f, 0.002f, 0.3f, 0.4f, 0.6f, 0.5f);
+        
+        // --- Total Delta-V ---
+        float total_dv = mnv_popup_dv.length();
+        char buf[64];
+        snprintf(buf, sizeof(buf), "TOTAL DV: %.1f M/S", total_dv);
+        renderer->drawText(pop_x, sep_y - 0.022f, buf, 0.011f, 1.0f, 1.0f, 1.0f, 1.0f, true, Renderer::CENTER);
+        
+        // --- Time to Node ---
+        float info_y = sep_y - 0.05f;
+        float info_lx = pop_x - pw/2 + 0.015f;
+        float info_rx = pop_x + pw/2 - 0.015f;
+        
+        int t_min = (int)(mnv_popup_time_to_node / 60.0);
+        int t_sec = (int)fmod(mnv_popup_time_to_node, 60.0);
+        if (mnv_popup_time_to_node > 3600) {
+            int t_hr = (int)(mnv_popup_time_to_node / 3600.0);
+            t_min = (int)fmod(mnv_popup_time_to_node / 60.0, 60.0);
+            snprintf(buf, sizeof(buf), "T- %dH %02dM %02dS", t_hr, t_min, t_sec);
+        } else {
+            snprintf(buf, sizeof(buf), "T- %dM %02dS", t_min, t_sec);
+        }
+        // Color: green if far, yellow if close, red if very close
+        float time_ratio = (float)fmin(1.0, mnv_popup_time_to_node / 120.0);
+        renderer->drawText(info_lx, info_y, buf, 0.010f, 
+                          1.0f - time_ratio * 0.7f, 0.3f + time_ratio * 0.7f, 0.2f, 1.0f, true, Renderer::LEFT);
+        
+        // --- Estimated Burn Time ---
+        info_y -= 0.025f;
+        int b_min = (int)(mnv_popup_burn_time / 60.0);
+        int b_sec = (int)fmod(mnv_popup_burn_time, 60.0);
+        if (mnv_popup_burn_time >= 9999.0) {
+            snprintf(buf, sizeof(buf), "BURN: ---");
+        } else if (mnv_popup_burn_time > 60.0) {
+            snprintf(buf, sizeof(buf), "BURN: %dM %02dS", b_min, b_sec);
+        } else {
+            snprintf(buf, sizeof(buf), "BURN: %.1fS", mnv_popup_burn_time);
+        }
+        renderer->drawText(info_lx, info_y, buf, 0.010f, 0.9f, 0.7f, 0.3f, 1.0f, true, Renderer::LEFT);
+        
+        // --- DELETE button (bottom center) ---
+        float del_btn_y = pop_y - ph/2 + 0.025f;
+        float del_btn_w = 0.10f, del_btn_h = 0.03f;
+        renderer->addRect(pop_x, del_btn_y, del_btn_w, del_btn_h, 
+                          mnv_popup_del_hover ? 0.9f : 0.5f, mnv_popup_del_hover ? 0.15f : 0.08f, mnv_popup_del_hover ? 0.15f : 0.08f, 0.9f);
+        renderer->addRectOutline(pop_x, del_btn_y, del_btn_w, del_btn_h, 1.0f, 0.3f, 0.3f, 1.0f);
+        renderer->drawText(pop_x, del_btn_y, "DELETE", 0.012f, 1.0f, 1.0f, 1.0f, 1.0f, false, Renderer::CENTER);
+    }
     
     renderer->endFrame();
     glfwSwapBuffers(window);
