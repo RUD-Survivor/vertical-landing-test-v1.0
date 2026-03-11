@@ -552,6 +552,7 @@ int main() {
     
     // Maneuver popup deferred rendering state (computed in 3D pass, rendered in 2D HUD pass)
     static bool mnv_popup_visible = false;
+    static int mnv_popup_index = -1;
     static float mnv_popup_px = 0, mnv_popup_py = 0, mnv_popup_pw = 0, mnv_popup_ph = 0;
     static float mnv_popup_node_scr_x = 0, mnv_popup_node_scr_y = 0;
     static Vec3 mnv_popup_dv;
@@ -573,6 +574,7 @@ int main() {
     static int adv_orbit_ref_mode = 0;    // 0 = Inertial, 1 = Co-rotating
     static int adv_orbit_ref_body = 3;    // Earth default
     static bool adv_warp_to_node = false; // warp-to-maneuver in progress
+    static bool adv_embed_mnv = false;    // maneuver popup embedded in adv menu
 
     static bool space_was_pressed = true; // Start true to ignore the Builder's enter/space
     bool space_now = glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS;
@@ -1966,7 +1968,6 @@ int main() {
             r3d->drawBillboard(global_best_pt, hover_size, 1.0f, 1.0f, 1.0f, 0.5f);
         }
 
-        static int mnv_popup_index = -1;
         static bool popup_clicked_frame = false;
         popup_clicked_frame = false;
         
@@ -2313,6 +2314,7 @@ int main() {
                     mnv_popup_index = -1;
                     mnv_popup_visible = false;
                     mnv_popup_slider_dragging = -1;
+                    adv_embed_mnv = false;
                     cached_popup_w = 0;
                     popup_clicked_frame = true;
                 } else if (mnv_popup_del_hover) {
@@ -3151,6 +3153,9 @@ int main() {
                 rocket_state.maneuvers.push_back(node);
                 rocket_state.selected_maneuver_index = 0;
                 global_best_ang = 0; // Disable keplerian hit-testing state
+                mnv_popup_index = 0;
+                mnv_popup_visible = true;
+                adv_embed_mnv = true;
             }
             
             // Warp to Maneuver Node Button
@@ -3204,6 +3209,30 @@ int main() {
                 }
             }
             
+            // Toggle embedded Maneuver Popup
+            float fold_btn_y = warp_btn_y - 0.05f;
+            if (has_mnv_btn) {
+                bool hover_fold = (hmouse_x >= menu_x - menu_w/2 + 0.02f && hmouse_x <= menu_x + menu_w/2 - 0.02f && hmouse_y >= fold_btn_y - 0.015f && hmouse_y <= fold_btn_y + 0.015f);
+                renderer->addRectOutline(menu_x, fold_btn_y, menu_w - 0.04f, 0.03f, 0.4f, 0.8f, 1.0f, 0.8f);
+                if (hover_fold) renderer->addRect(menu_x, fold_btn_y, menu_w-0.04f, 0.03f, 0.2f, 0.4f, 0.6f, 0.4f);
+                renderer->drawText(menu_x, fold_btn_y, adv_embed_mnv ? "HIDE MANEUVER CONTROLS [v]" : "SHOW MANEUVER CONTROLS [>]", 0.009f, 0.6f,0.9f,1.0f,1.0f, true, Renderer::CENTER);
+                if (hover_fold && hlmb && !hlmb_prev) {
+                    adv_embed_mnv = !adv_embed_mnv;
+                    if (adv_embed_mnv) { mnv_popup_index = 0; mnv_popup_visible = true; }
+                }
+                
+                if (adv_embed_mnv) {
+                   float target_top = adv_btn_y + 0.19f;
+                   float adv_menu_bottom = target_top - 0.58f;
+                   
+                   mnv_popup_px = menu_x;
+                   mnv_popup_pw = menu_w + 0.02f;
+                   mnv_popup_ph = 0.55f;
+                   mnv_popup_py = adv_menu_bottom - mnv_popup_ph / 2 - 0.005f;
+                   mnv_popup_visible = true;
+                   mnv_popup_index = 0;
+                }
+            }
         }
     }
     
@@ -3218,7 +3247,9 @@ int main() {
         float pw = mnv_popup_pw, ph = mnv_popup_ph;
         
         // Connector line from popup to node icon
-        renderer->addLine(pop_x - pw/2, pop_y, mnv_popup_node_scr_x, mnv_popup_node_scr_y, 0.002f, 0.4f, 0.6f, 1.0f, 0.6f);
+        if (!adv_embed_mnv || !adv_orbit_menu) {
+            renderer->addLine(pop_x - pw/2, pop_y, mnv_popup_node_scr_x, mnv_popup_node_scr_y, 0.002f, 0.4f, 0.6f, 1.0f, 0.6f);
+        }
         
         // Background panel with subtle gradient effect (two overlapping rects)
         renderer->addRect(pop_x, pop_y, pw, ph, 0.06f, 0.06f, 0.12f, 0.95f);
