@@ -378,7 +378,9 @@ double CalculateSolarOcclusion(const RocketState& state) {
 }
 
 double get_gravity(double r) { 
-    return G0 * pow(EARTH_RADIUS / r, 2); 
+    CelestialBody& current_body = SOLAR_SYSTEM[current_soi_index];
+    double GM = G_const * current_body.mass;
+    return GM / (r * r);
 }
 
 double get_pressure(double h) {
@@ -427,10 +429,15 @@ void Update(RocketState& state, const RocketConfig& config, const ControlInput& 
     
     state.sim_time += dt;
     
-    // Ensure celestial bodies are at the correct positions for this sim time
+    // 1. Ensure celestial bodies are at the correct positions for this sim time
     UpdateCelestialBodies(state.sim_time);
     
-    CelestialBody& current_body_launch = SOLAR_SYSTEM[current_soi_index];
+    // 2. IMPORTANT: Check for SOI transitions AT THE START of the frame.
+    // This ensures all physics (altitude, gravity, drag) use the correct reference body.
+    CheckSOI_Transitions(state);
+    
+    // Now fetch the body reference - it's guaranteed to be the correct one for this frame's relative coords
+    CelestialBody& current_body = SOLAR_SYSTEM[current_soi_index];
 
     if (state.status == PRE_LAUNCH) {
         if (input.throttle > 0.01) {
@@ -438,19 +445,18 @@ void Update(RocketState& state, const RocketConfig& config, const ControlInput& 
              state.mission_msg = "LIFTOFF!";
         } else {
             // Calculate current rotation angle
-            double theta = current_body_launch.prime_meridian_epoch + (state.sim_time * 2.0 * PI / current_body_launch.rotation_period);
+            double theta = current_body.prime_meridian_epoch + (state.sim_time * 2.0 * PI / current_body.rotation_period);
             double cos_t = std::cos(theta);
             double sin_t = std::sin(theta);
             state.px = state.surf_px * cos_t - state.surf_py * sin_t;
             state.py = state.surf_px * sin_t + state.surf_py * cos_t;
             state.pz = state.surf_pz;
-            double omega = (2.0 * PI) / current_body_launch.rotation_period;
+            double omega = (2.0 * PI) / current_body.rotation_period;
             state.vx = -omega * state.py;
             state.vy = omega * state.px;
             state.vz = 0;
             state.altitude = 0;
             state.velocity = 0; state.local_vx = 0;
-            CheckSOI_Transitions(state);
             return;
         }
     }
@@ -459,36 +465,28 @@ void Update(RocketState& state, const RocketConfig& config, const ControlInput& 
             state.status = ASCEND;
             state.mission_msg = "TOUCHDOWN TO LIFTOFF!";
         } else {
-            CelestialBody& near_body = SOLAR_SYSTEM[current_soi_index];
-            double theta = near_body.prime_meridian_epoch + (state.sim_time * 2.0 * PI / near_body.rotation_period);
+            double theta = current_body.prime_meridian_epoch + (state.sim_time * 2.0 * PI / current_body.rotation_period);
             double cos_t = std::cos(theta);
             double sin_t = std::sin(theta);
             state.px = state.surf_px * cos_t - state.surf_py * sin_t;
             state.py = state.surf_px * sin_t + state.surf_py * cos_t;
             state.pz = state.surf_pz;
-            double omega = (2.0 * PI) / near_body.rotation_period;
+            double omega = (2.0 * PI) / current_body.rotation_period;
             state.vx = -omega * state.py;
             state.vy = omega * state.px;
             state.vz = 0;
             state.altitude = 0;
             state.velocity = 0; state.local_vx = 0;
-            CheckSOI_Transitions(state);
             return;
         }
     }
     if (state.status == CRASHED) {
-        CheckSOI_Transitions(state);
         return;
     }
 
     // A. Base State Calculation
-    CelestialBody& current_body = SOLAR_SYSTEM[current_soi_index];
-    double r = std::sqrt(state.px * state.px + state.py * state.py); // Horizontal distance for derived info
     double r_3d = std::sqrt(state.px * state.px + state.py * state.py + state.pz * state.pz);
     state.altitude = r_3d - current_body.radius;
-    
-    // Update SOI transitions and Absolute Positions
-    CheckSOI_Transitions(state);
     
     // Update Solar Occlusion
     state.solar_occlusion = CalculateSolarOcclusion(state);
@@ -818,7 +816,7 @@ void FastGravityUpdate(RocketState& state, const RocketConfig& config, double dt
         state.py += (dt / 6.0) * (k1_py + 2.0 * k2_py + 2.0 * k3_py + k4_py);
         state.pz += (dt / 6.0) * (k1_pz + 2.0 * k2_pz + 2.0 * k3_pz + k4_pz);
         
-        state.altitude = std::sqrt(state.px*state.px + state.py*state.py + state.pz*state.pz) - EARTH_RADIUS;
+        state.altitude = std::sqrt(state.px*state.px + state.py*state.py + state.pz*state.pz) - SOLAR_SYSTEM[current_soi_index].radius;
         
         if (state.altitude <= 0.0) {
             state.altitude = 0;
@@ -866,9 +864,10 @@ void UpdateSmoke(RocketState& state, double dt) {
         p.wy += p.vwy * dt;
 
         double r = std::sqrt(p.wx * p.wx + p.wy * p.wy);
-        if (r < EARTH_RADIUS && r > 0) {
-            p.wx = p.wx / r * EARTH_RADIUS;
-            p.wy = p.wy / r * EARTH_RADIUS;
+        double planet_r = SOLAR_SYSTEM[current_soi_index].radius;
+        if (r < planet_r && r > 0) {
+            p.wx = p.wx / r * planet_r;
+            p.wy = p.wy / r * planet_r;
             double nx = p.wx / r, ny = p.wy / r;
             double v_radial = p.vwx * nx + p.vwy * ny;
             double v_tang = -p.vwx * ny + p.vwy * nx;
