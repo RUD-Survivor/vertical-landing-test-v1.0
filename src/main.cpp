@@ -1316,7 +1316,7 @@ int main() {
         
         // 渲染历史轨迹 (更亮实线: 黄绿色), 增加基于相机拉远的线宽补偿 (仅在 Panorama 显示)
         if (cam_mode_3d == 2 && traj_history.size() >= 2) {
-           float hist_w = earth_r * 0.003f * fmaxf(1.0f, cam_zoom_pan * 0.5f);
+           float hist_w = earth_r * 0.004f * fmaxf(1.0f, cam_zoom_pan * 0.8f);
            float macro_fade = fminf(1.0f, fmaxf(0.0f, (cam_zoom_pan - 0.05f) / 0.1f));
            if (macro_fade > 0.01f) {
               std::vector<Vec3> relative_traj;
@@ -1340,8 +1340,18 @@ int main() {
 
       // ===== 火箭自身高亮标注 (方便在远景找到) =====
       if (cam_mode_3d == 2) {
-        float marker_size = fminf(earth_r * 0.1f, earth_r * 0.02f * fmaxf(1.0f, cam_zoom_pan * 0.8f));
+        // Scale marker more aggressively with zoom, with a guaranteed minimum visible size
+        float base_marker = earth_r * 0.025f * fmaxf(1.0f, cam_zoom_pan * 1.2f);
+        // Guarantee a minimum screen-space size (proportional to camera distance)
+        float cam_dist_marker = (renderRocketBase - camEye_rel).length();
+        float min_marker = cam_dist_marker * 0.008f; // ~0.8% of camera distance = always visible
+        float marker_size = fmaxf(base_marker, min_marker);
         r3d->drawBillboard(renderRocketBase, marker_size, 0.2f, 1.0f, 0.4f, 0.9f);
+        // Draw a second, larger but fainter halo for extreme zoom-out findability
+        if (cam_zoom_pan > 2.0f) {
+            float halo_size = marker_size * 2.5f;
+            r3d->drawBillboard(renderRocketBase, halo_size, 0.2f, 1.0f, 0.4f, 0.15f);
+        }
       }
 
       // ===== 轨道预测线 (开普勒轨道) =====
@@ -1456,7 +1466,7 @@ int main() {
               }
               
               // 渲染预测轨迹
-              float pred_w = earth_r * 0.0025f * fmaxf(1.0f, cam_zoom_pan * 0.5f);
+              float pred_w = earth_r * 0.004f * fmaxf(1.0f, cam_zoom_pan * 0.8f);
               float macro_fade = fminf(1.0f, fmaxf(0.0f, (cam_zoom_pan - 0.05f) / 0.1f));
               if (macro_fade > 0.01f) {
                   if (will_reenter) {
@@ -1718,16 +1728,22 @@ int main() {
                         Vec3 p_perp = p_h_vec.normalized().cross(p_e_dir);
                         Vec3 p_center = p_e_dir * (-(float)p_a * p_ecc);
                         std::vector<Vec3> p_pts;
-                        for (int s = 0; s <= 100; s++) {
-                            float ang = (float)s / 100.0f * 2.0f * PI;
+                        int samples = 500; // High precision samples
+                        for (int s = 0; s <= samples; s++) {
+                            float ang = (float)s / (float)samples * 2.0f * PI;
                             Vec3 ptr = p_center + p_e_dir * ((float)p_a * cosf(ang)) + p_perp * (p_b * sinf(ang));
                             p_pts.push_back(Vec3((float)(ref_px * ws_d + ptr.x * ws_d - ro_x), (float)(ref_py * ws_d + ptr.y * ws_d - ro_y), (float)(ref_pz * ws_d + ptr.z * ws_d - ro_z)));
                         }
-                        float ribbon_w = earth_r * 0.002f * fmaxf(1.0f, cam_zoom_pan * 0.5f);
-                        for (size_t s = 0; s < p_pts.size() - 1; s += 2) { // Increased density slightly
-                            std::vector<Vec3> sub; sub.push_back(p_pts[s]);
-                            if (s+1 < p_pts.size()) sub.push_back(p_pts[s+1]);
-                            r3d->drawRibbon(sub, ribbon_w, 1.0f, 1.0f, 1.0f, 0.7f);
+                        float ribbon_w = earth_r * 0.004f * fmaxf(1.0f, cam_zoom_pan * 0.8f);
+                        // Draw as dashed lines: segments of 6 points with 4 point gaps
+                        for (int s = 0; s < samples; s += 10) {
+                            std::vector<Vec3> dash;
+                            for (int j = 0; j < 6; j++) {
+                                if (s + j <= samples) dash.push_back(p_pts[s + j]);
+                            }
+                            if (dash.size() >= 2) {
+                                r3d->drawRibbon(dash, ribbon_w, 1.0f, 1.0f, 1.0f, 0.7f);
+                            }
                         }
                     }
                 }
@@ -1921,7 +1937,16 @@ int main() {
         rmb_prev_mnv = rmb;
       }
 
-
+      // Dynamic TAA blend: reduce temporal accumulation during fast changes
+      // to prevent ghosting/smearing of orbit lines
+      if (time_warp > 1 || mnv_popup_slider_dragging >= 0) {
+          // In time warp or during slider drag, favor current frame heavily
+          float warp_blend = (time_warp > 100) ? 0.8f : (time_warp > 1 ? 0.5f : 0.4f);
+          if (mnv_popup_slider_dragging >= 0) warp_blend = fmaxf(warp_blend, 0.6f);
+          r3d->taaBlendOverride = warp_blend;
+      } else {
+          r3d->taaBlendOverride = -1.0f; // Use default
+      }
       r3d->resolveTAA();
 
       // =========== PASS 2: MICRO FOREGROUND ===========

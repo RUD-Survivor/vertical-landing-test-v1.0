@@ -356,6 +356,7 @@ public:
   int taaWidth = 0, taaHeight = 0;  // Current FBO dimensions
   int taaFrameIndex = 0;            // Frame counter for noise animation
   bool taaInitialized = false;
+  float taaBlendOverride = -1.0f;   // If >= 0, use this blend factor instead of default
 
   Mat4 prevViewProj;                // History matrix
   Mat4 invViewProj;                 // Current inverse matrix
@@ -2784,6 +2785,7 @@ R"(
     // Blend factor: 10% new, 90% history for smooth accumulation
     // First few frames use more of the current frame to converge faster
     float blend = (taaFrameIndex < 8) ? 0.5f : 0.1f;
+    if (taaBlendOverride >= 0.0f) blend = taaBlendOverride; // Allow external override
     glUniform1f(glGetUniformLocation(taaProg, "uBlendFactor"), blend);
 
     // Render fullscreen quad with alpha blending to composite over existing scene
