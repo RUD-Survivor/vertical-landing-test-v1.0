@@ -1388,9 +1388,15 @@ int main() {
         if (adv_orbit_enabled) {
             // Perform asynchronous numerical orbit prediction
             if (!rocket_state.prediction_in_progress) {
-                // Throttle requests: update every ~1 simulated second if not busy
-                if (std::abs(rocket_state.sim_time - rocket_state.last_prediction_sim_time) > 1.0 || rocket_state.predicted_path.empty()) {
+                // Throttle requests: update every 0.1s of real time if not busy (provides "100x efficiency" at all warp rates)
+                static auto last_req_time = std::chrono::steady_clock::now();
+                auto now = std::chrono::steady_clock::now();
+                float elapsed_real = std::chrono::duration<float>(now - last_req_time).count();
+
+                if (elapsed_real > 0.1f || rocket_state.predicted_path.empty()) {
                     rocket_state.prediction_in_progress = true;
+                    last_req_time = now;
+                    
                     // Populate heliocentric state for the background predictor
                     CelestialBody& soi = SOLAR_SYSTEM[current_soi_index];
                     rocket_state.abs_px = rocket_state.px + soi.px;
@@ -1399,7 +1405,9 @@ int main() {
                     rocket_state.abs_vx = rocket_state.vx + soi.vx;
                     rocket_state.abs_vy = rocket_state.vy + soi.vy;
                     rocket_state.abs_vz = rocket_state.vz + soi.vz;
-                    bool force_reset = (control_input.throttle > 0.01) || (std::abs(rocket_state.sim_time - rocket_state.last_prediction_sim_time) > 10.0);
+                    
+                    // Reset only if engines are active or large drift (1 hour of sim time)
+                    bool force_reset = (control_input.throttle > 0.01) || (std::abs(rocket_state.sim_time - rocket_state.last_prediction_sim_time) > 3600.0);
                     orbit_predictor.RequestUpdate(&rocket_state, rocket_state, adv_orbit_pred_days, adv_orbit_iters, adv_orbit_ref_mode, adv_orbit_ref_body, force_reset);
                 }
             }
