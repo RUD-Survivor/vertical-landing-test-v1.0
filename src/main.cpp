@@ -15,6 +15,8 @@
 #include "simulation/orbit_physics.h"
 #include "simulation/stage_manager.h"
 #include "simulation/maneuver_system.h"
+#include "math/spline.h"
+#include "math/chebyshev.h"  // Leaving for reference but not using for rendering
 
 using namespace std;
 
@@ -1808,14 +1810,19 @@ int main() {
             float ribbon_w = fmaxf(earth_r * 0.006f, cam_dist * 0.001f);
             if (adv_points.size() > 1) {
                 // Original Predicted Path matches the celestial body color scheme basically matching Keplerian (Cyan/Blue)
-                r3d->drawRibbon(adv_points, ribbon_w, 0.4f, 0.8f, 1.0f, 0.85f);
+                // --- Spline Smoothing (Centripetal Catmull-Rom) ---
+                std::vector<Vec3> smooth_pts = CatmullRomSpline::interpolate(adv_points, 8);
+                r3d->drawRibbon(smooth_pts, ribbon_w, 0.4f, 0.8f, 1.0f, 0.85f);
             }
             if (adv_mnv_points.size() > 1) {
                 // Dashed line logic for maneuver prediction: Make it Orange
-                for (size_t s = 0; s < adv_mnv_points.size(); s += 5) {
+                // --- Spline Smoothing (Centripetal Catmull-Rom) ---
+                std::vector<Vec3> smooth_mnv_pts = CatmullRomSpline::interpolate(adv_mnv_points, 8);
+
+                for (size_t s = 0; s < smooth_mnv_pts.size(); s += 5) {
                     std::vector<Vec3> dash;
                     for (size_t j = 0; j < 3; j++) {
-                        if (s + j < adv_mnv_points.size()) dash.push_back(adv_mnv_points[s + j]);
+                        if (s + j < smooth_mnv_pts.size()) dash.push_back(smooth_mnv_pts[s + j]);
                     }
                     if (dash.size() >= 2) r3d->drawRibbon(dash, ribbon_w, 1.0f, 0.6f, 0.1f, 0.9f);
                 }
