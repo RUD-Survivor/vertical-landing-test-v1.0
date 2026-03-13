@@ -13,6 +13,7 @@
 #include "control/control_system.h"
 #include "render/renderer_2d.h"
 #include "simulation/orbit_physics.h"
+#include "simulation/predictor.h"
 #include "simulation/stage_manager.h"
 #include "simulation/maneuver_system.h"
 #include "math/spline.h"
@@ -116,6 +117,9 @@ int main() {
   renderer = new Renderer();
   
   PhysicsSystem::InitSolarSystem();
+  
+  Simulation::AsyncOrbitPredictor orbit_predictor;
+  orbit_predictor.Start();
 
   // =========================================================
   // 主菜单阶段：显示启动菜单
@@ -1379,446 +1383,63 @@ int main() {
       }
 
       // ===== 轨道预测线 (开普勒轨道) =====
+      std::vector<Vec3> draw_points, draw_mnv_points;
       if (cam_mode_3d == 2) {
         if (adv_orbit_enabled) {
-            // ==========================================
-            // ADVANCED ORBIT PREDICTION: N-BODY RK4
-            // ==========================================
-            std::vector<Vec3> adv_points;
-            std::vector<Vec3> adv_mnv_points; // For prediction after maneuver
-            std::vector<Vec3> adv_ground_track;
-            std::vector<Vec3> adv_mnv_ground_track;
-
-            int STEPS = adv_orbit_iters;
-            double dt = (adv_orbit_pred_days * 86400.0) / (double)STEPS; // auto-calc step size
-            
-            // Get initial absolute state
-            double cur_h_px = rocket_state.px + SOLAR_SYSTEM[current_soi_index].px;
-            double cur_h_py = rocket_state.py + SOLAR_SYSTEM[current_soi_index].py;
-            double cur_h_pz = rocket_state.pz + SOLAR_SYSTEM[current_soi_index].pz;
-            double cur_h_vx = rocket_state.vx + SOLAR_SYSTEM[current_soi_index].vx;
-            double cur_h_vy = rocket_state.vy + SOLAR_SYSTEM[current_soi_index].vy;
-            double cur_h_vz = rocket_state.vz + SOLAR_SYSTEM[current_soi_index].vz;
-
-            double t_sim = rocket_state.sim_time;
-            
-            bool has_mnv = (rocket_state.maneuvers.size() > 0);
-            double mnv_t = has_mnv ? rocket_state.maneuvers[0].sim_time : 1e20;
-            bool mnv_executed = false;
-            bool burn_in_progress = false;
-            
-            double mnv_duration = 0;
-            if (has_mnv) {
-                double dv_val = rocket_state.maneuvers[0].delta_v.length();
-                double m0 = rocket_state.fuel + rocket_config.dry_mass + rocket_config.upper_stages_mass;
-                double ve = rocket_config.specific_impulse * 9.80665;
-                double mdot = rocket_config.cosrate;
-                if (ve > 0 && mdot > 0 && dv_val > 0) {
-                    mnv_duration = m0 * (1.0 - 1.0/exp(dv_val/ve)) / mdot;
+            // Perform asynchronous numerical orbit prediction
+            if (!rocket_state.prediction_in_progress) {
+                // Throttle requests: update every ~1 simulated second if not busy
+                if (std::abs(rocket_state.sim_time - rocket_state.last_prediction_sim_time) > 1.0 || rocket_state.predicted_path.empty()) {
+                    rocket_state.prediction_in_progress = true;
+                    // Populate heliocentric state for the background predictor
+                    CelestialBody& soi = SOLAR_SYSTEM[current_soi_index];
+                    rocket_state.abs_px = rocket_state.px + soi.px;
+                    rocket_state.abs_py = rocket_state.py + soi.py;
+                    rocket_state.abs_pz = rocket_state.pz + soi.pz;
+                    rocket_state.abs_vx = rocket_state.vx + soi.vx;
+                    rocket_state.abs_vy = rocket_state.vy + soi.vy;
+                    rocket_state.abs_vz = rocket_state.vz + soi.vz;
+                    bool force_reset = (control_input.throttle > 0.01) || (std::abs(rocket_state.sim_time - rocket_state.last_prediction_sim_time) > 10.0);
+                    orbit_predictor.RequestUpdate(&rocket_state, rocket_state, adv_orbit_pred_days, adv_orbit_iters, adv_orbit_ref_mode, adv_orbit_ref_body, force_reset);
                 }
             }
-            double trigger_t = mnv_t;
-            if (has_mnv && rocket_state.maneuvers[0].burn_mode == 1) {
-                trigger_t = mnv_t - 0.5 * mnv_duration;
+
+            {
+                std::lock_guard<std::mutex> lock(*rocket_state.path_mutex);
+                draw_points = rocket_state.predicted_path;
+                draw_mnv_points = rocket_state.predicted_mnv_path;
             }
 
-            // If the burn is already in progress or completed, we need to:
-            if (has_mnv && rocket_state.sim_time >= trigger_t) {
-                burn_in_progress = true;
-                mnv_executed = true; // Don't re-apply delta-v in the primary RK4
-            }
-            
-            double orig_px = 0, orig_py = 0, orig_pz = 0;
-            double orig_vx = 0, orig_vy = 0, orig_vz = 0;
-            
-            // Pre-calculate current basis for rendering mapping
-            double b0_px = SOLAR_SYSTEM[adv_orbit_ref_body].px;
-            double b0_py = SOLAR_SYSTEM[adv_orbit_ref_body].py;
-            double b0_pz = SOLAR_SYSTEM[adv_orbit_ref_body].pz;
-            double b0_vx = SOLAR_SYSTEM[adv_orbit_ref_body].vx;
-            double b0_vy = SOLAR_SYSTEM[adv_orbit_ref_body].vy;
-            double b0_vz = SOLAR_SYSTEM[adv_orbit_ref_body].vz;
-            
-            Vec3 ux0, uy0, uz0;
-            if (adv_orbit_ref_mode == 1 && adv_orbit_ref_body != 0) {
-                Vec3 R(b0_px, b0_py, b0_pz);
-                Vec3 V(b0_vx, b0_vy, b0_vz);
-                ux0 = R.normalized();
-                uz0 = R.cross(V).normalized();
-                uy0 = uz0.cross(ux0).normalized();
-            }
-
-            auto calc_acc = [&](double tx, double px, double py, double pz, double& ax, double& ay, double& az) {
-                PhysicsSystem::UpdateCelestialBodies(tx);
-                ax = 0; ay = 0; az = 0;
-                for (size_t b = 0; b < SOLAR_SYSTEM.size(); b++) {
-                    double dx = SOLAR_SYSTEM[b].px - px;
-                    double dy = SOLAR_SYSTEM[b].py - py;
-                    double dz = SOLAR_SYSTEM[b].pz - pz;
-                    double dist_sq = dx*dx + dy*dy + dz*dz;
-                    if (dist_sq > 0) {
-                        double dist = sqrt(dist_sq);
-                        double F = (6.67430e-11 * SOLAR_SYSTEM[b].mass) / dist_sq;
-                        ax += F * dx / dist;
-                        ay += F * dy / dist;
-                        az += F * dz / dist;
-                    }
-                }
-            };
-
-            double max_pred_time = rocket_state.sim_time + adv_orbit_pred_days * 86400.0;
-            const double FR_theta = 1.0 / (2.0 - cbrt(2.0));
-            const double c1 = FR_theta / 2.0, c2 = (1.0 - FR_theta) / 2.0;
-            const double d1 = FR_theta, d2 = 1.0 - 2.0 * FR_theta;
-
-            int actual_steps = 0;
-            while (t_sim < max_pred_time && actual_steps < adv_orbit_iters) {
-                actual_steps++;
-                
-                if (has_mnv && !mnv_executed) {
-                    if (t_sim >= trigger_t - 1e-6) {
-                        t_sim = trigger_t; // Strict snap to maneuver time
-                        
-                        // Extract point before applying burn
-                        if (!adv_points.empty()) {
-                            adv_mnv_world_pos = adv_points.back();
-                        } else {
-                            double fx=cur_h_px, fy=cur_h_py, fz=cur_h_pz;
-                            if (adv_orbit_ref_mode==0 && adv_orbit_ref_body!=0) { fx = (cur_h_px-SOLAR_SYSTEM[adv_orbit_ref_body].px)+b0_px; fy = (cur_h_py-SOLAR_SYSTEM[adv_orbit_ref_body].py)+b0_py; fz = (cur_h_pz-SOLAR_SYSTEM[adv_orbit_ref_body].pz)+b0_pz; }
-                            adv_mnv_world_pos = Vec3((float)(fx*ws_d - ro_x), (float)(fy*ws_d - ro_y), (float)(fz*ws_d - ro_z));
-                        }
-
-                        PhysicsSystem::UpdateCelestialBodies(t_sim);
-                        double r_rel_x = cur_h_px - SOLAR_SYSTEM[current_soi_index].px;
-                        double r_rel_y = cur_h_py - SOLAR_SYSTEM[current_soi_index].py;
-                        double r_rel_z = cur_h_pz - SOLAR_SYSTEM[current_soi_index].pz;
-                        double v_rel_x = cur_h_vx - SOLAR_SYSTEM[current_soi_index].vx;
-                        double v_rel_y = cur_h_vy - SOLAR_SYSTEM[current_soi_index].vy;
-                        double v_rel_z = cur_h_vz - SOLAR_SYSTEM[current_soi_index].vz;
-                        
-                        // Dynamically update the node's osculating Kepler parameters so the UI handles rotate correctly
-                        double r_mag = sqrt(r_rel_x*r_rel_x + r_rel_y*r_rel_y + r_rel_z*r_rel_z);
-                        double v_sq_rel = v_rel_x*v_rel_x + v_rel_y*v_rel_y + v_rel_z*v_rel_z;
-                        double mu = 6.67430e-11 * SOLAR_SYSTEM[current_soi_index].mass;
-                        Vec3 r_vec((float)r_rel_x, (float)r_rel_y, (float)r_rel_z);
-                        Vec3 v_vec((float)v_rel_x, (float)v_rel_y, (float)v_rel_z);
-                        Vec3 h_vec = r_vec.cross(v_vec);
-                        double energy = 0.5 * v_sq_rel - mu / r_mag;
-                        double a = -mu / (2.0 * energy);
-                        if (a != 0) {
-                            Vec3 e_vec = v_vec.cross(h_vec) / (float)mu - r_vec / (float)r_mag;
-                            double ecc = e_vec.length();
-                            Vec3 e_dir = (ecc > 1e-7f) ? e_vec.normalized() : Vec3(1,0,0);
-                            Vec3 p_dir = h_vec.normalized().cross(e_dir).normalized();
-                            double s_cosE = (a - r_mag) / (a * ecc);
-                            double s_sinE = r_vec.dot(p_dir) / (a * sqrt(fmax(0.0, 1.0 - ecc*ecc)));
-                            double E0 = atan2(s_sinE, s_cosE);
-                            rocket_state.maneuvers[0].ref_a = a;
-                            rocket_state.maneuvers[0].ref_ecc = ecc;
-                            rocket_state.maneuvers[0].ref_M0 = E0;
-                            rocket_state.maneuvers[0].ref_n = sqrt(mu / (a * a * a));
-                            rocket_state.maneuvers[0].ref_center = e_dir * (-(float)a * (float)ecc);
-                            rocket_state.maneuvers[0].ref_e_dir = e_dir;
-                            rocket_state.maneuvers[0].ref_p_dir = p_dir;
-                        }
-                        
-                        ManeuverFrame frame = ManeuverSystem::getFrame(r_vec, v_vec);
-                        Vec3 dv = frame.prograde * rocket_state.maneuvers[0].delta_v.x + 
-                                  frame.normal   * rocket_state.maneuvers[0].delta_v.y + 
-                                  frame.radial   * rocket_state.maneuvers[0].delta_v.z;
-                                  
-                        orig_px = cur_h_px; orig_py = cur_h_py; orig_pz = cur_h_pz;
-                        orig_vx = cur_h_vx; orig_vy = cur_h_vy; orig_vz = cur_h_vz;
-                        
-                        cur_h_vx += dv.x; cur_h_vy += dv.y; cur_h_vz += dv.z;
-                        
-                        // Snapshot the post-burn state ONLY ONCE for stable orbit prediction.
-                        if (!rocket_state.maneuvers[0].snap_valid) {
-                            rocket_state.maneuvers[0].snap_px = cur_h_px;
-                            rocket_state.maneuvers[0].snap_py = cur_h_py;
-                            rocket_state.maneuvers[0].snap_pz = cur_h_pz;
-                            rocket_state.maneuvers[0].snap_vx = cur_h_vx;
-                            rocket_state.maneuvers[0].snap_vy = cur_h_vy;
-                            rocket_state.maneuvers[0].snap_vz = cur_h_vz;
-                            rocket_state.maneuvers[0].snap_valid = true;
-                        }
-                        
-                        mnv_executed = true;
-                        continue; // Skip the integration time-step this loop, maneuver is applied instantly in-place!
-                    }
-                }
-                
-                double min_dist_sq = 1e20;
-                for (size_t b = 0; b < SOLAR_SYSTEM.size(); b++) {
-                    double dx = cur_h_px - SOLAR_SYSTEM[b].px;
-                    double dy = cur_h_py - SOLAR_SYSTEM[b].py;
-                    double dz = cur_h_pz - SOLAR_SYSTEM[b].pz;
-                    double dsq = dx*dx + dy*dy + dz*dz;
-                    if (dsq > 1.0 && dsq < min_dist_sq) min_dist_sq = dsq;
-                }
-                double v_sq = cur_h_vx*cur_h_vx + cur_h_vy*cur_h_vy + cur_h_vz*cur_h_vz;
-                
-                // Sundman Time Transformation: dt scales strictly with local r/v curvature
-                double step_dt = 0.05 * sqrt(min_dist_sq / fmax(v_sq, 1.0));
-                
-                if (step_dt > 3600.0 * 24.0) step_dt = 3600.0 * 24.0;
-                if (step_dt < 0.1) step_dt = 0.1;
-                
-                if (has_mnv && !mnv_executed && t_sim + step_dt > trigger_t) {
-                    step_dt = trigger_t - t_sim; // strict sync at burn bounds
-                } else if (t_sim + step_dt > max_pred_time) {
-                    step_dt = max_pred_time - t_sim;
-                }
-                
-                if (step_dt <= 0) break;
-                
-                // 4th-Order Symplectic LMM evaluate (Forest-Ruth)
-                // We use macros to cleanly represent the symmetric position and velocity stages
-                #define SYM_Q(C) \
-                    cur_h_px += (C) * cur_h_vx * step_dt; cur_h_py += (C) * cur_h_vy * step_dt; cur_h_pz += (C) * cur_h_vz * step_dt; \
-                    t_sim += (C) * step_dt; \
-                    if (mnv_executed) { orig_px += (C)*orig_vx*step_dt; orig_py += (C)*orig_vy*step_dt; orig_pz += (C)*orig_vz*step_dt; }
-
-                #define SYM_P(D) \
-                    { \
-                        double ax, ay, az; calc_acc(t_sim, cur_h_px, cur_h_py, cur_h_pz, ax, ay, az); \
-                        cur_h_vx += (D) * ax * step_dt; cur_h_vy += (D) * ay * step_dt; cur_h_vz += (D) * az * step_dt; \
-                        if (mnv_executed) { \
-                            double oax, oay, oaz; calc_acc(t_sim, orig_px, orig_py, orig_pz, oax, oay, oaz); \
-                            orig_vx += (D) * oax * step_dt; orig_vy += (D) * oay * step_dt; orig_vz += (D) * oaz * step_dt; \
-                        } \
-                    }
-
-                // Execute 4 completely symmetric stages to guarantee long term energy conservation
-                SYM_Q(c1); SYM_P(d1);
-                SYM_Q(c2); SYM_P(d2);
-                SYM_Q(c2); SYM_P(d1);
-                SYM_Q(c1);
-
-                #undef SYM_Q
-                #undef SYM_P
-
-                // Sync planets to new t_sim to extract rendering reference
-                PhysicsSystem::UpdateCelestialBodies(t_sim);
-                
-                double final_px = cur_h_px, final_py = cur_h_py, final_pz = cur_h_pz;
-
-                if (adv_orbit_ref_body != 0) {
-                    if (adv_orbit_ref_mode == 0) { // Inertial Translation
-                        final_px = (cur_h_px - SOLAR_SYSTEM[adv_orbit_ref_body].px) + b0_px;
-                        final_py = (cur_h_py - SOLAR_SYSTEM[adv_orbit_ref_body].py) + b0_py;
-                        final_pz = (cur_h_pz - SOLAR_SYSTEM[adv_orbit_ref_body].pz) + b0_pz;
-                    } else if (adv_orbit_ref_mode == 1) { // Co-rotating
-                        Vec3 R(SOLAR_SYSTEM[adv_orbit_ref_body].px, SOLAR_SYSTEM[adv_orbit_ref_body].py, SOLAR_SYSTEM[adv_orbit_ref_body].pz);
-                        Vec3 V(SOLAR_SYSTEM[adv_orbit_ref_body].vx, SOLAR_SYSTEM[adv_orbit_ref_body].vy, SOLAR_SYSTEM[adv_orbit_ref_body].vz);
-                        Vec3 uxt = R.normalized();
-                        Vec3 uzt = R.cross(V).normalized();
-                        Vec3 uyt = uzt.cross(uxt).normalized();
-                        
-                        // Pos relative to Sun
-                        Vec3 p_sc((float)cur_h_px, (float)cur_h_py, (float)cur_h_pz); 
-                        float xc = p_sc.dot(uxt);
-                        float yc = p_sc.dot(uyt);
-                        float zc = p_sc.dot(uzt);
-
-                        // Reconstruct in t0 basis
-                        Vec3 recon = ux0 * xc + uy0 * yc + uz0 * zc;
-                        final_px = recon.x; final_py = recon.y; final_pz = recon.z;
-                    } else if (adv_orbit_ref_mode == 2) { // Surface
-                        double dx = cur_h_px - SOLAR_SYSTEM[adv_orbit_ref_body].px;
-                        double dy = cur_h_py - SOLAR_SYSTEM[adv_orbit_ref_body].py;
-                        double dz = cur_h_pz - SOLAR_SYSTEM[adv_orbit_ref_body].pz;
-                        
-                        double rot_period = SOLAR_SYSTEM[adv_orbit_ref_body].rotation_period;
-                        double delta_theta = (t_sim - rocket_state.sim_time) * (2.0 * PI / rot_period);
-                        
-                        double c = cos(delta_theta);
-                        double s = sin(delta_theta);
-                        
-                        double recon_x = dx * c + dy * s;
-                        double recon_y = -dx * s + dy * c;
-                        double recon_z = dz;
-                        
-                        final_px = recon_x + b0_px;
-                        final_py = recon_y + b0_py;
-                        final_pz = recon_z + b0_pz;
-                    }
-                }
-                
-                Vec3 render_pt((float)(final_px * ws_d - ro_x), (float)(final_py * ws_d - ro_y), (float)(final_pz * ws_d - ro_z));
-                // Ground track point calculation
-                if (adv_orbit_ref_mode == 1) { // Ground track only makes sense in Co-rotating frame
-                    double dx = final_px - b0_px;
-                    double dy = final_py - b0_py;
-                    double dz = final_pz - b0_pz;
-                    double dist = sqrt(dx*dx + dy*dy + dz*dz);
-                    if (dist > 0 && SOLAR_SYSTEM[adv_orbit_ref_body].radius > 0) {
-                        double surf_r = SOLAR_SYSTEM[adv_orbit_ref_body].radius * 1.002; // slightly above surface
-                        double gx = b0_px + dx/dist * surf_r;
-                        double gy = b0_py + dy/dist * surf_r;
-                        double gz = b0_pz + dz/dist * surf_r;
-                        Vec3 gt_pt((float)(gx * ws_d - ro_x), (float)(gy * ws_d - ro_y), (float)(gz * ws_d - ro_z));
-                        if (mnv_executed) adv_mnv_ground_track.push_back(gt_pt);
-                        else adv_ground_track.push_back(gt_pt);
-                    }
-                }
-                if (mnv_executed && !burn_in_progress) {
-                    adv_mnv_points.push_back(render_pt);
-                    
-                    // Render shadowed original path
-                    double o_final_px = orig_px, o_final_py = orig_py, o_final_pz = orig_pz;
-                    if (adv_orbit_ref_mode == 0 && adv_orbit_ref_body != 0) { // Inertial
-                        o_final_px = (orig_px - SOLAR_SYSTEM[adv_orbit_ref_body].px) + b0_px;
-                        o_final_py = (orig_py - SOLAR_SYSTEM[adv_orbit_ref_body].py) + b0_py;
-                        o_final_pz = (orig_pz - SOLAR_SYSTEM[adv_orbit_ref_body].pz) + b0_pz;
-                    } else if (adv_orbit_ref_mode == 1) { // Co-rotating
-                        Vec3 p_sc((float)orig_px, (float)orig_py, (float)orig_pz);
-                        Vec3 R(SOLAR_SYSTEM[adv_orbit_ref_body].px, SOLAR_SYSTEM[adv_orbit_ref_body].py, SOLAR_SYSTEM[adv_orbit_ref_body].pz);
-                        Vec3 V(SOLAR_SYSTEM[adv_orbit_ref_body].vx, SOLAR_SYSTEM[adv_orbit_ref_body].vy, SOLAR_SYSTEM[adv_orbit_ref_body].vz);
-                        Vec3 uxt = R.normalized();
-                        Vec3 uzt = R.cross(V).normalized();
-                        Vec3 uyt = uzt.cross(uxt).normalized();
-                        float xc = p_sc.dot(uxt);
-                        float yc = p_sc.dot(uyt);
-                        float zc = p_sc.dot(uzt);
-                        Vec3 recon = ux0 * xc + uy0 * yc + uz0 * zc;
-                        o_final_px = recon.x; o_final_py = recon.y; o_final_pz = recon.z;
-                    } else if (adv_orbit_ref_mode == 2) { // Surface
-                        double dx = orig_px - SOLAR_SYSTEM[adv_orbit_ref_body].px;
-                        double dy = orig_py - SOLAR_SYSTEM[adv_orbit_ref_body].py;
-                        double dz = orig_pz - SOLAR_SYSTEM[adv_orbit_ref_body].pz;
-                        
-                        double rot_period = SOLAR_SYSTEM[adv_orbit_ref_body].rotation_period;
-                        double delta_theta = (t_sim - rocket_state.sim_time) * (2.0 * PI / rot_period);
-                        
-                        double c = cos(delta_theta);
-                        double s = sin(delta_theta);
-                        
-                        double recon_x = dx * c + dy * s;
-                        double recon_y = -dx * s + dy * c;
-                        double recon_z = dz;
-                        
-                        o_final_px = recon_x + b0_px;
-                        o_final_py = recon_y + b0_py;
-                        o_final_pz = recon_z + b0_pz;
-                    }
-                    Vec3 o_render_pt((float)(o_final_px * ws_d - ro_x), (float)(o_final_py * ws_d - ro_y), (float)(o_final_pz * ws_d - ro_z));
-                    adv_points.push_back(o_render_pt); // Original path continues
-                    
-                    if (adv_orbit_ref_mode == 1) {
-                        double odx = o_final_px - b0_px;
-                        double ody = o_final_py - b0_py;
-                        double odz = o_final_pz - b0_pz;
-                        double odist = sqrt(odx*odx + ody*ody + odz*odz);
-                        if (odist > 0 && SOLAR_SYSTEM[adv_orbit_ref_body].radius > 0) {
-                            double surf_r = SOLAR_SYSTEM[adv_orbit_ref_body].radius * 1.002;
-                            double gx = b0_px + odx/odist * surf_r;
-                            double gy = b0_py + ody/odist * surf_r;
-                            double gz = b0_pz + odz/odist * surf_r;
-                            Vec3 o_gt_pt((float)(gx * ws_d - ro_x), (float)(gy * ws_d - ro_y), (float)(gz * ws_d - ro_z));
-                            adv_ground_track.push_back(o_gt_pt);
-                        }
-                    }
-                } else {
-                    // During burn or no maneuver: everything goes to the primary (cyan) trajectory
-                    adv_points.push_back(render_pt);
-                }
-            }
-            // Restore current sim state
-            PhysicsSystem::UpdateCelestialBodies(rocket_state.sim_time);
-            
-            // === STABLE PLANNED ORBIT: If burn is in progress and we have a snapshot, ===
-            // === run a SECOND independent RK4 from the snapshot to show the planned orange orbit ===
-            if (burn_in_progress && has_mnv && rocket_state.maneuvers[0].snap_valid) {
-                double s_px = rocket_state.maneuvers[0].snap_px;
-                double s_py = rocket_state.maneuvers[0].snap_py;
-                double s_pz = rocket_state.maneuvers[0].snap_pz;
-                double s_vx = rocket_state.maneuvers[0].snap_vx;
-                double s_vy = rocket_state.maneuvers[0].snap_vy;
-                double s_vz = rocket_state.maneuvers[0].snap_vz;
-                double s_t = trigger_t;
-                
-                const double FR_theta = 1.0 / (2.0 - cbrt(2.0));
-                const double c1 = FR_theta / 2.0, c2 = (1.0 - FR_theta) / 2.0;
-                const double d1 = FR_theta, d2 = 1.0 - 2.0 * FR_theta;
-                
-                int actual_steps = 0;
-                double max_s_time = trigger_t + adv_orbit_pred_days * 86400.0;
-                
-                while (actual_steps < adv_orbit_iters && s_t < max_s_time) {
-                    actual_steps++;
-                    
-                    double min_dist_sq = 1e20;
-                    for (size_t b = 0; b < SOLAR_SYSTEM.size(); b++) {
-                        double dx = s_px - SOLAR_SYSTEM[b].px, dy = s_py - SOLAR_SYSTEM[b].py, dz = s_pz - SOLAR_SYSTEM[b].pz;
-                        double dsq = dx*dx + dy*dy + dz*dz;
-                        if (dsq > 1.0 && dsq < min_dist_sq) min_dist_sq = dsq;
-                    }
-                    double v_sq = s_vx*s_vx + s_vy*s_vy + s_vz*s_vz;
-                    
-                    double step_dt = 0.05 * sqrt(min_dist_sq / fmax(v_sq, 1.0));
-                    if (step_dt > 3600.0 * 24.0) step_dt = 3600.0 * 24.0;
-                    if (step_dt < 0.1) step_dt = 0.1;
-                    if (s_t + step_dt > max_s_time) step_dt = max_s_time - s_t;
-                    
-                    if (step_dt <= 0) break;
-                    
-                    #define SYM_S_Q(C) s_px += (C)*s_vx*step_dt; s_py += (C)*s_vy*step_dt; s_pz += (C)*s_vz*step_dt; s_t += (C)*step_dt;
-                    #define SYM_S_P(D) { double ax,ay,az; calc_acc(s_t, s_px,s_py,s_pz, ax,ay,az); s_vx+=(D)*ax*step_dt; s_vy+=(D)*ay*step_dt; s_vz+=(D)*az*step_dt; }
-                    
-                    SYM_S_Q(c1); SYM_S_P(d1);
-                    SYM_S_Q(c2); SYM_S_P(d2);
-                    SYM_S_Q(c2); SYM_S_P(d1);
-                    SYM_S_Q(c1);
-                    
-                    #undef SYM_S_Q
-                    #undef SYM_S_P
-                    
-                    PhysicsSystem::UpdateCelestialBodies(s_t);
-                    double fp = s_px, fpy = s_py, fpz = s_pz;
-                    if (adv_orbit_ref_body != 0) {
-                        if (adv_orbit_ref_mode == 0) { fp = (s_px-SOLAR_SYSTEM[adv_orbit_ref_body].px)+b0_px; fpy = (s_py-SOLAR_SYSTEM[adv_orbit_ref_body].py)+b0_py; fpz = (s_pz-SOLAR_SYSTEM[adv_orbit_ref_body].pz)+b0_pz; }
-                        else if (adv_orbit_ref_mode == 2) {
-                            double dx = s_px - SOLAR_SYSTEM[adv_orbit_ref_body].px;
-                            double dy = s_py - SOLAR_SYSTEM[adv_orbit_ref_body].py;
-                            double dz = s_pz - SOLAR_SYSTEM[adv_orbit_ref_body].pz;
-                            double rot_period = SOLAR_SYSTEM[adv_orbit_ref_body].rotation_period;
-                            double delta_theta = (s_t - rocket_state.sim_time) * (2.0 * PI / rot_period);
-                            double c = cos(delta_theta), s = sin(delta_theta);
-                            fp  = (dx * c + dy * s) + b0_px;
-                            fpy = (-dx * s + dy * c) + b0_py;
-                            fpz = dz + b0_pz;
-                        }
-                    }
-                    Vec3 rp((float)(fp * ws_d - ro_x), (float)(fpy * ws_d - ro_y), (float)(fpz * ws_d - ro_z));
-                    adv_mnv_points.push_back(rp);
-                    
-                    if (adv_orbit_ref_mode == 1) {
-                        double mdx = fp - b0_px, mdy = fpy - b0_py, mdz = fpz - b0_pz;
-                        double mdist = sqrt(mdx*mdx + mdy*mdy + mdz*mdz);
-                        if (mdist > 0 && SOLAR_SYSTEM[adv_orbit_ref_body].radius > 0) {
-                            double sr = SOLAR_SYSTEM[adv_orbit_ref_body].radius * 1.002;
-                            Vec3 mgp((float)((b0_px + mdx/mdist*sr) * ws_d - ro_x), (float)((b0_py + mdy/mdist*sr) * ws_d - ro_y), (float)((b0_pz + mdz/mdist*sr) * ws_d - ro_z));
-                            adv_mnv_ground_track.push_back(mgp);
-                        }
-                    }
-                }
-                PhysicsSystem::UpdateCelestialBodies(rocket_state.sim_time);
-            }
-
-            // Draw Predicted Path
+            // Render predicted paths from async buffers
             float ribbon_w = fmaxf(earth_r * 0.006f, cam_dist * 0.001f);
-            if (adv_points.size() > 1) {
-                // Original Predicted Path matches the celestial body color scheme basically matching Keplerian (Cyan/Blue)
-                // --- Spline Smoothing (Centripetal Catmull-Rom) ---
-                std::vector<Vec3> smooth_pts = CatmullRomSpline::interpolate(adv_points, 8);
+            
+            // Get current reference body position for world reconstruction
+            double rb_px, rb_py, rb_pz;
+            PhysicsSystem::GetCelestialPositionAt(adv_orbit_ref_body, rocket_state.sim_time, rb_px, rb_py, rb_pz);
+
+            if (!draw_points.empty()) {
+                std::vector<Vec3> world_pts;
+                for (const auto& p : draw_points) {
+                    // Reconstruct world position: CurrentBodyPos + RelativePredictedPos
+                    double wx = (rb_px + p.x) * ws_d - ro_x;
+                    double wy = (rb_py + p.y) * ws_d - ro_y;
+                    double wz = (rb_pz + p.z) * ws_d - ro_z;
+                    world_pts.push_back(Vec3((float)wx, (float)wy, (float)wz));
+                }
+                
+                std::vector<Vec3> smooth_pts = CatmullRomSpline::interpolate(world_pts, 8);
                 r3d->drawRibbon(smooth_pts, ribbon_w, 0.4f, 0.8f, 1.0f, 0.85f);
             }
-            if (adv_mnv_points.size() > 1) {
-                // Dashed line logic for maneuver prediction: Make it Orange
-                // --- Spline Smoothing (Centripetal Catmull-Rom) ---
-                std::vector<Vec3> smooth_mnv_pts = CatmullRomSpline::interpolate(adv_mnv_points, 8);
-
+            if (!draw_mnv_points.empty()) {
+                std::vector<Vec3> world_mnv_pts;
+                for (const auto& p : draw_mnv_points) {
+                    double wx = (rb_px + p.x) * ws_d - ro_x;
+                    double wy = (rb_py + p.y) * ws_d - ro_y;
+                    double wz = (rb_pz + p.z) * ws_d - ro_z;
+                    world_mnv_pts.push_back(Vec3((float)wx, (float)wy, (float)wz));
+                }
+                
+                std::vector<Vec3> smooth_mnv_pts = CatmullRomSpline::interpolate(world_mnv_pts, 8);
                 for (size_t s = 0; s < smooth_mnv_pts.size(); s += 5) {
                     std::vector<Vec3> dash;
                     for (size_t j = 0; j < 3; j++) {
@@ -1827,20 +1448,8 @@ int main() {
                     if (dash.size() >= 2) r3d->drawRibbon(dash, ribbon_w, 1.0f, 0.6f, 0.1f, 0.9f);
                 }
             }
-            // Draw Ground Tracks
-            float gt_w = fmaxf(earth_r * 0.003f, cam_dist * 0.0005f);
-            if (adv_ground_track.size() > 1) {
-                r3d->drawRibbon(adv_ground_track, gt_w, 0.4f, 0.8f, 1.0f, 0.6f);
-            }
-            if (adv_mnv_ground_track.size() > 1) {
-                for (size_t s = 0; s < adv_mnv_ground_track.size(); s += 5) {
-                    std::vector<Vec3> dash;
-                    for (size_t j = 0; j < 3; j++) {
-                        if (s + j < adv_mnv_ground_track.size()) dash.push_back(adv_mnv_ground_track[s + j]);
-                    }
-                    if (dash.size() >= 2) r3d->drawRibbon(dash, gt_w, 1.0f, 0.6f, 0.1f, 0.6f);
-                }
-            }
+            // Restore current sim state
+            PhysicsSystem::UpdateCelestialBodies(rocket_state.sim_time);
 
         } else {
             // ==========================================
@@ -2126,8 +1735,11 @@ int main() {
             Vec3 node_world = Vec3((float)(ref_px * ws_d + pt_node_rel.x * ws_d - ro_x), 
                               (float)(ref_py * ws_d + pt_node_rel.y * ws_d - ro_y), 
                               (float)(ref_pz * ws_d + pt_node_rel.z * ws_d - ro_z));
-            if (adv_orbit_enabled && i == 0) {
-                node_world = adv_mnv_world_pos;
+            if (adv_orbit_enabled && i == 0 && !draw_mnv_points.empty()) {
+                // The maneuver node position is the first point of the post-burn path
+                node_world = Vec3((float)(draw_mnv_points[0].x * ws_d - ro_x), 
+                                  (float)(draw_mnv_points[0].y * ws_d - ro_y), 
+                                  (float)(draw_mnv_points[0].z * ws_d - ro_z));
             }
             Vec2 n_scr = ManeuverSystem::projectToScreen(node_world, viewMat, macroProjMat, as_ratio);
             float d_mouse = sqrtf(powf(n_scr.x - mouse_x, 2) + powf(n_scr.y - mouse_y, 2));

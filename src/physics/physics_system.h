@@ -12,6 +12,8 @@ namespace PhysicsSystem {
     // Planetary Ephemeris and Coordinates
     void InitSolarSystem();
     void UpdateCelestialBodies(double current_time_sec);
+    void GetCelestialPositionAt(int body_idx, double t, double& px, double& py, double& pz);
+    void GetCelestialStateAt(int body_idx, double t, double& bpx, double& bpy, double& bpz, double& bvx, double& bvy, double& bvz);
     void CheckSOI_Transitions(RocketState& state);
     double CalculateSolarOcclusion(const RocketState& state);
     

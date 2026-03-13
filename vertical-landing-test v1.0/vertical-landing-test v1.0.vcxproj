@@ -26,6 +26,7 @@
     <ClCompile Include="..\src\simulation\stage_manager.cpp" />
     <ClCompile Include="..\src\simulation\center_calculator.cpp" />
     <ClCompile Include="..\src\simulation\center_visualizer.cpp" />
+    <ClCompile Include="..\src\simulation\predictor.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\src\physics\physics_system.h" />
@@ -40,6 +41,7 @@
     <ClInclude Include="..\src\simulation\center_visualizer.h" />
     <ClInclude Include="..\src\simulation\orbit_physics.h" />
     <ClInclude Include="..\src\render\renderer_2d.h" />
+    <ClInclude Include="..\src\simulation\predictor.h" />
   </ItemGroup>
   <ItemGroup>
   </ItemGroup>

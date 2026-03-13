@@ -47,6 +47,7 @@ set(SOURCES
     src/simulation/stage_manager.cpp
     src/simulation/center_calculator.cpp
     src/simulation/center_visualizer.cpp
+    src/simulation/predictor.cpp
     vendor/glad/glad.c
 )
 

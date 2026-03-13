@@ -5,6 +5,8 @@
 #include <vector>
 #include <cmath>
 #include <iostream>
+#include <memory>
+#include <mutex>
 #include "math/math3d.h"
 
 // Constants
@@ -203,8 +205,9 @@ struct RocketState {
     double px = 0.0, py = EARTH_RADIUS + 0.1, pz = 0.0;
     double vx = 0.0, vy = 0.0, vz = 0.0;
     
-    // Absolute Heliocentric Position (used for continuous global tracking and Eclipse checks)
+    // Absolute Heliocentric Position/Velocity (used for continuous global tracking and Eclipse checks)
     double abs_px = 0.0, abs_py = 0.0, abs_pz = 0.0;
+    double abs_vx = 0.0, abs_vy = 0.0, abs_vz = 0.0;
     
     // Body-fixed surface coordinates (relative to planet center, rotated frame)
     double surf_px = 0.0, surf_py = EARTH_RADIUS, surf_pz = 0.0;
@@ -261,6 +264,15 @@ struct RocketState {
     // Maneuver Nodes
     std::vector<ManeuverNode> maneuvers;
     int selected_maneuver_index = -1;
+
+    // Asynchronous Prediction Results
+    mutable std::shared_ptr<std::mutex> path_mutex = std::make_shared<std::mutex>();
+    std::vector<Vec3> predicted_path;
+    std::vector<Vec3> predicted_mnv_path;
+    std::vector<Vec3> predicted_ground_track;
+    std::vector<Vec3> predicted_mnv_ground_track;
+    double last_prediction_sim_time = -1.0;
+    bool prediction_in_progress = false;
 };
 
 #endif // ROCKET_STATE_H

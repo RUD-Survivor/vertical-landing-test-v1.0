@@ -36,6 +36,9 @@
     <ClCompile Include="..\src\simulation\center_visualizer.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\simulation\predictor.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\src\physics\physics_system.h">
@@ -72,6 +75,9 @@
       <Filter>头文件</Filter>
     </ClInclude>
     <ClInclude Include="..\src\render\renderer_2d.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\simulation\predictor.h">
       <Filter>头文件</Filter>
     </ClInclude>
   </ItemGroup>

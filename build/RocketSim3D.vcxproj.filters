@@ -19,6 +19,9 @@
     <ClCompile Include="C:\antigravity_code\RocketSim3D\src\simulation\center_visualizer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="C:\antigravity_code\RocketSim3D\src\simulation\predictor.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="C:\antigravity_code\RocketSim3D\vendor\glad\glad.c">
       <Filter>Source Files</Filter>
     </ClCompile>
