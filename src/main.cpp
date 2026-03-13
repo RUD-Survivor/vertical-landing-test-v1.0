@@ -809,8 +809,14 @@ int main() {
     }
 
     ControlSystem::ManualInputs manual;
-    manual.throttle_up = glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS;
-    manual.throttle_down = glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS;
+    manual.throttle_up = glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS || 
+                         glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS ||
+                         glfwGetKey(window, GLFW_KEY_KP_ADD) == GLFW_PRESS || 
+                         glfwGetKey(window, GLFW_KEY_RIGHT_BRACKET) == GLFW_PRESS;
+    manual.throttle_down = glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS || 
+                           glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS ||
+                           glfwGetKey(window, GLFW_KEY_KP_SUBTRACT) == GLFW_PRESS || 
+                           glfwGetKey(window, GLFW_KEY_LEFT_BRACKET) == GLFW_PRESS;
     manual.throttle_max = glfwGetKey(window, GLFW_KEY_Z) == GLFW_PRESS;
     manual.throttle_min = glfwGetKey(window, GLFW_KEY_X) == GLFW_PRESS;
     manual.yaw_left = glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS;
