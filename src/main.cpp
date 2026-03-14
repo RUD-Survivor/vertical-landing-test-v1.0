@@ -40,6 +40,8 @@ static void scroll_callback(GLFWwindow* /*w*/, double /*xoffset*/, double yoffse
 #include "simulation/center_visualizer.h"
 #include "save_system.h"
 #include "menu_system.h"
+#include "simulation/factory_system.h"
+#include "simulation/factory_ui.h"
 
 // ==========================================
 // Part 2: Explorer Class -> Replaced by ECS (RocketState, PhysicsSystem)
@@ -182,6 +184,141 @@ int main() {
   }
 
   // =========================================================
+  // 航天局总览阶段 (Agency Hub)
+  // =========================================================
+  AgencyState agency_state;
+  FactorySystem factory;
+
+  bool agency_loaded = false;
+  if (load_from_save) {
+      agency_loaded = SaveSystem::LoadAgencyFactory(agency_state, factory);
+  }
+
+  if (!agency_loaded) {
+      // Starter resources (ONLY FOR NEW GAME)
+      agency_state.addItem(ITEM_IRON_ORE, 50);
+      agency_state.addItem(ITEM_COPPER_ORE, 30);
+      agency_state.addItem(ITEM_COAL, 40);
+      agency_state.addItem(ITEM_STEEL, 10);
+      agency_state.addItem(PART_ENGINE, 2);
+      agency_state.addItem(PART_FUEL_TANK, 4);
+      agency_state.addItem(PART_NOSECONE, 2);
+      agency_state.addItem(PART_STRUCTURAL, 5);
+      agency_state.addItem(PART_COMMAND_POD, 1);
+      // Starter factory buildings
+      factory.addNode(NODE_MINER, 0, 0);    // Iron miner (ID 1)
+      factory.addNode(NODE_MINER, 1, 0);    // Coal miner (ID 2)
+      factory.addNode(NODE_SMELTER, 3, 0);  // Smelter (ID 3)
+      factory.addNode(NODE_STORAGE, 4, 1);  // Storage (ID 4)
+      
+      // Starter belts
+      ConveyorBelt b1; b1.from_node_id = 1; b1.to_node_id = 3;
+      factory.belts.push_back(b1);
+      ConveyorBelt b2; b2.from_node_id = 2; b2.to_node_id = 3;
+      factory.belts.push_back(b2);
+      ConveyorBelt b3; b3.from_node_id = 3; b3.to_node_id = 4;
+      factory.belts.push_back(b3);
+  }
+  
+  while (menu_choice != MenuSystem::MENU_NONE && !glfwWindowShouldClose(window)) {
+      if (menu_choice == MenuSystem::MENU_AGENCY_HUB) {
+          while (menu_choice == MenuSystem::MENU_AGENCY_HUB && !glfwWindowShouldClose(window)) {
+              glfwPollEvents();
+              double mx, my;
+              glfwGetCursorPos(window, &mx, &my);
+              int ww, wh;
+              glfwGetWindowSize(window, &ww, &wh);
+              float mouse_x = (float)(mx / ww * 2.0 - 1.0);
+              float mouse_y = (float)(1.0 - my / wh * 2.0);
+              bool mouse_left = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+
+              menu_choice = MenuSystem::HandleAgencyHubInput(window, menu_state, up_pressed, down_pressed, enter_pressed, mouse_x, mouse_y, mouse_left);
+              
+              // Tick factory
+              factory.tick(0.016f, agency_state);
+              
+              glClearColor(0.02f, 0.03f, 0.08f, 1.0f);
+              glClear(GL_COLOR_BUFFER_BIT);
+              renderer->beginFrame();
+              MenuSystem::DrawAgencyHub(renderer, menu_state, agency_state, (float)glfwGetTime(), factory);
+              renderer->endFrame();
+              glfwSwapBuffers(window);
+              std::this_thread::sleep_for(std::chrono::milliseconds(16));
+          }
+          // Always save when leaving Hub
+          SaveSystem::SaveAgencyFactory(agency_state, factory);
+      }
+      
+      // Factory construction mode
+      if (menu_choice == MenuSystem::MENU_FACTORY) {
+          FactoryUIState factory_ui;
+          g_scroll_y = 0.0f;
+          bool in_factory = true;
+          while (in_factory && !glfwWindowShouldClose(window)) {
+              glfwPollEvents();
+              
+              double fmx, fmy;
+              glfwGetCursorPos(window, &fmx, &fmy);
+              int fww, fwh;
+              glfwGetWindowSize(window, &fww, &fwh);
+              float mouse_x = (float)(fmx / fww * 2.0 - 1.0);
+              float mouse_y = (float)(1.0 - fmy / fwh * 2.0);
+              bool mouse_left = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+              float scroll = g_scroll_y;
+              g_scroll_y = 0.0f;
+              
+              in_factory = HandleFactoryInput(window, factory_ui, factory, agency_state, mouse_x, mouse_y, mouse_left, scroll);
+              
+              // Tick factory production
+              factory.tick(0.016f, agency_state);
+              
+              glClearColor(0.04f, 0.05f, 0.07f, 1.0f);
+              glClear(GL_COLOR_BUFFER_BIT);
+              renderer->beginFrame();
+              DrawFactoryUI(renderer, factory_ui, factory, agency_state, (float)glfwGetTime());
+              renderer->endFrame();
+              glfwSwapBuffers(window);
+              
+              std::this_thread::sleep_for(std::chrono::milliseconds(16));
+          }
+          // Save and return to hub
+          SaveSystem::SaveAgencyFactory(agency_state, factory);
+          menu_choice = MenuSystem::MENU_AGENCY_HUB;
+          // Wait for ESC release to prevent triggering Hub exit immediately
+          while (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
+              glfwPollEvents();
+          }
+      }
+      
+      if (menu_choice == MenuSystem::MENU_NONE) {
+          // Returning to main menu or popping out
+          break;
+      }
+      
+      // If we got here and it's VAB or CONTINUE, break out of the management loop
+      // to proceed to the 3D workshop/flight simulation
+      if (menu_choice == MenuSystem::MENU_VAB || menu_choice == MenuSystem::MENU_CONTINUE) {
+          break;
+      }
+  }
+  
+  // Final exit check
+  if (menu_choice == MenuSystem::MENU_NONE || glfwWindowShouldClose(window)) {
+      if (menu_choice != MenuSystem::MENU_NONE) {
+          // This must be rocket flight/building mode if we continue below
+      } else {
+          delete renderer;
+          glfwTerminate();
+          return 0;
+      }
+  }
+  
+  // Transition to Rocket Building/Flight
+  load_from_save = (menu_choice == MenuSystem::MENU_CONTINUE);
+  bool skip_builder = false; // Default behavior
+  bool factory_mode_active = false;
+
+  // =========================================================
   // 初始化 3D 渲染器和网格 (Early instantiation for Workshop)
   // =========================================================
   Renderer3D* r3d = new Renderer3D();
@@ -201,7 +338,7 @@ int main() {
   BuilderState builder_state;
   RocketState loaded_state;
   ControlInput loaded_input;
-  bool skip_builder = false;
+  // skip_builder is already set by Hub transition logic above
   
   if (load_from_save) {
       // 从存档加载
@@ -463,7 +600,7 @@ int main() {
                                      "CoT", viewMat * projMat);
     }
     
-    drawBuilderUI_KSP(renderer, builder_state, (float)glfwGetTime());
+    drawBuilderUI_KSP(renderer, builder_state, agency_state, (float)glfwGetTime());
     renderer->endFrame();
 
     glfwSwapBuffers(window);
@@ -475,6 +612,21 @@ int main() {
   // Build RocketConfig from assembled parts
   // =========================================================
   RocketConfig rocket_config = builder_state.assembly.buildRocketConfig();
+  
+  // Consume parts from agency inventory
+  for (const auto& p : builder_state.assembly.parts) {
+      const PartDef& def = PART_CATALOG[p.def_id];
+      ItemType it = ITEM_NONE;
+      if (def.category == CAT_NOSE_CONE) it = PART_NOSECONE;
+      else if (def.category == CAT_COMMAND_POD) it = PART_COMMAND_POD;
+      else if (def.category == CAT_FUEL_TANK) it = PART_FUEL_TANK;
+      else if (def.category == CAT_ENGINE) it = PART_ENGINE;
+      else if (def.category == CAT_BOOSTER) it = PART_FUEL_TANK;
+      else if (def.category == CAT_STRUCTURAL) it = PART_STRUCTURAL;
+      if (it != ITEM_NONE) {
+          agency_state.removeItem(it, 1);
+      }
+  }
 
   RocketState rocket_state;
   ControlInput control_input;

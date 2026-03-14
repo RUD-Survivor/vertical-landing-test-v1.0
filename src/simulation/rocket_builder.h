@@ -5,8 +5,11 @@
 // ==========================================================
 
 #include "core/rocket_state.h"
+#include "core/agency_state.h"
+#include "simulation/resource_system.h"
 #include "math/math3d.h"
 #include <vector>
+#include <map>
 #include <cmath>
 #include <algorithm>
 #include <string>
@@ -309,7 +312,7 @@ inline void drawBuilderInt(Renderer* r, float x, float y, int value, float size,
 // ==========================================================
 // Main Builder UI Rendering
 // ==========================================================
-inline void drawBuilderUI_KSP(Renderer* r, BuilderState& bs, float time) {
+inline void drawBuilderUI_KSP(Renderer* r, BuilderState& bs, const AgencyState& agency, float time) {
     // ---- Background ----
     // Make background completely transparent to see the 3D workshop
     // r->addRect(0.0f, 0.0f, 2.0f, 2.0f, 0.05f, 0.06f, 0.10f, 0.0f);
@@ -388,6 +391,27 @@ inline void drawBuilderUI_KSP(Renderer* r, BuilderState& bs, float time) {
         float nb = is_selected ? 0.9f : 0.55f;
         drawBuilderText(r, panel_left + 0.07f, iy + 0.018f, def.name, 0.010f, nr, ng, nb);
 
+        // --- STOCK LEVEL (Integration) ---
+        ItemType mapped_item = ITEM_NONE;
+        switch(def.category) {
+            case CAT_NOSE_CONE:   mapped_item = PART_NOSECONE;    break;
+            case CAT_COMMAND_POD: mapped_item = PART_COMMAND_POD; break;
+            case CAT_FUEL_TANK:   mapped_item = PART_FUEL_TANK;   break;
+            case CAT_ENGINE:      mapped_item = PART_ENGINE;      break;
+            case CAT_BOOSTER:     mapped_item = PART_FUEL_TANK;   break; // Boosters are heavy tanks
+            case CAT_STRUCTURAL:  mapped_item = PART_STRUCTURAL;  break;
+            default: break;
+        }
+        
+        int stock = (mapped_item != ITEM_NONE) ? agency.getItemCount(mapped_item) : 999;
+        
+        char stock_buf[32];
+        snprintf(stock_buf, sizeof(stock_buf), "STOCK: %d", stock);
+        float sr = (stock > 0) ? 0.4f : 1.0f;
+        float sg = (stock > 0) ? 0.8f : 0.3f;
+        float sb = (stock > 0) ? 0.4f : 0.3f;
+        drawBuilderText(r, panel_left + 0.36f, iy + 0.018f, stock_buf, 0.0085f, sr, sg, sb);
+        
         // Part stats line
         if (def.fuel_capacity > 0) {
             drawBuilderInt(r, panel_left + 0.07f, iy - 0.015f, (int)(def.fuel_capacity / 1000), 0.008f, 0.9f, 0.7f, 0.2f);
@@ -543,7 +567,26 @@ inline void drawBuilderUI_KSP(Renderer* r, BuilderState& bs, float time) {
     drawBuilderText(r, btn_x - 0.10f, cot_btn_y, "CoT", 0.011f, cot_tr, cot_tg, cot_tb);
 
     // ---- Launch Button / Prompt ----
-    bool can_launch = bs.assembly.hasEngine() && !bs.assembly.parts.empty();
+    // Inventory check for launch
+    std::map<ItemType, int> required;
+    for (const auto& p : bs.assembly.parts) {
+        const PartDef& def = PART_CATALOG[p.def_id];
+        ItemType it = ITEM_NONE;
+        if (def.category == CAT_NOSE_CONE) it = PART_NOSECONE;
+        else if (def.category == CAT_COMMAND_POD) it = PART_COMMAND_POD;
+        else if (def.category == CAT_FUEL_TANK) it = PART_FUEL_TANK;
+        else if (def.category == CAT_ENGINE) it = PART_ENGINE;
+        else if (def.category == CAT_BOOSTER) it = PART_FUEL_TANK;
+        else if (def.category == CAT_STRUCTURAL) it = PART_STRUCTURAL;
+        if (it != ITEM_NONE) required[it]++;
+    }
+
+    bool has_stock = true;
+    for (auto const& it : required) {
+        if (agency.getItemCount(it.first) < it.second) has_stock = false;
+    }
+
+    bool can_launch = bs.assembly.hasEngine() && !bs.assembly.parts.empty() && has_stock;
     if (can_launch) {
         float blink = 0.5f + 0.5f * sinf(time * 3.0f);
         r->addRect(0.0f, -0.93f, 0.60f, 0.08f,
@@ -551,7 +594,26 @@ inline void drawBuilderUI_KSP(Renderer* r, BuilderState& bs, float time) {
         drawBuilderText(r, -0.18f, -0.93f, "[SPACE] LAUNCH", 0.013f,
                         0.3f, 1.0f * blink, 0.4f);
     } else {
-        drawBuilderText(r, -0.22f, -0.93f, "ADD ENGINE TO LAUNCH", 0.010f, 0.5f, 0.3f, 0.3f);
+        if (!has_stock) {
+            drawBuilderText(r, -0.25f, -0.93f, "INSUFFICIENT PARTS IN WAREHOUSE", 0.010f, 1.0f, 0.4f, 0.3f);
+        } else {
+            drawBuilderText(r, -0.22f, -0.93f, "ADD ENGINE TO LAUNCH", 0.010f, 0.5f, 0.3f, 0.3f);
+        }
+    }
+    
+    // Show required parts summary
+    if (!required.empty()) {
+        float ry = -0.72f;
+        drawBuilderText(r, 0.65f, ry - 0.15f, "REQUIRED PARTS:", 0.0085f, 0.6f, 0.6f, 0.7f);
+        int j = 0;
+        for (auto const& it : required) {
+            char req_buf[64];
+            int stock = agency.getItemCount(it.first);
+            snprintf(req_buf, sizeof(req_buf), "%s: %d/%d", GetItemInfo(it.first).name, stock, it.second);
+            float color = (stock >= it.second) ? 0.7f : 1.0f;
+            drawBuilderText(r, 0.65f, ry - 0.20f - j * 0.04f, req_buf, 0.008f, color, color * 0.9f, (stock >= it.second) ? 0.7f : 0.3f);
+            j++;
+        }
     }
 
     // ---- Controls Help ----
