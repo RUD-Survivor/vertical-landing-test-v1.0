@@ -5,4 +5,4 @@ if not exist "%VCVARS%" (
     exit /b 1
 )
 call "%VCVARS%"
-cl /EHsc /MD /O2 src/project.cpp src/glad.c src/physics_system.cpp src/control_system.cpp -I dependencires/include /link /LIBPATH:dependencires/lib glfw3.lib opengl32.lib user32.lib gdi32.lib shell32.lib /OUT:vertical-landing-test.exe
+cl /EHsc /MD /O2 src/main.cpp src/physics/physics_system.cpp src/control/control_system.cpp src/simulation/stage_manager.cpp src/simulation/center_calculator.cpp src/simulation/center_visualizer.cpp vendor/glad/glad.c -I dependencires/include -I vendor -I src /link /LIBPATH:dependencires/lib glfw3.lib opengl32.lib user32.lib gdi32.lib shell32.lib /OUT:vertical-landing-test.exe

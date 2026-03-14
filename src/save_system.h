@@ -5,10 +5,14 @@
 
 #include "core/rocket_state.h"
 #include "simulation/rocket_builder.h"
+#include "core/agency_state.h"
+#include "simulation/factory_system.h"
+#include "simulation/resource_system.h"
 #include <fstream>
 #include <sstream>
 #include <string>
 #include <vector>
+#include <map>
 
 namespace SaveSystem {
 
@@ -211,6 +215,143 @@ bool LoadGame(RocketAssembly& assembly, RocketState& state,
         file >> timestamp;
     }
     
+    file.close();
+    return true;
+}
+
+// ==========================================
+// Save Agency and Factory data
+// ==========================================
+inline bool SaveAgencyFactory(const AgencyState& agency, const FactorySystem& factory) {
+    std::ofstream file("agency_save.dat");
+    if (!file.is_open()) return false;
+
+    file << "AGENCY_VERSION 1.0\n";
+    
+    // 1. Agency Stats
+    file << "STATS\n";
+    file << agency.funds << " " << agency.science << " " << agency.reputation << " " << agency.global_time << "\n";
+
+    // 2. Inventory (AgencyState::inventory is std::map)
+    file << "INVENTORY " << (int)agency.inventory.size() << "\n";
+    for (std::map<ItemType, int>::const_iterator it = agency.inventory.begin(); it != agency.inventory.end(); ++it) {
+        file << (int)it->first << " " << it->second << "\n";
+    }
+
+    // 3. Factory Nodes
+    file << "NODES " << (int)factory.nodes.size() << "\n";
+    for (size_t i = 0; i < factory.nodes.size(); i++) {
+        const FactoryNode& n = factory.nodes[i];
+        file << (int)n.type << " " << n.id << " " << n.grid_x << " " << n.grid_y << " ";
+        file << n.progress << " " << (n.is_producing ? 1 : 0) << " ";
+        file << (int)n.mine_output << " " << n.recipe_index << "\n";
+        
+        // Internal Buffers (FactoryNode::input_buffer is Inventory struct)
+        file << "IBUFFER " << (int)n.input_buffer.items.size() << "\n";
+        for (std::map<ItemType, int>::const_iterator it = n.input_buffer.items.begin(); it != n.input_buffer.items.end(); ++it) {
+            file << (int)it->first << " " << it->second << "\n";
+        }
+        file << "OBUFFER " << (int)n.output_buffer.items.size() << "\n";
+        for (std::map<ItemType, int>::const_iterator it = n.output_buffer.items.begin(); it != n.output_buffer.items.end(); ++it) {
+            file << (int)it->first << " " << it->second << "\n";
+        }
+    }
+
+    // 4. Belts
+    file << "BELTS " << (int)factory.belts.size() << "\n";
+    for (size_t i = 0; i < factory.belts.size(); i++) {
+        const ConveyorBelt& b = factory.belts[i];
+        file << b.from_node_id << " " << b.to_node_id << " " << b.transfer_timer << "\n";
+        // Belt items
+        file << "ITEMS " << (int)b.items.size() << "\n";
+        for (size_t j = 0; j < b.items.size(); j++) {
+            file << (int)b.items[j].type << " " << b.items[j].progress << "\n";
+        }
+    }
+
+    file.close();
+    return true;
+}
+
+// ==========================================
+// Load Agency and Factory data
+// ==========================================
+inline bool LoadAgencyFactory(AgencyState& agency, FactorySystem& factory) {
+    std::ifstream file("agency_save.dat");
+    if (!file.is_open()) return false;
+
+    std::string line;
+    if (!std::getline(file, line) || line.find("AGENCY_VERSION") == std::string::npos) {
+        file.close();
+        return false;
+    }
+
+    factory.nodes.clear();
+    factory.belts.clear();
+    agency.inventory.clear();
+    factory.next_id = 1;
+
+    while (std::getline(file, line)) {
+        if (line == "STATS") {
+            file >> agency.funds >> agency.science >> agency.reputation >> agency.global_time;
+            std::getline(file, line); // consume newline
+        } 
+        else if (line.find("INVENTORY") == 0) {
+            int count = std::stoi(line.substr(10));
+            for (int i = 0; i < count; i++) {
+                int type, qty;
+                file >> type >> qty;
+                agency.addItem((ItemType)type, qty);
+            }
+            std::getline(file, line); // consume newline
+        }
+        else if (line.find("NODES") == 0) {
+            int count = std::stoi(line.substr(6));
+            for (int i = 0; i < count; i++) {
+                FactoryNode n;
+                int n_type, is_prod, m_out;
+                file >> n_type >> n.id >> n.grid_x >> n.grid_y >> n.progress >> is_prod >> m_out >> n.recipe_index;
+                n.type = (FactoryNodeType)n_type;
+                n.is_producing = (is_prod != 0);
+                n.mine_output = (ItemType)m_out;
+                std::getline(file, line); // newline
+
+                // Buffers
+                std::getline(file, line); // IBUFFER
+                int icount = std::stoi(line.substr(8));
+                for (int j = 0; j < icount; j++) {
+                    int t, q; file >> t >> q; n.input_buffer.add((ItemType)t, q);
+                }
+                std::getline(file, line); // newline
+                std::getline(file, line); // OBUFFER
+                int ocount = std::stoi(line.substr(8));
+                for (int j = 0; j < ocount; j++) {
+                    int t, q; file >> t >> q; n.output_buffer.add((ItemType)t, q);
+                }
+                std::getline(file, line); // newline
+                factory.nodes.push_back(n);
+                if (n.id >= factory.next_id) factory.next_id = n.id + 1;
+            }
+        }
+        else if (line.find("BELTS") == 0) {
+            int count = std::stoi(line.substr(6));
+            for (int i = 0; i < count; i++) {
+                ConveyorBelt b;
+                file >> b.from_node_id >> b.to_node_id >> b.transfer_timer;
+                std::getline(file, line); // newline
+                std::getline(file, line); // ITEMS
+                int icount = std::stoi(line.substr(6));
+                for (int j = 0; j < icount; j++) {
+                    int t; float p;
+                    file >> t >> p;
+                    BeltItem itm; itm.type = (ItemType)t; itm.progress = p;
+                    b.items.push_back(itm);
+                }
+                std::getline(file, line); // newline
+                factory.belts.push_back(b);
+            }
+        }
+    }
     file.close();
     return true;
 }
