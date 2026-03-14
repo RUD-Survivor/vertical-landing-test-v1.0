@@ -579,6 +579,7 @@ int main() {
     static int adv_orbit_iters = 4000;           // number of iterations (user adjustable)
     static int adv_orbit_ref_mode = 0;    // 0 = Inertial, 1 = Co-rotating
     static int adv_orbit_ref_body = 3;    // Earth default
+    static int adv_orbit_secondary_ref_body = 4; // Moon default
     static bool adv_warp_to_node = false; // warp-to-maneuver in progress
     static bool adv_embed_mnv = false;    // maneuver popup embedded in adv menu
     static bool adv_embed_mnv_mini = false; // deeply folded (mini) state
@@ -1408,7 +1409,7 @@ int main() {
                     
                     // Reset only if engines are active or large drift (1 hour of sim time)
                     bool force_reset = (control_input.throttle > 0.01) || (std::abs(rocket_state.sim_time - rocket_state.last_prediction_sim_time) > 3600.0);
-                    orbit_predictor.RequestUpdate(&rocket_state, rocket_state, adv_orbit_pred_days, adv_orbit_iters, adv_orbit_ref_mode, adv_orbit_ref_body, force_reset);
+                    orbit_predictor.RequestUpdate(&rocket_state, rocket_state, adv_orbit_pred_days, adv_orbit_iters, adv_orbit_ref_mode, adv_orbit_ref_body, adv_orbit_secondary_ref_body, force_reset);
                 }
             }
 
@@ -1424,14 +1425,18 @@ int main() {
             // Get current reference body position for world reconstruction
             double rb_px, rb_py, rb_pz;
             PhysicsSystem::GetCelestialPositionAt(adv_orbit_ref_body, rocket_state.sim_time, rb_px, rb_py, rb_pz);
+            
+            // Get transformation from local to inertial (world)
+            Quat q_local_to_inertial = PhysicsSystem::GetFrameRotation(adv_orbit_ref_mode, adv_orbit_ref_body, adv_orbit_secondary_ref_body, rocket_state.sim_time);
 
             if (!draw_points.empty()) {
                 std::vector<Vec3> world_pts;
                 for (const auto& p : draw_points) {
-                    // Reconstruct world position: CurrentBodyPos + RelativePredictedPos
-                    double wx = (rb_px + p.x) * ws_d - ro_x;
-                    double wy = (rb_py + p.y) * ws_d - ro_y;
-                    double wz = (rb_pz + p.z) * ws_d - ro_z;
+                    Vec3 p_rot = q_local_to_inertial.rotate(p);
+                    // Reconstruct world position: CurrentBodyPos + RotatedRelativePredictedPos
+                    double wx = (rb_px + p_rot.x) * ws_d - ro_x;
+                    double wy = (rb_py + p_rot.y) * ws_d - ro_y;
+                    double wz = (rb_pz + p_rot.z) * ws_d - ro_z;
                     world_pts.push_back(Vec3((float)wx, (float)wy, (float)wz));
                 }
                 
@@ -1441,9 +1446,10 @@ int main() {
             if (!draw_mnv_points.empty()) {
                 std::vector<Vec3> world_mnv_pts;
                 for (const auto& p : draw_mnv_points) {
-                    double wx = (rb_px + p.x) * ws_d - ro_x;
-                    double wy = (rb_py + p.y) * ws_d - ro_y;
-                    double wz = (rb_pz + p.z) * ws_d - ro_z;
+                    Vec3 p_rot = q_local_to_inertial.rotate(p);
+                    double wx = (rb_px + p_rot.x) * ws_d - ro_x;
+                    double wy = (rb_py + p_rot.y) * ws_d - ro_y;
+                    double wz = (rb_pz + p_rot.z) * ws_d - ro_z;
                     world_mnv_pts.push_back(Vec3((float)wx, (float)wy, (float)wz));
                 }
                 
@@ -2807,7 +2813,7 @@ int main() {
 
             // Ref Body Switch
             float bd_y = fr_y - 0.06f;
-            renderer->drawText(menu_x - 0.12f, bd_y, "Ref Body:", 0.012f, 1, 1, 1, 1.0f);
+            renderer->drawText(menu_x - 0.12f, bd_y, "Primary:", 0.012f, 1, 1, 1, 1.0f);
             bool hover_bd_l = (hmouse_x >= menu_x - 0.01f && hmouse_x <= menu_x + 0.03f && hmouse_y >= bd_y - 0.02f && hmouse_y <= bd_y + 0.02f);
             bool hover_bd_r = (hmouse_x >= menu_x + 0.11f && hmouse_x <= menu_x + 0.15f && hmouse_y >= bd_y - 0.02f && hmouse_y <= bd_y + 0.02f);
             if (hover_bd_l && hlmb && !hlmb_prev) adv_orbit_ref_body = (adv_orbit_ref_body-1 < 0) ? (int)SOLAR_SYSTEM.size()-1 : adv_orbit_ref_body-1;
@@ -2817,9 +2823,25 @@ int main() {
                 renderer->drawText(menu_x + 0.07f, bd_y, SOLAR_SYSTEM[adv_orbit_ref_body].name.c_str(), 0.010f, 1,1,1,1, true, Renderer::CENTER);
             }
             renderer->drawText(menu_x + 0.13f, bd_y, ">", 0.012f, 1,1,1, hover_bd_r?1.0f:0.5f, true, Renderer::CENTER);
+            
+            float next_y = bd_y - 0.06f;
+            
+            if (adv_orbit_ref_mode == 1) { // Co-rotating needs Secondary Body
+                renderer->drawText(menu_x - 0.12f, next_y, "Second:", 0.012f, 1, 1, 1, 1.0f);
+                bool hover_sbd_l = (hmouse_x >= menu_x - 0.01f && hmouse_x <= menu_x + 0.03f && hmouse_y >= next_y - 0.02f && hmouse_y <= next_y + 0.02f);
+                bool hover_sbd_r = (hmouse_x >= menu_x + 0.11f && hmouse_x <= menu_x + 0.15f && hmouse_y >= next_y - 0.02f && hmouse_y <= next_y + 0.02f);
+                if (hover_sbd_l && hlmb && !hlmb_prev) adv_orbit_secondary_ref_body = (adv_orbit_secondary_ref_body-1 < 0) ? (int)SOLAR_SYSTEM.size()-1 : adv_orbit_secondary_ref_body-1;
+                if (hover_sbd_r && hlmb && !hlmb_prev) adv_orbit_secondary_ref_body = (adv_orbit_secondary_ref_body+1) % (int)SOLAR_SYSTEM.size();
+                renderer->drawText(menu_x + 0.01f, next_y, "<", 0.012f, 1,1,1, hover_sbd_l?1.0f:0.5f, true, Renderer::CENTER);
+                if (!SOLAR_SYSTEM.empty()) {
+                    renderer->drawText(menu_x + 0.07f, next_y, SOLAR_SYSTEM[adv_orbit_secondary_ref_body].name.c_str(), 0.010f, 1,1,1,1, true, Renderer::CENTER);
+                }
+                renderer->drawText(menu_x + 0.13f, next_y, ">", 0.012f, 1,1,1, hover_sbd_r?1.0f:0.5f, true, Renderer::CENTER);
+                next_y -= 0.06f;
+            }
 
             // --- Prediction Time Slider ---
-            float pred_y = bd_y - 0.06f;
+            float pred_y = next_y;
             renderer->drawText(menu_x - 0.12f, pred_y, "Predict:", 0.012f, 1, 1, 1, 1.0f);
             float pred_slider_w = menu_w * 0.50f;
             float pred_slider_x = menu_x + 0.04f;

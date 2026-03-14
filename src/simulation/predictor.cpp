@@ -26,12 +26,12 @@ void AsyncOrbitPredictor::Stop() {
     }
 }
 
-void AsyncOrbitPredictor::RequestUpdate(RocketState* target, const RocketState& state, double pred_days, int iters, int ref_mode, int ref_body, bool force_reset) {
+void AsyncOrbitPredictor::RequestUpdate(RocketState* target, const RocketState& state, double pred_days, int iters, int ref_mode, int ref_body, int secondary_ref_body, bool force_reset) {
     if (!target) return;
     std::lock_guard<std::mutex> lock(m_request_mutex);
     
     // Auto reset if reference frame changed
-    if (m_request.ref_body != ref_body || m_request.ref_mode != ref_mode) force_reset = true;
+    if (m_request.ref_body != ref_body || m_request.ref_mode != ref_mode || m_request.secondary_ref_body != secondary_ref_body) force_reset = true;
     
     m_request.target = target;
     m_request.state = state;
@@ -39,6 +39,7 @@ void AsyncOrbitPredictor::RequestUpdate(RocketState* target, const RocketState& 
     m_request.iters = iters;
     m_request.ref_mode = ref_mode;
     m_request.ref_body = ref_body;
+    m_request.secondary_ref_body = secondary_ref_body;
     m_request.celestial_snapshot = SOLAR_SYSTEM;
     m_request.force_reset = force_reset;
     m_request.pending = true;
@@ -228,9 +229,14 @@ void AsyncOrbitPredictor::WorkerLoop() {
                 double rbpx, rbpy, rbpz;
                 PhysicsSystem::GetCelestialPositionAt(req.ref_body, t_sim, rbpx, rbpy, rbpz);
                 
-                m_context.points.push_back(Vec3((float)(cur_h_px - rbpx), (float)(cur_h_py - rbpy), (float)(cur_h_pz - rbpz)));
+                Quat q_inv = PhysicsSystem::GetFrameRotation(req.ref_mode, req.ref_body, req.secondary_ref_body, t_sim).conjugate();
+                
+                Vec3 p_inertial((float)(cur_h_px - rbpx), (float)(cur_h_py - rbpy), (float)(cur_h_pz - rbpz));
+                m_context.points.push_back(q_inv.rotate(p_inertial));
+                
                 if (m_context.mnv_done) {
-                    m_context.mnv_points.push_back(Vec3((float)(mnv_h_px - rbpx), (float)(mnv_h_py - rbpy), (float)(mnv_h_pz - rbpz)));
+                    Vec3 mnv_inertial((float)(mnv_h_px - rbpx), (float)(mnv_h_py - rbpy), (float)(mnv_h_pz - rbpz));
+                    m_context.mnv_points.push_back(q_inv.rotate(mnv_inertial));
                 }
                 last_record_t = t_sim;
             }

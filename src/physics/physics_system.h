@@ -2,6 +2,7 @@
 #define PHYSICS_SYSTEM_H
 
 #include "core/rocket_state.h"
+#include "math/math3d.h"
 
 namespace PhysicsSystem {
     // Math Utilities
@@ -14,6 +15,7 @@ namespace PhysicsSystem {
     void UpdateCelestialBodies(double current_time_sec);
     void GetCelestialPositionAt(int body_idx, double t, double& px, double& py, double& pz);
     void GetCelestialStateAt(int body_idx, double t, double& bpx, double& bpy, double& bpz, double& bvx, double& bvy, double& bvz);
+    Quat GetFrameRotation(int ref_mode, int ref_body, int sec_body, double t);
     void CheckSOI_Transitions(RocketState& state);
     double CalculateSolarOcclusion(const RocketState& state);
     

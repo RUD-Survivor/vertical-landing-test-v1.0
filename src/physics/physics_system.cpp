@@ -288,6 +288,63 @@ void UpdateCelestialBodies(double current_time_sec) {
     }
 }
 
+Quat GetFrameRotation(int ref_mode, int ref_body, int sec_body, double t) {
+    if (ref_mode == 0) return Quat(1, 0, 0, 0); // Inertial
+    if (ref_mode == 2) { // Surface
+        CelestialBody& body = SOLAR_SYSTEM[ref_body];
+        double theta = body.prime_meridian_epoch + (t * 2.0 * PI / body.rotation_period);
+        return Quat::fromAxisAngle(Vec3(0, 0, 1), (float)theta);
+    }
+    if (ref_mode == 1) { // Co-rotating
+        if (sec_body < 0 || sec_body >= (int)SOLAR_SYSTEM.size() || sec_body == ref_body) return Quat(1, 0, 0, 0);
+        double p1x, p1y, p1z, v1x, v1y, v1z;
+        GetCelestialStateAt(ref_body, t, p1x, p1y, p1z, v1x, v1y, v1z);
+        double p2x, p2y, p2z, v2x, v2y, v2z;
+        GetCelestialStateAt(sec_body, t, p2x, p2y, p2z, v2x, v2y, v2z);
+        
+        Vec3 r_rel((float)(p2x - p1x), (float)(p2y - p1y), (float)(p2z - p1z));
+        Vec3 v_rel((float)(v2x - v1x), (float)(v2y - v1y), (float)(v2z - v1z));
+        
+        Vec3 X = r_rel.normalized();
+        Vec3 Z = r_rel.cross(v_rel).normalized(); // Orbital angular momentum normal is Z-axis by convention
+        if (Z.length() < 0.5f) Z = Vec3(0, 0, 1);
+        Vec3 Y = Z.cross(X).normalized(); // Complete orthogonal frame
+        
+        float m00 = X.x, m01 = Y.x, m02 = Z.x;
+        float m10 = X.y, m11 = Y.y, m12 = Z.y;
+        float m20 = X.z, m21 = Y.z, m22 = Z.z;
+        float tr = m00 + m11 + m22;
+        Quat q;
+        if (tr > 0) {
+            float S = std::sqrt(tr + 1.0f) * 2.0f; 
+            q.w = 0.25f * S;
+            q.x = (m21 - m12) / S;
+            q.y = (m02 - m20) / S; 
+            q.z = (m10 - m01) / S; 
+        } else if ((m00 > m11) && (m00 > m22)) {
+            float S = std::sqrt(1.0f + m00 - m11 - m22) * 2.0f; 
+            q.w = (m21 - m12) / S;
+            q.x = 0.25f * S;
+            q.y = (m01 + m10) / S; 
+            q.z = (m02 + m20) / S; 
+        } else if (m11 > m22) {
+            float S = std::sqrt(1.0f + m11 - m00 - m22) * 2.0f; 
+            q.w = (m02 - m20) / S;
+            q.x = (m01 + m10) / S; 
+            q.y = 0.25f * S;
+            q.z = (m12 + m21) / S; 
+        } else {
+            float S = std::sqrt(1.0f + m22 - m00 - m11) * 2.0f; 
+            q.w = (m10 - m01) / S;
+            q.x = (m02 + m20) / S;
+            q.y = (m12 + m21) / S;
+            q.z = 0.25f * S;
+        }
+        return q;
+    }
+    return Quat(1, 0, 0, 0);
+}
+
 
 void CheckSOI_Transitions(RocketState& state) {
     if (SOLAR_SYSTEM.empty()) return;

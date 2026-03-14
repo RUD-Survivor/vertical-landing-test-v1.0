@@ -15,7 +15,7 @@ public:
     void Stop();
 
     // Requests a new prediction based on the provided state
-    void RequestUpdate(RocketState* target, const RocketState& state, double pred_days, int iters, int ref_mode, int ref_body, bool force_reset = false);
+    void RequestUpdate(RocketState* target, const RocketState& state, double pred_days, int iters, int ref_mode, int ref_body, int secondary_ref_body, bool force_reset = false);
 
     // Checks if the predictor is busy
     bool IsBusy() const { return m_busy; }
@@ -30,6 +30,7 @@ private:
         int iters;
         int ref_mode;
         int ref_body;
+        int secondary_ref_body;
         std::vector<CelestialBody> celestial_snapshot;
         bool force_reset = false; // New flag to force clear
         bool pending = false;
@@ -47,6 +48,7 @@ private:
         bool mnv_done = false;
         std::vector<ManeuverNode> last_maneuvers;
         int last_ref_body = -1;
+        int last_secondary_ref_body = -1;
         
         // Initial state at t_epoch for continuity checks
         double init_px, init_py, init_pz;
