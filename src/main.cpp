@@ -4,6 +4,8 @@
 #include <chrono>
 #include <thread>
 #include <cmath>
+#include <functional>
+#include <mutex>
 
 #include "math/math3d.h"
 #include "render/renderer3d.h"
@@ -581,6 +583,8 @@ int main() {
     static int adv_orbit_ref_body = 3;    // Earth default
     static int adv_orbit_secondary_ref_body = 4; // Moon default
     static bool adv_warp_to_node = false; // warp-to-maneuver in progress
+    static bool auto_exec_mnv = false;    // auto-execute next maneuver node
+    static bool flight_assist_menu = false; // Flight Assist menu visibility
     static bool adv_embed_mnv = false;    // maneuver popup embedded in adv menu
     static bool adv_embed_mnv_mini = false; // deeply folded (mini) state
     static bool mnv_popup_mini_hover = false;
@@ -604,6 +608,22 @@ int main() {
         }
     }
     g_was_pressed = g_now;
+
+    // --- N 键自动执行机动节点 (Auto-Execute Maneuver) ---
+    static bool n_was_pressed = false;
+    bool n_now = glfwGetKey(window, GLFW_KEY_N) == GLFW_PRESS;
+    if (n_now && !n_was_pressed) {
+        if (!rocket_state.maneuvers.empty()) {
+            auto_exec_mnv = !auto_exec_mnv;
+            if (auto_exec_mnv) {
+                rocket_state.mission_msg = "MNV AUTO-EXEC: ARMED";
+            } else {
+                rocket_state.mission_msg = "MNV AUTO-EXEC: OFF";
+                control_input.throttle = 0;
+            }
+        }
+    }
+    n_was_pressed = n_now;
 
     // --- C 键切换 3D 视角 ---
     bool c_now = glfwGetKey(window, GLFW_KEY_C) == GLFW_PRESS;
@@ -854,10 +874,161 @@ int main() {
         }
         PhysicsSystem::FastGravityUpdate(rocket_state, rocket_config, dt * time_warp);
     } else {
+        // === Auto-Execute Maneuver Node ===
+        bool mnv_autopilot_active = false;
+        if (!rocket_state.maneuvers.empty() && (rocket_state.status == ASCEND || rocket_state.status == DESCEND)) {
+            auto& node = rocket_state.maneuvers[0];
+            
+            // Compute burn time for this node
+            double total_dv_mag = node.delta_v.length();
+            double current_mass = rocket_state.fuel + rocket_config.dry_mass + rocket_config.upper_stages_mass;
+            double max_thrust = 0;
+            if (rocket_state.current_stage < (int)rocket_config.stage_configs.size())
+                max_thrust = rocket_config.stage_configs[rocket_state.current_stage].thrust;
+            double ve = rocket_config.specific_impulse * 9.80665;
+            double estimated_burn_time = 0;
+            if (max_thrust > 0 && ve > 0 && total_dv_mag > 0) {
+                double mass_ratio = exp(total_dv_mag / ve);
+                double fuel_needed = current_mass * (1.0 - 1.0 / mass_ratio);
+                double mdot = max_thrust / ve;
+                estimated_burn_time = (mdot > 0) ? fuel_needed / mdot : total_dv_mag / (max_thrust / current_mass);
+            }
+            
+            double time_to_node = node.sim_time - rocket_state.sim_time;
+            double burn_start_offset = (node.burn_mode == 1) ? estimated_burn_time / 2.0 : 0;
+            double time_to_burn_start = time_to_node - burn_start_offset;
+            
+            // Populate velocity snapshot when approaching burn time (first time only)
+            if (!node.snap_valid && time_to_burn_start < 5.0) {
+                CelestialBody& soi = SOLAR_SYSTEM[current_soi_index];
+                // Current absolute position/velocity at node creation
+                node.snap_px = rocket_state.px + soi.px;
+                node.snap_py = rocket_state.py + soi.py;
+                node.snap_pz = rocket_state.pz + soi.pz;
+                
+                // Compute burn direction in world space
+                Vec3 r_rel((float)rocket_state.px, (float)rocket_state.py, (float)rocket_state.pz);
+                Vec3 v_rel((float)rocket_state.vx, (float)rocket_state.vy, (float)rocket_state.vz);
+                ManeuverFrame frame = ManeuverSystem::getFrame(r_rel, v_rel);
+                Vec3 dv_world = frame.prograde * node.delta_v.x + 
+                                frame.normal   * node.delta_v.y + 
+                                frame.radial   * node.delta_v.z;
+                
+                // Target absolute velocity = current absolute velocity + delta-v
+                node.snap_vx = rocket_state.vx + soi.vx + dv_world.x;
+                node.snap_vy = rocket_state.vy + soi.vy + dv_world.y;
+                node.snap_vz = rocket_state.vz + soi.vz + dv_world.z;
+                node.snap_valid = true;
+            }
+
+            if (auto_exec_mnv) {
+                // Compute remaining dv
+                double remaining_dv = total_dv_mag;
+                if (node.snap_valid) {
+                    double cur_abs_vx = rocket_state.vx + SOLAR_SYSTEM[current_soi_index].vx;
+                    double cur_abs_vy = rocket_state.vy + SOLAR_SYSTEM[current_soi_index].vy;
+                    double cur_abs_vz = rocket_state.vz + SOLAR_SYSTEM[current_soi_index].vz;
+                    double rem_vx = node.snap_vx - cur_abs_vx;
+                    double rem_vy = node.snap_vy - cur_abs_vy;
+                    double rem_vz = node.snap_vz - cur_abs_vz;
+                    remaining_dv = sqrt(rem_vx*rem_vx + rem_vy*rem_vy + rem_vz*rem_vz);
+                }
+            
+            // Phase 1: Point toward burn direction (60s before burn start)
+            if (time_to_burn_start < 60.0) {
+                mnv_autopilot_active = true;
+                
+                // Compute burn direction in world space
+                Vec3 burn_dir(0,0,0);
+                if (node.snap_valid) {
+                    // During/Near burn: Point towards the remaining delta-v vector (KSP style)
+                    double cur_abs_vx = rocket_state.vx + SOLAR_SYSTEM[current_soi_index].vx;
+                    double cur_abs_vy = rocket_state.vy + SOLAR_SYSTEM[current_soi_index].vy;
+                    double cur_abs_vz = rocket_state.vz + SOLAR_SYSTEM[current_soi_index].vz;
+                    Vec3 rem_v((float)(node.snap_vx - cur_abs_vx), (float)(node.snap_vy - cur_abs_vy), (float)(node.snap_vz - cur_abs_vz));
+                    if (rem_v.length() > 0.1f) burn_dir = rem_v.normalized();
+                } 
+                
+                if (burn_dir.length() < 0.1f) {
+                    // Pre-burn or fallback: Point towards the planned prograde at the node time
+                    double mu = 6.67430e-11 * SOLAR_SYSTEM[current_soi_index].mass;
+                    double npx, npy, npz, nvx, nvy, nvz;
+                    double dt_node = node.sim_time - rocket_state.sim_time;
+                    get3DStateAtTime(rocket_state.px, rocket_state.py, rocket_state.pz, rocket_state.vx, rocket_state.vy, rocket_state.vz, mu, dt_node, npx, npy, npz, nvx, nvy, nvz);
+                    ManeuverFrame frame = ManeuverSystem::getFrame(Vec3((float)npx, (float)npy, (float)npz), Vec3((float)nvx, (float)nvy, (float)nvz));
+                    burn_dir = (frame.prograde * node.delta_v.x + frame.normal * node.delta_v.y + frame.radial * node.delta_v.z).normalized();
+                }
+
+                // Attitude control via PD controller
+                Vec3 fwd = rocket_state.attitude.forward();
+                float dot_prod = fwd.dot(burn_dir);
+                Vec3 error_axis = fwd.cross(burn_dir);
+                float error_mag = error_axis.length();
+
+                // Singularity fix: if looking exactly AWAY from target
+                if (dot_prod < -0.999f && error_mag < 0.01f) {
+                    error_axis = rocket_state.attitude.right(); 
+                    error_mag = 1.0f; 
+                }
+
+                if (error_mag > 0.001f) {
+                    error_axis = error_axis / error_mag;
+                    float error_angle = std::asin(std::min(error_mag, 1.0f));
+                    if (dot_prod < 0) error_angle = (float)PI - error_angle; 
+
+                    // PD torque control with MOI scaling
+                    double total_mass = rocket_config.dry_mass + rocket_state.fuel + rocket_config.upper_stages_mass;
+                    float moi = (float)(50000.0 * (total_mass / 50000.0));
+                    float kp = moi * 32.0f;
+                    float kd = moi * 12.0f; // Critical damping (zeta ~ 1.0)
+                    
+                    // Decompose error into rocket's local axes
+                    Vec3 right_axis = rocket_state.attitude.right();
+                    Vec3 up_axis = rocket_state.attitude.up();
+                    float err_pitch = error_axis.dot(right_axis) * error_angle;
+                    float err_yaw = error_axis.dot(up_axis) * error_angle;
+                    
+                    control_input.torque_cmd = kp * err_yaw - kd * (float)rocket_state.ang_vel;
+                    control_input.torque_cmd_z = kp * err_pitch - kd * (float)rocket_state.ang_vel_z;
+                } else {
+                    double total_mass = rocket_config.dry_mass + rocket_state.fuel + rocket_config.upper_stages_mass;
+                    float moi = (float)(50000.0 * (total_mass / 50000.0));
+                    control_input.torque_cmd = -moi * 8.0f * (float)rocket_state.ang_vel;
+                    control_input.torque_cmd_z = -moi * 8.0f * (float)rocket_state.ang_vel_z;
+                }
+                double total_mass = rocket_config.dry_mass + rocket_state.fuel + rocket_config.upper_stages_mass;
+                float moi = (float)(50000.0 * (total_mass / 50000.0));
+                control_input.torque_cmd_roll = -moi * 8.0f * (float)rocket_state.ang_vel_roll;
+            }
+            
+            // Phase 2: Throttle control
+            if (time_to_burn_start <= 0 && remaining_dv > 0.5) {
+                // Currently burning
+                control_input.throttle = 1.0;
+                mnv_autopilot_active = true;
+            } else if (node.snap_valid && remaining_dv <= 0.5) {
+                // Burn complete!
+                control_input.throttle = 0;
+                rocket_state.mission_msg = "MNV COMPLETE";
+                // Remove the completed maneuver node
+                rocket_state.maneuvers.erase(rocket_state.maneuvers.begin());
+                if (rocket_state.selected_maneuver_index >= 0) rocket_state.selected_maneuver_index--;
+                if (rocket_state.maneuvers.empty()) {
+                    auto_exec_mnv = false;
+                } 
+            } else if (!mnv_autopilot_active) {
+                control_input.throttle = 0; // Not yet time
+            }
+            }
+        }
+        
         // 普通循环执行实现加速
         for (int i = 0; i < time_warp; i++) {
-          if (rocket_state.auto_mode) ControlSystem::UpdateAutoPilot(rocket_state, rocket_config, control_input, dt);
-          else ControlSystem::UpdateManualControl(rocket_state, rocket_config, control_input, manual, dt);
+          // Skip normal autopilot if maneuver auto-exec is controlling attitude
+          if (!mnv_autopilot_active) {
+              if (rocket_state.auto_mode) ControlSystem::UpdateAutoPilot(rocket_state, rocket_config, control_input, dt);
+              else ControlSystem::UpdateManualControl(rocket_state, rocket_config, control_input, manual, dt);
+          }
           PhysicsSystem::Update(rocket_state, rocket_config, control_input, dt);
           
           // Auto-staging: when current stage fuel is depleted, advance to next
@@ -1409,7 +1580,7 @@ int main() {
                     
                     // Reset only if engines are active or large drift (1 hour of sim time)
                     bool force_reset = (control_input.throttle > 0.01) || (std::abs(rocket_state.sim_time - rocket_state.last_prediction_sim_time) > 3600.0);
-                    orbit_predictor.RequestUpdate(&rocket_state, rocket_state, adv_orbit_pred_days, adv_orbit_iters, adv_orbit_ref_mode, adv_orbit_ref_body, adv_orbit_secondary_ref_body, force_reset);
+                    orbit_predictor.RequestUpdate(&rocket_state, rocket_state, rocket_config, adv_orbit_pred_days, adv_orbit_iters, adv_orbit_ref_mode, adv_orbit_ref_body, adv_orbit_secondary_ref_body, force_reset);
                 }
             }
 
@@ -1429,23 +1600,41 @@ int main() {
             // Get transformation from local to inertial (world)
             Quat q_local_to_inertial = PhysicsSystem::GetFrameRotation(adv_orbit_ref_mode, adv_orbit_ref_body, adv_orbit_secondary_ref_body, rocket_state.sim_time);
 
+            static std::vector<Vec3> cached_rel_pts;
+            static std::vector<Vec3> cached_mnv_rel_pts;
+            static size_t last_draw_points_size = 0;
+            static size_t last_draw_mnv_points_size = 0;
+            static Vec3 last_first_pt, last_mnv_first_pt;
+
             if (!draw_points.empty()) {
+                bool needs_update = (draw_points.size() != last_draw_points_size) || (draw_points[0].x != last_first_pt.x);
+                if (needs_update) {
+                    cached_rel_pts = CatmullRomSpline::interpolate(draw_points, 8);
+                    last_draw_points_size = draw_points.size();
+                    last_first_pt = draw_points[0];
+                }
+                
                 std::vector<Vec3> world_pts;
-                for (const auto& p : draw_points) {
+                for (const auto& p : cached_rel_pts) {
                     Vec3 p_rot = q_local_to_inertial.rotate(p);
-                    // Reconstruct world position: CurrentBodyPos + RotatedRelativePredictedPos
                     double wx = (rb_px + p_rot.x) * ws_d - ro_x;
                     double wy = (rb_py + p_rot.y) * ws_d - ro_y;
                     double wz = (rb_pz + p_rot.z) * ws_d - ro_z;
                     world_pts.push_back(Vec3((float)wx, (float)wy, (float)wz));
                 }
-                
-                std::vector<Vec3> smooth_pts = CatmullRomSpline::interpolate(world_pts, 8);
-                r3d->drawRibbon(smooth_pts, ribbon_w, 0.4f, 0.8f, 1.0f, 0.85f);
+                r3d->drawRibbon(world_pts, ribbon_w, 0.4f, 0.8f, 1.0f, 0.85f);
             }
+
             if (!draw_mnv_points.empty()) {
+                bool needs_update = (draw_mnv_points.size() != last_draw_mnv_points_size) || (draw_mnv_points[0].x != last_mnv_first_pt.x);
+                if (needs_update) {
+                    cached_mnv_rel_pts = CatmullRomSpline::interpolate(draw_mnv_points, 8);
+                    last_draw_mnv_points_size = draw_mnv_points.size();
+                    last_mnv_first_pt = draw_mnv_points[0];
+                }
+
                 std::vector<Vec3> world_mnv_pts;
-                for (const auto& p : draw_mnv_points) {
+                for (const auto& p : cached_mnv_rel_pts) {
                     Vec3 p_rot = q_local_to_inertial.rotate(p);
                     double wx = (rb_px + p_rot.x) * ws_d - ro_x;
                     double wy = (rb_py + p_rot.y) * ws_d - ro_y;
@@ -1453,11 +1642,11 @@ int main() {
                     world_mnv_pts.push_back(Vec3((float)wx, (float)wy, (float)wz));
                 }
                 
-                std::vector<Vec3> smooth_mnv_pts = CatmullRomSpline::interpolate(world_mnv_pts, 8);
-                for (size_t s = 0; s < smooth_mnv_pts.size(); s += 5) {
+                // Efficient dashed rendering: draw larger batches
+                for (size_t s = 0; s < world_mnv_pts.size(); s += 20) {
                     std::vector<Vec3> dash;
-                    for (size_t j = 0; j < 3; j++) {
-                        if (s + j < smooth_mnv_pts.size()) dash.push_back(smooth_mnv_pts[s + j]);
+                    for (size_t j = 0; j < 12 && (s + j < world_mnv_pts.size()); j++) {
+                        dash.push_back(world_mnv_pts[s + j]);
                     }
                     if (dash.size() >= 2) r3d->drawRibbon(dash, ribbon_w, 1.0f, 0.6f, 0.1f, 0.9f);
                 }
@@ -1926,12 +2115,31 @@ int main() {
             float total_dv_val = node.delta_v.length();
             float remaining_dv = total_dv_val; // Default: full delta-v
             
-            if (node.snap_valid && rocket_state.sim_time >= node.sim_time) {
-                // Burn is in progress! Compute remaining dv from velocity difference
+            // Populate snapshot when approaching node time (for manual burns too)
+            if (!node.snap_valid && rocket_state.sim_time >= node.sim_time - 5.0) {
+                CelestialBody& soi = SOLAR_SYSTEM[current_soi_index];
+                node.snap_px = rocket_state.px + soi.px;
+                node.snap_py = rocket_state.py + soi.py;
+                node.snap_pz = rocket_state.pz + soi.pz;
+                
+                Vec3 r_rel((float)rocket_state.px, (float)rocket_state.py, (float)rocket_state.pz);
+                Vec3 v_rel((float)rocket_state.vx, (float)rocket_state.vy, (float)rocket_state.vz);
+                ManeuverFrame frame = ManeuverSystem::getFrame(r_rel, v_rel);
+                Vec3 dv_world = frame.prograde * node.delta_v.x + 
+                                frame.normal   * node.delta_v.y + 
+                                frame.radial   * node.delta_v.z;
+                
+                node.snap_vx = rocket_state.vx + soi.vx + dv_world.x;
+                node.snap_vy = rocket_state.vy + soi.vy + dv_world.y;
+                node.snap_vz = rocket_state.vz + soi.vz + dv_world.z;
+                node.snap_valid = true;
+            }
+            
+            if (node.snap_valid) {
+                // Compute remaining dv from velocity difference vs target
                 double cur_abs_vx = rocket_state.vx + SOLAR_SYSTEM[current_soi_index].vx;
                 double cur_abs_vy = rocket_state.vy + SOLAR_SYSTEM[current_soi_index].vy;
                 double cur_abs_vz = rocket_state.vz + SOLAR_SYSTEM[current_soi_index].vz;
-                // Target velocity is the snapshot velocity (includes delta-v)
                 double rem_vx = node.snap_vx - cur_abs_vx;
                 double rem_vy = node.snap_vy - cur_abs_vy;
                 double rem_vz = node.snap_vz - cur_abs_vz;
@@ -1950,7 +2158,7 @@ int main() {
                 if (ve > 0 && remaining_dv > 0) {
                     double mass_ratio = exp((double)remaining_dv / ve);
                     double fuel_needed = current_mass * (1.0 - 1.0 / mass_ratio);
-                    double mdot = rocket_config.cosrate;
+                    double mdot = max_thrust / ve;
                     double accel = max_thrust / current_mass;
                     mnv_popup_burn_time = (mdot > 0) ? fuel_needed / mdot : (double)remaining_dv / accel;
                 } else {
@@ -2786,6 +2994,53 @@ int main() {
         renderer->addRect(adv_btn_x, adv_btn_y, adv_btn_w, adv_btn_h, 0.2f, 0.4f, 0.8f, hover_adv ? 0.9f : 0.7f);
         renderer->drawText(adv_btn_x, adv_btn_y, "ADV ORBIT", 0.012f, 1, 1, 1, 1.0f, true, Renderer::CENTER);
 
+        // --- Flight Assist Button (Below ADV ORBIT) ---
+        float fa_btn_y = adv_btn_y - 0.06f;
+        bool hover_fa = (hmouse_x >= adv_btn_x - adv_btn_w/2 && hmouse_x <= adv_btn_x + adv_btn_w/2 && hmouse_y >= fa_btn_y - adv_btn_h/2 && hmouse_y <= fa_btn_y + adv_btn_h/2);
+        if (hover_fa && hlmb && !hlmb_prev) flight_assist_menu = !flight_assist_menu;
+        
+        renderer->addRect(adv_btn_x, fa_btn_y, adv_btn_w, adv_btn_h, 0.8f, 0.4f, 0.2f, hover_fa ? 0.9f : 0.7f);
+        renderer->drawText(adv_btn_x, fa_btn_y, "FLIGHT ASSIST", 0.012f, 1, 1, 1, 1.0f, true, Renderer::CENTER);
+
+        if (flight_assist_menu) {
+            float menu_w = 0.25f;
+            float menu_h = 0.22f; // Reduced size as requested
+            float menu_x = adv_btn_x - adv_btn_w/2 - menu_w/2 - 0.02f;
+            float menu_y = fa_btn_y;
+            renderer->addRect(menu_x, menu_y, menu_w, menu_h, 0.1f, 0.05f, 0.05f, 0.85f);
+            renderer->addRectOutline(menu_x, menu_y, menu_w, menu_h, 1.0f, 0.6f, 0.4f, 0.8f);
+
+            auto draw_toggle = [&](float y, const char* label, bool active, bool& toggle_var, std::function<void()> on_true = nullptr) {
+                float ty = menu_y + menu_h/2 - y;
+                bool hover = (hmouse_x >= menu_x - menu_w/2 && hmouse_x <= menu_x + menu_w/2 && hmouse_y >= ty - 0.025f && hmouse_y <= ty + 0.025f);
+                if (hover && hlmb && !hlmb_prev) {
+                    toggle_var = !toggle_var;
+                    if (toggle_var && on_true) on_true();
+                }
+                renderer->addRect(menu_x, ty, menu_w * 0.9f, 0.04f, hover ? 0.3f : 0.15f, hover ? 0.3f : 0.15f, hover ? 0.3f : 0.15f, 0.8f);
+                renderer->drawText(menu_x - menu_w * 0.4f, ty, label, 0.012f, 1, 1, 1, 0.9f, true, Renderer::LEFT);
+                renderer->drawText(menu_x + menu_w * 0.35f, ty, active ? "ON" : "OFF", 0.012f, active ? 0.2f : 1.0f, active ? 1.0f : 0.2f, 0.2f, 0.9f, true, Renderer::CENTER);
+            };
+
+            draw_toggle(0.05f, "AUTO EXECUTE MNV", auto_exec_mnv, auto_exec_mnv);
+            
+            bool is_ascent = (rocket_state.status == ASCEND);
+            bool temp_ascent = is_ascent;
+            draw_toggle(0.10f, "AUTO ORBIT", is_ascent, temp_ascent, [&](){
+                rocket_state.status = ASCEND;
+                rocket_state.mission_phase = 0;
+                rocket_state.auto_mode = true;
+                rocket_state.mission_msg = "AUTOPILOT: INITIATING ASCENT...";
+            });
+
+            bool is_descent = (rocket_state.status == DESCEND);
+            bool temp_descent = is_descent;
+            draw_toggle(0.15f, "AUTO LANDING", is_descent, temp_descent, [&](){
+                rocket_state.status = DESCEND;
+                rocket_state.auto_mode = true;
+                rocket_state.mission_msg = "AUTOPILOT: INITIATING LANDING...";
+            });
+        }
         if (adv_orbit_menu) {
             float menu_w = 0.30f;
             float menu_h = 0.58f;
