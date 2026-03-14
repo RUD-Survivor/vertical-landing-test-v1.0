@@ -38,11 +38,14 @@ private:
     struct PredContext {
         double t_epoch = -1.0;  // Sim time when this sequence started
         double t_last = -1.0;   // Sim time at the end of current buffer
-        double px, py, pz;      // Absolute heliocentric state at t_last
+        double px, py, pz;      // Absolute heliocentric state at t_last (pure prediction)
         double vx, vy, vz;
+        double mnv_px, mnv_py, mnv_pz; // Absolute heliocentric state for maneuvered orbit
+        double mnv_vx, mnv_vy, mnv_vz;
         std::vector<Vec3> points;
         std::vector<Vec3> mnv_points;
         bool mnv_done = false;
+        std::vector<ManeuverNode> last_maneuvers;
         
         // Initial state at t_epoch for continuity checks
         double init_px, init_py, init_pz;

@@ -70,6 +70,17 @@ void AsyncOrbitPredictor::WorkerLoop() {
             // Simpler: if sim_time is within a small window of where we expect, or if throttle was 0.
             if (t_start < m_context.t_epoch || t_start > m_context.t_last + 3600.0) {
                 reset_needed = true;
+            } else if (req.state.maneuvers.size() != m_context.last_maneuvers.size()) {
+                reset_needed = true;
+            } else if (!req.state.maneuvers.empty()) {
+                auto& curr_m = req.state.maneuvers[0];
+                auto& last_m = m_context.last_maneuvers[0];
+                if (std::abs(curr_m.sim_time - last_m.sim_time) > 1.0 ||
+                    std::abs(curr_m.delta_v.x - last_m.delta_v.x) > 0.1 ||
+                    std::abs(curr_m.delta_v.y - last_m.delta_v.y) > 0.1 ||
+                    std::abs(curr_m.delta_v.z - last_m.delta_v.z) > 0.1) {
+                    reset_needed = true;
+                }
             }
         }
 
@@ -83,6 +94,7 @@ void AsyncOrbitPredictor::WorkerLoop() {
             m_context.points.clear();
             m_context.mnv_points.clear();
             m_context.mnv_done = false;
+            m_context.last_maneuvers = req.state.maneuvers;
         }
 
         // Integration Constants
@@ -96,9 +108,9 @@ void AsyncOrbitPredictor::WorkerLoop() {
         double cur_h_px = m_context.px, cur_h_py = m_context.py, cur_h_pz = m_context.pz;
         double cur_h_vx = m_context.vx, cur_h_vy = m_context.vy, cur_h_vz = m_context.vz;
 
-        // Snapshot of pre-maneuver state for dashed line
-        double orig_h_px = cur_h_px, orig_h_py = cur_h_py, orig_h_pz = cur_h_pz;
-        double orig_h_vx = cur_h_vx, orig_h_vy = cur_h_vy, orig_h_vz = cur_h_vz;
+        // Snapshot of post-maneuver state for dashed line
+        double mnv_h_px = m_context.mnv_px, mnv_h_py = m_context.mnv_py, mnv_h_pz = m_context.mnv_pz;
+        double mnv_h_vx = m_context.mnv_vx, mnv_h_vy = m_context.mnv_vy, mnv_h_vz = m_context.mnv_vz;
 
         bool has_mnv = !req.state.maneuvers.empty();
         double trigger_t = has_mnv ? req.state.maneuvers[0].sim_time : -1.0;
@@ -137,8 +149,8 @@ void AsyncOrbitPredictor::WorkerLoop() {
                 if (dsq < min_dist_sq) { min_dist_sq = dsq; nearest_body = b; }
             }
             double v_sq = cur_h_vx*cur_h_vx + cur_h_vy*cur_h_vy + cur_h_vz*cur_h_vz;
-            double step_dt = 0.02 * std::sqrt(min_dist_sq / std::max(v_sq, 1.0));
-            step_dt = std::clamp(step_dt, 1.0, 3600.0);
+            double step_dt = 0.1 * std::sqrt(min_dist_sq / std::max(v_sq, 1.0));
+            step_dt = std::clamp(step_dt, 5.0, 14400.0);
 
             if (has_mnv && !m_context.mnv_done && t_sim + step_dt > trigger_t) {
                 step_dt = trigger_t - t_sim;
@@ -146,10 +158,17 @@ void AsyncOrbitPredictor::WorkerLoop() {
                 step_dt = max_pred_time - t_sim;
             }
 
-            if (step_dt <= 0 && (!has_mnv || m_context.mnv_done || t_sim >= trigger_t)) break;
+            if (step_dt <= 0) {
+                if (t_sim >= max_pred_time - 1e-4) break;
+                if (has_mnv && !m_context.mnv_done && std::abs(t_sim - trigger_t) < 0.1) {
+                    step_dt = 1e-5; // force forward progress across node
+                } else {
+                    break;
+                }
+            }
 
             // Maneuver
-            if (has_mnv && !m_context.mnv_done && std::abs(t_sim - trigger_t) < 1e-4) {
+            if (has_mnv && !m_context.mnv_done && t_sim >= trigger_t - 1e-4) {
                 double bpx, bpy, bpz, bvx, bvy, bvz;
                 PhysicsSystem::GetCelestialStateAt(nearest_body, t_sim, bpx, bpy, bpz, bvx, bvy, bvz);
                 Vec3 r_rel((float)(cur_h_px - bpx), (float)(cur_h_py - bpy), (float)(cur_h_pz - bpz));
@@ -158,16 +177,19 @@ void AsyncOrbitPredictor::WorkerLoop() {
                 Vec3 dv = frame.prograde * req.state.maneuvers[0].delta_v.x + 
                           frame.normal   * req.state.maneuvers[0].delta_v.y + 
                           frame.radial   * req.state.maneuvers[0].delta_v.z;
-                cur_h_vx += dv.x; cur_h_vy += dv.y; cur_h_vz += dv.z;
+                
+                mnv_h_px = cur_h_px; mnv_h_py = cur_h_py; mnv_h_pz = cur_h_pz;
+                mnv_h_vx = cur_h_vx + dv.x; mnv_h_vy = cur_h_vy + dv.y; mnv_h_vz = cur_h_vz + dv.z;
+                
                 m_context.mnv_done = true;
                 if (step_dt < 1e-5) continue;
             }
 
             // Integrator
             #define SYM_W_Q(C) { cur_h_px += (C)*cur_h_vx*step_dt; cur_h_py += (C)*cur_h_vy*step_dt; cur_h_pz += (C)*cur_h_vz*step_dt; t_sim += (C)*step_dt; \
-                               if (m_context.mnv_done) { orig_h_px+=(C)*orig_h_vx*step_dt; orig_h_py+=(C)*orig_h_vy*step_dt; orig_h_pz+=(C)*orig_h_vz*step_dt; } }
+                               if (m_context.mnv_done) { mnv_h_px+=(C)*mnv_h_vx*step_dt; mnv_h_py+=(C)*mnv_h_vy*step_dt; mnv_h_pz+=(C)*mnv_h_vz*step_dt; } }
             #define SYM_W_P(D) { double ax,ay,az; calc_acc(t_sim, cur_h_px,cur_h_py,cur_h_pz, ax,ay,az); cur_h_vx+=(D)*ax*step_dt; cur_h_vy+=(D)*ay*step_dt; cur_h_vz+=(D)*az*step_dt; \
-                                if (m_context.mnv_done) { double oax,oay,oaz; calc_acc(t_sim, orig_h_px,orig_h_py,orig_h_pz, oax,oay,oaz); orig_h_vx+=(D)*oax*step_dt; orig_h_vy+=(D)*oay*step_dt; orig_h_vz+=(D)*oaz*step_dt; } }
+                                if (m_context.mnv_done) { double max,may,maz; calc_acc(t_sim, mnv_h_px,mnv_h_py,mnv_h_pz, max,may,maz); mnv_h_vx+=(D)*max*step_dt; mnv_h_vy+=(D)*may*step_dt; mnv_h_vz+=(D)*maz*step_dt; } }
             SYM_W_Q(c1); SYM_W_P(d1);
             SYM_W_Q(c2); SYM_W_P(d2);
             SYM_W_Q(c2); SYM_W_P(d1);
@@ -182,7 +204,7 @@ void AsyncOrbitPredictor::WorkerLoop() {
                 
                 m_context.points.push_back(Vec3((float)(cur_h_px - rbpx), (float)(cur_h_py - rbpy), (float)(cur_h_pz - rbpz)));
                 if (m_context.mnv_done) {
-                    m_context.mnv_points.push_back(Vec3((float)(orig_h_px - rbpx), (float)(orig_h_py - rbpy), (float)(orig_h_pz - rbpz)));
+                    m_context.mnv_points.push_back(Vec3((float)(mnv_h_px - rbpx), (float)(mnv_h_py - rbpy), (float)(mnv_h_pz - rbpz)));
                 }
                 last_record_t = t_sim;
             }
@@ -191,6 +213,8 @@ void AsyncOrbitPredictor::WorkerLoop() {
         m_context.t_last = t_sim;
         m_context.px = cur_h_px; m_context.py = cur_h_py; m_context.pz = cur_h_pz;
         m_context.vx = cur_h_vx; m_context.vy = cur_h_vy; m_context.vz = cur_h_vz;
+        m_context.mnv_px = mnv_h_px; m_context.mnv_py = mnv_h_py; m_context.mnv_pz = mnv_h_pz;
+        m_context.mnv_vx = mnv_h_vx; m_context.mnv_vy = mnv_h_vy; m_context.mnv_vz = mnv_h_vz;
 
         if (req.target && !m_request.pending) {
             std::lock_guard<std::mutex> lock(*req.target->path_mutex);
