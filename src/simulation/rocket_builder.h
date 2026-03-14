@@ -55,7 +55,7 @@ struct PartDef {
     float drag_coeff;       // Cd contribution
     float r, g, b;          // render color
     const char* description;
-};
+}; 
 
 // ==========================================================
 // Part Catalog — all available parts

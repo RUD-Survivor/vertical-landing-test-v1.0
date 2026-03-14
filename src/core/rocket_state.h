@@ -265,10 +265,20 @@ struct RocketState {
     std::vector<ManeuverNode> maneuvers;
     int selected_maneuver_index = -1;
 
+    // Apsis markers
+    struct Apsis {
+        bool is_apoapsis;
+        Vec3 local_pos;   // position relative to reference body in the selected reference frame
+        double sim_time;
+        double altitude;
+    };
+
     // Asynchronous Prediction Results
     mutable std::shared_ptr<std::mutex> path_mutex = std::make_shared<std::mutex>();
     std::vector<Vec3> predicted_path;
     std::vector<Vec3> predicted_mnv_path;
+    std::vector<Apsis> predicted_apsides;
+    std::vector<Apsis> predicted_mnv_apsides;
     std::vector<Vec3> predicted_ground_track;
     std::vector<Vec3> predicted_mnv_ground_track;
     double last_prediction_sim_time = -1.0;

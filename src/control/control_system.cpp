@@ -216,72 +216,83 @@ void UpdateManualControl(RocketState& state, const RocketConfig& config, Control
                         double dt_node = node.sim_time - state.sim_time;
                         double mu = 6.67430e-11 * SOLAR_SYSTEM[current_soi_index].mass;
                         
-                        double npx, npy, npz, nvx, nvy, nvz;
-                        // Project CURRENT state to node time
-                        get3DStateAtTime(state.px, state.py, state.pz, state.vx, state.vy, state.vz, mu, dt_node, npx, npy, npz, nvx, nvy, nvz);
-                        
-                        // We need to know what the target velocity was supposed to be.
-                        // The node's delta_v is defined in the frame of the orbit *at the time of creation/modification*.
-                        // However, we can approximate: target = V_proj_at_node + deltaV_local_frame
-                        ManeuverFrame frame = ManeuverSystem::getFrame(Vec3((float)npx, (float)npy, (float)npz), Vec3((float)nvx, (float)nvy, (float)nvz));
-                        Vec3 target_dv_world = frame.prograde * node.delta_v.x + frame.normal * node.delta_v.y + frame.radial * node.delta_v.z;
-                        
-                        state.sas_target_vec = target_dv_world.normalized();
-                        if (target_dv_world.length() < 0.05f) state.sas_target_vec = Vec3(0,0,0);
+                        // If we are close to or during the burn, steer towards the remaining delta-v vector (more stable)
+                        if (dt_node < 5.0 && node.snap_valid) {
+                           double cur_abs_vx = state.vx + SOLAR_SYSTEM[current_soi_index].vx;
+                           double cur_abs_vy = state.vy + SOLAR_SYSTEM[current_soi_index].vy;
+                           double cur_abs_vz = state.vz + SOLAR_SYSTEM[current_soi_index].vz;
+                           Vec3 rem_v((float)(node.snap_vx - cur_abs_vx), (float)(node.snap_vy - cur_abs_vy), (float)(node.snap_vz - cur_abs_vz));
+                           if (rem_v.length() > 0.01f) state.sas_target_vec = rem_v.normalized();
+                           else state.sas_target_vec = Vec3(0,0,0);
+                        } else {
+                           // Fallback: Point towards the planned direction at node time
+                           double npx, npy, npz, nvx, nvy, nvz;
+                           get3DStateAtTime(state.px, state.py, state.pz, state.vx, state.vy, state.vz, mu, dt_node, npx, npy, npz, nvx, nvy, nvz);
+                           ManeuverFrame frame = ManeuverSystem::getFrame(Vec3((float)npx, (float)npy, (float)npz), Vec3((float)nvx, (float)nvy, (float)nvz));
+                           Vec3 target_dv_world = frame.prograde * node.delta_v.x + frame.normal * node.delta_v.y + frame.radial * node.delta_v.z;
+                           state.sas_target_vec = target_dv_world.normalized();
+                           if (target_dv_world.length() < 0.05f) state.sas_target_vec = Vec3(0,0,0);
+                        }
                     }
                 }
 
                 if (state.sas_target_vec.length() > 0.1f) {
                     Vec3 rocketNose = state.attitude.forward();
                     Vec3 targetDir = state.sas_target_vec;
+                    
+                    float dot_prod = rocketNose.dot(targetDir);
                     Vec3 errorVec = rocketNose.cross(targetDir);
+                    float error_mag = errorVec.length();
 
-                    // Singularity fix: if looking exactly AWAY from target, errorVec is zero.
-                    // Dot product will be -1.0 in this case.
-                    if (rocketNose.dot(targetDir) < -0.999f && errorVec.length() < 0.01f) {
-                        // Inject a small perturbation to break the symmetry
-                        // Pick an axis we aren't currently aligned with to start a turn
-                        errorVec = rocketNose.cross(Vec3(0, 0, 1.0f));
-                        if (errorVec.length() < 0.01f) errorVec = rocketNose.cross(Vec3(1.0f, 0, 0));
+                    // Singularity fix: if looking exactly AWAY from target
+                    if (dot_prod < -0.999f && error_mag < 0.01f) {
+                        errorVec = state.attitude.right();
+                        error_mag = 1.0f;
                     }
 
-                    Vec3 localError = state.attitude.conjugate().rotate(errorVec);
+                    float error_angle = std::acos(std::max(-1.0f, std::min(1.0f, dot_prod)));
+                    Vec3 error_axis = (error_mag > 1e-6f) ? (errorVec / error_mag) : Vec3(0,0,0);
                     
-                    double torque_mag = 60000.0; // Synchronized with manual control
-                    double base_moi = 50000.0;
+                    Vec3 worldError = error_axis * error_angle;
+                    Vec3 localError = state.attitude.conjugate().rotate(worldError);
+                    
+                    double torque_mag = 60000.0;
                     double total_mass = config.dry_mass + state.fuel + config.upper_stages_mass;
-                    double moi = base_moi * (total_mass / 50000.0);
-                    double max_a = torque_mag / moi;
+                    double moi = (50000.0) * (total_mass / 50000.0);
                     
-                    // High-performance velocity law with linear region near zero to prevent chatter
-                    auto get_v = [&](float err) {
+                    // Unified PD-like Velocity Law
+                    // Target angular velocity should be proportional to error, but clamped
+                    auto get_target_v = [&](float err) {
                         float abs_e = std::abs(err);
                         if (abs_e < 1e-4f) return 0.0;
                         
-                        // sqrt(2*a*d) braking curve
+                        // v = sqrt(2*a*d) braking curve for high performance
+                        double max_a = torque_mag / moi;
                         double v_curve = std::sqrt(2.0 * (max_a * 0.5) * abs_e);
                         
-                        // Linear region for smooth landing at target: v = k * error
-                        // We blend or use a transition to ensure stability
-                        double v_linear = 5.0 * abs_e; 
+                        // Linear region for stability near center (Gain = 4.0)
+                        double v_linear = 4.0 * abs_e; 
                         double v = std::min(v_curve, v_linear);
                         
                         return (double)(err > 0 ? v : -v);
                     };
 
-                    double target_vx = get_v(localError.x);
-                    double target_vz = get_v(localError.z);
+                    double tvx = get_target_v(localError.x);
+                    double tvz = get_target_v(localError.z);
                     
-                    double max_v = 1.0; // Slightly slower for better stability
-                    if (target_vx > max_v) target_vx = max_v;
-                    if (target_vx < -max_v) target_vx = -max_v;
-                    if (target_vz > max_v) target_vz = max_v;
-                    if (target_vz < -max_v) target_vz = -max_v;
+                    double max_v = 1.0; 
+                    if (tvx > max_v) tvx = max_v;
+                    if (tvx < -max_v) tvx = -max_v;
+                    if (tvz > max_v) tvz = max_v;
+                    if (tvz < -max_v) tvz = -max_v;
 
-                    // Lower gain for stability
-                    double K = moi * 2.0; 
-                    double tx = (target_vx - state.ang_vel_z) * K;
-                    double tz = (target_vz - state.ang_vel) * K;
+                    // Compute torque to reach target velocity
+                    // Damping gain K should ensure zeta near 1.0
+                    // accel = (target_v - current_v) * K / moi
+                    // We use K = moi * 8.0 for a snappy response
+                    double K_gain = moi * 8.0; 
+                    double tx = (tvx - state.ang_vel_z) * K_gain;
+                    double tz = (tvz - state.ang_vel) * K_gain;
 
                     if (tx > torque_mag) tx = torque_mag;
                     if (tx < -torque_mag) tx = -torque_mag;
@@ -290,7 +301,7 @@ void UpdateManualControl(RocketState& state, const RocketConfig& config, Control
 
                     if (!manual_pitch) input.torque_cmd_z = tx;
                     if (!manual_yaw) input.torque_cmd = tz;
-                    if (!manual_roll) input.torque_cmd_roll = -state.ang_vel_roll * (moi * 5.0);
+                    if (!manual_roll) input.torque_cmd_roll = -state.ang_vel_roll * (moi * 8.0);
                 }
             }
         }

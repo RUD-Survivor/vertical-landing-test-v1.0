@@ -142,15 +142,23 @@ inline void get3DStateAtTime(double px, double py, double pz, double vx, double 
         return;
     }
 
-    double b = a * std::sqrt(1.0 - e*e);
-    Vec3 e_dir = (e > 1e-7f) ? e_vec.normalized() : Vec3(1, 0, 0);
-    Vec3 n_dir = h_vec.normalized();
-    Vec3 p_dir = n_dir.cross(e_dir).normalized(); 
+    double b = a * std::sqrt(std::max(0.0, 1.0 - e*e));
+    Vec3 e_dir, n_dir, p_dir;
+    n_dir = h_vec.normalized();
+
+    if (e > 1e-7) {
+        e_dir = e_vec.normalized();
+    } else {
+        // For circular orbits, pick any arbitrary vector in the orbital plane
+        if (std::abs(n_dir.x) < 0.9f) e_dir = n_dir.cross(Vec3(1, 0, 0)).normalized();
+        else e_dir = n_dir.cross(Vec3(0, 1, 0)).normalized();
+    }
+    p_dir = n_dir.cross(e_dir).normalized(); 
     
-    double cos_E = (a - r_mag) / (a * e);
+    // Decompose current position into this frame to find E0
     double r_dot_e = r_vec.dot(e_dir);
     double r_dot_p = r_vec.dot(p_dir);
-    cos_E = (r_dot_e / a) + e;
+    double cos_E = (r_dot_e / a) + e;
     double sin_E = r_dot_p / b;
     
     double E0 = std::atan2(sin_E, cos_E);

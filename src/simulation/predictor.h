@@ -15,7 +15,7 @@ public:
     void Stop();
 
     // Requests a new prediction based on the provided state
-    void RequestUpdate(RocketState* target, const RocketState& state, double pred_days, int iters, int ref_mode, int ref_body, int secondary_ref_body, bool force_reset = false);
+    void RequestUpdate(RocketState* target, const RocketState& state, const RocketConfig& config, double pred_days, int iters, int ref_mode, int ref_body, int secondary_ref_body, bool force_reset = false);
 
     // Checks if the predictor is busy
     bool IsBusy() const { return m_busy; }
@@ -26,13 +26,14 @@ private:
     struct PredictionRequest {
         RocketState* target = nullptr;
         RocketState state;
+        RocketConfig config;
         double pred_days;
         int iters;
         int ref_mode;
         int ref_body;
         int secondary_ref_body;
         std::vector<CelestialBody> celestial_snapshot;
-        bool force_reset = false; // New flag to force clear
+        bool force_reset = false;
         bool pending = false;
     };
 
@@ -44,15 +45,30 @@ private:
         double mnv_px, mnv_py, mnv_pz; // Absolute heliocentric state for maneuvered orbit
         double mnv_vx, mnv_vy, mnv_vz;
         std::vector<Vec3> points;
+        std::vector<double> point_times;
         std::vector<Vec3> mnv_points;
+        std::vector<double> mnv_point_times;
         bool mnv_done = false;
+        bool mnv_burning = false;     // Finite burn in progress
+        double mnv_remaining_dv = 0;  // Remaining delta-v for finite burn
+        double mnv_mass = 0;          // Current mass during finite burn
         std::vector<ManeuverNode> last_maneuvers;
         int last_ref_body = -1;
         int last_secondary_ref_body = -1;
         
+        // Apsis tracking
+        std::vector<RocketState::Apsis> apsides;
+        std::vector<RocketState::Apsis> mnv_apsides;
+        double last_r = -1.0;
+        double last_dr = 0.0;
+        double last_mnv_r = -1.0;
+        double last_mnv_dr = 0.0;
+        
         // Initial state at t_epoch for continuity checks
         double init_px, init_py, init_pz;
         double init_vx, init_vy, init_vz;
+        bool crashed = false;
+        bool mnv_crashed = false;
     };
 
     std::thread m_worker;
