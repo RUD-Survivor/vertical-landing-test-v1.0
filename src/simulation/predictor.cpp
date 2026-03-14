@@ -152,19 +152,18 @@ void AsyncOrbitPredictor::WorkerLoop() {
             double step_dt = 0.1 * std::sqrt(min_dist_sq / std::max(v_sq, 1.0));
             step_dt = std::clamp(step_dt, 5.0, 14400.0);
 
-            if (has_mnv && !m_context.mnv_done && t_sim + step_dt > trigger_t) {
-                step_dt = trigger_t - t_sim;
-            } else if (t_sim + step_dt > max_pred_time) {
+            if (has_mnv && !m_context.mnv_done) {
+                if (t_sim < trigger_t && t_sim + step_dt > trigger_t) {
+                    step_dt = trigger_t - t_sim;
+                }
+            }
+            if (t_sim + step_dt > max_pred_time) {
                 step_dt = max_pred_time - t_sim;
             }
 
             if (step_dt <= 0) {
                 if (t_sim >= max_pred_time - 1e-4) break;
-                if (has_mnv && !m_context.mnv_done && std::abs(t_sim - trigger_t) < 0.1) {
-                    step_dt = 1e-5; // force forward progress across node
-                } else {
-                    break;
-                }
+                step_dt = 1e-5;
             }
 
             // Maneuver
