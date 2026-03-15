@@ -22,23 +22,16 @@ void BuildStages(const RocketAssembly& assembly, RocketConfig& config) {
 
     for (int i = 0; i < (int)assembly.parts.size(); i++) {
         const PartDef& def = PART_CATALOG[assembly.parts[i].def_id];
-        float p0 = assembly.parts[i].param0;
 
         current.dry_mass += def.dry_mass;
-        
-        if (def.category == CAT_FUEL_TANK) current.fuel_capacity += def.fuel_capacity * p0;
-        else current.fuel_capacity += def.fuel_capacity;
-
+        current.fuel_capacity += def.fuel_capacity;
+        current.height += def.height;
         if (def.diameter > current.diameter) current.diameter = def.diameter;
 
         if (def.thrust > 0) {
-            float t = def.thrust;
-            float c = def.consumption;
-            if (def.category == CAT_ENGINE) { t *= p0; c *= p0; }
-            
-            total_thrust_stage += t;
-            current.consumption_rate += c;
-            thrust_isp_sum += t * def.isp;
+            total_thrust_stage += def.thrust;
+            current.consumption_rate += def.consumption;
+            thrust_isp_sum += def.thrust * def.isp;
         }
 
         // Check if this part is a Decoupler (stage boundary)

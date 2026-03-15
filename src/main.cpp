@@ -361,7 +361,7 @@ int main() {
   
   bool build_done = skip_builder;
 
-  BuilderKeyState bk_prev = {};
+  BuilderKeyState bk_prev = {false,false,false,false,false,false,false,false,false,false};
 
   while (!build_done && !glfwWindowShouldClose(window)) {
     glfwPollEvents();
@@ -380,9 +380,6 @@ int main() {
     bk_now.pgup  = glfwGetKey(window, GLFW_KEY_PAGE_UP) == GLFW_PRESS;
     bk_now.pgdn  = glfwGetKey(window, GLFW_KEY_PAGE_DOWN) == GLFW_PRESS;
     bk_now.space = glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS;
-    bk_now.q     = glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS;
-    bk_now.e     = glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS;
-    bk_now.shift = (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS);
 
     // Mouse for builder
     double bmx, bmy;
@@ -394,21 +391,26 @@ int main() {
     bk_now.lmb = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
     bk_now.rmb = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
 
-    // Workshop camera controls (scroll and right click drag)
+    // First process builder logic (hit detection, drag, context menu)
+    build_done = builderHandleInput(builder_state, bk_now, bk_prev);
+    bk_prev = bk_now;
+
+    // Then process camera controls based on updated builder state
     static double workshop_prev_mx = 0, workshop_prev_my = 0;
     static bool workshop_is_dragging = false;
+    static bool allowed_rotation = false;
 
     if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS) {
         double mx, my;
         glfwGetCursorPos(window, &mx, &my);
         
         if (!workshop_is_dragging) {
-            // Start of a new drag: anchor here
             workshop_prev_mx = mx;
             workshop_prev_my = my;
             workshop_is_dragging = true;
-        } else {
-            // Dragging: calculate delta
+            // Only allow rotation if no part menu was JUST opened this frame
+            allowed_rotation = !builder_state.show_part_menu;
+        } else if (allowed_rotation) {
             float dx = (float)(mx - workshop_prev_mx) * 0.005f;
             float dy = (float)(my - workshop_prev_my) * 0.005f;
             builder_state.orbit_angle -= dx;
@@ -417,33 +419,30 @@ int main() {
             workshop_prev_my = my;
         }
     } else {
-        // Button released: stop dragging and resume auto-rotate
         workshop_is_dragging = false;
-        builder_state.orbit_angle += 0.001f;
+        allowed_rotation = false;
+        if (!builder_state.show_part_menu) builder_state.orbit_angle += 0.001f;
     }
     
-    // Scroll control: Shift+Scroll = Zoom, Scroll = Pan Vertical
+    // Zoom and Pan controls
     if (g_scroll_y != 0.0f) {
-        if (bk_now.shift) {
+        if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS) {
             builder_state.cam_dist *= powf(0.85f, g_scroll_y);
-            builder_state.cam_dist = std::max(2.0f, std::min(50.0f, builder_state.cam_dist));
+            builder_state.cam_dist = std::max(2.0f, std::min(100.0f, builder_state.cam_dist));
         } else {
-            builder_state.cam_pan_y += g_scroll_y * 0.5f;
+            builder_state.cam_y_offset += g_scroll_y * (builder_state.cam_dist * 0.05f);
         }
         g_scroll_y = 0.0f;
     }
-
-    build_done = builderHandleInput(builder_state, bk_now, bk_prev);
-    bk_prev = bk_now;
 
     // --- 3D WORKSHOP RENDER PASS ---
     int ww, wh;
     glfwGetFramebufferSize(window, &ww, &wh);
     r3d->lightDir = Vec3(0.5f, 1.0f, 0.3f).normalized(); // Angled floodlight
 
-    // Dynamic camera based on rocket height
+    // Dynamic camera based on rocket height and manual pan
     float current_height = std::max(5.0f, builder_state.assembly.total_height);
-    float look_y = current_height * 0.4f + builder_state.cam_pan_y;
+    float look_y = current_height * 0.4f + builder_state.cam_y_offset;
     
     Vec3 camTarget(0.0f, look_y, 0.0f);
     float dist = builder_state.cam_dist + current_height * 0.5f;
@@ -481,11 +480,15 @@ int main() {
     r3d->drawMesh(rocketBox, pillar2, 0.2f, 0.2f, 0.2f, 1.0f, 0.1f);
 
     // Draw Assembled Rocket Part Tree
-    auto drawPartWithSymmetry = [&](const PartDef& def, Vec3 pos, Quat rot, bool highlight, float alpha = 1.0f, int sym = 1, float rm = 1.0f, float gm = 1.0f, float bm = 1.0f) {
+    auto drawPartWithSymmetry = [&](const PartDef& def, Vec3 pos, Quat rot, bool highlight, bool selected, float alpha = 1.0f, int sym = 1, float rm = 1.0f, float gm = 1.0f, float bm = 1.0f) {
         float r = def.r * rm, g = def.g * gm, b = def.b * bm;
         if (highlight) {
             float blink = 0.5f + 0.5f * sinf((float)glfwGetTime() * 8.0f);
             r = std::min(1.0f, r + 0.4f * blink); g = std::min(1.0f, g + 0.6f * blink); b = std::min(1.0f, b + 0.3f * blink);
+        }
+        if (selected) {
+            // Selected part is highlighted with a blue tint
+            r = r * 0.4f; g = g * 0.6f; b = std::min(1.0f, b + 0.7f);
         }
 
         for (int s = 0; s < sym; s++) {
@@ -501,33 +504,36 @@ int main() {
                 }
             }
 
-            Quat symRot = Quat::fromAxisAngle(Vec3(0, 1, 0), angle);
-            Quat finalRot = symRot * rot;
             float pd = def.diameter;
+            float py = symPos.y + def.height * 0.5f;
 
             if (def.category == CAT_NOSE_CONE) {
-                Mat4 partMat = Mat4::translate(symPos) * Mat4::fromQuat(finalRot) * Mat4::scale(Vec3(pd, def.height, pd));
+                // Nosecones are typically base-centered and point up
+                Mat4 partMat = Mat4::translate(symPos) * Mat4::scale({pd, def.height, pd});
                 r3d->drawMesh(rocketNose, partMat, r, g, b, alpha, 0.2f);
             } else if (def.category == CAT_ENGINE) {
+                // Engine: Body top + Nozzle bell bottom
                 float bf = 0.4f; float nf = 1.0f - bf;
-                Mat4 baseTrans = Mat4::translate(symPos) * Mat4::fromQuat(finalRot);
-                Mat4 bodyMat = baseTrans * Mat4::translate(Vec3(0, def.height*(1.0f-bf*0.5f), 0)) * Mat4::scale(Vec3(pd*0.6f, def.height*bf, pd*0.6f));
+                Mat4 bodyMat = Mat4::translate(symPos + Vec3(0, def.height*(1.0f-bf*0.5f), 0)) * Mat4::scale({pd*0.6f, def.height*bf, pd*0.6f});
                 r3d->drawMesh(rocketBody, bodyMat, 0.2f*rm, 0.2f*gm, 0.22f*bm, alpha, 0.4f);
-                Mat4 bellMat = baseTrans * Mat4::scale(Vec3(pd*0.85f, def.height*nf, pd*0.85f));
+                Mat4 bellMat = Mat4::translate(symPos) * Mat4::scale({pd*0.85f, def.height*nf, pd*0.85f});
                 r3d->drawMesh(rocketNose, bellMat, r*0.8f, g*0.8f, b*0.8f, alpha, 0.1f);
             } else if (def.category == CAT_STRUCTURAL) {
                 if (strstr(def.name, "Fin") || strstr(def.name, "Solar")) {
-                    Mat4 finMat = Mat4::translate(symPos + Vec3(0, def.height*0.5f, 0)) * Mat4::fromQuat(symRot * rot) * Mat4::scale(Vec3(pd*0.05f, def.height, pd*0.5f));
+                    // Radial fins/panels
+                    Mat4 finMat = Mat4::translate(symPos + Vec3(0, def.height*0.5f, 0)) * Mat4::fromQuat(Quat::fromAxisAngle(Vec3(0, 1, 0), angle)) * Mat4::scale({pd*0.05f, def.height, pd*0.5f});
                     r3d->drawMesh(rocketBox, finMat, r, g, b, alpha, 0.1f);
                 } else if (strstr(def.name, "Leg")) {
-                    Mat4 legMat = Mat4::translate(symPos + Vec3(0, def.height*0.5f, 0)) * Mat4::fromQuat(symRot * rot) * Mat4::scale(Vec3(pd*0.15f, def.height, pd*0.15f));
+                    // Landing legs
+                    Mat4 legMat = Mat4::translate(symPos + Vec3(0, def.height*0.5f, 0)) * Mat4::fromQuat(Quat::fromAxisAngle(Vec3(0, 1, 0), angle)) * Mat4::scale({pd*0.15f, def.height, pd*0.15f});
                     r3d->drawMesh(rocketBox, legMat, r, g, b, alpha, 0.1f);
                 } else {
-                    Mat4 partMat = Mat4::translate(symPos) * Mat4::fromQuat(finalRot) * Mat4::translate(Vec3(0, def.height*0.5f, 0)) * Mat4::scale(Vec3(pd, def.height, pd));
+                    Mat4 partMat = Mat4::translate(Vec3(symPos.x, py, symPos.z)) * Mat4::scale({pd, def.height, pd});
                     r3d->drawMesh(rocketBody, partMat, r, g, b, alpha, 0.2f);
                 }
             } else {
-                Mat4 partMat = Mat4::translate(symPos) * Mat4::fromQuat(finalRot) * Mat4::translate(Vec3(0, def.height*0.5f, 0)) * Mat4::scale(Vec3(pd, def.height, pd));
+                // Default: Standard cylinder (Tanks, Boosters, etc.)
+                Mat4 partMat = Mat4::translate(Vec3(symPos.x, py, symPos.z)) * Mat4::scale({pd, def.height, pd});
                 r3d->drawMesh(rocketBody, partMat, r, g, b, alpha, 0.2f);
             }
         }
@@ -535,8 +541,9 @@ int main() {
 
     for (int i = 0; i < (int)builder_state.assembly.parts.size(); i++) {
         const PlacedPart& pp = builder_state.assembly.parts[i];
+        bool is_selected = builder_state.show_part_menu && (builder_state.r_clicked_part_idx == i);
         drawPartWithSymmetry(PART_CATALOG[pp.def_id], pp.pos, pp.rot, 
-                            (builder_state.in_assembly_mode && builder_state.assembly_cursor == i), 1.0f, pp.symmetry);
+                            (builder_state.in_assembly_mode && builder_state.assembly_cursor == i), is_selected, 1.0f, pp.symmetry);
     }
 
     // Draw Dragging Ghost
@@ -555,33 +562,19 @@ int main() {
 
         drawPartWithSymmetry(PART_CATALOG[builder_state.dragging_def_id], 
                             builder_state.dragging_pos, builder_state.dragging_rot, 
-                            false, alpha, builder_state.current_symmetry, rt, gt, bt);
+                            false, false, alpha, builder_state.current_symmetry, rt, gt, bt);
         
         if (over_catalog) {
             renderer->addRect(pl + pw/2.0f, 0.15f, pw, 1.40f, 0.5f, 0.0f, 0.0f, 0.3f);
             renderer->drawText(pl + 0.15f, 0.15f, "DROP TO DELETE", 0.015f, 1, 1, 1);
         }
 
-        // Render potential snap nodes as small glowy points
+        // Render potential snap nodes as glowy points
         for (const auto& p : builder_state.assembly.parts) {
             const auto& pdef = PART_CATALOG[p.def_id];
             for (const auto& node : pdef.snap_nodes) {
-                Mat4 nodeMat = Mat4::translate(p.pos + node.pos) * Mat4::scale(Vec3(0.15f, 0.15f, 0.15f));
-                r3d->drawMesh(rocketBox, nodeMat, 0.1f, 1.0f, 0.2f, 0.6f, 0.1f);
-            }
-        }
-
-        // Draw Snap Line
-        if (builder_state.dragging_parent_idx != -1) {
-            const auto& p = builder_state.assembly.parts[builder_state.dragging_parent_idx];
-            Vec3 p1 = p.pos;
-            Vec3 p2 = builder_state.dragging_pos;
-            Vec3 dir = p2 - p1;
-            float len = dir.length();
-            if (len > 0.1f) {
-                Quat lRot = Quat::fromTo(Vec3(0,1,0), dir.normalized());
-                Mat4 lMat = Mat4::translate(p1 + dir * 0.5f) * Mat4::fromQuat(lRot) * Mat4::scale({0.05f, len, 0.05f});
-                r3d->drawMesh(rocketBox, lMat, 0.3f, 0.8f, 1.0f, 0.9f, 0.2f);
+                Mat4 nodeMat = Mat4::translate(p.pos + node.pos) * Mat4::scale({0.3f, 0.3f, 0.3f});
+                r3d->drawMesh(rocketBox, nodeMat, 0, 1, 0, 0.8f, 0); // Green glow
             }
         }
     }

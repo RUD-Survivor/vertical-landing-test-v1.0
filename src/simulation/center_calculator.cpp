@@ -63,8 +63,6 @@ size_t hashAssembly(const RocketAssembly& assembly) {
         part_hash ^= (size_t)(pp.pos.y * 1000.0f) << 8;
         part_hash ^= (size_t)(pp.pos.z * 1000.0f) << 12;
         part_hash ^= (size_t)pp.symmetry << 20;
-        part_hash ^= (size_t)(pp.param0 * 1000.0f) << 24;
-        part_hash ^= (size_t)pp.stage << 28;
         
         // Combine with running hash
         hash ^= part_hash * 0x9e3779b9 + (hash << 6) + (hash >> 2);
@@ -86,11 +84,7 @@ Vec3 calculateCenterOfMass(const RocketAssembly& assembly) {
         const PlacedPart& pp = assembly.parts[i];
         const PartDef& def = PART_CATALOG[pp.def_id];
         
-        float part_mass = def.dry_mass;
-        if (def.category == CAT_FUEL_TANK) part_mass += def.fuel_capacity * pp.param0;
-        else part_mass += def.fuel_capacity;
-        
-        part_mass *= pp.symmetry;
+        float part_mass = (def.dry_mass + def.fuel_capacity) * pp.symmetry;
         if (part_mass <= 0.0f) continue;
         
         // For symmetry, we assume parts are radially balanced around (0, y, 0)
@@ -147,7 +141,6 @@ Vec3 calculateCenterOfThrust(const RocketAssembly& assembly) {
         if (!isEngine(def)) continue;
         
         float thrust = def.thrust * pp.symmetry;
-        if (def.category == CAT_ENGINE) thrust *= pp.param0;
         if (thrust <= 0.0f) continue;
         
         Vec3 local_cot = pp.pos + Vec3(0, def.height / 2.0f, 0);

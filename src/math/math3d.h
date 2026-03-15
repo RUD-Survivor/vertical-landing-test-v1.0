@@ -165,22 +165,6 @@ struct Quat {
     m[2]  = 2 * (xz - wy);     m[6]  = 2 * (yz + wx);     m[10] = 1 - 2 * (xx + yy); m[14] = 0;
     m[3]  = 0;                  m[7]  = 0;                  m[11] = 0;                  m[15] = 1;
   }
-
-  static Quat fromTo(const Vec3& a, const Vec3& b) {
-    Vec3 v1 = a.normalized();
-    Vec3 v2 = b.normalized();
-    float d = v1.dot(v2);
-    if (d > 0.99999f) return Quat();
-    if (d < -0.99999f) {
-      Vec3 axis = v1.cross(Vec3(1, 0, 0));
-      if (axis.lengthSq() < 0.01f) axis = v1.cross(Vec3(0, 1, 0));
-      return Quat::fromAxisAngle(axis.normalized(), 3.14159f);
-    }
-    Vec3 axis = v1.cross(v2);
-    float s = sqrtf((1 + d) * 2);
-    float invS = 1.0f / s;
-    return Quat(s * 0.5f, axis.x * invS, axis.y * invS, axis.z * invS).normalized();
-  }
 };
 
 // ==========================================================
