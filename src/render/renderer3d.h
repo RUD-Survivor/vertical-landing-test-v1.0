@@ -2913,6 +2913,19 @@ R"(
      float aspect = (float)screenW / (float)screenH;
      glUniform1f(ulf_aspect, aspect);
      
+     // Dynamic Scaling based on distance (Feature Request: Sun brightness/size change)
+     float currentDist = (sunWorldPos - camPos).length();
+     float refDist = 149597870.0f; // 1 AU in scaled units (km)
+     float distFactor = refDist / currentDist;
+     
+     // Increase brightness as we get closer (intensity uses non-linear power for visual punch)
+     float intensityScale = powf(distFactor, 1.25f);
+     intensityScale = fminf(fmaxf(intensityScale, 0.15f), 8.0f);
+     
+     // Scale size linearly with distance factor
+     float sizeScale = distFactor;
+     sizeScale = fminf(fmaxf(sizeScale, 0.2f), 10.0f);
+
      glEnable(GL_BLEND);
      glBlendFunc(GL_SRC_ALPHA, GL_ONE); // Additive blending for light
      glDepthMask(GL_FALSE);
@@ -2929,10 +2942,10 @@ R"(
      auto drawFlare = [&](int shape, float scaleX, float scaleY, float ndcOffsetMult, 
                               float r, float g, float b, float aFactor) {
           glUniform1i(glGetUniformLocation(lensFlareProg, "uShapeType"), shape);
-          glUniform2f(glGetUniformLocation(lensFlareProg, "uScale"), scaleX, scaleY);
+          glUniform2f(glGetUniformLocation(lensFlareProg, "uScale"), scaleX * sizeScale, scaleY * sizeScale);
           glUniform2f(glGetUniformLocation(lensFlareProg, "uOffset"), ndcPos.x * ndcOffsetMult, ndcPos.y * ndcOffsetMult);
           glUniform4f(ulf_color, r, g, b, 1.0f);
-          glUniform1f(ulf_intensity, aFactor * occlusionFade);
+          glUniform1f(ulf_intensity, aFactor * occlusionFade * intensityScale);
           glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
      };
 
