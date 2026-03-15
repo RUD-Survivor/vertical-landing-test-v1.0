@@ -83,19 +83,20 @@ static const PartDef PART_CATALOG[] = {
     {2,  "Payload Bay",      CAT_NOSE_CONE, 1200.0f, 0.0f, 0.0f, 0.0f, 0.0f, 12.0f, 4.0f, 0.3f, 0.90f, 0.90f, 0.85f, "Large payload enclosure", stackNodes(0, 4.0f), false},
     {3,  "Mk1 Capsule",      CAT_COMMAND_POD, 1500.0f, 0.0f, 0.0f, 0.0f, 0.0f, 4.0f, 2.5f, 0.25f, 0.30f, 0.30f, 0.35f, "Single-crew capsule", stackNodes(4.0f, 2.5f), false},
     {4,  "Probe Core",       CAT_COMMAND_POD, 200.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 0.1f, 0.20f, 0.25f, 0.20f, "Guidance unit", stackNodes(1.0f, 1.0f), false},
-    {5,  "Small Tank 50t",   CAT_FUEL_TANK, 3000.0f, 50000.0f, 0.0f, 0.0f, 0.0f, 25.0f, 3.7f, 0.3f, 0.92f, 0.92f, 0.92f, "Small fuel storage", stackNodes(25.0f, 3.7f), false},
-    {6,  "Medium Tank 100t", CAT_FUEL_TANK, 5000.0f, 100000.0f, 0.0f, 0.0f, 0.0f, 35.0f, 3.7f, 0.3f, 0.90f, 0.90f, 0.92f, "Standard fuel tank", stackNodes(35.0f, 3.7f), false},
-    {7,  "Large Tank 200t",  CAT_FUEL_TANK, 8000.0f, 200000.0f, 0.0f, 0.0f, 0.0f, 50.0f, 3.7f, 0.3f, 0.88f, 0.88f, 0.92f, "High-capacity tank", stackNodes(50.0f, 3.7f), false},
-    {8,  "Jumbo Tank 500t",  CAT_FUEL_TANK, 15000.0f, 500000.0f, 0.0f, 0.0f, 0.0f, 80.0f, 5.0f, 0.3f, 0.85f, 0.85f, 0.90f, "Massive reservoir", stackNodes(80.0f, 5.0f), false},
-    {18, "Gold Leaf Tank",   CAT_FUEL_TANK, 1000.0f, 20000.0f, 0.0f, 0.0f, 0.0f, 12.0f, 2.0f, 0.2f, 1.0f, 0.84f, 0.0f, "Titanium-gold tank", stackNodes(12.0f, 2.0f), false},
-    {9,  "Raptor",           CAT_ENGINE, 2000.0f, 0.0f, 1500.0f, 2200000.0f, 100.0f, 4.0f, 3.7f, 0.05f, 0.35f, 0.35f, 0.38f, "High-ISP engine", stackNodes(4.0f, 3.7f), false},
-    {10, "Merlin 1D",        CAT_ENGINE, 1500.0f, 0.0f, 1200.0f, 845000.0f, 80.0f, 3.0f, 3.0f, 0.05f, 0.40f, 0.35f, 0.30f, "Workhorse engine", stackNodes(3.0f, 3.0f), false},
-    {19, "Vacuum Engine",    CAT_ENGINE, 800.0f, 0.0f, 1800.0f, 300000.0f, 20.0f, 5.0f, 4.2f, 0.02f, 0.6f, 0.6f, 0.7f, "Deep space efficient", stackNodes(5.0f, 4.2f), false},
+    {5,  "Small Tank 50t",   CAT_FUEL_TANK, 3000.0f, 50000.0f, 0.0f, 0.0f, 0.0f, 25.0f, 3.7f, 0.3f, 0.92f, 0.92f, 0.92f, "Small fuel storage", stackNodes(25.0f, 3.7f), true},
+    {6,  "Medium Tank 100t", CAT_FUEL_TANK, 5000.0f, 100000.0f, 0.0f, 0.0f, 0.0f, 35.0f, 3.7f, 0.3f, 0.90f, 0.90f, 0.92f, "Standard fuel tank", stackNodes(35.0f, 3.7f), true},
+    {7,  "Large Tank 200t",  CAT_FUEL_TANK, 8000.0f, 200000.0f, 0.0f, 0.0f, 0.0f, 50.0f, 3.7f, 0.3f, 0.88f, 0.88f, 0.92f, "High-capacity tank", stackNodes(50.0f, 3.7f), true},
+    {8,  "Jumbo Tank 500t",  CAT_FUEL_TANK, 15000.0f, 500000.0f, 0.0f, 0.0f, 0.0f, 80.0f, 5.0f, 0.3f, 0.85f, 0.85f, 0.90f, "Massive reservoir", stackNodes(80.0f, 5.0f), true},
+    {18, "Gold Leaf Tank",   CAT_FUEL_TANK, 1000.0f, 20000.0f, 0.0f, 0.0f, 0.0f, 12.0f, 2.0f, 0.2f, 1.0f, 0.84f, 0.0f, "Titanium-gold tank", stackNodes(12.0f, 2.0f), true},
+    {9,  "Raptor",           CAT_ENGINE, 2000.0f, 0.0f, 1500.0f, 2200000.0f, 100.0f, 4.0f, 3.7f, 0.05f, 0.35f, 0.35f, 0.38f, "High-ISP engine", stackNodes(4.0f, 3.7f), true},
+    {10, "Merlin 1D",        CAT_ENGINE, 1500.0f, 0.0f, 1200.0f, 845000.0f, 80.0f, 3.0f, 3.0f, 0.05f, 0.40f, 0.35f, 0.30f, "Workhorse engine", stackNodes(3.0f, 3.0f), true},
+    {19, "Vacuum Engine",    CAT_ENGINE, 800.0f, 0.0f, 1800.0f, 300000.0f, 20.0f, 5.0f, 4.2f, 0.02f, 0.6f, 0.6f, 0.7f, "Deep space efficient", stackNodes(5.0f, 4.2f), true},
     {15, "Decoupler",        CAT_STRUCTURAL, 300.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 3.7f, 0.0f, 0.25f, 0.25f, 0.25f, "Stage separator", stackNodes(1.0f, 3.7f), false},
     {16, "Fin Set (x4)",     CAT_STRUCTURAL, 200.0f, 0.0f, 0.0f, 0.0f, 0.0f, 2.0f, 3.7f, -0.1f, 0.30f, 0.30f, 0.30f, "Stability fins", stackNodes(2.0f, 3.7f), true}, 
     {17, "Girder XL",        CAT_STRUCTURAL, 400.0f, 0.0f, 0.0f, 0.0f, 0.0f, 6.0f, 1.0f, 0.1f, 0.40f, 0.40f, 0.42f, "Structural beam", stackNodes(6.0f, 1.0f), true},
     {20, "Landing Leg",      CAT_STRUCTURAL, 500.0f, 0.0f, 0.0f, 0.0f, 0.0f, 8.0f, 1.0f, 0.4f, 0.7f, 0.7f, 0.75f, "Heavy landing gear", stackNodes(8.0f, 1.0f), true},
     {21, "Solar Panel V3",   CAT_STRUCTURAL, 100.0f, 0.0f, 0.0f, 0.0f, 0.0f, 4.0f, 5.0f, 0.0f, 0.1f, 0.3f, 0.8f, "Efficient power gen", stackNodes(4.0f, 5.0f), true},
+    {22, "Radial Decoupler", CAT_STRUCTURAL, 150.0f, 0.0f, 0.0f, 0.0f, 0.0f, 2.0f, 1.0f, 0.0f, 0.6f, 0.2f, 0.2f, "Side-mounted separator", stackNodes(2.0f, 1.0f), true},
 };
 
 static const int PART_CATALOG_SIZE = sizeof(PART_CATALOG) / sizeof(PART_CATALOG[0]);
@@ -175,8 +176,13 @@ struct RocketAssembly {
 
         for (int i = 0; i < (int)parts.size(); i++) {
             const PartDef& pDef = PART_CATALOG[parts[i].def_id];
-            // Simplification: only snap to fuel tanks or structural cylinders
-            if (pDef.category != CAT_FUEL_TANK && pDef.category != CAT_STRUCTURAL) continue;
+            // Broaden snapping: allow attachment to tanks, structural, engines, and commands
+            bool valid_parent = (pDef.category == CAT_FUEL_TANK || 
+                                 pDef.category == CAT_STRUCTURAL || 
+                                 pDef.category == CAT_ENGINE || 
+                                 pDef.category == CAT_COMMAND_POD ||
+                                 pDef.category == CAT_NOSE_CONE);
+            if (!valid_parent) continue;
             
             float r = pDef.diameter * 0.5f;
             // Central axis of parent cylinder
@@ -184,15 +190,16 @@ struct RocketAssembly {
             Vec3 p1 = parts[i].pos + Vec3(0, pDef.height, 0);
 
             // Find point on central axis closest to the ray/mouse point
-            float t = (rayPos.y - p0.y) / pDef.height;
-            if (t >= 0.0f && t <= 1.0f) {
+            float t = (rayPos.y - p0.y) / fmaxf(0.001f, pDef.height);
+            if (t >= -0.1f && t <= 1.1f) {
+                t = std::max(0.0f, std::min(1.0f, t));
                 Vec3 axisPt = p0 + Vec3(0, t * pDef.height, 0);
                 // Vector from axis to cursor
                 Vec3 diff = rayPos - axisPt; diff.y = 0; // Stick to 2D radial offset
                 float dist = diff.length();
-                if (dist < r * 2.5f && dist > 0.1f) {
+                if (dist < r * 3.5f && dist > 0.01f) {
                     float score = std::abs(dist - r);
-                    if (score < best.score) {
+                    if (score < best.score || best.score > 2.0f) {
                         best.score = score; best.parent_idx = i;
                         best.pos = axisPt + diff.normalized() * r;
                         // Surface snap uses a specific node index to signify surface
@@ -485,10 +492,15 @@ inline void drawBuilderUI_KSP(Renderer* r, BuilderState& bs, const AgencyState& 
 
         // Place or Delete
         if (k.lmb && !pk.lmb && dragging_id_at_start != -1) {
+            bool picked_this_frame = (bs.moving_part_idx != -1 && !pk.lmb); // Simple heuristic: if we were moving and just pressed LMB, it might be the same click
+            // Actually, a better check: did dragging_id_at_start just become valid?
+            // Since we set bs.dragging_def_id = -1 at the end of placement, we can check if it was -1 in the previous state's handle input call.
+            // But we don't have pk's BuilderState here. Let's use a more direct check.
+            
             if (over_catalog) {
                 bs.dragging_def_id = -1;
                 bs.moving_part_idx = -1;
-            } else if (bs.is_placement_valid) {
+            } else if (bs.is_placement_valid && bs.hover_timer > 0.05f) { // Add a tiny delay (1-2 frames) before allowing placement
                 bs.assembly.addPart(bs.dragging_def_id, bs.dragging_parent_idx, bs.current_symmetry);
                 bs.assembly.parts.back().pos = bs.dragging_pos;
                 bs.dragging_def_id = -1; 
@@ -496,6 +508,9 @@ inline void drawBuilderUI_KSP(Renderer* r, BuilderState& bs, const AgencyState& 
                 bs.show_part_menu = false; // Cancel selection/menu after placement
             }
         }
+        bs.hover_timer += 0.016f; // Update timer while dragging
+    } else {
+        bs.hover_timer = 0; // Reset timer when not dragging
     }
 
     // Symmetry & UI Buttons

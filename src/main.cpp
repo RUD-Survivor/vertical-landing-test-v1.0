@@ -2729,31 +2729,55 @@ int main() {
           }
       }
 
-      // ===== 工业级 3D 体积尾焰 (Volumetric Raymarched Plume) =====
-      if (rocket_state.thrust_power > 0.1) {
+      // ===== 工业级 3D 体积尾焰 (Volumetric Raymarched Plume for ALL active engines) =====
+      if (rocket_state.thrust_power > 0.01) {
         float thrust = (float)control_input.throttle;
-        // 大气压力膨胀系数: 高空膨胀 (Expansion) = 1.0 - Density_Ratio
         float expansion = (float)fmax(0.0, 1.0 - PhysicsSystem::get_air_density(rocket_state.altitude) / 1.225);
-        
-        // 尾焰尺寸：提高节流阀敏感度，增加动态比例变化
-        // 非线性映射让长度随推力更剧烈地改变 (0.1 推力时只有初始长度的 25%)
         float thrust_scale = 0.25f + 0.75f * powf(thrust, 1.5f);
-        float plume_len = rh * 4.2f * thrust_scale * (1.0f + expansion * 1.0f);
-        float plume_dia = rw_3d * 6.5f * (1.1f + expansion * 4.2f);
         
-        // 动态增加包围盒宽度：当尾焰撞击地面时，必须增加包围盒直径以允许横向“飞溅”渲染，否则会被裁剪成方形
-        float ground_contact_depth = fmaxf(0.0f, plume_len - (float)rocket_state.altitude * (float)ws_d);
-        float splash_factor = ground_contact_depth / fmaxf(0.001f, plume_len);
-        plume_dia *= (1.0f + splash_factor * 12.0f); // 显著增加包围盒宽度以解除裁剪限制
-        
-        // 尾焰渲染锚点：从发动机喷口向后延伸
-        Vec3 plumePos = engNozzlePos - rocketDir * (plume_len * 0.5f);
-        Mat4 plumeMdl = Mat4::TRS(plumePos, rocketQuat, Vec3(plume_dia, plume_len, plume_dia));
-        
-        // 传递地面高度：rocket_state.altitude 是相对于地面的高度
-        // 我们假设 engNozzlePos 相对地面的距离近似为 altitude
-        float groundDist = (float)rocket_state.altitude * (float)ws_d;
-        r3d->drawExhaustVolumetric(rocketBox, plumeMdl, thrust, expansion, (float)glfwGetTime(), groundDist, plume_len);
+        int render_start = 0;
+        if (rocket_state.current_stage < (int)rocket_config.stage_configs.size()) {
+            render_start = rocket_config.stage_configs[rocket_state.current_stage].part_start_index;
+        }
+
+        // Iterate through all active engines to render plumes
+        for (int pi = render_start; pi < (int)assembly.parts.size(); pi++) {
+            const PlacedPart& pp = assembly.parts[pi];
+            const PartDef& def = PART_CATALOG[pp.def_id];
+            
+            if (def.category == CAT_ENGINE) {
+                for (int s = 0; s < pp.symmetry; s++) {
+                    float symAngle = (s * 2.0f * 3.14159f) / pp.symmetry;
+                    Vec3 localPos = pp.pos;
+                    if (pp.symmetry > 1) {
+                        float dist = sqrtf(pp.pos.x*pp.pos.x + pp.pos.z*pp.pos.z);
+                        if (dist > 0.01f) {
+                            float curAngle = atan2f(pp.pos.z, pp.pos.x);
+                            localPos.x = cosf(curAngle + symAngle) * dist;
+                            localPos.z = sinf(curAngle + symAngle) * dist;
+                        }
+                    }
+
+                    Vec3 nozzleWorldPos = renderRocketBase + rocketQuat.rotate(localPos * (float)ws_d);
+                    
+                    float engine_ph = def.height * (float)ws_d;
+                    float plume_len = engine_ph * 4.2f * thrust_scale * (1.0f + expansion * 1.0f);
+                    float plume_dia = def.diameter * (float)ws_d * 2.0f * (1.1f + expansion * 4.2f);
+                    
+                    // 动态增加包围盒宽度：当尾焰撞击地面时，必须增加包围盒直径以允许横向“飞溅”渲染
+                    float groundDist = (float)rocket_state.altitude * (float)ws_d;
+                    float ground_contact_depth = fmaxf(0.0f, plume_len - groundDist);
+                    float splash_factor = ground_contact_depth / fmaxf(0.001f, plume_len);
+                    plume_dia *= (1.0f + splash_factor * 8.0f); 
+                    
+                    // 尾焰渲染锚点：从发动机喷口向后延伸
+                    Vec3 plumePos = nozzleWorldPos - rocketDir * (plume_len * 0.5f);
+                    Mat4 plumeMdl = Mat4::TRS(plumePos, rocketQuat, Vec3(plume_dia, plume_len, plume_dia));
+                    
+                    r3d->drawExhaustVolumetric(rocketBox, plumeMdl, thrust, expansion, (float)glfwGetTime(), groundDist, plume_len);
+                }
+            }
+        }
       }
 
       r3d->endFrame();
