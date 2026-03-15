@@ -540,12 +540,17 @@ int main() {
         bool over_catalog = (bk_now.mx < pl + pw);
         
         float rt = 1.0f, gt = 1.0f, bt = 1.0f;
-        if (!builder_state.is_placement_valid) { rt = 1.0f; gt = 0.2f; bt = 0.2f; }
-        if (over_catalog) { rt = 1.0f; gt = 0.0f; bt = 0.0f; }
+        float alpha = 0.4f;
+        if (!builder_state.is_placement_valid) { 
+            float pulse = 0.5f + 0.5f * sinf((float)glfwGetTime() * 10.0f);
+            rt = 1.0f; gt = 0.1f * pulse; bt = 0.1f * pulse; 
+            alpha = 0.5f + 0.2f * pulse;
+        }
+        if (over_catalog) { rt = 1.0f; gt = 0.0f; bt = 0.0f; alpha = 0.3f; }
 
         drawPartWithSymmetry(PART_CATALOG[builder_state.dragging_def_id], 
                             builder_state.dragging_pos, builder_state.dragging_rot, 
-                            false, 0.4f, builder_state.current_symmetry, rt, gt, bt);
+                            false, alpha, builder_state.current_symmetry, rt, gt, bt);
         
         if (over_catalog) {
             renderer->addRect(pl + pw/2.0f, 0.15f, pw, 1.40f, 0.5f, 0.0f, 0.0f, 0.3f);
@@ -2542,103 +2547,73 @@ int main() {
 
 
       // ===== 火箭涂装 (Assembly-based per-part rendering) =====
-      Vec3 engNozzlePos = renderRocketPos - rocketDir * (rh * 0.50f); // default engine pos for flame
+      Vec3 engNozzlePos = renderRocketBase; // Fallback to base
       {
-        float total_h_3d = (float)rocket_config.height;
-        float scale_3d = rh / fmaxf(total_h_3d, 1.0f); // meters-to-world scale
-        Vec3 rocketBottom = renderRocketPos - rocketDir * (rh * 0.5f);
-        
-        // Determine which parts to render (skip jettisoned stages)
         int render_start = 0;
         if (rocket_state.current_stage < (int)rocket_config.stage_configs.size()) {
             render_start = rocket_config.stage_configs[rocket_state.current_stage].part_start_index;
         }
-        // Recalculate stack_y offset for rendering from render_start
-        float y_offset_jettison = 0;
-        for (int pi = 0; pi < render_start && pi < (int)assembly.parts.size(); pi++) {
-            y_offset_jettison += PART_CATALOG[assembly.parts[pi].def_id].height;
+
+        // Find lowest active engine for flame positioning
+        float min_ey = 1e10f;
+        for (int pi = render_start; pi < (int)assembly.parts.size(); pi++) {
+            const PlacedPart& pp = assembly.parts[pi];
+            if (PART_CATALOG[pp.def_id].category == CAT_ENGINE) {
+                if (pp.pos.y < min_ey) {
+                    min_ey = pp.pos.y;
+                    engNozzlePos = renderRocketBase + rocketQuat.rotate(pp.pos * (float)ws_d);
+                }
+            }
         }
 
         for (int pi = render_start; pi < (int)assembly.parts.size(); pi++) {
           const PlacedPart& pp = assembly.parts[pi];
           const PartDef& def = PART_CATALOG[pp.def_id];
-          float part_h_3d = def.height * scale_3d;
-          float part_w_3d = (def.diameter / fmaxf((float)rocket_config.diameter, 1.0f)) * rw_3d;
-          float adjusted_stack_y = (pp.stack_y - y_offset_jettison) * scale_3d;
-          float part_center_y = adjusted_stack_y + part_h_3d * 0.5f;
-          Vec3 partPos = rocketBottom + rocketDir * part_center_y;
-          // Bottom and top edges of this part's slot
-          Vec3 partBot = rocketBottom + rocketDir * adjusted_stack_y;
-          Vec3 partTop = rocketBottom + rocketDir * (adjusted_stack_y + part_h_3d);
+          
+          for (int s = 0; s < pp.symmetry; s++) {
+            float symAngle = (s * 2.0f * 3.14159f) / pp.symmetry;
+            Vec3 localPos = pp.pos;
+            if (pp.symmetry > 1) {
+                float dist = sqrtf(pp.pos.x*pp.pos.x + pp.pos.z*pp.pos.z);
+                if (dist > 0.01f) {
+                   float curAngle = atan2f(pp.pos.z, pp.pos.x);
+                   localPos.x = cosf(curAngle + symAngle) * dist;
+                   localPos.z = sinf(curAngle + symAngle) * dist;
+                }
+            }
 
-          if (def.category == CAT_NOSE_CONE) {
-            // Lower 40%: cylinder body flush with part below
-            float bodyFrac = 0.4f;
-            Vec3 bodyCenter = partBot + rocketDir * (part_h_3d * bodyFrac * 0.5f);
-            Mat4 bodyMdl = Mat4::TRS(bodyCenter, rocketQuat, Vec3(part_w_3d, part_h_3d * bodyFrac, part_w_3d));
-            r3d->drawMesh(rocketBody, bodyMdl, def.r * 0.95f, def.g * 0.95f, def.b * 0.95f, 1.0f, 0.25f);
-            // Upper 60%: cone from body top to part top
-            float coneFrac = 1.0f - bodyFrac;
-            Vec3 coneStart = partBot + rocketDir * (part_h_3d * bodyFrac);
-            Mat4 coneMdl = Mat4::TRS(coneStart, rocketQuat, Vec3(part_w_3d, part_h_3d * coneFrac, part_w_3d));
-            r3d->drawMesh(rocketNose, coneMdl, def.r, def.g, def.b, 1.0f, 0.25f);
-          } else if (def.category == CAT_ENGINE) {
-            // Upper 40%: cylinder body flush with part above
-            float bodyFrac = 0.4f;
-            Vec3 bodyCenter = partTop - rocketDir * (part_h_3d * bodyFrac * 0.5f);
-            Mat4 bodyMdl = Mat4::TRS(bodyCenter, rocketQuat, Vec3(part_w_3d * 0.55f, part_h_3d * bodyFrac, part_w_3d * 0.55f));
-            r3d->drawMesh(rocketBody, bodyMdl, 0.18f, 0.18f, 0.20f, 1.0f, 0.4f);
-            // Lower 60%: bell nozzle (cone mesh base at y=0, tip at y=h)
-            // To flare out downwards, we place it at partBot and it grows up to the body.
-            float nozzleFrac = 1.0f - bodyFrac;
-            Mat4 nozzleMdl = Mat4::TRS(partBot, rocketQuat, Vec3(part_w_3d * 0.85f, part_h_3d * nozzleFrac, part_w_3d * 0.85f));
-            r3d->drawMesh(rocketNose, nozzleMdl, def.r, def.g, def.b, 1.0f, 0.4f);
-            engNozzlePos = partBot; // update for flame rendering
-          } else if (def.category == CAT_STRUCTURAL && def.drag_coeff < 0) {
-            // Fin set: 4 fins around this part (no body needed)
-            for (int fi = 0; fi < 4; fi++) {
-              float fin_angle = fi * 1.570796f;
-              Quat finRot = rocketQuat * Quat::fromAxisAngle(Vec3(0.0f, 1.0f, 0.0f), fin_angle);
-              Vec3 finPos = partPos + finRot.rotate(Vec3(part_w_3d * 1.2f, 0.0f, 0.0f));
-              Mat4 finMdl = Mat4::TRS(finPos, finRot, Vec3(part_w_3d * 1.5f, part_h_3d * 0.8f, part_w_3d * 0.05f));
-              r3d->drawMesh(rocketBox, finMdl, def.r, def.g, def.b, 1.0f, 0.2f);
+            Vec3 partWorldPos = renderRocketBase + rocketQuat.rotate(localPos * (float)ws_d);
+            Quat partWorldRot = rocketQuat * pp.rot * Quat::fromAxisAngle(Vec3(0, 1, 0), symAngle);
+            
+            float pd = def.diameter * (float)ws_d;
+            float ph = def.height * (float)ws_d;
+            Vec3 partCenter = partWorldPos + rocketQuat.rotate(Vec3(0, ph * 0.5f, 0));
+
+            if (def.category == CAT_NOSE_CONE) {
+                Mat4 partMat = Mat4::TRS(partWorldPos, rocketQuat, {pd, ph, pd});
+                r3d->drawMesh(rocketNose, partMat, def.r, def.g, def.b, 1.0f, 0.2f);
+            } else if (def.category == CAT_ENGINE) {
+                float bf = 0.4f; float nf = 1.0f - bf;
+                Vec3 bodyPos = partWorldPos + rocketQuat.rotate(Vec3(0, ph*(1.0f-bf*0.5f), 0));
+                Mat4 bodyMat = Mat4::TRS(bodyPos, rocketQuat, {pd*0.6f, ph*bf, pd*0.6f});
+                r3d->drawMesh(rocketBody, bodyMat, 0.2f, 0.2f, 0.22f, 1.0f, 0.4f);
+                Mat4 bellMat = Mat4::TRS(partWorldPos, rocketQuat, {pd*0.85f, ph*nf, pd*0.85f});
+                r3d->drawMesh(rocketNose, bellMat, def.r*0.8f, def.g*0.8f, def.b*0.8f, 1.0f, 0.1f);
+            } else if (def.category == CAT_STRUCTURAL) {
+                if (strstr(def.name, "Fin") || strstr(def.name, "Solar")) {
+                    Mat4 finMat = Mat4::TRS(partCenter, partWorldRot, {pd*0.05f, ph, pd*0.5f});
+                    r3d->drawMesh(rocketBox, finMat, def.r, def.g, def.b, 1.0f, 0.1f);
+                } else if (strstr(def.name, "Leg")) {
+                    Mat4 legMat = Mat4::TRS(partCenter, partWorldRot, {pd*0.15f, ph, pd*0.15f});
+                    r3d->drawMesh(rocketBox, legMat, def.r, def.g, def.b, 1.0f, 0.1f);
+                } else {
+                    Mat4 partMat = Mat4::TRS(partCenter, rocketQuat, {pd, ph, pd});
+                    r3d->drawMesh(rocketBody, partMat, def.r, def.g, def.b, 1.0f, 0.2f);
+                }
+            } else {
+                Mat4 partMat = Mat4::TRS(partCenter, rocketQuat, {pd, ph, pd});
+                r3d->drawMesh(rocketBody, partMat, def.r, def.g, def.b, 1.0f, 0.2f);
             }
-          } else if (def.category == CAT_BOOSTER) {
-            // Full-height body
-            Mat4 bstBody = Mat4::TRS(partPos, rocketQuat, Vec3(part_w_3d * 0.7f, part_h_3d, part_w_3d * 0.7f));
-            r3d->drawMesh(rocketBody, bstBody, def.r, def.g, def.b, 1.0f, 0.25f);
-            for (int si = 0; si < 2; si++) {
-              float side_angle = si * 3.14159f;
-              Quat sideRot = rocketQuat * Quat::fromAxisAngle(Vec3(0.0f, 1.0f, 0.0f), side_angle);
-              Vec3 sidePos = partPos + sideRot.rotate(Vec3(part_w_3d * 0.6f, 0.0f, 0.0f));
-              Mat4 sideMdl = Mat4::TRS(sidePos, rocketQuat, Vec3(part_w_3d * 0.25f, part_h_3d * 0.8f, part_w_3d * 0.25f));
-              r3d->drawMesh(rocketBody, sideMdl, def.r * 0.8f, def.g * 0.8f, def.b * 0.8f, 1.0f, 0.3f);
-            }
-          } else if (def.category == CAT_COMMAND_POD) {
-            // Lower 50%: cylinder body
-            float bodyFrac = 0.5f;
-            Vec3 bodyCenter = partBot + rocketDir * (part_h_3d * bodyFrac * 0.5f);
-            Mat4 bodyMdl = Mat4::TRS(bodyCenter, rocketQuat, Vec3(part_w_3d, part_h_3d * bodyFrac, part_w_3d));
-            r3d->drawMesh(rocketBody, bodyMdl, def.r, def.g, def.b, 1.0f, 0.3f);
-            // Upper 50%: cone top
-            float coneFrac = 1.0f - bodyFrac;
-            Vec3 coneStart = partBot + rocketDir * (part_h_3d * bodyFrac);
-            Mat4 coneMdl = Mat4::TRS(coneStart, rocketQuat, Vec3(part_w_3d * 0.9f, part_h_3d * coneFrac, part_w_3d * 0.9f));
-            r3d->drawMesh(rocketNose, coneMdl, def.r * 1.1f, def.g * 1.1f, def.b * 1.1f, 1.0f, 0.3f);
-          } else if (def.category == CAT_STRUCTURAL && def.drag_coeff >= 0) {
-            // Decoupler/adapter
-            Mat4 decMdl = Mat4::TRS(partPos, rocketQuat, Vec3(part_w_3d * 1.05f, part_h_3d, part_w_3d * 1.05f));
-            r3d->drawMesh(rocketBody, decMdl, def.r, def.g, def.b, 1.0f, 0.4f);
-          } else {
-            // Default: fuel tank — full-height cylinder + inter-stage rings
-            Mat4 tankMdl = Mat4::TRS(partPos, rocketQuat, Vec3(part_w_3d, part_h_3d, part_w_3d));
-            r3d->drawMesh(rocketBody, tankMdl, def.r, def.g, def.b, 1.0f, 0.25f);
-            Vec3 ringTopP = partTop;
-            Mat4 ringTopMdl = Mat4::TRS(ringTopP, rocketQuat, Vec3(part_w_3d * 1.02f, part_h_3d * 0.02f, part_w_3d * 1.02f));
-            r3d->drawMesh(rocketBody, ringTopMdl, 0.2f, 0.2f, 0.25f, 1.0f, 0.4f);
-            Vec3 ringBotP = partBot;
-            Mat4 ringBotMdl = Mat4::TRS(ringBotP, rocketQuat, Vec3(part_w_3d * 1.02f, part_h_3d * 0.02f, part_w_3d * 1.02f));
-            r3d->drawMesh(rocketBody, ringBotMdl, 0.2f, 0.2f, 0.25f, 1.0f, 0.4f);
           }
         }
       }
