@@ -53,6 +53,7 @@ private:
         double mnv_remaining_dv = 0;  // Remaining delta-v for finite burn
         double mnv_mass = 0;          // Current mass during finite burn
         std::vector<ManeuverNode> last_maneuvers;
+        Vec3 mnv_thrust_dir;          // Inertial locking direction
         int last_ref_body = -1;
         int last_secondary_ref_body = -1;
         

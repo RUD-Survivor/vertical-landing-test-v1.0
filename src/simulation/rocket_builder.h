@@ -93,7 +93,7 @@ static const PartDef PART_CATALOG[] = {
     {19, "Vacuum Engine",    CAT_ENGINE, 800.0f, 0.0f, 1800.0f, 300000.0f, 20.0f, 5.0f, 4.2f, 0.02f, 0.6f, 0.6f, 0.7f, "Deep space efficient", stackNodes(5.0f, 4.2f), false},
     {15, "Decoupler",        CAT_STRUCTURAL, 300.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 3.7f, 0.0f, 0.25f, 0.25f, 0.25f, "Stage separator", stackNodes(1.0f, 3.7f), false},
     {16, "Fin Set (x4)",     CAT_STRUCTURAL, 200.0f, 0.0f, 0.0f, 0.0f, 0.0f, 2.0f, 3.7f, -0.1f, 0.30f, 0.30f, 0.30f, "Stability fins", stackNodes(2.0f, 3.7f), true}, 
-    {17, "Girder XL",        CAT_STRUCTURAL, 400.0f, 0.0f, 0.0f, 0.0f, 0.0f, 6.0f, 1.0f, 0.1f, 0.40f, 0.40f, 0.42f, "Structural beam", stackNodes(6.0f, 1.0f), false},
+    {17, "Girder XL",        CAT_STRUCTURAL, 400.0f, 0.0f, 0.0f, 0.0f, 0.0f, 6.0f, 1.0f, 0.1f, 0.40f, 0.40f, 0.42f, "Structural beam", stackNodes(6.0f, 1.0f), true},
     {20, "Landing Leg",      CAT_STRUCTURAL, 500.0f, 0.0f, 0.0f, 0.0f, 0.0f, 8.0f, 1.0f, 0.4f, 0.7f, 0.7f, 0.75f, "Heavy landing gear", stackNodes(8.0f, 1.0f), true},
     {21, "Solar Panel V3",   CAT_STRUCTURAL, 100.0f, 0.0f, 0.0f, 0.0f, 0.0f, 4.0f, 5.0f, 0.0f, 0.1f, 0.3f, 0.8f, "Efficient power gen", stackNodes(4.0f, 5.0f), true},
 };
@@ -169,6 +169,41 @@ struct RocketAssembly {
         }
         return best;
     }
+    SnapResult findSurfaceSnap(int d_id, Vec3 rayPos, Vec3 rayDir) const {
+        SnapResult best; const PartDef& dDef = PART_CATALOG[d_id];
+        if (!dDef.surf_attach) return best;
+
+        for (int i = 0; i < (int)parts.size(); i++) {
+            const PartDef& pDef = PART_CATALOG[parts[i].def_id];
+            // Simplification: only snap to fuel tanks or structural cylinders
+            if (pDef.category != CAT_FUEL_TANK && pDef.category != CAT_STRUCTURAL) continue;
+            
+            float r = pDef.diameter * 0.5f;
+            // Central axis of parent cylinder
+            Vec3 p0 = parts[i].pos;
+            Vec3 p1 = parts[i].pos + Vec3(0, pDef.height, 0);
+
+            // Find point on central axis closest to the ray/mouse point
+            float t = (rayPos.y - p0.y) / pDef.height;
+            if (t >= 0.0f && t <= 1.0f) {
+                Vec3 axisPt = p0 + Vec3(0, t * pDef.height, 0);
+                // Vector from axis to cursor
+                Vec3 diff = rayPos - axisPt; diff.y = 0; // Stick to 2D radial offset
+                float dist = diff.length();
+                if (dist < r * 2.5f && dist > 0.1f) {
+                    float score = std::abs(dist - r);
+                    if (score < best.score) {
+                        best.score = score; best.parent_idx = i;
+                        best.pos = axisPt + diff.normalized() * r;
+                        // Surface snap uses a specific node index to signify surface
+                        best.p_node = -2; 
+                    }
+                }
+            }
+        }
+        return best;
+    }
+
 
     bool hasEngine() const { for (const auto& p : parts) if (PART_CATALOG[p.def_id].thrust > 0) return true; return false; }
     
@@ -205,6 +240,7 @@ struct BuilderState {
     bool show_part_menu = false;
     int r_clicked_part_idx = -1;
     Vec2 menu_pos = Vec2(0,0);
+    float last_mx = 0, last_my = 0;
 
     void getPartsInCategory(std::vector<int>& out) const {
         out.clear();
@@ -267,20 +303,36 @@ inline void drawBuilderUI_KSP(Renderer* r, BuilderState& bs, const AgencyState& 
     drawBtn(ax, -0.07f,"CoT", bs.centerViz.hasCoT, bs.centerViz.showCoT, 0.70f,0.15f,0.15f);
 
     if (bs.show_part_menu && bs.r_clicked_part_idx != -1) {
-        float mx = bs.menu_pos.x, my = bs.menu_pos.y;
-        float mw = 0.25f, mh = 0.20f;
-        r->addRect(mx + mw/2.0f, my - mh/2.0f, mw, mh, 0.05f, 0.06f, 0.12f, 0.95f);
+        float mx = bs.menu_pos.x, my = bs.menu_pos.y, mw = 0.30f, mh = 0.35f;
+        r->addRect(mx + mw/2.0f, my - mh/2.0f, mw, mh, 0.05f, 0.06f, 0.12f, 0.98f);
         const auto& p = bs.assembly.parts[bs.r_clicked_part_idx];
         const auto& d = PART_CATALOG[p.def_id];
-        r->drawText(mx + 0.02f, my - 0.04f, d.name, 0.012f, 0.5f, 0.9f, 1.0f);
+        r->drawText(mx + 0.02f, my - 0.04f, d.name, 0.012f, 0.4f, 0.8f, 1.0f);
         
-        auto drawMenuBtn = [&](float menu_y, const char* label, bool hovered) {
-            r->addRect(mx + mw/2.0f, menu_y, mw - 0.02f, 0.04f, hovered?0.2f:0.1f, hovered?0.3f:0.2f, hovered?0.5f:0.3f, 0.8f);
-            r->drawText(mx + 0.04f, menu_y, label, 0.009f, 1, 1, 1);
+        char s1[64], s2[64];
+        if (d.category == CAT_ENGINE) {
+            snprintf(s1, 64, "THRUST: %.0f kN", d.thrust/1000.0f);
+            snprintf(s2, 64, "ISP: %.0f s", d.isp);
+        } else if (d.category == CAT_FUEL_TANK) {
+            snprintf(s1, 64, "FUELCAP: %.0f kg", d.fuel_capacity);
+            snprintf(s2, 64, "WETMASS: %.1f t", (d.dry_mass + d.fuel_capacity)/1000.0f);
+        } else {
+            snprintf(s1, 64, "DRAG: %.2f", d.drag_coeff);
+            snprintf(s2, 64, "MASS: %.0f kg", d.dry_mass);
+        }
+        r->drawText(mx + 0.02f, my - 0.08f, s1, 0.008f, 0.7f, 0.7f, 0.7f);
+        r->drawText(mx + 0.02f, my - 0.11f, s2, 0.008f, 0.7f, 0.7f, 0.7f);
+
+        auto drawMenuBtn = [&](float menu_y, const char* label) {
+            bool hov = builderCheckHit(bs.last_mx, bs.last_my, mx + mw/2.0f, menu_y, mw - 0.02f, 0.045f);
+            r->addRect(mx + mw/2.0f, menu_y, mw - 0.02f, 0.045f, hov?0.2f:0.1f, hov?0.4f:0.2f, hov?0.7f:0.3f, 0.9f);
+            r->drawText(mx + 0.04f, menu_y, label, 0.010f, 1, 1, 1);
         };
         
-        drawMenuBtn(my - 0.10f, "DUPLICATE", false);
-        drawMenuBtn(my - 0.15f, "STAGING: NEXT", false);
+        drawMenuBtn(my - 0.17f, "DUPLICATE");
+        char s_stage[32]; snprintf(s_stage, 32, "STAGE: %d (CYCLE)", p.stage);
+        drawMenuBtn(my - 0.23f, s_stage);
+        drawMenuBtn(my - 0.29f, "DELETE PART");
     }
     r->addRect(-0.85f, -0.55f, 0.15f, 0.08f, 0.2f, 0.2f, 0.3f, 0.8f);
     char s_sym[16]; snprintf(s_sym, 16, "SYM: %dx", bs.current_symmetry); r->drawText(-0.91f,-0.55f,s_sym, 0.012f, 1,1,1);
@@ -289,6 +341,35 @@ inline void drawBuilderUI_KSP(Renderer* r, BuilderState& bs, const AgencyState& 
         r->drawText(-0.18f,-0.93f,"[SPACE] LAUNCH", 0.013f, 0.3f, 1.0f*blink, 0.4f);
     }
 }inline bool builderHandleInput(BuilderState& bs, const BuilderKeyState& k, const BuilderKeyState& pk) {
+    bs.last_mx = k.mx; bs.last_my = k.my;
+    // Context Menu Interactivity (Highest Priority)
+    if (bs.show_part_menu && k.lmb && !pk.lmb) {
+        float mx = bs.menu_pos.x, my = bs.menu_pos.y, mw = 0.28f;
+        auto& p = bs.assembly.parts[bs.r_clicked_part_idx];
+        
+        // Button 1: DUPLICATE
+        if (builderCheckHit(k.mx, k.my, mx + mw/2.0f, my - 0.17f, mw, 0.045f)) {
+            bs.dragging_def_id = p.def_id;
+            bs.moving_part_idx = -1;
+            bs.show_part_menu = false; return false; 
+        }
+        // Button 2: CYCLE STAGE
+        if (builderCheckHit(k.mx, k.my, mx + mw/2.0f, my - 0.23f, mw, 0.045f)) {
+            p.stage = (p.stage + 1) % 5;
+            bs.assembly.recalculate();
+            return false;
+        }
+        // Button 3: DELETE
+        if (builderCheckHit(k.mx, k.my, mx + mw/2.0f, my - 0.29f, mw, 0.045f)) {
+            bs.assembly.removePart(bs.r_clicked_part_idx);
+            bs.show_part_menu = false; return false;
+        }
+        // Project a click outside menu or specialized "Close" area
+        if (!builderCheckHit(k.mx, k.my, mx + mw/2.0f, my - 0.17f, mw, 0.35f)) {
+            bs.show_part_menu = false; 
+        }
+    }
+    
     int dragging_id_at_start = bs.dragging_def_id;
     bs.hovered_part_def_id = -1;
     float pl=-0.98f,pw=0.65f,gx=pl+0.08f,gy=0.70f,cw=0.16f,ch=0.16f;
@@ -379,10 +460,23 @@ inline void drawBuilderUI_KSP(Renderer* r, BuilderState& bs, const AgencyState& 
         Vec3 mouseWorldPos = camTarget + mouseWorldPosRelative;
         
         auto snap = bs.assembly.findBestSnapNode(bs.dragging_def_id, mouseWorldPos, camFwd);
+        auto surf = bs.assembly.findSurfaceSnap(bs.dragging_def_id, mouseWorldPos, camFwd);
+        
         if (snap.parent_idx != -1 && snap.score < 5.0f) { 
             bs.dragging_pos = snap.pos; 
             bs.dragging_parent_idx = snap.parent_idx; 
             bs.is_placement_valid = true;
+        } else if (surf.parent_idx != -1 && surf.score < 2.0f) {
+            bs.dragging_pos = surf.pos;
+            bs.dragging_parent_idx = surf.parent_idx;
+            bs.is_placement_valid = true;
+            
+            // Outward rotation for surface attachment
+            Vec3 normal = (surf.pos - bs.assembly.parts[surf.parent_idx].pos); normal.y = 0;
+            if (normal.length() > 0.01f) {
+                float angle = atan2(normal.z, normal.x);
+                bs.dragging_rot = Quat::fromAxisAngle(Vec3(0, 1, 0), -angle + (float)PI/2.0f);
+            }
         } else { 
             bs.dragging_pos = mouseWorldPos; 
             bs.dragging_parent_idx = -1;

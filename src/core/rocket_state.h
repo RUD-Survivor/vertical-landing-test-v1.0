@@ -138,6 +138,8 @@ struct ManeuverNode {
     bool active = true;
     bool selected = false;
     int burn_mode = 0;        // 0 = Impulse, 1 = Sustained
+    Vec3 locked_burn_dir;     // Captured inertial direction for guidance
+    double burn_duration = 0; // Calculated duration using rocket equation
 
     // Fixed orbital elements to prevent jitter during burns
     double ref_a=0, ref_ecc=0, ref_M0=0, ref_n=0;

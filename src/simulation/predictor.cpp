@@ -260,6 +260,7 @@ void AsyncOrbitPredictor::WorkerLoop() {
                         m_context.mnv_burning = true;
                         m_context.mnv_remaining_dv = dv_dir.length();
                         m_context.mnv_mass = req.state.fuel + req.config.dry_mass + req.config.upper_stages_mass;
+                        m_context.mnv_thrust_dir = dv_dir.normalized(); // Inertial Lock captured at ignition
                         // Fork the mnv trajectory from current state
                         mnv_h_px = cur_h_px; mnv_h_py = cur_h_py; mnv_h_pz = cur_h_pz;
                         mnv_h_vx = cur_h_vx; mnv_h_vy = cur_h_vy; mnv_h_vz = cur_h_vz;
@@ -270,8 +271,8 @@ void AsyncOrbitPredictor::WorkerLoop() {
             
             // Finite burn thrust application (on the mnv trajectory)
             if (m_context.mnv_burning && !m_context.mnv_done) {
-                // Clamp step for burn accuracy
-                step_dt = std::min(step_dt, 10.0);
+                // High-precision adaptive step for burn
+                step_dt = std::min(step_dt, 1.0);
                 
                 // Compute thrust parameters
                 double thrust = 0;
@@ -280,25 +281,10 @@ void AsyncOrbitPredictor::WorkerLoop() {
                 double ve = req.config.specific_impulse * 9.80665;
                 double mdot = (ve > 0) ? thrust / ve : 0;
                 
-                if (thrust > 0 && m_context.mnv_mass > req.config.dry_mass && m_context.mnv_remaining_dv > 0.1) {
-                    // Dynamic prograde attitude guidance: thrust along current velocity direction
-                    double vx_rel = mnv_h_vx, vy_rel = mnv_h_vy, vz_rel = mnv_h_vz;
-                    // Subtract nearest body velocity for local prograde
-                    double nbpx, nbpy, nbpz, nbvx, nbvy, nbvz;
-                    PhysicsSystem::GetCelestialStateAt(nearest_body, t_sim, nbpx, nbpy, nbpz, nbvx, nbvy, nbvz);
-                    vx_rel -= nbvx; vy_rel -= nbvy; vz_rel -= nbvz;
-                    double v_mag = std::sqrt(vx_rel*vx_rel + vy_rel*vy_rel + vz_rel*vz_rel);
+                if (thrust > 0 && m_context.mnv_mass > req.config.dry_mass && m_context.mnv_remaining_dv > 0.01) {
+                    Vec3 thrust_dir = m_context.mnv_thrust_dir; // Principia-style Inertial Lock
                     
-                    // Use maneuver delta_v direction for thrust orientation
-                    const auto& node = req.state.maneuvers[0];
-                    Vec3 r_now((float)(mnv_h_px - nbpx), (float)(mnv_h_py - nbpy), (float)(mnv_h_pz - nbpz));
-                    Vec3 v_now((float)vx_rel, (float)vy_rel, (float)vz_rel);
-                    ManeuverFrame frame_now = ManeuverSystem::getFrame(r_now, v_now);
-                    Vec3 thrust_dir = (frame_now.prograde * node.delta_v.x + 
-                                       frame_now.normal   * node.delta_v.y + 
-                                       frame_now.radial   * node.delta_v.z).normalized();
-                    
-                    // Apply thrust acceleration
+                    // Apply thrust acceleration (a = F/m)
                     double accel = thrust / m_context.mnv_mass;
                     double dv_this_step = accel * step_dt;
                     if (dv_this_step > m_context.mnv_remaining_dv) {
@@ -328,7 +314,9 @@ void AsyncOrbitPredictor::WorkerLoop() {
             // Integrator
             #define SYM_W_Q(C) { \
                 if (!m_context.crashed) { cur_h_px += (C)*cur_h_vx*step_dt; cur_h_py += (C)*cur_h_vy*step_dt; cur_h_pz += (C)*cur_h_vz*step_dt; } \
-                if (m_context.mnv_done && !m_context.mnv_crashed) { mnv_h_px+=(C)*mnv_h_vx*step_dt; mnv_h_py+=(C)*mnv_h_vy*step_dt; mnv_h_pz+=(C)*mnv_h_vz*step_dt; } \
+                if (loop_has_mnv && (m_context.mnv_done || m_context.mnv_burning) && !m_context.mnv_crashed) { \
+                    mnv_h_px+=(C)*mnv_h_vx*step_dt; mnv_h_py+=(C)*mnv_h_vy*step_dt; mnv_h_pz+=(C)*mnv_h_vz*step_dt; \
+                } \
                 t_sim += (C)*step_dt; \
             }
             #define SYM_W_P(D) { \
@@ -336,7 +324,7 @@ void AsyncOrbitPredictor::WorkerLoop() {
                     double ax,ay,az; calc_acc(t_sim, cur_h_px,cur_h_py,cur_h_pz, ax,ay,az); \
                     cur_h_vx+=(D)*ax*step_dt; cur_h_vy+=(D)*ay*step_dt; cur_h_vz+=(D)*az*step_dt; \
                 } \
-                if (m_context.mnv_done && !m_context.mnv_crashed) { \
+                if (loop_has_mnv && (m_context.mnv_done || m_context.mnv_burning) && !m_context.mnv_crashed) { \
                     double max,may,maz; calc_acc(t_sim, mnv_h_px,mnv_h_py,mnv_h_pz, max,may,maz); \
                     mnv_h_vx+=(D)*max*step_dt; mnv_h_vy+=(D)*may*step_dt; mnv_h_vz+=(D)*maz*step_dt; \
                 } \
@@ -357,7 +345,7 @@ void AsyncOrbitPredictor::WorkerLoop() {
                         double dx = cur_h_px - bpx, dy = cur_h_py - bpy, dz = cur_h_pz - bpz;
                         if (dx*dx+dy*dy+dz*dz < body.radius*body.radius) m_context.crashed = true;
                     }
-                    if (m_context.mnv_done && !m_context.mnv_crashed) {
+                    if (loop_has_mnv && (m_context.mnv_done || m_context.mnv_burning) && !m_context.mnv_crashed) {
                         double mdx = mnv_h_px - bpx, mdy = mnv_h_py - bpy, mdz = mnv_h_pz - bpz;
                         if (mdx*mdx+mdy*mdy+mdz*mdz < body.radius*body.radius) m_context.mnv_crashed = true;
                     }
@@ -405,7 +393,7 @@ void AsyncOrbitPredictor::WorkerLoop() {
                     m_context.last_dr = dr;
                 }
                 
-                if (m_context.mnv_done && !m_context.mnv_crashed) {
+                if (loop_has_mnv && (m_context.mnv_done || m_context.mnv_burning) && !m_context.mnv_crashed) {
                     Vec3 mnv_inertial((float)(mnv_h_px - rbpx), (float)(mnv_h_py - rbpy), (float)(mnv_h_pz - rbpz));
                     Vec3 mnv_local = q_inv.rotate(mnv_inertial);
                     if (std::isfinite(mnv_local.x)) {

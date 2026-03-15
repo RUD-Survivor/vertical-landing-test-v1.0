@@ -1087,14 +1087,16 @@ int main() {
             double ve = rocket_config.specific_impulse * 9.80665;
             double estimated_burn_time = 0;
             if (max_thrust > 0 && ve > 0 && total_dv_mag > 0) {
-                double mass_ratio = exp(total_dv_mag / ve);
-                double fuel_needed = current_mass * (1.0 - 1.0 / mass_ratio);
+                double m_0 = current_mass;
+                double m_f = m_0 * exp(-total_dv_mag / ve);
+                double delta_m = m_0 - m_f;
                 double mdot = max_thrust / ve;
-                estimated_burn_time = (mdot > 0) ? fuel_needed / mdot : total_dv_mag / (max_thrust / current_mass);
+                estimated_burn_time = delta_m / mdot;
             }
+            node.burn_duration = estimated_burn_time;
             
             double time_to_node = node.sim_time - rocket_state.sim_time;
-            double burn_start_offset = (node.burn_mode == 1) ? estimated_burn_time / 2.0 : 0;
+            double burn_start_offset = 0; // Ignition precisely at node per user request
             double time_to_burn_start = time_to_node - burn_start_offset;
             
             // Populate velocity snapshot when approaching burn time (first time only)
@@ -1109,14 +1111,16 @@ int main() {
                 Vec3 r_rel((float)rocket_state.px, (float)rocket_state.py, (float)rocket_state.pz);
                 Vec3 v_rel((float)rocket_state.vx, (float)rocket_state.vy, (float)rocket_state.vz);
                 ManeuverFrame frame = ManeuverSystem::getFrame(r_rel, v_rel);
-                Vec3 dv_world = frame.prograde * node.delta_v.x + 
-                                frame.normal   * node.delta_v.y + 
-                                frame.radial   * node.delta_v.z;
+                Vec3 dv_world = (frame.prograde * node.delta_v.x + 
+                                 frame.normal   * node.delta_v.y + 
+                                 frame.radial   * node.delta_v.z).normalized();
                 
-                // Target absolute velocity = current absolute velocity + delta-v
-                node.snap_vx = rocket_state.vx + soi.vx + dv_world.x;
-                node.snap_vy = rocket_state.vy + soi.vy + dv_world.y;
-                node.snap_vz = rocket_state.vz + soi.vz + dv_world.z;
+                node.locked_burn_dir = dv_world; // Inertial Lock captured at ignition
+                
+                // Target absolute velocity for shutdown check
+                node.snap_vx = rocket_state.vx + soi.vx + dv_world.x * total_dv_mag;
+                node.snap_vy = rocket_state.vy + soi.vy + dv_world.y * total_dv_mag;
+                node.snap_vz = rocket_state.vz + soi.vz + dv_world.z * total_dv_mag;
                 node.snap_valid = true;
             }
 
@@ -1140,12 +1144,8 @@ int main() {
                 // Compute burn direction in world space
                 Vec3 burn_dir(0,0,0);
                 if (node.snap_valid) {
-                    // During/Near burn: Point towards the remaining delta-v vector (KSP style)
-                    double cur_abs_vx = rocket_state.vx + SOLAR_SYSTEM[current_soi_index].vx;
-                    double cur_abs_vy = rocket_state.vy + SOLAR_SYSTEM[current_soi_index].vy;
-                    double cur_abs_vz = rocket_state.vz + SOLAR_SYSTEM[current_soi_index].vz;
-                    Vec3 rem_v((float)(node.snap_vx - cur_abs_vx), (float)(node.snap_vy - cur_abs_vy), (float)(node.snap_vz - cur_abs_vz));
-                    if (rem_v.length() > 0.1f) burn_dir = rem_v.normalized();
+                    // Inertial guidance locking
+                    burn_dir = node.locked_burn_dir;
                 } 
                 
                 if (burn_dir.length() < 0.1f) {
@@ -3096,17 +3096,26 @@ int main() {
     double dv_remaining = 0;
     if (rocket_state.selected_maneuver_index != -1 && (size_t)rocket_state.selected_maneuver_index < rocket_state.maneuvers.size()) {
         ManeuverNode& node = rocket_state.maneuvers[rocket_state.selected_maneuver_index];
-        double mu = 6.67430e-11 * SOLAR_SYSTEM[current_soi_index].mass;
-        double npx, npy, npz, nvx, nvy, nvz;
         
-        // Project CURRENT state to node time
-        get3DStateAtTime(rocket_state.px, rocket_state.py, rocket_state.pz, rocket_state.vx, rocket_state.vy, rocket_state.vz, mu, node.sim_time - rocket_state.sim_time, npx, npy, npz, nvx, nvy, nvz);
-        ManeuverFrame frame = ManeuverSystem::getFrame(Vec3((float)npx, (float)npy, (float)npz), Vec3((float)nvx, (float)nvy, (float)nvz));
-        
-        // The delta-v vector required in world space
-        Vec3 target_dv_world = frame.prograde * node.delta_v.x + frame.normal * node.delta_v.y + frame.radial * node.delta_v.z;
-        dv_remaining = (double)target_dv_world.length();
-        if (dv_remaining > 0.05) vManeuver = target_dv_world.normalized();
+        if (node.snap_valid) {
+            vManeuver = node.locked_burn_dir;
+            
+            // Calculate remaining dv based on absolute velocities
+            double cur_abs_vx = rocket_state.vx + SOLAR_SYSTEM[current_soi_index].vx;
+            double cur_abs_vy = rocket_state.vy + SOLAR_SYSTEM[current_soi_index].vy;
+            double cur_abs_vz = rocket_state.vz + SOLAR_SYSTEM[current_soi_index].vz;
+            Vec3 rem_v((float)(node.snap_vx - cur_abs_vx), (float)(node.snap_vy - cur_abs_vy), (float)(node.snap_vz - cur_abs_vz));
+            dv_remaining = (double)rem_v.length();
+        } else {
+            double mu = 6.67430e-11 * SOLAR_SYSTEM[current_soi_index].mass;
+            double npx, npy, npz, nvx, nvy, nvz;
+            // Project current state to node time
+            get3DStateAtTime(rocket_state.px, rocket_state.py, rocket_state.pz, rocket_state.vx, rocket_state.vy, rocket_state.vz, mu, node.sim_time - rocket_state.sim_time, npx, npy, npz, nvx, nvy, nvz);
+            ManeuverFrame frame = ManeuverSystem::getFrame(Vec3((float)npx, (float)npy, (float)npz), Vec3((float)nvx, (float)nvy, (float)nvz));
+            Vec3 target_dv_world = (frame.prograde * node.delta_v.x + frame.normal * node.delta_v.y + frame.radial * node.delta_v.z).normalized();
+            vManeuver = target_dv_world;
+            dv_remaining = (double)node.delta_v.length();
+        }
     }
 
     // 直接使用四元数投影，彻底解决万向锁和翻转问题
