@@ -649,6 +649,17 @@ int main() {
   // =========================================================
   // Build RocketConfig from assembled parts
   // =========================================================
+  // =========================================================
+  // RE-CENTER AROUND CoM BEFORE FLIGHT (Root Part logic)
+  // =========================================================
+  if (!skip_builder && !builder_state.assembly.parts.empty()) {
+      Vec3 com = CenterCalculator::calculateCenterOfMass(builder_state.assembly);
+      for (auto& p : builder_state.assembly.parts) {
+          p.pos = p.pos - com;
+      }
+      builder_state.assembly.com = Vec3(0,0,0); // It's now at the origin for the simulation
+      builder_state.assembly.recalculate();
+  }
   RocketConfig rocket_config = builder_state.assembly.buildRocketConfig();
   
   // Consume parts from agency inventory
@@ -695,8 +706,17 @@ int main() {
       
       // Initialize surface coordinates exactly at the planet's radius
       rocket_state.surf_px = 0.0;
-      rocket_state.surf_py = SOLAR_SYSTEM[current_soi_index].radius;
       rocket_state.surf_pz = 0.0;
+
+      float lowest_y = 0.0f;
+      if (!builder_state.assembly.parts.empty()) {
+          lowest_y = 1e10f;
+          for (const auto& p : builder_state.assembly.parts) {
+              lowest_y = std::min(lowest_y, p.pos.y);
+          }
+      }
+      // Set CoM altitude so the bottom-most part is on the surface
+      rocket_state.surf_py = SOLAR_SYSTEM[current_soi_index].radius - lowest_y;
   }
 
   // Keep a reference to the assembly for rendering

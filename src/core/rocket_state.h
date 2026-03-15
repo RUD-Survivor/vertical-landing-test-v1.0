@@ -178,6 +178,7 @@ struct RocketConfig {
     double dry_mass;
     double diameter;
     double height;
+    double bounds_bottom = 0; // Distance from origin to the lowest point of the rocket (usually negative)
     int stages;
     double specific_impulse;
     double cosrate; // fuel_consumption_rate / mass flow rate parameter

@@ -112,6 +112,7 @@ struct RocketAssembly {
     std::vector<PlacedPart> parts;
     float total_dry_mass = 0, total_fuel = 0, total_height = 0, max_diameter = 0;
     float total_thrust = 0, avg_isp = 0, total_consumption = 0, total_delta_v = 0, twr = 0, total_drag = 0;
+    Vec3 com = Vec3(0, 0, 0); // Center of Mass (local space)
 
     void recalculate() {
         total_dry_mass = 0; total_fuel = 0; total_height = 0; max_diameter = 0;
@@ -139,7 +140,11 @@ struct RocketAssembly {
 
     void addPart(int def_id, int parent_idx = -1, int sym = 1) {
         PlacedPart p; p.def_id = def_id; p.parent_idx = parent_idx; p.symmetry = sym;
-        if (parent_idx == -1 && !parts.empty()) p.pos = Vec3(0, total_height, 0);
+        if (parts.empty()) {
+            p.pos = Vec3(0, 0, 0); // Foundational root part anchored at origin
+        } else if (parent_idx == -1) {
+            p.pos = Vec3(0, total_height, 0);
+        }
         parts.push_back(p); recalculate();
     }
 
@@ -218,6 +223,14 @@ struct RocketAssembly {
         RocketConfig cfg; 
         cfg.dry_mass = (double)total_dry_mass; cfg.height = (double)total_height; cfg.diameter = (double)max_diameter;
         cfg.stages = 1; cfg.specific_impulse = (double)avg_isp; cfg.cosrate = (double)total_consumption;
+        
+        float min_y = 0;
+        if (!parts.empty()) {
+            min_y = 1e10f;
+            for (const auto& p : parts) min_y = std::min(min_y, p.pos.y);
+        }
+        cfg.bounds_bottom = (double)min_y;
+
         cfg.nozzle_area = 0.5 * (max_diameter / 3.7);
         StageManager::BuildStages(*this, cfg);
         return cfg;
@@ -485,9 +498,14 @@ inline void drawBuilderUI_KSP(Renderer* r, BuilderState& bs, const AgencyState& 
                 bs.dragging_rot = Quat::fromAxisAngle(Vec3(0, 1, 0), -angle + (float)PI/2.0f);
             }
         } else { 
-            bs.dragging_pos = mouseWorldPos; 
+            if (bs.assembly.parts.empty()) {
+                bs.dragging_pos = Vec3(0, 0, 0); // Snap first part to origin
+                bs.is_placement_valid = true;
+            } else {
+                bs.dragging_pos = mouseWorldPos; 
+                bs.is_placement_valid = PART_CATALOG[bs.dragging_def_id].surf_attach;
+            }
             bs.dragging_parent_idx = -1;
-            bs.is_placement_valid = bs.assembly.parts.empty() || PART_CATALOG[bs.dragging_def_id].surf_attach;
         }
 
         // Place or Delete

@@ -532,7 +532,7 @@ void Update(RocketState& state, const RocketConfig& config, const ControlInput& 
 
     // A. Base State Calculation
     double r_3d = std::sqrt(state.px * state.px + state.py * state.py + state.pz * state.pz);
-    state.altitude = r_3d - current_body.radius;
+    state.altitude = r_3d - current_body.radius + config.bounds_bottom;
     
     // Update Solar Occlusion
     state.solar_occlusion = CalculateSolarOcclusion(state);
@@ -705,7 +705,8 @@ void Update(RocketState& state, const RocketConfig& config, const ControlInput& 
     state.local_vx = (-state.vx * std::sin(local_up_angle) + state.vy * std::cos(local_up_angle)) - surface_rotation_speed;
 
     // E. Collision and Final Sync
-    double current_alt_f = std::sqrt(state.px*state.px+state.py*state.py+state.pz*state.pz) - current_body.radius;
+    double com_alt = std::sqrt(state.px*state.px+state.py*state.py+state.pz*state.pz) - current_body.radius;
+    double current_alt_f = com_alt + config.bounds_bottom;
     if (current_alt_f <= 0.0) {
         if (state.status == ASCEND && state.velocity < 0.01) {
             double theta = current_body.prime_meridian_epoch + (state.sim_time * 2.0 * PI / current_body.rotation_period);
