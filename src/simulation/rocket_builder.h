@@ -580,7 +580,7 @@ inline bool builderHandleInput(BuilderState& bs, const BuilderKeyState& k, const
         }
 
         // --- Keyboard Rotation Controls ---
-        float rot_step = 5.0f * (float)PI / 180.0f;
+        float rot_step = 90.0f * (float)PI / 180.0f;
         if (k.q && !pk.q) bs.placement_manual_rot = bs.placement_manual_rot * Quat::fromAxisAngle(Vec3(0, 1, 0), rot_step);
         if (k.e && !pk.e) bs.placement_manual_rot = bs.placement_manual_rot * Quat::fromAxisAngle(Vec3(0, 1, 0), -rot_step);
         if (k.w && !pk.w) bs.placement_manual_rot = bs.placement_manual_rot * Quat::fromAxisAngle(Vec3(1, 0, 0), rot_step);

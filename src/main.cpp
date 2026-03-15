@@ -2664,17 +2664,17 @@ int main() {
             
             float pd = def.diameter * (float)ws_d;
             float ph = def.height * (float)ws_d;
-            Vec3 partCenter = partWorldPos + rocketQuat.rotate(Vec3(0, ph * 0.5f, 0));
+            Vec3 partCenter = partWorldPos + partWorldRot.rotate(Vec3(0, ph * 0.5f, 0));
 
             if (def.category == CAT_NOSE_CONE) {
-                Mat4 partMat = Mat4::TRS(partWorldPos, rocketQuat, {pd, ph, pd});
+                Mat4 partMat = Mat4::TRS(partWorldPos, partWorldRot, {pd, ph, pd});
                 r3d->drawMesh(rocketNose, partMat, def.r, def.g, def.b, 1.0f, 0.2f);
             } else if (def.category == CAT_ENGINE) {
                 float bf = 0.4f; float nf = 1.0f - bf;
-                Vec3 bodyPos = partWorldPos + rocketQuat.rotate(Vec3(0, ph*(1.0f-bf*0.5f), 0));
-                Mat4 bodyMat = Mat4::TRS(bodyPos, rocketQuat, {pd*0.6f, ph*bf, pd*0.6f});
+                Vec3 bodyPos = partWorldPos + partWorldRot.rotate(Vec3(0, ph*(1.0f-bf*0.5f), 0));
+                Mat4 bodyMat = Mat4::TRS(bodyPos, partWorldRot, {pd*0.6f, ph*bf, pd*0.6f});
                 r3d->drawMesh(rocketBody, bodyMat, 0.2f, 0.2f, 0.22f, 1.0f, 0.4f);
-                Mat4 bellMat = Mat4::TRS(partWorldPos, rocketQuat, {pd*0.85f, ph*nf, pd*0.85f});
+                Mat4 bellMat = Mat4::TRS(partWorldPos, partWorldRot, {pd*0.85f, ph*nf, pd*0.85f});
                 r3d->drawMesh(rocketNose, bellMat, def.r*0.8f, def.g*0.8f, def.b*0.8f, 1.0f, 0.1f);
             } else if (def.category == CAT_STRUCTURAL) {
                 if (strstr(def.name, "Fin") || strstr(def.name, "Solar")) {
@@ -2684,11 +2684,11 @@ int main() {
                     Mat4 legMat = Mat4::TRS(partCenter, partWorldRot, {pd*0.15f, ph, pd*0.15f});
                     r3d->drawMesh(rocketBox, legMat, def.r, def.g, def.b, 1.0f, 0.1f);
                 } else {
-                    Mat4 partMat = Mat4::TRS(partCenter, rocketQuat, {pd, ph, pd});
+                    Mat4 partMat = Mat4::TRS(partCenter, partWorldRot, {pd, ph, pd});
                     r3d->drawMesh(rocketBody, partMat, def.r, def.g, def.b, 1.0f, 0.2f);
                 }
             } else {
-                Mat4 partMat = Mat4::TRS(partCenter, rocketQuat, {pd, ph, pd});
+                Mat4 partMat = Mat4::TRS(partCenter, partWorldRot, {pd, ph, pd});
                 r3d->drawMesh(rocketBody, partMat, def.r, def.g, def.b, 1.0f, 0.2f);
             }
           }
@@ -2786,20 +2786,20 @@ int main() {
                     }
 
                     Vec3 nozzleWorldPos = renderRocketBase + rocketQuat.rotate(localPos * (float)ws_d);
-                    
+                    Quat nozzleWorldRot = rocketQuat * pp.rot * Quat::fromAxisAngle(Vec3(0, 1, 0), symAngle);
+                    Vec3 nozzleDir = nozzleWorldRot.rotate(Vec3(0, 1, 0)); // Direction engine is pointing
+
                     float engine_ph = def.height * (float)ws_d;
                     float plume_len = engine_ph * 4.2f * thrust_scale * (1.0f + expansion * 1.0f);
                     float plume_dia = def.diameter * (float)ws_d * 2.0f * (1.1f + expansion * 4.2f);
                     
-                    // 动态增加包围盒宽度：当尾焰撞击地面时，必须增加包围盒直径以允许横向“飞溅”渲染
                     float groundDist = (float)rocket_state.altitude * (float)ws_d;
                     float ground_contact_depth = fmaxf(0.0f, plume_len - groundDist);
                     float splash_factor = ground_contact_depth / fmaxf(0.001f, plume_len);
                     plume_dia *= (1.0f + splash_factor * 8.0f); 
                     
-                    // 尾焰渲染锚点：从发动机喷口向后延伸
-                    Vec3 plumePos = nozzleWorldPos - rocketDir * (plume_len * 0.5f);
-                    Mat4 plumeMdl = Mat4::TRS(plumePos, rocketQuat, Vec3(plume_dia, plume_len, plume_dia));
+                    Vec3 plumePos = nozzleWorldPos - nozzleDir * (plume_len * 0.5f);
+                    Mat4 plumeMdl = Mat4::TRS(plumePos, nozzleWorldRot, Vec3(plume_dia, plume_len, plume_dia));
                     
                     r3d->drawExhaustVolumetric(rocketBox, plumeMdl, thrust, expansion, (float)glfwGetTime(), groundDist, plume_len);
                 }
