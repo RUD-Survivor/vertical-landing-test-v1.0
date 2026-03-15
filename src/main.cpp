@@ -472,73 +472,94 @@ int main() {
     r3d->drawMesh(rocketBox, pillar1, 0.2f, 0.2f, 0.2f, 1.0f, 0.1f);
     r3d->drawMesh(rocketBox, pillar2, 0.2f, 0.2f, 0.2f, 1.0f, 0.1f);
 
-    // Draw Assembled Rocket Stack
-    float stack_y = 0.0f;
-    for (int i = 0; i < builder_state.assembly.parts.size(); i++) {
-        const PlacedPart& pp = builder_state.assembly.parts[i];
-        const PartDef& def = PART_CATALOG[pp.def_id];
-        
-        float r = def.r, g = def.g, b = def.b;
-        bool is_selected = (builder_state.in_assembly_mode && builder_state.assembly_cursor == i);
-        if (is_selected) {
-            float blink = 0.5f + 0.5f * sinf((float)glfwGetTime() * 5.0f);
-            r = std::min(1.0f, r + 0.3f * blink);
-            g = std::min(1.0f, g + 0.5f * blink);
-            b = std::min(1.0f, b + 0.2f * blink);
+    // Draw Assembled Rocket Part Tree
+    auto drawPartWithSymmetry = [&](const PartDef& def, Vec3 pos, Quat rot, bool highlight, float alpha = 1.0f, int sym = 1, float rm = 1.0f, float gm = 1.0f, float bm = 1.0f) {
+        float r = def.r * rm, g = def.g * gm, b = def.b * bm;
+        if (highlight) {
+            float blink = 0.5f + 0.5f * sinf((float)glfwGetTime() * 8.0f);
+            r = std::min(1.0f, r + 0.4f * blink); g = std::min(1.0f, g + 0.6f * blink); b = std::min(1.0f, b + 0.3f * blink);
         }
 
-        float half_h = def.height * 0.5f;
-        float py = stack_y + half_h;
-        float pd = def.diameter;
-        
-        if (def.category == CAT_NOSE_CONE) {
-            // Nose cones are pivoted at the base (y=0 in MeshGen::cone)
-            Mat4 partMat = Mat4::translate(Vec3(0.0f, stack_y, 0.0f)) * Mat4::scale(Vec3(pd, def.height, pd));
-            r3d->drawMesh(rocketNose, partMat, r, g, b, 1.0f, 0.2f);
-        } else if (def.category == CAT_ENGINE) {
-            // Engine Rendering (matching in-flight style: cylinder body + nozzle)
-            float bodyFrac = 0.4f;
-            float nozzleFrac = 1.0f - bodyFrac;
-            float body_y = stack_y + def.height * (1.0f - bodyFrac * 0.5f);
-            
-            // Upper cylinder body
-            Mat4 bodyMat = Mat4::translate(Vec3(0.0f, body_y, 0.0f)) * Mat4::scale(Vec3(pd * 0.6f, def.height * bodyFrac, pd * 0.6f));
-            r3d->drawMesh(rocketBody, bodyMat, 0.2f, 0.2f, 0.22f, 1.0f, 0.4f);
-            
-            // Lower nozzle bell (cone mesh base at y=0)
-            Mat4 bellMat = Mat4::translate(Vec3(0.0f, stack_y, 0.0f)) * Mat4::scale(Vec3(pd * 0.85f, def.height * nozzleFrac, pd * 0.85f));
-            r3d->drawMesh(rocketNose, bellMat, r * 0.8f, g * 0.8f, b * 0.8f, 1.0f, 0.1f);
-        } else if (def.category == CAT_COMMAND_POD) {
-            // Command Pod Rendering (matching in-flight style: cylinder + cone)
-            float bodyFrac = 0.5f;
-            float coneFrac = 1.0f - bodyFrac;
-            
-            // Base cylinder
-            Mat4 bodyMat = Mat4::translate(Vec3(0.0f, stack_y + half_h * bodyFrac, 0.0f)) * Mat4::scale(Vec3(pd, def.height * bodyFrac, pd));
-            r3d->drawMesh(rocketBody, bodyMat, r, g, b, 1.0f, 0.3f);
-            
-            // Tapered top
-            Mat4 capMat = Mat4::translate(Vec3(0.0f, stack_y + def.height * bodyFrac, 0.0f)) * Mat4::scale(Vec3(pd * 0.9f, def.height * coneFrac, pd * 0.9f));
-            r3d->drawMesh(rocketNose, capMat, r * 1.1f, g * 1.1f, b * 1.1f, 1.0f, 0.3f);
-        } else if (def.category == CAT_BOOSTER) {
-            // Booster: Main body + side strap-ons
-            Mat4 mainMat = Mat4::translate(Vec3(0.0f, py, 0.0f)) * Mat4::scale(Vec3(pd, def.height, pd));
-            r3d->drawMesh(rocketBody, mainMat, r, g, b, 1.0f, 0.2f);
-            
-            for (int si = 0; si < 2; si++) {
-                float side_angle = si * 3.14159f;
-                float sx = cosf(side_angle) * pd * 0.6f;
-                float sz = sinf(side_angle) * pd * 0.6f;
-                Mat4 strapMat = Mat4::translate(Vec3(sx, py, sz)) * Mat4::scale(Vec3(pd * 0.3f, def.height * 0.8f, pd * 0.3f));
-                r3d->drawMesh(rocketBody, strapMat, r * 0.9f, g * 0.9f, b * 0.9f, 1.0f, 0.2f);
+        for (int s = 0; s < sym; s++) {
+            float angle = (s * 2.0f * 3.14159f) / sym;
+            Vec3 symPos = pos;
+            if (sym > 1) {
+                // Radially distribute around center if not already centered
+                float dist = sqrt(pos.x*pos.x + pos.z*pos.z);
+                if (dist > 0.01f) {
+                   float curAngle = atan2(pos.z, pos.x);
+                   symPos.x = cos(curAngle + angle) * dist;
+                   symPos.z = sin(curAngle + angle) * dist;
+                }
             }
-        } else {
-            // Standard fuel tank/structural (center-pivoted cylinder)
-            Mat4 partMat = Mat4::translate(Vec3(0.0f, py, 0.0f)) * Mat4::scale(Vec3(pd, def.height, pd));
-            r3d->drawMesh(rocketBody, partMat, r, g, b, 1.0f, 0.2f);
+
+            float pd = def.diameter;
+            float py = symPos.y + def.height * 0.5f;
+
+            if (def.category == CAT_NOSE_CONE) {
+                // Nosecones are typically base-centered and point up
+                Mat4 partMat = Mat4::translate(symPos) * Mat4::scale({pd, def.height, pd});
+                r3d->drawMesh(rocketNose, partMat, r, g, b, alpha, 0.2f);
+            } else if (def.category == CAT_ENGINE) {
+                // Engine: Body top + Nozzle bell bottom
+                float bf = 0.4f; float nf = 1.0f - bf;
+                Mat4 bodyMat = Mat4::translate(symPos + Vec3(0, def.height*(1.0f-bf*0.5f), 0)) * Mat4::scale({pd*0.6f, def.height*bf, pd*0.6f});
+                r3d->drawMesh(rocketBody, bodyMat, 0.2f*rm, 0.2f*gm, 0.22f*bm, alpha, 0.4f);
+                Mat4 bellMat = Mat4::translate(symPos) * Mat4::scale({pd*0.85f, def.height*nf, pd*0.85f});
+                r3d->drawMesh(rocketNose, bellMat, r*0.8f, g*0.8f, b*0.8f, alpha, 0.1f);
+            } else if (def.category == CAT_STRUCTURAL) {
+                if (strstr(def.name, "Fin") || strstr(def.name, "Solar")) {
+                    // Radial fins/panels
+                    Mat4 finMat = Mat4::translate(symPos + Vec3(0, def.height*0.5f, 0)) * Mat4::fromQuat(Quat::fromAxisAngle(Vec3(0, 1, 0), angle)) * Mat4::scale({pd*0.05f, def.height, pd*0.5f});
+                    r3d->drawMesh(rocketBox, finMat, r, g, b, alpha, 0.1f);
+                } else if (strstr(def.name, "Leg")) {
+                    // Landing legs
+                    Mat4 legMat = Mat4::translate(symPos + Vec3(0, def.height*0.5f, 0)) * Mat4::fromQuat(Quat::fromAxisAngle(Vec3(0, 1, 0), angle)) * Mat4::scale({pd*0.15f, def.height, pd*0.15f});
+                    r3d->drawMesh(rocketBox, legMat, r, g, b, alpha, 0.1f);
+                } else {
+                    Mat4 partMat = Mat4::translate(Vec3(symPos.x, py, symPos.z)) * Mat4::scale({pd, def.height, pd});
+                    r3d->drawMesh(rocketBody, partMat, r, g, b, alpha, 0.2f);
+                }
+            } else {
+                // Default: Standard cylinder (Tanks, Boosters, etc.)
+                Mat4 partMat = Mat4::translate(Vec3(symPos.x, py, symPos.z)) * Mat4::scale({pd, def.height, pd});
+                r3d->drawMesh(rocketBody, partMat, r, g, b, alpha, 0.2f);
+            }
         }
+    };
+
+    for (int i = 0; i < (int)builder_state.assembly.parts.size(); i++) {
+        const PlacedPart& pp = builder_state.assembly.parts[i];
+        drawPartWithSymmetry(PART_CATALOG[pp.def_id], pp.pos, pp.rot, 
+                            (builder_state.in_assembly_mode && builder_state.assembly_cursor == i), 1.0f, pp.symmetry);
+    }
+
+    // Draw Dragging Ghost
+    if (builder_state.dragging_def_id != -1) {
+        float pl = -0.98f, pw = 0.65f;
+        bool over_catalog = (bk_now.mx < pl + pw);
         
-        stack_y += def.height;
+        float rt = 1.0f, gt = 1.0f, bt = 1.0f;
+        if (!builder_state.is_placement_valid) { rt = 1.0f; gt = 0.2f; bt = 0.2f; }
+        if (over_catalog) { rt = 1.0f; gt = 0.0f; bt = 0.0f; }
+
+        drawPartWithSymmetry(PART_CATALOG[builder_state.dragging_def_id], 
+                            builder_state.dragging_pos, builder_state.dragging_rot, 
+                            false, 0.4f, builder_state.current_symmetry, rt, gt, bt);
+        
+        if (over_catalog) {
+            renderer->addRect(pl + pw/2.0f, 0.15f, pw, 1.40f, 0.5f, 0.0f, 0.0f, 0.3f);
+            renderer->drawText(pl + 0.15f, 0.15f, "DROP TO DELETE", 0.015f, 1, 1, 1);
+        }
+
+        // Render potential snap nodes as glowy points
+        for (const auto& p : builder_state.assembly.parts) {
+            const auto& pdef = PART_CATALOG[p.def_id];
+            for (const auto& node : pdef.snap_nodes) {
+                Mat4 nodeMat = Mat4::translate(p.pos + node.pos) * Mat4::scale({0.3f, 0.3f, 0.3f});
+                r3d->drawMesh(rocketBox, nodeMat, 0, 1, 0, 0.8f, 0); // Green glow
+            }
+        }
     }
 
     // Update center visualization state (detect assembly changes and recalculate)

@@ -1,27 +1,21 @@
 #pragma once
 // ==========================================================
-// rocket_builder.h — KSP-like Rocket Builder System
-// Part catalog, assembly data, builder state & UI
+// rocket_builder.h — KSP-like Rocket Builder System (V2)
 // ==========================================================
 
-#include "core/rocket_state.h"
-#include "core/agency_state.h"
-#include "simulation/resource_system.h"
-#include "math/math3d.h"
 #include <vector>
 #include <map>
 #include <cmath>
 #include <algorithm>
 #include <string>
+#include "math/math3d.h"
 
-// Forward declarations
-class Renderer;
+// 1. Forward Declarations
 struct RocketAssembly;
+struct RocketConfig;
 namespace StageManager { void BuildStages(const RocketAssembly& assembly, RocketConfig& config); }
 
-// ==========================================================
-// Part Categories
-// ==========================================================
+// 2. Core Part Enums
 enum PartCategory {
     CAT_NOSE_CONE,
     CAT_COMMAND_POD,
@@ -33,790 +27,359 @@ enum PartCategory {
 };
 
 static const char* CATEGORY_NAMES[] = {
-    "NOSECONES",
-    "COMMAND",
-    "FUEL TANKS",
-    "ENGINES",
-    "BOOSTERS",
-    "STRUCTURAL"
+    "NOSECONES", "COMMAND", "FUEL TANKS", "ENGINES", "BOOSTERS", "STRUCTURAL"
 };
 
-// ==========================================================
-// Part Definition — immutable blueprint
-// ==========================================================
+// 3. Structural Definitions (Independent)
+struct SnapNode {
+    Vec3 pos;       
+    Vec3 dir;       
+    float diameter; 
+    int type;       
+};
+
 struct PartDef {
     int id;
     const char* name;
     PartCategory category;
-    float dry_mass;         // kg
-    float fuel_capacity;    // kg (0 for non-fuel parts)
-    float isp;              // seconds (engines only)
-    float thrust;           // Newtons (engines only)
-    float consumption;      // kg/s fuel consumption (engines only)
-    float height;           // meters
-    float diameter;         // meters (visual)
-    float drag_coeff;       // Cd contribution
-    float r, g, b;          // render color
+    float dry_mass;
+    float fuel_capacity;
+    float isp;
+    float thrust;
+    float consumption;
+    float height;
+    float diameter;
+    float drag_coeff;
+    float r, g, b;
     const char* description;
-}; 
+    std::vector<SnapNode> snap_nodes;
+    bool surf_attach;
+};
 
-// ==========================================================
-// Part Catalog — all available parts
-// ==========================================================
+struct PlacedPart {
+    int def_id;          
+    int stage;
+    Vec3 pos;            
+    Quat rot;            
+    int parent_idx;      
+    int symmetry;        
+    float stack_y;       
+
+    PlacedPart() : def_id(0), stage(0), pos(Vec3(0,0,0)), rot(Quat()), parent_idx(-1), symmetry(1), stack_y(0) {}
+};
+
+// 4. Catalog Implementation (Header-only static internal linkage)
+inline std::vector<SnapNode> stackNodes(float h, float d) {
+    std::vector<SnapNode> v;
+    v.push_back({Vec3(0, h, 0), Vec3(0, 1, 0), d, 0});
+    v.push_back({Vec3(0, 0, 0), Vec3(0, -1, 0), d, 0});
+    return v;
+}
+
+// Using static to avoid LNK2005 (one copy per including TU)
 static const PartDef PART_CATALOG[] = {
-    // ---- NOSECONES ----
-    {0,  "Standard Fairing",   CAT_NOSE_CONE,    500,  0,     0,    0,   0,   8,  3.7f, 0.2f,  0.85f, 0.85f, 0.90f, "Basic aerodynamic fairing"},
-    {1,  "Aero Nosecone",      CAT_NOSE_CONE,    350,  0,     0,    0,   0,   10, 3.7f, 0.15f, 0.70f, 0.70f, 0.75f, "Low-drag pointed nosecone"},
-    {2,  "Payload Bay",        CAT_NOSE_CONE,    1200, 0,     0,    0,   0,   12, 4.0f, 0.3f,  0.90f, 0.90f, 0.85f, "Large payload enclosure"},
-
-    // ---- COMMAND PODS ----
-    {3,  "Mk1 Capsule",        CAT_COMMAND_POD,  1500, 0,     0,    0,   0,   4,  2.5f, 0.25f, 0.30f, 0.30f, 0.35f, "Single-crew capsule"},
-    {4,  "Probe Core",         CAT_COMMAND_POD,  200,  0,     0,    0,   0,   1,  1.0f, 0.1f,  0.20f, 0.25f, 0.20f, "Unmanned guidance unit"},
-
-    // ---- FUEL TANKS ----
-    {5,  "Small Tank 50t",     CAT_FUEL_TANK,    3000, 50000, 0,    0,   0,   25, 3.7f, 0.3f,  0.92f, 0.92f, 0.92f, "Compact fuel storage"},
-    {6,  "Medium Tank 100t",   CAT_FUEL_TANK,    5000, 100000,0,    0,   0,   35, 3.7f, 0.3f,  0.90f, 0.90f, 0.92f, "Standard fuel tank"},
-    {7,  "Large Tank 200t",    CAT_FUEL_TANK,    8000, 200000,0,    0,   0,   50, 3.7f, 0.3f,  0.88f, 0.88f, 0.92f, "High-capacity fuel tank"},
-    {8,  "Jumbo Tank 500t",    CAT_FUEL_TANK,    15000,500000,0,    0,   0,   80, 5.0f, 0.3f,  0.85f, 0.85f, 0.90f, "Massive fuel reservoir"},
-
-    // ---- ENGINES ----
-    {9,  "Raptor",             CAT_ENGINE,       2000, 0,     1500, 2200000, 100, 4,  3.7f, 0.05f, 0.35f, 0.35f, 0.38f, "High-ISP full-flow engine"},
-    {10, "Merlin 1D",          CAT_ENGINE,       1500, 0,     1200, 845000,  80,  3,  3.0f, 0.05f, 0.40f, 0.35f, 0.30f, "Reliable workhorse engine"},
-    {11, "Solid Rocket Motor", CAT_ENGINE,       3000, 30000, 250,  3500000, 200, 8,  3.7f, 0.1f,  0.50f, 0.40f, 0.30f, "Powerful solid fuel booster"},
-    {12, "Ion Thruster",       CAT_ENGINE,       500,  0,     4200, 5000,    0.1, 2,  1.5f, 0.02f, 0.50f, 0.60f, 0.80f, "Ultra-efficient low-thrust"},
-
-    // ---- BOOSTERS ----
-    {13, "SRB-Small",          CAT_BOOSTER,      4000, 40000, 220,  2800000, 250, 15, 2.5f, 0.15f, 0.55f, 0.45f, 0.35f, "Strap-on solid booster"},
-    {14, "SRB-Large",          CAT_BOOSTER,      8000, 100000,230,  6000000, 500, 25, 3.5f, 0.2f,  0.60f, 0.50f, 0.40f, "Heavy strap-on booster"},
-
-    // ---- STRUCTURAL ----
-    {15, "Decoupler",          CAT_STRUCTURAL,   300,  0,     0,    0,   0,   1,  3.7f, 0.0f,  0.25f, 0.25f, 0.25f, "Stage separation device"},
-    {16, "Fin Set (x4)",       CAT_STRUCTURAL,   200,  0,     0,    0,   0,   2,  3.7f, -0.1f, 0.30f, 0.30f, 0.30f, "Aerodynamic stability fins"},
-    {17, "Adapter 5m-3.7m",   CAT_STRUCTURAL,   500,  0,     0,    0,   0,   3,  5.0f, 0.05f, 0.40f, 0.40f, 0.42f, "Diameter transition piece"},
+    {0,  "Standard Fairing", CAT_NOSE_CONE, 500.0f, 0.0f, 0.0f, 0.0f, 0.0f, 8.0f, 3.7f, 0.2f, 0.85f, 0.85f, 0.90f, "Basic aerodynamic fairing", stackNodes(0, 3.7f), false},
+    {1,  "Aero Nosecone",    CAT_NOSE_CONE, 350.0f, 0.0f, 0.0f, 0.0f, 0.0f, 10.0f, 3.7f, 0.15f, 0.70f, 0.70f, 0.75f, "Low-drag pointed nosecone", stackNodes(0, 3.7f), false},
+    {2,  "Payload Bay",      CAT_NOSE_CONE, 1200.0f, 0.0f, 0.0f, 0.0f, 0.0f, 12.0f, 4.0f, 0.3f, 0.90f, 0.90f, 0.85f, "Large payload enclosure", stackNodes(0, 4.0f), false},
+    {3,  "Mk1 Capsule",      CAT_COMMAND_POD, 1500.0f, 0.0f, 0.0f, 0.0f, 0.0f, 4.0f, 2.5f, 0.25f, 0.30f, 0.30f, 0.35f, "Single-crew capsule", stackNodes(4.0f, 2.5f), false},
+    {4,  "Probe Core",       CAT_COMMAND_POD, 200.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 0.1f, 0.20f, 0.25f, 0.20f, "Guidance unit", stackNodes(1.0f, 1.0f), false},
+    {5,  "Small Tank 50t",   CAT_FUEL_TANK, 3000.0f, 50000.0f, 0.0f, 0.0f, 0.0f, 25.0f, 3.7f, 0.3f, 0.92f, 0.92f, 0.92f, "Small fuel storage", stackNodes(25.0f, 3.7f), false},
+    {6,  "Medium Tank 100t", CAT_FUEL_TANK, 5000.0f, 100000.0f, 0.0f, 0.0f, 0.0f, 35.0f, 3.7f, 0.3f, 0.90f, 0.90f, 0.92f, "Standard fuel tank", stackNodes(35.0f, 3.7f), false},
+    {7,  "Large Tank 200t",  CAT_FUEL_TANK, 8000.0f, 200000.0f, 0.0f, 0.0f, 0.0f, 50.0f, 3.7f, 0.3f, 0.88f, 0.88f, 0.92f, "High-capacity tank", stackNodes(50.0f, 3.7f), false},
+    {8,  "Jumbo Tank 500t",  CAT_FUEL_TANK, 15000.0f, 500000.0f, 0.0f, 0.0f, 0.0f, 80.0f, 5.0f, 0.3f, 0.85f, 0.85f, 0.90f, "Massive reservoir", stackNodes(80.0f, 5.0f), false},
+    {18, "Gold Leaf Tank",   CAT_FUEL_TANK, 1000.0f, 20000.0f, 0.0f, 0.0f, 0.0f, 12.0f, 2.0f, 0.2f, 1.0f, 0.84f, 0.0f, "Titanium-gold tank", stackNodes(12.0f, 2.0f), false},
+    {9,  "Raptor",           CAT_ENGINE, 2000.0f, 0.0f, 1500.0f, 2200000.0f, 100.0f, 4.0f, 3.7f, 0.05f, 0.35f, 0.35f, 0.38f, "High-ISP engine", stackNodes(4.0f, 3.7f), false},
+    {10, "Merlin 1D",        CAT_ENGINE, 1500.0f, 0.0f, 1200.0f, 845000.0f, 80.0f, 3.0f, 3.0f, 0.05f, 0.40f, 0.35f, 0.30f, "Workhorse engine", stackNodes(3.0f, 3.0f), false},
+    {19, "Vacuum Engine",    CAT_ENGINE, 800.0f, 0.0f, 1800.0f, 300000.0f, 20.0f, 5.0f, 4.2f, 0.02f, 0.6f, 0.6f, 0.7f, "Deep space efficient", stackNodes(5.0f, 4.2f), false},
+    {15, "Decoupler",        CAT_STRUCTURAL, 300.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 3.7f, 0.0f, 0.25f, 0.25f, 0.25f, "Stage separator", stackNodes(1.0f, 3.7f), false},
+    {16, "Fin Set (x4)",     CAT_STRUCTURAL, 200.0f, 0.0f, 0.0f, 0.0f, 0.0f, 2.0f, 3.7f, -0.1f, 0.30f, 0.30f, 0.30f, "Stability fins", stackNodes(2.0f, 3.7f), true}, 
+    {17, "Girder XL",        CAT_STRUCTURAL, 400.0f, 0.0f, 0.0f, 0.0f, 0.0f, 6.0f, 1.0f, 0.1f, 0.40f, 0.40f, 0.42f, "Structural beam", stackNodes(6.0f, 1.0f), false},
+    {20, "Landing Leg",      CAT_STRUCTURAL, 500.0f, 0.0f, 0.0f, 0.0f, 0.0f, 8.0f, 1.0f, 0.4f, 0.7f, 0.7f, 0.75f, "Heavy landing gear", stackNodes(8.0f, 1.0f), true},
+    {21, "Solar Panel V3",   CAT_STRUCTURAL, 100.0f, 0.0f, 0.0f, 0.0f, 0.0f, 4.0f, 5.0f, 0.0f, 0.1f, 0.3f, 0.8f, "Efficient power gen", stackNodes(4.0f, 5.0f), true},
 };
 
 static const int PART_CATALOG_SIZE = sizeof(PART_CATALOG) / sizeof(PART_CATALOG[0]);
 
-// ==========================================================
-// Placed Part — one instance on the assembly stack
-// ==========================================================
-struct PlacedPart {
-    int def_id;     // index into PART_CATALOG
-    int stage;      // staging group (0 = last to fire, higher = fires first)
-    float stack_y;  // computed Y position (meters from bottom)
-};
+// 5. Project Dependency Includes (after structs)
+#include "core/rocket_state.h"
+#include "core/agency_state.h"
+#include "simulation/resource_system.h"
+#include "render/renderer_2d.h"
 
-// ==========================================================
-// Rocket Assembly — the player's constructed rocket
-// ==========================================================
+// 6. Assembly & State Logic
 struct RocketAssembly {
-    std::vector<PlacedPart> parts; // bottom-to-top order
-
-    // Computed aggregates
-    float total_dry_mass = 0;
-    float total_fuel = 0;
-    float total_height = 0;
-    float max_diameter = 0;
-    float total_thrust = 0;
-    float avg_isp = 0;
-    float total_consumption = 0;
-    float total_delta_v = 0;
-    float twr = 0;
-    float total_drag = 0;
+    std::vector<PlacedPart> parts;
+    float total_dry_mass = 0, total_fuel = 0, total_height = 0, max_diameter = 0;
+    float total_thrust = 0, avg_isp = 0, total_consumption = 0, total_delta_v = 0, twr = 0, total_drag = 0;
 
     void recalculate() {
-        total_dry_mass = 0;
-        total_fuel = 0;
-        total_height = 0;
-        max_diameter = 0;
-        total_thrust = 0;
-        total_consumption = 0;
-        total_drag = 0;
+        total_dry_mass = 0; total_fuel = 0; total_height = 0; max_diameter = 0;
+        total_thrust = 0; total_consumption = 0; total_drag = 0;
         float thrust_isp_sum = 0;
 
-        float y = 0;
         for (size_t i = 0; i < parts.size(); i++) {
             const PartDef& def = PART_CATALOG[parts[i].def_id];
-            parts[i].stack_y = y;
-            y += def.height;
-
-            total_dry_mass += def.dry_mass;
-            total_fuel += def.fuel_capacity;
-            total_height += def.height;
-            if (def.diameter > max_diameter) max_diameter = def.diameter;
-            total_thrust += def.thrust;
-            total_consumption += def.consumption;
-            total_drag += def.drag_coeff;
-            if (def.thrust > 0) {
-                thrust_isp_sum += def.thrust * def.isp;
-            }
+            float sym = (float)parts[i].symmetry;
+            total_dry_mass += def.dry_mass * sym;
+            total_fuel += def.fuel_capacity * sym;
+            total_thrust += def.thrust * sym;
+            total_consumption += def.consumption * sym;
+            total_drag += def.drag_coeff * sym;
+            if (def.thrust > 0) thrust_isp_sum += (def.thrust * sym) * def.isp;
+            total_height = std::max(total_height, parts[i].pos.y + def.height);
+            max_diameter = std::max(max_diameter, def.diameter + sqrtf(parts[i].pos.x*parts[i].pos.x + parts[i].pos.z*parts[i].pos.z)*2.0f);
         }
-
         avg_isp = (total_thrust > 0) ? (thrust_isp_sum / total_thrust) : 0;
-
-        float total_mass = total_dry_mass + total_fuel;
-        if (total_dry_mass > 0 && avg_isp > 0) {
-            total_delta_v = (float)(avg_isp * G0 * log((double)total_mass / (double)total_dry_mass));
-        } else {
-            total_delta_v = 0;
-        }
-
-        if (total_mass > 0) {
-            twr = total_thrust / (total_mass * (float)G0);
-        } else {
-            twr = 0;
-        }
+        float tm = total_dry_mass + total_fuel;
+        if (total_dry_mass > 0 && avg_isp > 0) total_delta_v = (float)(avg_isp * 9.80665 * log((double)tm / (double)total_dry_mass));
+        else total_delta_v = 0;
+        twr = (tm > 0) ? total_thrust / (tm * 9.80665f) : 0;
     }
 
-    void addPart(int def_id) {
-        PlacedPart p;
-        p.def_id = def_id;
-        p.stage = 0;
-        p.stack_y = 0;
-        parts.push_back(p);
+    void addPart(int def_id, int parent_idx = -1, int sym = 1) {
+        PlacedPart p; p.def_id = def_id; p.parent_idx = parent_idx; p.symmetry = sym;
+        if (parent_idx == -1 && !parts.empty()) p.pos = Vec3(0, total_height, 0);
+        parts.push_back(p); recalculate();
+    }
+
+    void removePart(int idx) {
+        if (idx < 0 || idx >= (int)parts.size()) return;
+        // Simple removal: just erase it. In a complex tree, we'd remove children.
+        parts.erase(parts.begin() + idx);
+        // Correct parent indices for shifted elements
+        for (auto& p : parts) if (p.parent_idx > idx) p.parent_idx--; else if (p.parent_idx == idx) p.parent_idx = -1;
         recalculate();
     }
 
-    void removeTop() {
-        if (!parts.empty()) {
-            parts.pop_back();
-            recalculate();
+    struct SnapResult { int parent_idx = -1; int p_node = -1; int c_node = -1; Vec3 pos = Vec3(0,0,0); float score = 1e10f; };
+    SnapResult findBestSnapNode(int d_id, Vec3 rayPos, Vec3 rayDir) const {
+        SnapResult best; const PartDef& dDef = PART_CATALOG[d_id];
+        for (int i = 0; i < (int)parts.size(); i++) {
+            const PartDef& pDef = PART_CATALOG[parts[i].def_id];
+            for (int pn = 0; pn < (int)pDef.snap_nodes.size(); pn++) {
+                Vec3 wPos = parts[i].pos + pDef.snap_nodes[pn].pos;
+                float d = (wPos - rayPos).length();
+                for (int cn = 0; cn < (int)dDef.snap_nodes.size(); cn++) {
+                    if (d < 5.0f && d < best.score) {
+                        best.score = d; best.parent_idx = i; best.p_node = pn; best.c_node = cn;
+                        best.pos = wPos - dDef.snap_nodes[cn].pos;
+                    }
+                }
+            }
         }
+        return best;
     }
 
-    void removeAt(int index) {
-        if (index >= 0 && index < (int)parts.size()) {
-            parts.erase(parts.begin() + index);
-            recalculate();
-        }
-    }
-
-    void moveUp(int index) {
-        if (index > 0 && index < (int)parts.size()) {
-            std::swap(parts[index], parts[index - 1]);
-            recalculate();
-        }
-    }
-
-    void moveDown(int index) {
-        if (index >= 0 && index < (int)parts.size() - 1) {
-            std::swap(parts[index], parts[index + 1]);
-            recalculate();
-        }
-    }
-
-    RocketConfig buildRocketConfig() const {
-        RocketConfig cfg;
-        cfg.dry_mass = total_dry_mass;
-        cfg.diameter = max_diameter;
-        cfg.height = total_height;
-        cfg.stages = 1;
-        cfg.specific_impulse = avg_isp;
-        cfg.cosrate = total_consumption;
-        cfg.nozzle_area = 0.5 * (max_diameter / 3.7); // scaled nozzle
-        
-        // Build multi-stage configuration using StageManager
+    bool hasEngine() const { for (const auto& p : parts) if (PART_CATALOG[p.def_id].thrust > 0) return true; return false; }
+    
+    struct RocketConfig buildRocketConfig() const {
+        RocketConfig cfg; 
+        cfg.dry_mass = (double)total_dry_mass; cfg.height = (double)total_height; cfg.diameter = (double)max_diameter;
+        cfg.stages = 1; cfg.specific_impulse = (double)avg_isp; cfg.cosrate = (double)total_consumption;
+        cfg.nozzle_area = 0.5 * (max_diameter / 3.7);
         StageManager::BuildStages(*this, cfg);
-        
         return cfg;
-    }
-
-    bool hasEngine() const {
-        for (const auto& p : parts) {
-            const PartDef& def = PART_CATALOG[p.def_id];
-            if (def.thrust > 0) return true;
-        }
-        return false;
-    }
-
-    bool hasNosecone() const {
-        if (parts.empty()) return false;
-        const PartDef& top = PART_CATALOG[parts.back().def_id];
-        return top.category == CAT_NOSE_CONE;
     }
 };
 
-// ==========================================================
-// Center Visualization State — state for center point visualization
-// ==========================================================
 struct CenterVisualizationState {
-    // Display flags
-    bool showCoM = false;
-    bool showCoL = false;
-    bool showCoT = false;
-    
-    // Calculated positions (rocket local coordinate system, Y-axis up)
-    Vec3 comPos = Vec3(0, 0, 0);
-    Vec3 colPos = Vec3(0, 0, 0);
-    Vec3 cotPos = Vec3(0, 0, 0);
-    
-    // Validity flags (e.g., CoT invalid when no engines)
-    bool hasCoM = false;
-    bool hasCoL = false;
-    bool hasCoT = false;
-    
-    // Last assembly hash (used to detect changes)
+    bool showCoM = false, showCoL = false, showCoT = false;
+    Vec3 comPos = Vec3(0,0,0), colPos = Vec3(0,0,0), cotPos = Vec3(0,0,0);
+    bool hasCoM = false, hasCoL = false, hasCoT = false;
     size_t lastAssemblyHash = 0;
 };
 
-// ==========================================================
-// Builder State — UI state for the builder screen
-// ==========================================================
 struct BuilderState {
+    bool is_placement_valid = true;
     RocketAssembly assembly;
-    
-    // Center visualization state
     CenterVisualizationState centerViz;
+    int selected_category = 0, catalog_cursor = 0, assembly_cursor = -1;
+    bool in_assembly_mode = false;
+    int dragging_def_id = -1, dragging_parent_idx = -1, moving_part_idx = -1;
+    Vec3 dragging_pos = Vec3(0,0,0); Quat dragging_rot = Quat();
+    int current_symmetry = 1, hovered_part_def_id = -1;
+    float hover_timer = 0, orbit_angle = 0.0f, orbit_pitch = 0.2f, cam_dist = 15.0f, orbit_speed = 0.0f, launch_blink = 0.0f;
 
-    // UI navigation
-    int selected_category = 0;       // which category tab is active
-    int catalog_cursor = 0;          // cursor within current category's parts
-    int assembly_cursor = -1;        // -1 = not in assembly editing mode, >=0 = selected part index
-    bool in_assembly_mode = false;   // true = editing assembly, false = browsing catalog
-
-    // Camera auto-orbit
-    float orbit_angle = 0.0f;
-    float orbit_pitch = 0.2f;    // Added for 3D camera
-    float cam_dist = 15.0f;      // Added for 3D camera zoom
-    float orbit_speed = 0.3f;
-
-    // Animation
-    float launch_blink = 0.0f;
-
-    // Get parts in the current category
     void getPartsInCategory(std::vector<int>& out) const {
         out.clear();
         for (int i = 0; i < PART_CATALOG_SIZE; i++) {
-            if (PART_CATALOG[i].category == selected_category) {
-                out.push_back(i);
-            }
+            if (PART_CATALOG[i].category == selected_category) out.push_back(i);
         }
     }
 };
 
-// ==========================================================
-// Builder UI Drawing (using 2D Renderer overlay)
-// ==========================================================
-inline void drawBuilderText(Renderer* r, float x, float y, const char* text, float size,
-                            float cr, float cg, float cb, float ca = 1.0f) {
-    r->drawText(x, y, text, size, cr, cg, cb, ca);
-}
-
-// Draw an integer value at position
-inline void drawBuilderInt(Renderer* r, float x, float y, int value, float size,
-                           float cr, float cg, float cb, float ca = 1.0f) {
-    r->drawInt(x, y, value, size, cr, cg, cb, ca);
-}
-
-
-// ==========================================================
-// Main Builder UI Rendering
-// ==========================================================
-inline void drawBuilderUI_KSP(Renderer* r, BuilderState& bs, const AgencyState& agency, float time) {
-    // ---- Background ----
-    // Make background completely transparent to see the 3D workshop
-    // r->addRect(0.0f, 0.0f, 2.0f, 2.0f, 0.05f, 0.06f, 0.10f, 0.0f);
-
-    // Subtle star field
-    for (int i = 0; i < 120; i++) {
-        float sx = hash11(i * 3917) * 2.0f - 1.0f;
-        float sy = hash11(i * 7121) * 2.0f - 1.0f;
-        float ss = 0.001f + hash11(i * 2131) * 0.003f;
-        float sa = 0.3f + hash11(i * 991) * 0.5f;
-        // Twinkle effect
-        sa *= 0.5f + 0.3f * sinf(time * (1.0f + hash11(i * 443) * 2.0f) + hash11(i * 661) * 6.28f);
-        // Reduce star alpha to not interfere too heavily with the 3D scene
-        r->addRect(sx, sy, ss, ss, 0.8f, 0.85f, 1.0f, sa * 0.2f);
-    }
-
-    // ---- Title Bar ----
-    r->addRect(0.0f, 0.92f, 2.0f, 0.12f, 0.08f, 0.10f, 0.18f, 0.5f);
-    drawBuilderText(r, -0.42f, 0.925f, "ROCKET ASSEMBLY", 0.028f, 0.3f, 0.85f, 1.0f);
-
-    // ---- Left Panel: Part Catalog ----
-    float panel_left = -0.98f;
-    float panel_width = 0.55f;
-    float panel_right = panel_left + panel_width;
-
-    // Panel background (Semi-transparent)
-    r->addRect(panel_left + panel_width / 2.0f, 0.15f, panel_width, 1.40f,
-               0.07f, 0.08f, 0.13f, 0.40f);
-
-    // Category tabs
-    float tab_y = 0.82f;
-    float tab_w = panel_width / CAT_COUNT;
-    for (int c = 0; c < CAT_COUNT; c++) {
-        float tx = panel_left + tab_w * c + tab_w / 2.0f;
-        bool active = (c == bs.selected_category);
-        float br = active ? 0.15f : 0.08f;
-        float bg = active ? 0.35f : 0.12f;
-        float bb = active ? 0.20f : 0.15f;
-        float ba = active ? 0.9f : 0.5f;
-        r->addRect(tx, tab_y, tab_w - 0.005f, 0.06f, br, bg, bb, ba);
-
-        // Category abbreviation (first 3 chars)
-        char abbr[4] = {0};
-        for (int j = 0; j < 3 && CATEGORY_NAMES[c][j]; j++) abbr[j] = CATEGORY_NAMES[c][j];
-        float tr = active ? 0.5f : 0.35f;
-        float tg = active ? 1.0f : 0.45f;
-        float tb = active ? 0.6f : 0.45f;
-        drawBuilderText(r, tx - 0.03f, tab_y, abbr, 0.011f, tr, tg, tb);
-    }
-
-    // Part list in current category
-    std::vector<int> cat_parts;
-    bs.getPartsInCategory(cat_parts);
-    float list_y_start = 0.72f;
-    float item_h = 0.10f;
-
-    for (int i = 0; i < (int)cat_parts.size(); i++) {
-        const PartDef& def = PART_CATALOG[cat_parts[i]];
-        float iy = list_y_start - i * item_h;
-        bool is_selected = (!bs.in_assembly_mode && bs.catalog_cursor == i);
-
-        // Item background
-        if (is_selected) {
-            r->addRect(panel_left + panel_width / 2.0f, iy, panel_width - 0.02f, item_h - 0.01f,
-                       0.10f, 0.30f, 0.15f, 0.65f);
-            // Selection indicator
-            r->addRect(panel_left + 0.015f, iy, 0.008f, item_h * 0.6f, 0.2f, 1.0f, 0.4f, 0.9f);
-        }
-
-        // Part color swatch
-        r->addRect(panel_left + 0.04f, iy + 0.01f, 0.02f, 0.035f, def.r, def.g, def.b, 0.9f);
-
-        // Part name
-        float nr = is_selected ? 0.9f : 0.55f;
-        float ng = is_selected ? 0.95f : 0.55f;
-        float nb = is_selected ? 0.9f : 0.55f;
-        drawBuilderText(r, panel_left + 0.07f, iy + 0.018f, def.name, 0.010f, nr, ng, nb);
-
-        // --- STOCK LEVEL (Integration) ---
-        ItemType mapped_item = ITEM_NONE;
-        switch(def.category) {
-            case CAT_NOSE_CONE:   mapped_item = PART_NOSECONE;    break;
-            case CAT_COMMAND_POD: mapped_item = PART_COMMAND_POD; break;
-            case CAT_FUEL_TANK:   mapped_item = PART_FUEL_TANK;   break;
-            case CAT_ENGINE:      mapped_item = PART_ENGINE;      break;
-            case CAT_BOOSTER:     mapped_item = PART_FUEL_TANK;   break; // Boosters are heavy tanks
-            case CAT_STRUCTURAL:  mapped_item = PART_STRUCTURAL;  break;
-            default: break;
-        }
-        
-        int stock = (mapped_item != ITEM_NONE) ? agency.getItemCount(mapped_item) : 999;
-        
-        char stock_buf[32];
-        snprintf(stock_buf, sizeof(stock_buf), "STOCK: %d", stock);
-        float sr = (stock > 0) ? 0.4f : 1.0f;
-        float sg = (stock > 0) ? 0.8f : 0.3f;
-        float sb = (stock > 0) ? 0.4f : 0.3f;
-        drawBuilderText(r, panel_left + 0.36f, iy + 0.018f, stock_buf, 0.0085f, sr, sg, sb);
-        
-        // Part stats line
-        if (def.fuel_capacity > 0) {
-            drawBuilderInt(r, panel_left + 0.07f, iy - 0.015f, (int)(def.fuel_capacity / 1000), 0.008f, 0.9f, 0.7f, 0.2f);
-            drawBuilderText(r, panel_left + 0.20f, iy - 0.015f, "t fuel", 0.008f, 0.6f, 0.5f, 0.2f);
-        } else if (def.thrust > 0) {
-            drawBuilderInt(r, panel_left + 0.07f, iy - 0.015f, (int)(def.thrust / 1000), 0.008f, 1.0f, 0.5f, 0.2f);
-            drawBuilderText(r, panel_left + 0.20f, iy - 0.015f, "kn", 0.008f, 0.7f, 0.4f, 0.2f);
-            drawBuilderInt(r, panel_left + 0.30f, iy - 0.015f, (int)def.isp, 0.008f, 0.5f, 0.8f, 1.0f);
-            drawBuilderText(r, panel_left + 0.40f, iy - 0.015f, "s isp", 0.008f, 0.4f, 0.5f, 0.7f);
-        } else {
-            drawBuilderInt(r, panel_left + 0.07f, iy - 0.015f, (int)def.dry_mass, 0.008f, 0.6f, 0.6f, 0.6f);
-            drawBuilderText(r, panel_left + 0.20f, iy - 0.015f, "kg", 0.008f, 0.4f, 0.4f, 0.4f);
-        }
-    }
-
-    // ---- Right Panel: Assembly Stack ----
-    float asm_panel_x = 0.62f;
-    float asm_panel_w = 0.35f;
-
-    // Panel background (Semi-transparent)
-    r->addRect(asm_panel_x, 0.15f, asm_panel_w, 1.40f,
-               0.07f, 0.08f, 0.13f, 0.40f);
-
-    // Header
-    drawBuilderText(r, asm_panel_x - 0.13f, 0.82f, "ASSEMBLY", 0.012f,
-                    bs.in_assembly_mode ? 0.3f : 0.5f,
-                    bs.in_assembly_mode ? 1.0f : 0.5f,
-                    bs.in_assembly_mode ? 0.5f : 0.5f);
-
-    if (bs.assembly.parts.empty()) {
-        drawBuilderText(r, asm_panel_x - 0.15f, 0.45f, "ADD PARTS", 0.012f, 0.3f, 0.3f, 0.35f);
-        drawBuilderText(r, asm_panel_x - 0.14f, 0.35f, "ENTER=ADD", 0.010f, 0.2f, 0.5f, 0.3f);
-    } else {
-        // List assembly parts (bottom-to-top, but display top-to-bottom)
-        float asm_list_y = 0.72f;
-        float asm_item_h = 0.065f;
-        for (int i = (int)bs.assembly.parts.size() - 1; i >= 0; i--) {
-            int display_idx = (int)bs.assembly.parts.size() - 1 - i;
-            float iy = asm_list_y - display_idx * asm_item_h;
-            const PlacedPart& pp = bs.assembly.parts[i];
-            const PartDef& def = PART_CATALOG[pp.def_id];
-            bool is_asm_sel = (bs.in_assembly_mode && bs.assembly_cursor == i);
-
-            if (is_asm_sel) {
-                r->addRect(asm_panel_x, iy, asm_panel_w - 0.02f, asm_item_h - 0.005f,
-                           0.15f, 0.25f, 0.10f, 0.6f);
-                r->addRect(asm_panel_x - asm_panel_w / 2.0f + 0.015f, iy, 0.006f, asm_item_h * 0.6f,
-                           1.0f, 0.8f, 0.2f, 0.9f);
-            }
-
-            // Part color + name
-            r->addRect(asm_panel_x - asm_panel_w / 2.0f + 0.03f, iy, 0.015f, 0.025f,
-                       def.r, def.g, def.b, 0.85f);
-
-            float nr = is_asm_sel ? 0.95f : 0.5f;
-            float ng = is_asm_sel ? 0.95f : 0.5f;
-            float nb = is_asm_sel ? 0.90f : 0.5f;
-            // Truncate name to ~12 chars
-            char short_name[16] = {0};
-            for (int j = 0; j < 14 && def.name[j]; j++) short_name[j] = def.name[j];
-            drawBuilderText(r, asm_panel_x - asm_panel_w / 2.0f + 0.06f, iy, short_name, 0.0085f, nr, ng, nb);
-        }
-    }
-
-    // ---- Center: 3D Rocket Preview (drawn as 2D schematic) ----
-    // REMOVED: Now rendering the real 3D rocket in the background!
-
-    // ---- Bottom Stats Panel ----
-    r->addRect(0.0f, -0.78f, 2.0f, 0.30f, 0.06f, 0.07f, 0.12f, 0.5f);
-
-    // Separator line
-    r->addRect(0.0f, -0.64f, 1.8f, 0.002f, 0.2f, 0.4f, 0.6f, 0.5f);
-
-    float stat_y = -0.72f;
-    float stat_y2 = -0.82f;
-
-    // Mass
-    drawBuilderText(r, -0.88f, stat_y, "MASS", 0.0085f, 0.5f, 0.5f, 0.5f);
-    float total_mass = bs.assembly.total_dry_mass + bs.assembly.total_fuel;
-    drawBuilderInt(r, -0.88f, stat_y2, (int)(total_mass / 1000), 0.016f, 0.9f, 0.9f, 0.9f);
-    drawBuilderText(r, -0.72f, stat_y2, "t", 0.011f, 0.5f, 0.5f, 0.5f);
- 
-    // Fuel
-    drawBuilderText(r, -0.50f, stat_y, "FUEL", 0.0085f, 0.5f, 0.5f, 0.5f);
-    drawBuilderInt(r, -0.50f, stat_y2, (int)(bs.assembly.total_fuel / 1000), 0.016f, 0.9f, 0.7f, 0.2f);
-    drawBuilderText(r, -0.34f, stat_y2, "t", 0.011f, 0.6f, 0.5f, 0.2f);
- 
-    // Delta-V
-    drawBuilderText(r, -0.12f, stat_y, "DELTA V", 0.0085f, 0.5f, 0.5f, 0.5f);
-    drawBuilderInt(r, -0.12f, stat_y2, (int)bs.assembly.total_delta_v, 0.016f, 0.3f, 0.9f, 0.4f);
-    drawBuilderText(r, 0.10f, stat_y2, "m/s", 0.011f, 0.2f, 0.6f, 0.3f);
- 
-    // TWR
-    drawBuilderText(r, 0.32f, stat_y, "TWR", 0.0085f, 0.5f, 0.5f, 0.5f);
-    int twr_int = (int)(bs.assembly.twr * 100);
-    drawBuilderInt(r, 0.32f, stat_y2, twr_int, 0.016f,
-                   bs.assembly.twr >= 1.0f ? 0.3f : 1.0f,
-                   bs.assembly.twr >= 1.0f ? 0.9f : 0.3f,
-                   bs.assembly.twr >= 1.0f ? 0.4f : 0.3f);
-    drawBuilderText(r, 0.46f, stat_y2, "/100", 0.0085f, 0.4f, 0.4f, 0.4f);
- 
-    // Height
-    drawBuilderText(r, 0.65f, stat_y, "HEIGHT", 0.0085f, 0.5f, 0.5f, 0.5f);
-    drawBuilderInt(r, 0.65f, stat_y2, (int)bs.assembly.total_height, 0.016f, 0.6f, 0.7f, 0.9f);
-    drawBuilderText(r, 0.82f, stat_y2, "m", 0.011f, 0.4f, 0.5f, 0.6f);
-
-    // ---- Center Visualization Toggle Buttons ----
-    float btn_x = asm_panel_x;
-    float btn_w = 0.30f;
-    float btn_h = 0.05f;
-    float btn_spacing = 0.06f;
-    
-    // CoM Button
-    float com_btn_y = 0.05f;
-    bool com_enabled = bs.centerViz.hasCoM;
-    bool com_active = bs.centerViz.showCoM;
-    float com_br = com_enabled ? (com_active ? 0.15f : 0.08f) : 0.05f;
-    float com_bg = com_enabled ? (com_active ? 0.35f : 0.12f) : 0.05f;
-    float com_bb = com_enabled ? (com_active ? 0.70f : 0.15f) : 0.05f;
-    float com_ba = com_enabled ? 0.8f : 0.3f;
-    r->addRect(btn_x, com_btn_y, btn_w, btn_h, com_br, com_bg, com_bb, com_ba);
-    float com_tr = com_enabled ? (com_active ? 0.5f : 0.4f) : 0.3f;
-    float com_tg = com_enabled ? (com_active ? 0.9f : 0.5f) : 0.3f;
-    float com_tb = com_enabled ? (com_active ? 1.0f : 0.6f) : 0.3f;
-    drawBuilderText(r, btn_x - 0.10f, com_btn_y, "CoM", 0.011f, com_tr, com_tg, com_tb);
-    
-    // CoL Button
-    float col_btn_y = com_btn_y - btn_spacing;
-    bool col_enabled = bs.centerViz.hasCoL;
-    bool col_active = bs.centerViz.showCoL;
-    float col_br = col_enabled ? (col_active ? 0.70f : 0.08f) : 0.05f;
-    float col_bg = col_enabled ? (col_active ? 0.55f : 0.12f) : 0.05f;
-    float col_bb = col_enabled ? (col_active ? 0.15f : 0.15f) : 0.05f;
-    float col_ba = col_enabled ? 0.8f : 0.3f;
-    r->addRect(btn_x, col_btn_y, btn_w, btn_h, col_br, col_bg, col_bb, col_ba);
-    float col_tr = col_enabled ? (col_active ? 1.0f : 0.4f) : 0.3f;
-    float col_tg = col_enabled ? (col_active ? 0.9f : 0.5f) : 0.3f;
-    float col_tb = col_enabled ? (col_active ? 0.5f : 0.6f) : 0.3f;
-    drawBuilderText(r, btn_x - 0.10f, col_btn_y, "CoL", 0.011f, col_tr, col_tg, col_tb);
-    
-    // CoT Button
-    float cot_btn_y = col_btn_y - btn_spacing;
-    bool cot_enabled = bs.centerViz.hasCoT;
-    bool cot_active = bs.centerViz.showCoT;
-    float cot_br = cot_enabled ? (cot_active ? 0.70f : 0.08f) : 0.05f;
-    float cot_bg = cot_enabled ? (cot_active ? 0.15f : 0.12f) : 0.05f;
-    float cot_bb = cot_enabled ? (cot_active ? 0.15f : 0.15f) : 0.05f;
-    float cot_ba = cot_enabled ? 0.8f : 0.3f;
-    r->addRect(btn_x, cot_btn_y, btn_w, btn_h, cot_br, cot_bg, cot_bb, cot_ba);
-    float cot_tr = cot_enabled ? (cot_active ? 1.0f : 0.4f) : 0.3f;
-    float cot_tg = cot_enabled ? (cot_active ? 0.5f : 0.5f) : 0.3f;
-    float cot_tb = cot_enabled ? (cot_active ? 0.5f : 0.6f) : 0.3f;
-    drawBuilderText(r, btn_x - 0.10f, cot_btn_y, "CoT", 0.011f, cot_tr, cot_tg, cot_tb);
-
-    // ---- Launch Button / Prompt ----
-    // Inventory check for launch
-    std::map<ItemType, int> required;
-    for (const auto& p : bs.assembly.parts) {
-        const PartDef& def = PART_CATALOG[p.def_id];
-        ItemType it = ITEM_NONE;
-        if (def.category == CAT_NOSE_CONE) it = PART_NOSECONE;
-        else if (def.category == CAT_COMMAND_POD) it = PART_COMMAND_POD;
-        else if (def.category == CAT_FUEL_TANK) it = PART_FUEL_TANK;
-        else if (def.category == CAT_ENGINE) it = PART_ENGINE;
-        else if (def.category == CAT_BOOSTER) it = PART_FUEL_TANK;
-        else if (def.category == CAT_STRUCTURAL) it = PART_STRUCTURAL;
-        if (it != ITEM_NONE) required[it]++;
-    }
-
-    bool has_stock = true;
-    for (auto const& it : required) {
-        if (agency.getItemCount(it.first) < it.second) has_stock = false;
-    }
-
-    bool can_launch = bs.assembly.hasEngine() && !bs.assembly.parts.empty() && has_stock;
-    if (can_launch) {
-        float blink = 0.5f + 0.5f * sinf(time * 3.0f);
-        r->addRect(0.0f, -0.93f, 0.60f, 0.08f,
-                   0.05f * blink, 0.25f * blink, 0.05f * blink, 0.8f);
-        drawBuilderText(r, -0.18f, -0.93f, "[SPACE] LAUNCH", 0.013f,
-                        0.3f, 1.0f * blink, 0.4f);
-    } else {
-        if (!has_stock) {
-            drawBuilderText(r, -0.25f, -0.93f, "INSUFFICIENT PARTS IN WAREHOUSE", 0.010f, 1.0f, 0.4f, 0.3f);
-        } else {
-            drawBuilderText(r, -0.22f, -0.93f, "ADD ENGINE TO LAUNCH", 0.010f, 0.5f, 0.3f, 0.3f);
-        }
-    }
-    
-    // Show required parts summary
-    if (!required.empty()) {
-        float ry = -0.72f;
-        drawBuilderText(r, 0.65f, ry - 0.15f, "REQUIRED PARTS:", 0.0085f, 0.6f, 0.6f, 0.7f);
-        int j = 0;
-        for (auto const& it : required) {
-            char req_buf[64];
-            int stock = agency.getItemCount(it.first);
-            snprintf(req_buf, sizeof(req_buf), "%s: %d/%d", GetItemInfo(it.first).name, stock, it.second);
-            float color = (stock >= it.second) ? 0.7f : 1.0f;
-            drawBuilderText(r, 0.65f, ry - 0.20f - j * 0.04f, req_buf, 0.008f, color, color * 0.9f, (stock >= it.second) ? 0.7f : 0.3f);
-            j++;
-        }
-    }
-
-    // ---- Controls Help ----
-    float help_y = 0.82f;
-    float help_x = 0.05f;
-    drawBuilderText(r, help_x - 0.07f, help_y, "TAB=MODE", 0.0075f, 0.3f, 0.3f, 0.35f);
- 
-    // Mode indicator
-    if (bs.in_assembly_mode) {
-        drawBuilderText(r, help_x - 0.07f, help_y - 0.03f, "DEL=REMOVE", 0.0075f, 0.3f, 0.3f, 0.35f);
-        drawBuilderText(r, help_x - 0.07f, help_y - 0.05f, "PGUP/DN=MOVE", 0.0075f, 0.3f, 0.3f, 0.35f);
-    } else {
-        drawBuilderText(r, help_x - 0.07f, help_y - 0.03f, "ENTER=ADD", 0.0075f, 0.3f, 0.3f, 0.35f);
-        drawBuilderText(r, help_x - 0.07f, help_y - 0.05f, "<>=CATEGORY", 0.0075f, 0.3f, 0.3f, 0.35f);
-    }
-}
-
-// ==========================================================
-// Builder Input Handling
-// ==========================================================
 struct BuilderKeyState {
     bool up, down, left, right, enter, del, tab, pgup, pgdn, space;
-    float mx, my; // Normalized mouse coordinates [-1, 1]
-    bool lmb;     // Left mouse button pressed
+    float mx, my; bool lmb;
 };
 
-// 辅助检测矩形碰撞
+// 7. UI Drawing & Input
 inline bool builderCheckHit(float mx, float my, float cx, float cy, float w, float h) {
-    return (mx >= cx - w/2.0f && mx <= cx + w/2.0f &&
-            my >= cy - h/2.0f && my <= cy + h/2.0f);
+    return (mx >= cx - w/2.0f && mx <= cx + w/2.0f && my >= cy - h/2.0f && my <= cy + h/2.0f);
 }
 
-inline bool builderHandleInput(BuilderState& bs, const BuilderKeyState& keys,
-                               const BuilderKeyState& prev_keys) {
-    static bool lmb_pressed = false;
-    bool lmb_clicked = keys.lmb && !lmb_pressed;
-    lmb_pressed = keys.lmb;
-
-    // --- MOUSE INTERACTION ---
-    if (keys.lmb || true) { // Always check for hover if needed, but here we focus on clicks
-        // 1. Category Tabs
-        float panel_left = -0.98f;
-        float panel_width = 0.55f;
-        float tab_y = 0.82f;
-        float tab_w = panel_width / CAT_COUNT;
-        for (int c = 0; c < CAT_COUNT; c++) {
-            float tx = panel_left + tab_w * c + tab_w / 2.0f;
-            if (builderCheckHit(keys.mx, keys.my, tx, tab_y, tab_w, 0.06f)) {
-                if (lmb_clicked) {
-                    bs.selected_category = c;
-                    bs.catalog_cursor = 0;
-                    bs.in_assembly_mode = false;
-                } else if (!keys.lmb) {
-                    // Hover effect: optionally switch mode or just highlight
-                }
-            }
-        }
-
-        // 2. Catalog Items
-        std::vector<int> cat_parts;
-        bs.getPartsInCategory(cat_parts);
-        float list_y_start = 0.72f;
-        float item_h = 0.10f;
-        for (int i = 0; i < (int)cat_parts.size(); i++) {
-            float iy = list_y_start - i * item_h;
-            if (builderCheckHit(keys.mx, keys.my, panel_left + panel_width / 2.0f, iy, panel_width, item_h)) {
-                if (lmb_clicked) {
-                    bs.catalog_cursor = i;
-                    bs.in_assembly_mode = false;
-                    bs.assembly.addPart(cat_parts[i]);
-                } else if (!keys.lmb) {
-                    bs.catalog_cursor = i;
-                    bs.in_assembly_mode = false;
-                }
-            }
-        }
-
-        // 3. Assembly Stack
-        float asm_panel_x = 0.62f;
-        float asm_panel_w = 0.35f;
-        float asm_list_y = 0.72f;
-        float asm_item_h = 0.065f;
-        for (int i = (int)bs.assembly.parts.size() - 1; i >= 0; i--) {
-            int display_idx = (int)bs.assembly.parts.size() - 1 - i;
-            float iy = asm_list_y - display_idx * asm_item_h;
-            if (builderCheckHit(keys.mx, keys.my, asm_panel_x, iy, asm_panel_w, asm_item_h)) {
-                if (lmb_clicked) {
-                    bs.in_assembly_mode = true;
-                    bs.assembly_cursor = i;
-                } else if (!keys.lmb) {
-                    // Hover
-                }
-            }
-        }
-
-        // 4. Center Visualization Toggle Buttons
-        float btn_x = 0.62f;
-        float btn_w = 0.30f;
-        float btn_h = 0.05f;
-        float btn_spacing = 0.06f;
-        
-        // CoM Button
-        float com_btn_y = 0.05f;
-        if (bs.centerViz.hasCoM && builderCheckHit(keys.mx, keys.my, btn_x, com_btn_y, btn_w, btn_h)) {
-            if (lmb_clicked) {
-                bs.centerViz.showCoM = !bs.centerViz.showCoM;
-                std::cout << "CoM button clicked! showCoM = " << bs.centerViz.showCoM << std::endl;
-            }
-        }
-        
-        // CoL Button
-        float col_btn_y = com_btn_y - btn_spacing;
-        if (bs.centerViz.hasCoL && builderCheckHit(keys.mx, keys.my, btn_x, col_btn_y, btn_w, btn_h)) {
-            if (lmb_clicked) {
-                bs.centerViz.showCoL = !bs.centerViz.showCoL;
-                std::cout << "CoL button clicked! showCoL = " << bs.centerViz.showCoL << std::endl;
-            }
-        }
-        
-        // CoT Button
-        float cot_btn_y = col_btn_y - btn_spacing;
-        if (bs.centerViz.hasCoT && builderCheckHit(keys.mx, keys.my, btn_x, cot_btn_y, btn_w, btn_h)) {
-            if (lmb_clicked) {
-                bs.centerViz.showCoT = !bs.centerViz.showCoT;
-                std::cout << "CoT button clicked! showCoT = " << bs.centerViz.showCoT << std::endl;
-            }
-        }
-        
-        // 5. Launch Button
-        if (bs.assembly.hasEngine() && !bs.assembly.parts.empty()) {
-            if (builderCheckHit(keys.mx, keys.my, 0.0f, -0.93f, 0.60f, 0.08f)) {
-                if (lmb_clicked) return true;
+inline void drawBuilderUI_KSP(Renderer* r, BuilderState& bs, const AgencyState& agency, float time) {
+    r->addRect(0.0f, 0.92f, 2.0f, 0.12f, 0.08f, 0.10f, 0.18f, 0.8f);
+    r->drawText(-0.42f, 0.925f, "ROCKET ASSEMBLY V2", 0.028f, 0.4f, 0.9f, 1.0f);
+    float pl = -0.98f, pw = 0.65f; r->addRect(pl + pw/2.0f, 0.15f, pw, 1.40f, 0.05f, 0.06f, 0.10f, 0.6f);
+    float tab_y = 0.82f, tab_w = pw / CAT_COUNT;
+    for (int c = 0; c < CAT_COUNT; c++) {
+        float tx = pl + tab_w*c + tab_w/2.0f; bool act = (c == bs.selected_category);
+        r->addRect(tx, tab_y, tab_w - 0.005f, 0.06f, act?0.2f:0.1f, act?0.5f:0.2f, act?0.3f:0.2f, 0.8f);
+        char abbr[4]={0}; for(int j=0;j<3&&CATEGORY_NAMES[c][j];j++) abbr[j]=CATEGORY_NAMES[c][j];
+        r->drawText(tx - 0.035f, tab_y, abbr, 0.012f, act?1.0f:0.6f, act?1.0f:0.6f, act?1.0f:0.6f);
+    }
+    std::vector<int> cat_p; bs.getPartsInCategory(cat_p);
+    float gx = pl + 0.08f, gy = 0.70f, cw = 0.16f, ch = 0.16f;
+    for (int i = 0; i < (int)cat_p.size(); i++) {
+        const PartDef& d = PART_CATALOG[cat_p[i]];
+        float cx = gx + (i%3)*(cw+0.02f), cy = gy - (i/3)*(ch+0.02f); bool hov = (bs.hovered_part_def_id == cat_p[i]);
+        r->addRect(cx, cy, cw, ch, 0.15f, 0.18f, 0.25f, hov?0.9f:0.4f);
+        r->addRect(cx, cy+0.02f, cw*0.7f, ch*0.5f, d.r, d.g, d.b, 0.8f);
+        r->drawText(cx-0.07f, cy-0.05f, d.name, 0.007f, 0.8f, 0.8f, 0.8f);
+    }
+    if (bs.hovered_part_def_id != -1) {
+        const PartDef& d = PART_CATALOG[bs.hovered_part_def_id];
+        r->addRect(0.0f, 0.0f, 0.5f, 0.6f, 0.08f, 0.10f, 0.15f, 0.95f);
+        r->drawText(-0.22f, 0.25f, d.name, 0.02f, 0.5f, 0.9f, 1.0f);
+        r->drawText(-0.22f, 0.20f, d.description, 0.009f, 0.7f, 0.7f, 0.7f);
+        char buf[64]; snprintf(buf, 64, "MASS: %.0f kg", d.dry_mass); r->drawText(-0.22f, 0.12f, buf, 0.01f, 0.8f, 0.8f, 0.8f);
+        if (d.fuel_capacity > 0) { snprintf(buf, 64, "FUEL: %.0f kg", d.fuel_capacity); r->drawText(-0.22f, 0.08f, buf, 0.01f, 0.9f, 0.7f, 0.2f); }
+        if (d.thrust > 0) { snprintf(buf,64,"THRUST: %.0f kN", d.thrust/1000.0f); r->drawText(-0.22f, 0.04f, buf, 0.01f, 1.0f, 0.4f, 0.2f); }
+    }
+    float ax = 0.62f, aw = 0.35f; r->addRect(ax, 0.15f, aw, 1.40f, 0.07f, 0.08f, 0.13f, 0.5f);
+    r->addRect(0.0f, -0.78f, 2.0f, 0.30f, 0.06f, 0.07f, 0.12f, 0.8f);
+    r->drawInt(-0.88f, -0.82f, (int)(bs.assembly.total_dry_mass + bs.assembly.total_fuel)/1000, 0.016f, 1,1,1, 1.0f);
+    r->drawInt(-0.12f, -0.82f, (int)bs.assembly.total_delta_v, 0.016f, 0.3f, 0.9f, 0.4f, 1.0f);
+    r->drawInt(0.32f, -0.82f, (int)(bs.assembly.twr * 100), 0.016f, 0.3f, 0.9f, 0.4f, 1.0f);
+    auto drawBtn = [&](float x, float y, const char* label, bool en, bool act, float br, float bg, float bb) {
+        r->addRect(x,y,0.3f,0.05f, act?br:0.08f, act?bg:0.12f, act?bb:0.15f, en?0.8f:0.3f);
+        r->drawText(x-0.10f, y, label, 0.011f, en?1.0f:0.3f, en?1.0f:0.3f, en?1.0f:0.3f);
+    };
+    drawBtn(ax, 0.05f, "CoM", bs.centerViz.hasCoM, bs.centerViz.showCoM, 0.15f,0.35f,0.70f);
+    drawBtn(ax, -0.01f,"CoL", bs.centerViz.hasCoL, bs.centerViz.showCoL, 0.70f,0.55f,0.15f);
+    drawBtn(ax, -0.07f,"CoT", bs.centerViz.hasCoT, bs.centerViz.showCoT, 0.70f,0.15f,0.15f);
+    r->addRect(-0.85f, -0.55f, 0.15f, 0.08f, 0.2f, 0.2f, 0.3f, 0.8f);
+    char s_sym[16]; snprintf(s_sym, 16, "SYM: %dx", bs.current_symmetry); r->drawText(-0.91f,-0.55f,s_sym, 0.012f, 1,1,1);
+    if (bs.assembly.hasEngine() && !bs.assembly.parts.empty()) {
+        float blink = 0.5f + 0.5f*sinf(time*3.0f); r->addRect(0.0f,-0.93f,0.60f,0.08f, 0.05f*blink, 0.25f*blink, 0.05f*blink, 0.8f);
+        r->drawText(-0.18f,-0.93f,"[SPACE] LAUNCH", 0.013f, 0.3f, 1.0f*blink, 0.4f);
+    }
+}inline bool builderHandleInput(BuilderState& bs, const BuilderKeyState& k, const BuilderKeyState& pk) {
+    int dragging_id_at_start = bs.dragging_def_id;
+    bs.hovered_part_def_id = -1;
+    float pl=-0.98f,pw=0.65f,gx=pl+0.08f,gy=0.70f,cw=0.16f,ch=0.16f;
+    std::vector<int> cat_p; bs.getPartsInCategory(cat_p);
+    
+    // Check catalog hits
+    bool over_catalog = (k.mx < pl + pw);
+    bool over_icon = false;
+    for (int i=0;i<(int)cat_p.size();i++) {
+        float cx=gx+(i%3)*(cw+0.02f), cy=gy-(i/3)*(ch+0.02f);
+        if (builderCheckHit(k.mx,k.my,cx,cy,cw,ch)) {
+            bs.hovered_part_def_id=cat_p[i];
+            over_icon = true;
+            if(k.lmb && !pk.lmb) { 
+                // Pick from catalog
+                bs.dragging_def_id=cat_p[i]; 
+                bs.moving_part_idx = -1;
+                bs.in_assembly_mode = false; 
             }
         }
     }
 
-    // --- KEYBOARD INTERACTION (Keep existing) ---
-    // TAB: toggle catalog/assembly mode
-    if (keys.tab && !prev_keys.tab) {
-        bs.in_assembly_mode = !bs.in_assembly_mode;
-        if (bs.in_assembly_mode) {
-            bs.assembly_cursor = bs.assembly.parts.empty() ? -1 : (int)bs.assembly.parts.size() - 1;
+    // Tabs
+    float tab_y=0.82f, tab_w=pw/CAT_COUNT;
+    for(int c=0;c<CAT_COUNT;c++) {
+        float tx=pl+tab_w*c+tab_w/2.0f;
+        if(builderCheckHit(k.mx,k.my,tx,tab_y,tab_w,0.06f)&&k.lmb&&!pk.lmb) bs.selected_category=c;
+    }
+
+    // Camera Sync with main.cpp: Dynamic target and distance
+    float current_height = std::max(5.0f, bs.assembly.total_height);
+    float look_y = current_height * 0.4f;
+    float view_dist = bs.cam_dist + current_height * 0.5f;
+    Vec3 camTarget(0, look_y, 0);
+
+    // Pick from assembly (Improved Proximity/Picking Logic)
+    if (bs.dragging_def_id == -1 && k.lmb && !pk.lmb && !over_catalog) {
+        float best_d = 0.8f; int best_idx = -1;
+        float cosA = cosf(bs.orbit_angle), sinA = sinf(bs.orbit_angle);
+        float cosP = cosf(bs.orbit_pitch), sinP = sinf(bs.orbit_pitch);
+        Vec3 camRight(sinA, 0, -cosA);
+        Vec3 camUp(-cosA * sinP, cosP, -sinA * sinP);
+
+        for(int i=0; i<(int)bs.assembly.parts.size(); i++) {
+            const auto& p = bs.assembly.parts[i];
+            const auto& def = PART_CATALOG[p.def_id];
+            Vec3 testPoints[] = { p.pos, p.pos + Vec3(0, def.height * 0.5f, 0) };
+            for (const auto& pt : testPoints) {
+                // Account for camTarget in projection
+                Vec3 relPos = pt - camTarget;
+                float px = relPos.dot(camRight) / (view_dist * 0.5f * 1.6f);
+                float py = relPos.dot(camUp) / (view_dist * 0.5f);
+                float dx = px - k.mx;
+                float dy = py - k.my;
+                float d = sqrtf(dx*dx + dy*dy);
+                if (d < best_d) { best_d = d; best_idx = i; }
+            }
+        }
+        if (best_idx != -1) {
+            bs.dragging_def_id = bs.assembly.parts[best_idx].def_id;
+            bs.moving_part_idx = best_idx;
+            bs.dragging_pos = bs.assembly.parts[best_idx].pos;
+            bs.assembly.removePart(best_idx);
+            dragging_id_at_start = bs.dragging_def_id; 
         }
     }
 
-    if (bs.in_assembly_mode) {
-        // Assembly editing mode
-        if (!bs.assembly.parts.empty()) {
-            if (keys.up && !prev_keys.up) {
-                bs.assembly_cursor = std::min(bs.assembly_cursor + 1, (int)bs.assembly.parts.size() - 1);
-            }
-            if (keys.down && !prev_keys.down) {
-                bs.assembly_cursor = std::max(bs.assembly_cursor - 1, 0);
-            }
-            if (keys.del && !prev_keys.del) {
-                bs.assembly.removeAt(bs.assembly_cursor);
-                if (bs.assembly_cursor >= (int)bs.assembly.parts.size()) {
-                    bs.assembly_cursor = (int)bs.assembly.parts.size() - 1;
-                }
-            }
-            if (keys.pgup && !prev_keys.pgup) {
-                bs.assembly.moveUp(bs.assembly_cursor);
-                if (bs.assembly_cursor > 0) bs.assembly_cursor--;
-            }
-            if (keys.pgdn && !prev_keys.pgdn) {
-                bs.assembly.moveDown(bs.assembly_cursor);
-                if (bs.assembly_cursor < (int)bs.assembly.parts.size() - 1) bs.assembly_cursor++;
-            }
-        }
-    } else {
-        // Catalog browsing mode
-        std::vector<int> cat_parts;
-        bs.getPartsInCategory(cat_parts);
+    // Dragging Logic (Sticky)
+    if (bs.dragging_def_id != -1) {
+        float cosA = cosf(bs.orbit_angle), sinA = sinf(bs.orbit_angle);
+        float cosP = cosf(bs.orbit_pitch), sinP = sinf(bs.orbit_pitch);
+        Vec3 camRight(sinA, 0, -cosA);
+        Vec3 camUp(-cosA * sinP, cosP, -sinA * sinP);
+        Vec3 camFwd(-cosA * cosP, -sinP, -sinA * cosP);
 
-        if (keys.up && !prev_keys.up) {
-            bs.catalog_cursor = std::max(bs.catalog_cursor - 1, 0);
+        float aspect = 1.6f; 
+        float scale = view_dist * 0.5f;
+        // Project relative to camTarget
+        Vec3 mouseWorldPosRelative = camRight * (k.mx * scale * aspect) + camUp * (k.my * scale);
+        Vec3 mouseWorldPos = camTarget + mouseWorldPosRelative;
+        
+        auto snap = bs.assembly.findBestSnapNode(bs.dragging_def_id, mouseWorldPos, camFwd);
+        if (snap.parent_idx != -1 && snap.score < 5.0f) { 
+            bs.dragging_pos = snap.pos; 
+            bs.dragging_parent_idx = snap.parent_idx; 
+            bs.is_placement_valid = true;
+        } else { 
+            bs.dragging_pos = mouseWorldPos; 
+            bs.dragging_parent_idx = -1;
+            bs.is_placement_valid = bs.assembly.parts.empty() || PART_CATALOG[bs.dragging_def_id].surf_attach;
         }
-        if (keys.down && !prev_keys.down) {
-            bs.catalog_cursor = std::min(bs.catalog_cursor + 1, (int)cat_parts.size() - 1);
-        }
-        if (keys.left && !prev_keys.left) {
-            bs.selected_category = (bs.selected_category - 1 + CAT_COUNT) % CAT_COUNT;
-            bs.catalog_cursor = 0;
-        }
-        if (keys.right && !prev_keys.right) {
-            bs.selected_category = (bs.selected_category + 1) % CAT_COUNT;
-            bs.catalog_cursor = 0;
-        }
-        if (keys.enter && !prev_keys.enter) {
-            if (bs.catalog_cursor >= 0 && bs.catalog_cursor < (int)cat_parts.size()) {
-                bs.assembly.addPart(cat_parts[bs.catalog_cursor]);
+
+        // Place or Delete
+        if (k.lmb && !pk.lmb && dragging_id_at_start != -1) {
+            if (over_catalog) {
+                bs.dragging_def_id = -1;
+                bs.moving_part_idx = -1;
+            } else if (bs.is_placement_valid) {
+                bs.assembly.addPart(bs.dragging_def_id, bs.dragging_parent_idx, bs.current_symmetry);
+                bs.assembly.parts.back().pos = bs.dragging_pos;
+                bs.dragging_def_id = -1; 
+                bs.moving_part_idx = -1;
             }
         }
     }
 
-    // SPACE = launch (return true)
-    if (keys.space && !prev_keys.space) {
-        if (bs.assembly.hasEngine() && !bs.assembly.parts.empty()) {
-            return true; // signal launch
-        }
+    // Symmetry & UI Buttons
+    if (k.mx < -0.7f && k.my < -0.5f && k.lmb && !pk.lmb) {
+        int syms[] = {1,2,4,6,8}; static int s_idx=0; s_idx=(s_idx+1)%5; bs.current_symmetry=syms[s_idx];
     }
-
-    return false; // not launching
+    float ax=0.62f;
+    if (builderCheckHit(k.mx,k.my, ax, 0.05f, 0.3f, 0.05f)&&k.lmb&&!pk.lmb) bs.centerViz.showCoM=!bs.centerViz.showCoM;
+    if (builderCheckHit(k.mx,k.my, ax, -0.01f, 0.3f, 0.05f)&&k.lmb&&!pk.lmb) bs.centerViz.showCoL=!bs.centerViz.showCoL;
+    if (builderCheckHit(k.mx,k.my, ax, -0.07f, 0.3f, 0.05f)&&k.lmb&&!pk.lmb) bs.centerViz.showCoT=!bs.centerViz.showCoT;
+    if (k.space && !pk.space && !bs.assembly.parts.empty() && bs.assembly.hasEngine()) return true;
+    return false;
 }
-
-

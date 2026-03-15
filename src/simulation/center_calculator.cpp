@@ -1,4 +1,4 @@
-﻿// ==========================================================
+// ==========================================================
 // center_calculator.cpp — Center Point Calculation Implementation
 // ==========================================================
 
@@ -56,17 +56,13 @@ size_t hashAssembly(const RocketAssembly& assembly) {
     // Hash each part's properties
     for (size_t i = 0; i < assembly.parts.size(); i++) {
         const PlacedPart& pp = assembly.parts[i];
-        const PartDef& def = PART_CATALOG[pp.def_id];
         
-        // Combine part ID, position, and stage
+        // Combine part ID, position, and symmetry
         size_t part_hash = pp.def_id;
-        part_hash ^= (size_t)(pp.stack_y * 1000.0f) << 8;
-        part_hash ^= (size_t)pp.stage << 16;
-        
-        // Mix in mass and dimensions
-        part_hash ^= (size_t)(def.dry_mass * 10.0f);
-        part_hash ^= (size_t)(def.fuel_capacity * 0.01f) << 4;
-        part_hash ^= (size_t)(def.height * 100.0f) << 12;
+        part_hash ^= (size_t)(pp.pos.x * 1000.0f) << 4;
+        part_hash ^= (size_t)(pp.pos.y * 1000.0f) << 8;
+        part_hash ^= (size_t)(pp.pos.z * 1000.0f) << 12;
+        part_hash ^= (size_t)pp.symmetry << 20;
         
         // Combine with running hash
         hash ^= part_hash * 0x9e3779b9 + (hash << 6) + (hash >> 2);
@@ -82,110 +78,80 @@ Vec3 calculateCenterOfMass(const RocketAssembly& assembly) {
     }
     
     float total_mass = 0.0f;
-    float weighted_y = 0.0f;
+    Vec3 weighted_pos = Vec3(0, 0, 0);
     
     for (size_t i = 0; i < assembly.parts.size(); i++) {
         const PlacedPart& pp = assembly.parts[i];
         const PartDef& def = PART_CATALOG[pp.def_id];
         
-        // Part mass = dry mass + fuel capacity
-        float part_mass = def.dry_mass + def.fuel_capacity;
+        float part_mass = (def.dry_mass + def.fuel_capacity) * pp.symmetry;
+        if (part_mass <= 0.0f) continue;
         
-        // Skip parts with zero or negative mass
-        if (part_mass <= 0.0f) {
-            continue;
+        // For symmetry, we assume parts are radially balanced around (0, y, 0)
+        Vec3 local_com = pp.pos + Vec3(0, def.height / 2.0f, 0);
+        if (pp.symmetry > 1) {
+            local_com.x = 0;
+            local_com.z = 0;
         }
-        
-        // Part center position = stack_y + height/2
-        float part_center_y = pp.stack_y + def.height / 2.0f;
-        
+
         total_mass += part_mass;
-        weighted_y += part_mass * part_center_y;
+        weighted_pos = weighted_pos + local_com * part_mass;
     }
     
-    if (total_mass <= 0.0f) {
-        return Vec3(0, 0, 0);
-    }
-    
-    // Center of mass is on the rocket's central axis (x=0, z=0)
-    float com_y = weighted_y / total_mass;
-    return Vec3(0, com_y, 0);
+    if (total_mass <= 0.0f) return Vec3(0, 0, 0);
+    return weighted_pos * (1.0f / total_mass);
 }
 
 // Calculate center of lift
 Vec3 calculateCenterOfLift(const RocketAssembly& assembly) {
-    if (assembly.parts.empty()) {
-        return Vec3(0, 0, 0);
-    }
+    if (assembly.parts.empty()) return Vec3(0, 0, 0);
     
     float total_area = 0.0f;
-    float weighted_y = 0.0f;
+    Vec3 weighted_pos = Vec3(0, 0, 0);
     
     for (size_t i = 0; i < assembly.parts.size(); i++) {
         const PlacedPart& pp = assembly.parts[i];
         const PartDef& def = PART_CATALOG[pp.def_id];
+        if (!isAerodynamicSurface(def)) continue;
         
-        if (!isAerodynamicSurface(def)) {
-            continue;
-        }
+        float area = getAerodynamicArea(def) * pp.symmetry;
+        if (area <= 0.0f) continue;
         
-        float area = getAerodynamicArea(def);
-        if (area <= 0.0f) {
-            continue;
-        }
-        
-        // Part center position = stack_y + height/2
-        float part_center_y = pp.stack_y + def.height / 2.0f;
-        
+        Vec3 local_col = pp.pos + Vec3(0, def.height / 2.0f, 0);
+        if (pp.symmetry > 1) { local_col.x = 0; local_col.z = 0; }
+
         total_area += area;
-        weighted_y += area * part_center_y;
+        weighted_pos = weighted_pos + local_col * area;
     }
     
-    if (total_area <= 0.0f) {
-        return Vec3(0, 0, 0);
-    }
-    
-    // Center of lift is on the rocket's central axis (x=0, z=0)
-    float col_y = weighted_y / total_area;
-    return Vec3(0, col_y, 0);
+    if (total_area <= 0.0f) return Vec3(0, 0, 0);
+    return weighted_pos * (1.0f / total_area);
 }
 
 // Calculate center of thrust
 Vec3 calculateCenterOfThrust(const RocketAssembly& assembly) {
-    if (assembly.parts.empty()) {
-        return Vec3(0, 0, 0);
-    }
+    if (assembly.parts.empty()) return Vec3(0, 0, 0);
     
     float total_thrust = 0.0f;
-    float weighted_y = 0.0f;
+    Vec3 weighted_pos = Vec3(0, 0, 0);
     
     for (size_t i = 0; i < assembly.parts.size(); i++) {
         const PlacedPart& pp = assembly.parts[i];
         const PartDef& def = PART_CATALOG[pp.def_id];
+        if (!isEngine(def)) continue;
         
-        if (!isEngine(def)) {
-            continue;
-        }
+        float thrust = def.thrust * pp.symmetry;
+        if (thrust <= 0.0f) continue;
         
-        float thrust = def.thrust;
-        if (thrust <= 0.0f) {
-            continue;
-        }
-        
-        // Part center position = stack_y + height/2
-        float part_center_y = pp.stack_y + def.height / 2.0f;
-        
+        Vec3 local_cot = pp.pos + Vec3(0, def.height / 2.0f, 0);
+        if (pp.symmetry > 1) { local_cot.x = 0; local_cot.z = 0; }
+
         total_thrust += thrust;
-        weighted_y += thrust * part_center_y;
+        weighted_pos = weighted_pos + local_cot * thrust;
     }
     
-    if (total_thrust <= 0.0f) {
-        return Vec3(0, 0, 0);
-    }
-    
-    // Center of thrust is on the rocket's central axis (x=0, z=0)
-    float cot_y = weighted_y / total_thrust;
-    return Vec3(0, cot_y, 0);
+    if (total_thrust <= 0.0f) return Vec3(0, 0, 0);
+    return weighted_pos * (1.0f / total_thrust);
 }
 
 } // namespace CenterCalculator
