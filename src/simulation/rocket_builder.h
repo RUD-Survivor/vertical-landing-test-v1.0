@@ -215,6 +215,8 @@ struct BuilderState {
     Vec3 dragging_pos = Vec3(0,0,0); Quat dragging_rot = Quat();
     int current_symmetry = 1, hovered_part_def_id = -1;
     float hover_timer = 0, orbit_angle = 0.0f, orbit_pitch = 0.2f, cam_dist = 15.0f, orbit_speed = 0.0f, launch_blink = 0.0f;
+    float cam_pan_y = 0.0f;
+    Vec2 rmb_down_pos = Vec2(0,0);
     RocketConfig cached_cfg;
     bool stats_dirty = true;
     int context_menu_part_idx = -1;
@@ -229,7 +231,7 @@ struct BuilderState {
 
 struct BuilderKeyState {
     bool up, down, left, right, enter, del, tab, pgup, pgdn, space;
-    bool w, s, a, d, q, e;
+    bool w, s, a, d, q, e, shift;
     float mx, my; bool lmb, rmb;
 };
 
@@ -397,9 +399,9 @@ inline bool builderHandleInput(BuilderState& bs, const BuilderKeyState& k, const
     }
 
     // Camera Sync with main.cpp: Dynamic target and distance
-    float current_height = std::max(5.0f, bs.assembly.total_height);
-    float look_y = current_height * 0.4f;
-    float view_dist = bs.cam_dist + current_height * 0.5f;
+    float cur_ht = std::max(5.0f, bs.assembly.total_height);
+    float look_y = cur_ht * 0.4f + bs.cam_pan_y;
+    float view_dist = bs.cam_dist + cur_ht * 0.5f;
     Vec3 camTarget(0, look_y, 0);
 
     // Pick from assembly (Improved Proximity/Picking Logic)
@@ -484,24 +486,33 @@ inline bool builderHandleInput(BuilderState& bs, const BuilderKeyState& k, const
         }
     }
 
-    // Context Menu (Right Click)
-    if (bs.dragging_def_id == -1 && k.rmb && !pk.rmb && !over_catalog) {
-        float best_d = 0.5f; int best_idx = -1;
-        float b_view_dist = bs.cam_dist + std::max(5.0f, bs.assembly.total_height) * 0.5f;
-        Vec3 b_camTarget(0, std::max(5.0f, bs.assembly.total_height) * 0.4f, 0);
-        float b_cosA = cosf(bs.orbit_angle), b_sinA = sinf(bs.orbit_angle);
-        float b_cosP = cosf(bs.orbit_pitch), b_sinP = sinf(bs.orbit_pitch);
-        Vec3 b_camRight(b_sinA, 0, -b_cosA); Vec3 b_camUp(-b_cosA * b_sinP, b_cosP, -b_sinA * b_sinP);
-
-        for(int i=0; i<(int)bs.assembly.parts.size(); i++) {
-            const auto& p = bs.assembly.parts[i];
-            Vec3 relPos = p.pos - b_camTarget;
-            float px = relPos.dot(b_camRight) / (b_view_dist * 0.5f * 1.6f);
-            float py = relPos.dot(b_camUp) / (b_view_dist * 0.5f);
-            float d = sqrtf((px-k.mx)*(px-k.mx) + (py-k.my)*(py-k.my));
-            if (d < best_d) { best_d = d; best_idx = i; }
+    // Context Menu (Right Click - Triggered on Release if minimal movement)
+    if (bs.dragging_def_id == -1 && !over_catalog) {
+        if (k.rmb && !pk.rmb) {
+            bs.rmb_down_pos = Vec2(k.mx, k.my);
         }
-        bs.context_menu_part_idx = best_idx;
+        if (!k.rmb && pk.rmb) {
+            float dist = (Vec2(k.mx, k.my) - bs.rmb_down_pos).length();
+            if (dist < 0.05f) { // Only if mouse didn't move much (click, not drag)
+                float best_d = 0.5f; int best_idx = -1;
+                float current_ht_v2 = std::max(5.0f, bs.assembly.total_height);
+                float b_view_dist = bs.cam_dist + current_ht_v2 * 0.5f;
+                Vec3 b_camTarget(0, current_ht_v2 * 0.4f + bs.cam_pan_y, 0);
+                float b_cosA = cosf(bs.orbit_angle), b_sinA = sinf(bs.orbit_angle);
+                float b_cosP = cosf(bs.orbit_pitch), b_sinP = sinf(bs.orbit_pitch);
+                Vec3 b_camRight(b_sinA, 0, -b_cosA); Vec3 b_camUp(-b_cosA * b_sinP, b_cosP, -b_sinA * b_sinP);
+
+                for(int i=0; i<(int)bs.assembly.parts.size(); i++) {
+                    const auto& p = bs.assembly.parts[i];
+                    Vec3 relPos = p.pos - b_camTarget;
+                    float px = relPos.dot(b_camRight) / (b_view_dist * 0.5f * 1.6f);
+                    float py = relPos.dot(b_camUp) / (b_view_dist * 0.5f);
+                    float d = sqrtf((px-k.mx)*(px-k.mx) + (py-k.my)*(py-k.my));
+                    if (d < best_d) { best_d = d; best_idx = i; }
+                }
+                bs.context_menu_part_idx = best_idx;
+            }
+        }
     }
     if (k.lmb && !pk.lmb) {
         // Handle context menu clicks before closing

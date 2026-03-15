@@ -380,12 +380,9 @@ int main() {
     bk_now.pgup  = glfwGetKey(window, GLFW_KEY_PAGE_UP) == GLFW_PRESS;
     bk_now.pgdn  = glfwGetKey(window, GLFW_KEY_PAGE_DOWN) == GLFW_PRESS;
     bk_now.space = glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS;
-    bk_now.w     = glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS;
-    bk_now.s     = glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS;
-    bk_now.a     = glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS;
-    bk_now.d     = glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS;
     bk_now.q     = glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS;
     bk_now.e     = glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS;
+    bk_now.shift = (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS);
 
     // Mouse for builder
     double bmx, bmy;
@@ -425,10 +422,14 @@ int main() {
         builder_state.orbit_angle += 0.001f;
     }
     
-    // Zoom control
+    // Scroll control: Shift+Scroll = Zoom, Scroll = Pan Vertical
     if (g_scroll_y != 0.0f) {
-        builder_state.cam_dist *= powf(0.85f, g_scroll_y);
-        builder_state.cam_dist = std::max(2.0f, std::min(50.0f, builder_state.cam_dist));
+        if (bk_now.shift) {
+            builder_state.cam_dist *= powf(0.85f, g_scroll_y);
+            builder_state.cam_dist = std::max(2.0f, std::min(50.0f, builder_state.cam_dist));
+        } else {
+            builder_state.cam_pan_y += g_scroll_y * 0.5f;
+        }
         g_scroll_y = 0.0f;
     }
 
@@ -442,7 +443,7 @@ int main() {
 
     // Dynamic camera based on rocket height
     float current_height = std::max(5.0f, builder_state.assembly.total_height);
-    float look_y = current_height * 0.4f;
+    float look_y = current_height * 0.4f + builder_state.cam_pan_y;
     
     Vec3 camTarget(0.0f, look_y, 0.0f);
     float dist = builder_state.cam_dist + current_height * 0.5f;
