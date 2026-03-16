@@ -319,7 +319,7 @@ int main() {
   // 初始化 3D 渲染器和网格 (Early instantiation for Workshop)
   // =========================================================
   Renderer3D* r3d = new Renderer3D();
-  Mesh earthMesh = MeshGen::sphere(96, 128, 1.0f);  // High-res unit sphere for RSS-Reborn quality
+  Mesh earthMesh = MeshGen::sphere(256, 512, 1.0f);  // Extreme-res unit sphere for terrain detail
   Mesh ringMesh = MeshGen::ring(128, 1.11f, 2.35f);  // NASA Real Ratios: D-ring start to F-ring end (1.11R to 2.35R)
   Mesh rocketBody = MeshGen::cylinder(32, 1.0f, 1.0f);
   Mesh rocketNose = MeshGen::cone(32, 1.0f, 1.0f);
@@ -1600,27 +1600,33 @@ int main() {
           float dist_to_center = (camEye_rel - rp).length();
 
           float true_surf_dist = dist_to_center - body_r;
+          
+          // Consider terrain displacement (max 25km for Earth)
+          float terrain_buffer = (i == 3) ? 25.0f : 0.0f;
+          float effective_surf_dist = true_surf_dist - terrain_buffer;
+
           float atmo_surf_dist = dist_to_center - (body_r + atmo_thickness);
 
           // Use the atmosphere boundary for camera clipping if it exists
-          float geo_dist = (atmo_surf_dist > 0.0f) ? atmo_surf_dist : true_surf_dist;
-          if (geo_dist > 0.0f && geo_dist < closest_planet_dist) {
+          float geo_dist = (atmo_surf_dist > 0.0f) ? atmo_surf_dist : effective_surf_dist;
+          if (geo_dist < closest_planet_dist) {
               closest_planet_dist = geo_dist;
           }
       }
       // Also consider distance to the Sun
       {
           float sun_surf = (camEye_rel - renderSun).length() - sun_radius;
-          if (sun_surf > 0.0f && sun_surf < closest_planet_dist)
+          if (sun_surf < closest_planet_dist)
               closest_planet_dist = sun_surf;
       }
-      // Near plane = 10% of closest planet surface distance.
-      // At low altitude this stays tiny (ground visible); at high altitude it grows
-      // large enough to give the depth buffer sufficient precision on planet surfaces.
-      // Near plane cap to prevent clipping volumetric atmosphere shells
-      float macro_near = fmaxf(0.001f, closest_planet_dist * 0.1f);
-      macro_near = fminf(macro_near, 10.0f); // Cap at 10 meters
-      macro_near = fmaxf(macro_near, cam_dist * 0.001f); // but never clip behind target
+      
+      // Industrial Grade Near Plane:
+      // We use a small fraction of the distance to the actual surface (including mountains).
+      // If we are extremely close (less than 1km), we force a very small near plane for micro-detail.
+      float macro_near = fmaxf(0.00001f, closest_planet_dist * 0.05f); // 5% of distance
+      macro_near = fminf(macro_near, 1.0f); // Cap macro near plane at 1km
+      if (closest_planet_dist < 1.0f) macro_near = fminf(macro_near, 0.0001f); // 10cm when near ground
+      macro_near = fmaxf(macro_near, cam_dist * 0.0001f); // but never clip behind target
       
       macroProjMat = Mat4::perspective(0.8f, aspect, macro_near, far_plane);
       

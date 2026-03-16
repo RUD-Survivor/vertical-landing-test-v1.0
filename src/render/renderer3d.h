@@ -11,6 +11,8 @@
 #include <string>
 #include <map>
 #include <fstream>
+#include "terrain_system.h"
+#include "vegetation_system.h"
 
 // ==========================================================
 // 3D Vertex Format
@@ -381,6 +383,16 @@ public:
   // Skybox uniforms
   GLint us_invViewProj = -1, us_skyVibrancy = -1;
 
+  // === Terrain & Vegetation ===
+  GLuint terrainProg = 0;
+  GLint ut_mvp = -1, ut_model = -1, ut_lightDir = -1, ut_viewPos = -1, ut_time = -1;
+  GLuint vegProg = 0;
+  GLint uv_vp = -1, uv_proj = -1, uv_lightDir = -1, uv_viewPos = -1, uv_time = -1;
+  GLuint treeVAO = 0, treeVBO = 0, treeEBO = 0, treeInstanceVBO = 0;
+  int treeIndexCount = 0;
+  GLuint grassVAO = 0, grassVBO = 0, grassInstanceVBO = 0;
+  int grassIndexCount = 0;
+
   // Exhaust uniforms
   GLuint exhaustProg = 0;
   GLint uex_mvp = -1, uex_model = -1, uex_invModel = -1, uex_viewPos = -1, uex_time = -1;
@@ -397,6 +409,9 @@ public:
   Mat4 view, proj;
   Vec3 camPos;
   Vec3 lightDir;
+
+  Terrain::QuadtreeTerrain* terrain = nullptr;
+  Vegetation::VegetationSystem* vegSystem = nullptr;
 
   // Cached meshes and textures for parts
   std::map<std::string, Mesh> meshCache;
@@ -2846,6 +2861,339 @@ R"(
     )";
     taaProg = compileProgram(taaVertSrc, taaFragSrc);
     taaVAO = skyboxVAO; // Reuse the fullscreen quad
+
+    // --- Terrain Shader (High-res displacement mapping) ---
+    const char* terrainVertSrc = R"(
+      #version 330 core
+      layout(location=0) in vec3 aPos;
+      layout(location=1) in vec3 aNormal;
+      layout(location=2) in vec2 aUV;
+      
+      uniform mat4 uMVP;
+      uniform mat4 uModel;
+      uniform vec3 uPlanetCenter;
+      uniform float uPlanetRadius;
+      uniform float uMaxElevation;
+      uniform float uTime;
+
+      out vec3 vWorldPos;
+      out vec3 vNormal;
+      out vec2 vUV;
+      out vec3 vLocalPos;
+      out float vElevation;
+
+      // Noise functions (matching Earth shader for consistency)
+      float hash(vec3 p) {
+        p = fract(p * vec3(443.897, 441.423, 437.195));
+        p += dot(p, p.yzx + 19.19);
+        return fract((p.x + p.y) * p.z);
+      }
+      float noise3d(vec3 p) {
+        vec3 i = floor(p); vec3 f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
+        float n000 = hash(i); float n100 = hash(i + vec3(1,0,0));
+        float n010 = hash(i + vec3(0,1,0)); float n110 = hash(i + vec3(1,1,0));
+        float n001 = hash(i + vec3(0,0,1)); float n101 = hash(i + vec3(1,0,1));
+        float n011 = hash(i + vec3(0,1,1)); float n111 = hash(i + vec3(1,1,1));
+        return mix(mix(mix(n000, n100, f.x), mix(n010, n110, f.x), f.y),
+                   mix(mix(n001, n101, f.x), mix(n011, n111, f.x), f.y), f.z);
+      }
+      float fbm(vec3 p, int oct) {
+        float v = 0.0, amp = 0.5;
+        for (int i = 0; i < oct; i++) {
+          v += noise3d(p) * amp;
+          p = p * 2.07 + vec3(0.131, -0.217, 0.344);
+          amp *= 0.48;
+        }
+        return v;
+      }
+      float warpedFbm(vec3 p) {
+        vec3 q = vec3(fbm(p, 4), fbm(p + vec3(5.2, 1.3, 2.8), 4), fbm(p + vec3(9.1, 4.7, 3.1), 4));
+        return fbm(p + q * 1.6, 8);
+      }
+
+      void main() {
+        vec3 normPos = normalize(aPos);
+        float hStr = warpedFbm(normPos * 4.8); // Slightly higher frequency
+        float seaLevel = 0.44;
+        
+        // Displacement: Mountains go up, Oceans go down slightly
+        float h = (hStr - seaLevel);
+        float height = h * uMaxElevation / uPlanetRadius;
+        
+        vec3 displacedPos = normPos * (1.0 + max(-0.0005, height)); // Cap depth for visual stability
+        vElevation = hStr; // Pass raw noise for biome logic
+        vWorldPos = (uModel * vec4(displacedPos, 1.0)).xyz;
+        vNormal = mat3(uModel) * normPos; // Surface normal is planet-normal initially
+        vUV = aUV;
+        vLocalPos = displacedPos;
+        gl_Position = uMVP * vec4(displacedPos, 1.0);
+      }
+    )";
+
+    const char* terrainFragSrc = R"(
+      #version 330 core
+      in vec3 vWorldPos;
+      in vec3 vNormal;
+      in vec2 vUV;
+      in vec3 vLocalPos;
+      in float vElevation;
+
+      uniform vec3 uLightDir;
+      uniform vec3 uViewPos;
+      uniform float uTime;
+
+      out vec4 FragColor;
+
+      float hash(vec3 p) {
+        p = fract(p * vec3(443.897, 441.423, 437.195));
+        p += dot(p, p.yzx + 19.19);
+        return fract((p.x + p.y) * p.z);
+      }
+      float noise3d(vec3 p) {
+        vec3 i = floor(p); vec3 f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
+        return mix(mix(mix(hash(i),     hash(i+vec3(1,0,0)), f.x), 
+                       mix(hash(i+vec3(0,1,0)), hash(i+vec3(1,1,0)), f.x), f.y),
+                   mix(mix(hash(i+vec3(0,0,1)), hash(i+vec3(1,0,1)), f.x), 
+                       mix(hash(i+vec3(0,1,1)), hash(i+vec3(1,1,1)), f.x), f.y), f.z);
+      }
+      
+      // Procedural height for POM and Normal Derivatives
+      float getMicroHeight(vec3 p) {
+          float h = noise3d(p * 800.0) * 0.5;
+          h += noise3d(p * 8000.0) * 0.15;
+          h += noise3d(p * 40000.0) * 0.05;
+          return h;
+      }
+
+      void main() {
+        vec3 L = normalize(uLightDir);
+        vec3 V = normalize(uViewPos - vWorldPos);
+        
+        float distToCam = length(uViewPos - vWorldPos);
+        float microFade = clamp(1.0 - (distToCam / 2.0), 0.0, 1.0); // Only within 2km
+
+        // --- INDUSTRIAL GRADE: PARALLAX OCCLUSION MAPPING (POM) ---
+        vec3 pLocal = vLocalPos;
+        if (microFade > 0.01 && vElevation > 0.44) {
+            // Transform view vector to local space for raymarching
+            // For a sphere, we can approximate the tangent space
+            vec3 N_geom = normalize(vNormal);
+            vec3 T = normalize(cross(N_geom, vec3(0,1,0)));
+            if (abs(N_geom.y) > 0.99) T = normalize(cross(N_geom, vec3(0,0,1)));
+            vec3 B = cross(N_geom, T);
+            mat3 TBN = mat3(T, B, N_geom);
+            vec3 vLocalDir = normalize(V * TBN); // View in tangent space
+            
+            float numLayers = mix(8.0, 32.0, abs(dot(vLocalDir, vec3(0,0,1))));
+            float layerDepth = 1.0 / numLayers;
+            float currentLayerDepth = 0.0;
+            vec2 P = vLocalDir.xy * 0.0005; // Scale of parallax
+            vec2 deltaP = P / numLayers;
+            
+            vec2 currentTexCoords = vec2(0.0);
+            float currentDepthMapValue = getMicroHeight(pLocal);
+            
+            while(currentLayerDepth < currentDepthMapValue) {
+                currentTexCoords -= deltaP;
+                currentDepthMapValue = getMicroHeight(pLocal + T * currentTexCoords.x + B * currentTexCoords.y);
+                currentLayerDepth += layerDepth;
+            }
+            
+            // Linear interpolation for smoother depth
+            vec2 prevTexCoords = currentTexCoords + deltaP;
+            float afterDepth  = currentDepthMapValue - currentLayerDepth;
+            float beforeDepth = getMicroHeight(pLocal + T * prevTexCoords.x + B * prevTexCoords.y) - currentLayerDepth + layerDepth;
+            float weight = afterDepth / (afterDepth - beforeDepth);
+            currentTexCoords = prevTexCoords * weight + currentTexCoords * (1.0 - weight);
+            
+            // Update pLocal for subsequent color/normal logic
+            pLocal += T * currentTexCoords.x + B * currentTexCoords.y;
+        }
+
+        // Biome logic based on raw noise vElevation
+        float h = vElevation;
+        float seaLevel = 0.44;
+        
+        vec3 deepWater = vec3(0.02, 0.08, 0.20);
+        vec3 shallowWater = vec3(0.1, 0.4, 0.5);
+        vec3 beach = vec3(0.76, 0.72, 0.55);
+        vec3 lowland = vec3(0.15, 0.38, 0.12);
+        vec3 forest = vec3(0.08, 0.28, 0.06);
+        vec3 mountain = vec3(0.48, 0.45, 0.42);
+        vec3 snow = vec3(0.95, 0.96, 1.0);
+
+        vec3 surfColor;
+        float waterAlpha = 0.0;
+        
+        if (h < seaLevel) {
+            float waterDepth = (seaLevel - h) / seaLevel;
+            surfColor = mix(shallowWater, deepWater, clamp(waterDepth * 5.0, 0.0, 1.0));
+            waterAlpha = 1.0;
+        } else {
+            float landH = (h - seaLevel) / (1.0 - seaLevel);
+            if (landH < 0.01) surfColor = beach;
+            else if (landH < 0.15) surfColor = mix(beach, lowland, (landH-0.01)/0.14);
+            else if (landH < 0.45) surfColor = mix(lowland, forest, (landH-0.15)/0.30);
+            else if (landH < 0.75) surfColor = mix(forest, mountain, (landH-0.45)/0.30);
+            else surfColor = mix(mountain, snow, clamp((landH-0.75)/0.25, 0.0, 1.0));
+        }
+        
+        // Detailed micro-noise integration
+        float detailH = getMicroHeight(pLocal);
+        surfColor *= (0.90 + 0.20 * detailH);
+
+        // --- INDUSTRIAL GRADE: PROCEDURAL NORMAL DERIVATIVES ---
+        vec3 N = normalize(vNormal);
+        if (waterAlpha < 0.5) {
+            // Finite difference for normals
+            float eps = 0.0001;
+            vec3 T = normalize(cross(N, vec3(0,1,0)));
+            if (abs(N.y) > 0.99) T = normalize(cross(N, vec3(0,0,1)));
+            vec3 B = cross(N, T);
+            
+            float hCenter = getMicroHeight(pLocal);
+            float hRight  = getMicroHeight(pLocal + T * eps);
+            float hUp     = getMicroHeight(pLocal + B * eps);
+            
+            vec3 grad = vec3((hRight - hCenter)/eps, (hUp - hCenter)/eps, 0.0);
+            vec3 pertN = normalize(vec3(-grad.x, -grad.y, 1.0));
+            N = normalize(T * pertN.x + B * pertN.y + N * pertN.z);
+            
+            // Micro-AO based on height
+            surfColor *= clamp(hCenter * 4.0, 0.6, 1.0);
+        } else {
+            // Water ripples
+            float ripple = noise3d(pLocal * 1500.0 + vec3(uTime * 0.1));
+            N = normalize(N + (vec3(ripple) - 0.5) * 0.04);
+        }
+        
+        float diff = max(dot(N, L), 0.0);
+        float spec = 0.0;
+        if (waterAlpha > 0.5 && diff > 0.0) {
+            vec3 H = normalize(L + V);
+            spec = pow(max(dot(N, H), 0.0), 64.0) * 0.8;
+        }
+
+        float ambient = 0.12; // Higher ambient for better visibility in shadows
+        vec3 result = surfColor * (ambient + diff * (1.0 - ambient)) + vec3(spec);
+        
+        // --- NIGHT SIDE CITY LIGHTS & MICRO-LIGHTS ---
+        float NdotL = dot(normalize(vNormal), L);
+        if (NdotL < 0.05 && waterAlpha < 0.5) {
+            float nightFade = smoothstep(0.05, -0.10, NdotL);
+            
+            // Macro city lights (visible from orbit)
+            float city1 = noise3d(vLocalPos * 15.0);
+            float city2 = noise3d(vLocalPos * 35.0 + vec3(7.7));
+            float habitability = smoothstep(0.44, 0.48, vElevation) * smoothstep(0.6, 0.4, vElevation);
+            float cityBrightness = 0.0;
+            if (city1 > 0.58) cityBrightness += (city1 - 0.58) * 5.0;
+            if (city2 > 0.65) cityBrightness += (city2 - 0.65) * 2.0;
+            
+            // Micro city lights (individual windows/lamps visible when extremely close)
+            float microLights = noise3d(vLocalPos * 150000.0) * noise3d(vLocalPos * 80000.0);
+            float mlFade = clamp(1.0 - (distToCam / 0.5), 0.0, 1.0); // Only within 500m
+            if (microLights > 0.45) cityBrightness += (microLights - 0.45) * 15.0 * mlFade;
+
+            cityBrightness *= habitability * nightFade;
+            vec3 cityColor = mix(vec3(1.0, 0.7, 0.2), vec3(1.0, 0.9, 0.6), city2);
+            result += cityColor * min(cityBrightness, 1.5) * 0.9;
+        }
+
+        // Atmospheric haze simulation (very crude, based on distance/elevation)
+        float haze = clamp((distToCam - 2.0) / 100.0, 0.0, 0.15); 
+        result = mix(result, vec3(0.5, 0.7, 1.0), haze);
+
+        FragColor = vec4(result, 1.0);
+      }
+    )";
+
+    terrainProg = compileProgram(terrainVertSrc, terrainFragSrc);
+    ut_mvp = glGetUniformLocation(terrainProg, "uMVP");
+    ut_model = glGetUniformLocation(terrainProg, "uModel");
+    ut_lightDir = glGetUniformLocation(terrainProg, "uLightDir");
+    ut_viewPos = glGetUniformLocation(terrainProg, "uViewPos");
+    ut_time = glGetUniformLocation(terrainProg, "uTime");
+
+    // --- Vegetation Shader (Instanced) ---
+    const char* vegVertSrc = R"(
+      #version 330 core
+      layout(location=0) in vec3 aPos;
+      layout(location=1) in vec3 aNormal;
+      layout(location=4) in vec3 iPos;     // Instance position
+      layout(location=5) in float iScale;  // Instance scale
+      layout(location=6) in float iRot;    // Instance Y-rotation
+
+      uniform mat4 uView;
+      uniform mat4 uProj;
+      uniform vec3 uPlanetCenter;
+
+      out vec3 vNormal;
+      out vec3 vWorldPos;
+
+      void main() {
+        // Construct instance rotation matrix (Y-axis)
+        float s = sin(iRot);
+        float c = cos(iRot);
+        mat3 rot = mat3(c, 0, s,  0, 1, 0, -s, 0, c);
+        
+        // Transform local position
+        vec3 pos = (rot * aPos) * iScale;
+        
+        // Orient to planet surface
+        vec3 up = normalize(iPos);
+        vec3 right = normalize(cross(vec3(0,1,0), up));
+        if (length(right) < 0.01) right = normalize(cross(vec3(1,0,0), up));
+        vec3 forward = cross(up, right);
+        mat3 orient = mat3(right, up, forward);
+        
+        vec3 worldPos = orient * pos + iPos;
+        vWorldPos = worldPos;
+        vNormal = orient * (rot * aNormal);
+        
+        gl_Position = uProj * uView * vec4(worldPos, 1.0);
+      }
+    )";
+
+    const char* vegFragSrc = R"(
+      #version 330 core
+      in vec3 vNormal;
+      in vec3 vWorldPos;
+      uniform vec3 uLightDir;
+      uniform vec3 uViewPos;
+      out vec4 FragColor;
+      void main() {
+        vec3 N = normalize(vNormal);
+        vec3 L = normalize(uLightDir);
+        float diff = max(dot(N, L), 0.0);
+        vec3 color = vec3(0.1, 0.4, 0.05); // Standard forest green
+        FragColor = vec4(color * (0.2 + 0.8 * diff), 1.0);
+      }
+    )";
+
+    vegProg = compileProgram(vegVertSrc, vegFragSrc);
+    uv_vp = glGetUniformLocation(vegProg, "uView");
+    uv_proj = glGetUniformLocation(vegProg, "uProj");
+    uv_lightDir = glGetUniformLocation(vegProg, "uLightDir");
+    uv_viewPos = glGetUniformLocation(vegProg, "uViewPos");
+
+    // --- Create Vegetation Geometry ---
+    // Simple Tree (cylinder stump + cone top)
+    std::vector<Vertex3D> treeVerts;
+    std::vector<unsigned int> treeIndices;
+    // ... (simplified generation for now or reuse existing)
+    
+    // For now, let's just initialize the buffers
+    glGenVertexArrays(1, &treeVAO);
+    glGenBuffers(1, &treeVBO);
+    glGenBuffers(1, &treeEBO);
+    glGenBuffers(1, &treeInstanceVBO);
+    
+    initVegetationGeometry();
+    terrain = new Terrain::QuadtreeTerrain(EARTH_RADIUS);
+    vegSystem = new Vegetation::VegetationSystem();
   }
 
   // Initialize or resize TAA framebuffers
@@ -3124,6 +3472,92 @@ R"(
      glDisable(GL_BLEND);
   }
 
+  // ==== Quadtree Terrain & Vegetation Implementation ====
+  void initVegetationGeometry() {
+      // 1. Generate Tree Mesh (Stump + Top)
+      std::vector<Vertex3D> verts;
+      std::vector<unsigned int> indices;
+      
+      // Stump (Cylinder)
+      float radius = 0.15f, height = 0.8f;
+      int segs = 8;
+      for (int i = 0; i <= segs; i++) {
+          float ang = (i / (float)segs) * 2.0f * 3.14159f;
+          float cs = cosf(ang), sn = sinf(ang);
+          Vertex3D v; v.nx = cs; v.ny = 0; v.nz = sn; v.u = i/(float)segs; v.r=0.4f; v.g=0.25f; v.b=0.1f; v.a=1;
+          v.px = cs * radius; v.py = 0; v.pz = sn * radius; v.v = 1; verts.push_back(v); // Bottom
+          v.px = cs * radius; v.py = height; v.pz = sn * radius; v.v = 0; verts.push_back(v); // Top
+      }
+      for (int i = 0; i < segs; i++) {
+          int a = i*2, b = a+1, c = a+2, d = a+3;
+          indices.push_back(a); indices.push_back(b); indices.push_back(c);
+          indices.push_back(b); indices.push_back(d); indices.push_back(c);
+      }
+      
+      // Top (Cone)
+      int base = (int)verts.size();
+      float cRad = 0.6f, cHeight = 2.0f;
+      Vertex3D tip; tip.px=0; tip.py=height+cHeight; tip.pz=0; tip.nx=0; tip.ny=1; tip.nz=0; tip.u=0.5f; tip.v=0; tip.r=0.1f; tip.g=0.35f; tip.b=0.05f; tip.a=1;
+      verts.push_back(tip);
+      for (int i = 0; i <= segs; i++) {
+          float ang = (i / (float)segs) * 2.0f * 3.14159f;
+          float cs = cosf(ang), sn = sinf(ang);
+          Vertex3D v; v.px = cs*cRad; v.py = height; v.pz = sn*cRad; v.nx=cs; v.ny=0.3f; v.nz=sn; v.u=i/(float)segs; v.v=1; v.r=0.1f; v.g=0.35f; v.b=0.05f; v.a=1;
+          verts.push_back(v);
+      }
+      for (int i = 0; i < segs; i++) {
+          indices.push_back(base); indices.push_back(base+1+i); indices.push_back(base+2+i);
+      }
+      
+      treeIndexCount = (int)indices.size();
+      glBindVertexArray(treeVAO);
+      glBindBuffer(GL_ARRAY_BUFFER, treeVBO);
+      glBufferData(GL_ARRAY_BUFFER, verts.size() * sizeof(Vertex3D), verts.data(), GL_STATIC_DRAW);
+      glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, treeEBO);
+      glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int), indices.data(), GL_STATIC_DRAW);
+      
+      glEnableVertexAttribArray(0); glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex3D), (void*)0);
+      glEnableVertexAttribArray(1); glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex3D), (void*)12);
+      
+      // Instance attributes (loc 4, 5, 6)
+      glBindBuffer(GL_ARRAY_BUFFER, treeInstanceVBO);
+      glBufferData(GL_ARRAY_BUFFER, 4096 * sizeof(Vegetation::InstanceData), nullptr, GL_DYNAMIC_DRAW);
+      glEnableVertexAttribArray(4); glVertexAttribPointer(4, 3, GL_FLOAT, GL_FALSE, sizeof(Vegetation::InstanceData), (void*)0); glVertexAttribDivisor(4, 1);
+      glEnableVertexAttribArray(5); glVertexAttribPointer(5, 1, GL_FLOAT, GL_FALSE, sizeof(Vegetation::InstanceData), (void*)12); glVertexAttribDivisor(5, 1);
+      glEnableVertexAttribArray(6); glVertexAttribPointer(6, 1, GL_FLOAT, GL_FALSE, sizeof(Vegetation::InstanceData), (void*)16); glVertexAttribDivisor(6, 1);
+      glBindVertexArray(0);
+  }
+
+  void drawTerrainPatch(const Mesh& mesh, const Mat4& model, float maxElev, float time) {
+      glUseProgram(terrainProg);
+      Mat4 mvp = proj * view * model;
+      glUniformMatrix4fv(ut_mvp, 1, GL_FALSE, mvp.m);
+      glUniformMatrix4fv(ut_model, 1, GL_FALSE, model.m);
+      glUniform3f(ut_lightDir, lightDir.x, lightDir.y, lightDir.z);
+      glUniform3f(ut_viewPos, camPos.x, camPos.y, camPos.z);
+      glUniform1f(ut_time, time);
+      glUniform1f(glGetUniformLocation(terrainProg, "uMaxElevation"), maxElev);
+      glUniform1f(glGetUniformLocation(terrainProg, "uPlanetRadius"), 6371000.0f); 
+      
+      mesh.draw();
+  }
+
+  void drawVegetation(const std::vector<Vegetation::InstanceData>& instances) {
+      if (instances.empty()) return;
+      glUseProgram(vegProg);
+      glUniformMatrix4fv(uv_vp, 1, GL_FALSE, view.m);
+      glUniformMatrix4fv(uv_proj, 1, GL_FALSE, proj.m);
+      glUniform3f(uv_lightDir, lightDir.x, lightDir.y, lightDir.z);
+      glUniform3f(uv_viewPos, camPos.x, camPos.y, camPos.z);
+      
+      glBindVertexArray(treeVAO);
+      glBindBuffer(GL_ARRAY_BUFFER, treeInstanceVBO);
+      glBufferSubData(GL_ARRAY_BUFFER, 0, instances.size() * sizeof(Vegetation::InstanceData), instances.data());
+      
+      glDrawElementsInstanced(GL_TRIANGLES, treeIndexCount, GL_UNSIGNED_INT, 0, (GLsizei)instances.size());
+      glBindVertexArray(0);
+  }
+
   void drawPlanet(const Mesh& mesh, const Mat4& model, BodyType type, float cr, float cg, float cb, float ca, float time = 0.0f, int bodyIdx = -1) {
     GLuint prog = earthProgram;
     GLint mvpLoc = ue_mvp, modelLoc = ue_model, lightLoc = ue_lightDir, viewLoc = ue_viewPos, colorLoc = -1, timeLoc = ue_time;
@@ -3153,6 +3587,37 @@ R"(
     if (pu) {
         mvpLoc = pu->mvp; modelLoc = pu->model; lightLoc = pu->lightDir;
         viewLoc = pu->viewPos; colorLoc = pu->baseColor; timeLoc = pu->time;
+    }
+
+    // === TERRAIN INTEGRATION FOR EARTH ===
+    if (bodyIdx == 3) {
+        drawTerrainPatch(mesh, model, 25000.0f, time); // 25km max elevation for prominent terrain
+        
+        // --- VEGETATION PASS (If close enough) ---
+        float camAlt = (camPos - Vec3(model.m[12], model.m[13], model.m[14])).length() - 1.0f; // Scale is 1.0 for mesh
+        if (camAlt < 0.05f) { // ~300km at scale
+            std::vector<Vegetation::InstanceData> instances;
+            // Generate some semi-random instances near the camera's ground point
+            Vec3 camNorm = (camPos - Vec3(model.m[12], model.m[13], model.m[14])).normalized();
+            for (int i = 0; i < 500; i++) {
+                // Low-fidelity Poisson-ish distribution near camera ground track
+                float offX = (hash11(i * 7) * 2 - 1) * 0.002f;
+                float offZ = (hash11(i * 13) * 2 - 1) * 0.002f;
+                
+                Vec3 p = (camNorm + Vec3(offX, 0, offZ)).normalized();
+                float h = terrain->getHeight(p) / EARTH_RADIUS;
+                if (h > 0.0f) { // Only on land
+                    Vegetation::InstanceData id;
+                    Vec3 worldP = p * (1.0f + h);
+                    id.pos[0] = worldP.x; id.pos[1] = worldP.y; id.pos[2] = worldP.z;
+                    id.scale = (0.5f + 0.5f * hash11(i)) * (0.0001f); // Tiny relative to planet
+                    id.rot = hash11(i * 3) * 6.28f;
+                    instances.push_back(id);
+                }
+            }
+            drawVegetation(instances);
+        }
+        return;
     }
 
     glUseProgram(prog);

@@ -293,7 +293,9 @@ Quat GetFrameRotation(int ref_mode, int ref_body, int sec_body, double t) {
     if (ref_mode == 2) { // Surface
         CelestialBody& body = SOLAR_SYSTEM[ref_body];
         double theta = body.prime_meridian_epoch + (t * 2.0 * PI / body.rotation_period);
-        return Quat::fromAxisAngle(Vec3(0, 0, 1), (float)theta);
+        Quat rot = Quat::fromAxisAngle(Vec3(0, 0, 1), (float)theta);
+        Quat tilt = Quat::fromAxisAngle(Vec3(1, 0, 0), (float)body.axial_tilt);
+        return tilt * rot; // Apply rotation then tilt
     }
     if (ref_mode == 1) { // Co-rotating
         if (sec_body < 0 || sec_body >= (int)SOLAR_SYSTEM.size() || sec_body == ref_body) return Quat(1, 0, 0, 0);
@@ -493,17 +495,24 @@ void Update(RocketState& state, const RocketConfig& config, const ControlInput& 
              state.status = ASCEND;
              state.mission_msg = "LIFTOFF!";
         } else {
-            // Calculate current rotation angle
+            // Calculate current rotation (Axial Tilt + Rotation)
             double theta = current_body.prime_meridian_epoch + (state.sim_time * 2.0 * PI / current_body.rotation_period);
-            double cos_t = std::cos(theta);
-            double sin_t = std::sin(theta);
-            state.px = state.surf_px * cos_t - state.surf_py * sin_t;
-            state.py = state.surf_px * sin_t + state.surf_py * cos_t;
-            state.pz = state.surf_pz;
+            Quat rot = Quat::fromAxisAngle(Vec3(0, 0, 1), (float)theta);
+            Quat tilt = Quat::fromAxisAngle(Vec3(1, 0, 0), (float)current_body.axial_tilt);
+            Quat full_rot = tilt * rot;
+            
+            Vec3 local_pos((float)state.surf_px, (float)state.surf_py, (float)state.surf_pz);
+            Vec3 world_pos = full_rot.rotate(local_pos);
+            state.px = (double)world_pos.x;
+            state.py = (double)world_pos.y;
+            state.pz = (double)world_pos.z;
+            
             double omega = (2.0 * PI) / current_body.rotation_period;
-            state.vx = -omega * state.py;
-            state.vy = omega * state.px;
-            state.vz = 0;
+            Vec3 ang_vel_world = full_rot.rotate(Vec3(0, 0, (float)omega));
+            Vec3 world_v = ang_vel_world.cross(world_pos);
+            state.vx = (double)world_v.x;
+            state.vy = (double)world_v.y;
+            state.vz = (double)world_v.z;
             state.altitude = 0;
             state.velocity = 0; state.local_vx = 0;
             return;
@@ -515,15 +524,22 @@ void Update(RocketState& state, const RocketConfig& config, const ControlInput& 
             state.mission_msg = "TOUCHDOWN TO LIFTOFF!";
         } else {
             double theta = current_body.prime_meridian_epoch + (state.sim_time * 2.0 * PI / current_body.rotation_period);
-            double cos_t = std::cos(theta);
-            double sin_t = std::sin(theta);
-            state.px = state.surf_px * cos_t - state.surf_py * sin_t;
-            state.py = state.surf_px * sin_t + state.surf_py * cos_t;
-            state.pz = state.surf_pz;
+            Quat rot = Quat::fromAxisAngle(Vec3(0, 0, 1), (float)theta);
+            Quat tilt = Quat::fromAxisAngle(Vec3(1, 0, 0), (float)current_body.axial_tilt);
+            Quat full_rot = tilt * rot;
+            
+            Vec3 local_pos((float)state.surf_px, (float)state.surf_py, (float)state.surf_pz);
+            Vec3 world_pos = full_rot.rotate(local_pos);
+            state.px = (double)world_pos.x;
+            state.py = (double)world_pos.y;
+            state.pz = (double)world_pos.z;
+            
             double omega = (2.0 * PI) / current_body.rotation_period;
-            state.vx = -omega * state.py;
-            state.vy = omega * state.px;
-            state.vz = 0;
+            Vec3 ang_vel_world = full_rot.rotate(Vec3(0, 0, (float)omega));
+            Vec3 world_v = ang_vel_world.cross(world_pos);
+            state.vx = (double)world_v.x;
+            state.vy = (double)world_v.y;
+            state.vz = (double)world_v.z;
             state.altitude = 0;
             state.velocity = 0; state.local_vx = 0;
             return;
@@ -713,12 +729,21 @@ void Update(RocketState& state, const RocketConfig& config, const ControlInput& 
     if (current_alt_f <= 0.0) {
         if (state.status == ASCEND && state.velocity < 0.01) {
             double theta = current_body.prime_meridian_epoch + (state.sim_time * 2.0 * PI / current_body.rotation_period);
-            state.px = state.surf_px * std::cos(theta) - state.surf_py * std::sin(theta);
-            state.py = state.surf_px * std::sin(theta) + state.surf_py * std::cos(theta);
-            state.pz = state.surf_pz;
-            state.vx = -(2*PI/current_body.rotation_period)*state.py;
-            state.vy = (2*PI/current_body.rotation_period)*state.px;
-            state.vz = 0; state.altitude = 0;
+            Quat rot = Quat::fromAxisAngle(Vec3(0, 0, 1), (float)theta);
+            Quat tilt = Quat::fromAxisAngle(Vec3(1, 0, 0), (float)current_body.axial_tilt);
+            Quat full_rot = tilt * rot;
+            
+            Vec3 local_pos((float)state.surf_px, (float)state.surf_py, (float)state.surf_pz);
+            Vec3 world_pos = full_rot.rotate(local_pos);
+            state.px = (double)world_pos.x;
+            state.py = (double)world_pos.y;
+            state.pz = (double)world_pos.z;
+            
+            double omega = (2.0 * PI) / current_body.rotation_period;
+            Vec3 ang_vel_world = full_rot.rotate(Vec3(0, 0, (float)omega));
+            Vec3 world_v = ang_vel_world.cross(world_pos);
+            state.vx = (double)world_v.x; state.vy = (double)world_v.y; state.vz = (double)world_v.z;
+            state.altitude = 0;
         } else if (state.velocity < 0.1) {
             state.altitude = 0;
             if (state.status != PRE_LAUNCH && state.status != LANDED) {
@@ -726,11 +751,21 @@ void Update(RocketState& state, const RocketConfig& config, const ControlInput& 
                 else {
                     state.status = LANDED;
                     double theta = current_body.prime_meridian_epoch + (state.sim_time * 2.0 * PI / current_body.rotation_period);
-                    state.surf_px = state.px * std::cos(-theta) - state.py * std::sin(-theta);
-                    state.surf_py = state.px * std::sin(-theta) + state.py * std::cos(-theta);
-                    state.surf_pz = state.pz;
+                    Quat rot = Quat::fromAxisAngle(Vec3(0, 0, 1), (float)theta);
+                    Quat tilt = Quat::fromAxisAngle(Vec3(1, 0, 0), (float)current_body.axial_tilt);
+                    Quat inv_full_rot = (tilt * rot).conjugate();
+                    
+                    Vec3 local_rel = inv_full_rot.rotate(Vec3((float)state.px, (float)state.py, (float)state.pz));
+                    state.surf_px = (double)local_rel.x;
+                    state.surf_py = (double)local_rel.y;
+                    state.surf_pz = (double)local_rel.z;
+
+                    double omega = (2.0 * PI) / current_body.rotation_period;
+                    Quat full_rot = tilt * rot;
+                    Vec3 ang_vel_world = full_rot.rotate(Vec3(0, 0, (float)omega));
+                    Vec3 world_v = ang_vel_world.cross(Vec3((float)state.px, (float)state.py, (float)state.pz));
+                    state.vx = (double)world_v.x; state.vy = (double)world_v.y; state.vz = (double)world_v.z;
                 }
-                state.vx = -(2*PI/current_body.rotation_period)*state.py; state.vy = (2*PI/current_body.rotation_period)*state.px; state.vz = 0;
                 state.ang_vel = 0; state.ang_vel_z = 0; state.ang_vel_roll = 0;
             }
         }
@@ -771,17 +806,22 @@ void FastGravityUpdate(RocketState& state, const RocketConfig& config, double dt
         CelestialBody& current_body = SOLAR_SYSTEM[current_soi_index];
         // Maintain surface lock relative to the rotating body
         double theta = current_body.prime_meridian_epoch + (state.sim_time * 2.0 * PI / current_body.rotation_period);
-        double cos_t = std::cos(theta);
-        double sin_t = std::sin(theta);
+        Quat rot = Quat::fromAxisAngle(Vec3(0, 0, 1), (float)theta);
+        Quat tilt = Quat::fromAxisAngle(Vec3(1, 0, 0), (float)current_body.axial_tilt);
+        Quat full_rot = tilt * rot;
         
-        state.px = state.surf_px * cos_t - state.surf_py * sin_t;
-        state.py = state.surf_px * sin_t + state.surf_py * cos_t;
-        state.pz = state.surf_pz;
+        Vec3 local_pos((float)state.surf_px, (float)state.surf_py, (float)state.surf_pz);
+        Vec3 world_pos = full_rot.rotate(local_pos);
+        state.px = (double)world_pos.x;
+        state.py = (double)world_pos.y;
+        state.pz = (double)world_pos.z;
         
         double omega = (2.0 * PI) / current_body.rotation_period;
-        state.vx = -omega * state.py;
-        state.vy = omega * state.px;
-        state.vz = 0;
+        Vec3 ang_vel_world = full_rot.rotate(Vec3(0, 0, (float)omega));
+        Vec3 world_v = ang_vel_world.cross(world_pos);
+        state.vx = (double)world_v.x;
+        state.vy = (double)world_v.y;
+        state.vz = (double)world_v.z;
         state.altitude = 0;
         
         CheckSOI_Transitions(state);
