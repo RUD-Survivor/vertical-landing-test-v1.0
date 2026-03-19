@@ -2972,12 +2972,21 @@ R"(
         
         // 2. Sample procedural height (Kilometers)
         float plateBase = getPlateBase(normPos);
-        float hStr = warpedFbm(normPos * 6.5);
-        // Combine baked tectonic skeleton with fractal noise
-        hStr = mix(plateBase * 0.7, hStr, 0.4); 
-        // Further shape the profile: flatten oceans, sharpen peaks
-        if (hStr < 0.44) hStr = hStr * 0.5 + 0.22; 
+        float noise = warpedFbm(normPos * 6.5);
+        
+        // Additive Blending with Noise Scaling (More detail on land)
+        float landMask = smoothstep(0.4, 0.6, plateBase);
+        float hStr = plateBase + (noise - 0.5) * (0.12 + 0.06 * landMask);
+        
+        // Continental Shelf Logic: Plateau in the 0.38-0.44 range
         float seaLevel = 0.44;
+        if (hStr < seaLevel && hStr > 0.38) {
+            float shelfT = (hStr - 0.38) / (seaLevel - 0.38);
+            hStr = mix(0.39, seaLevel - 0.002, smoothstep(0.0, 1.0, shelfT));
+        }
+        
+        // Further shape the profile: flatten oceans, sharpen peaks
+        if (hStr < seaLevel) hStr = hStr * 0.6 + 0.176; 
         float landH = max(0.0, (hStr - seaLevel) / (1.0 - seaLevel));
         float height = landH * uMaxElevation / uPlanetRadius;
         
