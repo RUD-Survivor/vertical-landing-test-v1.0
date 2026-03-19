@@ -1,5 +1,6 @@
 #pragma once
 #include "math/math3d.h"
+#include "tectonic_sim.h"
 #include <vector>
 #include <memory>
 #include <cmath>
@@ -80,9 +81,14 @@ class QuadtreeTerrain {
 public:
     float planetRadius;
     float maxElevation = 25.0f; // 25km max height (Kilometers)
+    Tectonic::TectonicSimulator* sim = nullptr;
     std::unique_ptr<TerrainNode> roots[6];
     
     QuadtreeTerrain(float radius) : planetRadius(radius) {
+        // Initialize 6-stage physical tectonic simulation
+        sim = new Tectonic::TectonicSimulator(1024, 512);
+        sim->simulate(40); // 40 generations of plate evolution
+
         // Initialize 6 faces of the cube
         // +X, -X, +Y, -Y, +Z, -Z
         roots[0] = std::make_unique<TerrainNode>(Vec3( 1, 0, 0), Vec3( 0, 0,-2), Vec3( 0, 2, 0), 1.0f, 0);

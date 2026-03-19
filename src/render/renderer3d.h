@@ -421,6 +421,7 @@ public:
   GLint ut_mvp = -1, ut_model = -1, ut_camPos = -1, ut_lightDir = -1, ut_viewPos = -1, ut_time = -1;
   GLint ut_nodePos = -1, ut_nodeSide = -1, ut_nodeUp = -1; // For patch warping
   GLint ut_planetCenterRel = -1; // New: Planet center relative to camera
+  GLint ut_tectonicMap = -1;    // New: Baked Macro-Skeleton from simulation
   GLuint vegProg = 0;
   GLint uv_vp = -1, uv_proj = -1, uv_lightDir = -1, uv_viewPos = -1, uv_time = -1;
   GLuint treeVAO = 0, treeVBO = 0, treeEBO = 0, treeInstanceVBO = 0;
@@ -2954,13 +2955,28 @@ R"(
         return fbm(p + q * 1.8, 10); // Increased detail and warping
       }
 
+        uniform sampler2D uTectonicMap;
+
+        float getPlateBase(vec3 p) {
+            // Equirectangular mapping: theta=[-PI, PI], phi=[0, PI]
+            float phi = acos(clamp(p.y, -1.0, 1.0));
+            float theta = atan(p.z, p.x);
+            vec2 uv = vec2(theta / (2.0 * 3.14159) + 0.5, phi / 3.14159);
+            return texture(uTectonicMap, uv).r;
+        }
+
       void main() {
         // 1. Warping flat patch (-0.5 to 0.5) to unit cube face
         vec3 cubePos = uNodePos + aPos.x * uNodeSide + aPos.z * uNodeUp;
         vec3 normPos = normalize(cubePos);
         
         // 2. Sample procedural height (Kilometers)
-        float hStr = warpedFbm(normPos * 6.5); 
+        float plateBase = getPlateBase(normPos);
+        float hStr = warpedFbm(normPos * 6.5);
+        // Combine baked tectonic skeleton with fractal noise
+        hStr = mix(plateBase * 0.7, hStr, 0.4); 
+        // Further shape the profile: flatten oceans, sharpen peaks
+        if (hStr < 0.44) hStr = hStr * 0.5 + 0.22; 
         float seaLevel = 0.44;
         float landH = max(0.0, (hStr - seaLevel) / (1.0 - seaLevel));
         float height = landH * uMaxElevation / uPlanetRadius;
@@ -3209,6 +3225,7 @@ R"(
     ut_nodeSide = glGetUniformLocation(terrainProg, "uNodeSide");
     ut_nodeUp = glGetUniformLocation(terrainProg, "uNodeUp");
     ut_planetCenterRel = glGetUniformLocation(terrainProg, "uPlanetCenterRel");
+    ut_tectonicMap = glGetUniformLocation(terrainProg, "uTectonicMap");
 
     // --- Vegetation Shader (Instanced) ---
     const char* vegVertSrc = R"(
@@ -3727,6 +3744,13 @@ R"(
         glUniform1f(ut_time, time);
         glUniform1f(glGetUniformLocation(terrainProg, "uMaxElevation"), 25.0f); // Kilometers!
         glUniform1f(glGetUniformLocation(terrainProg, "uPlanetRadius"), radius); 
+        
+        // --- Discrete Tectonic Simulation Texture ---
+        if (terrain && terrain->sim && terrain->sim->textureID != 0) {
+            glActiveTexture(GL_TEXTURE4);
+            glBindTexture(GL_TEXTURE_2D, terrain->sim->textureID);
+            glUniform1i(ut_tectonicMap, 4);
+        }
         
         // 1. Planet center from model matrix translation components
         Vec3 planetCenter(model.m[12], model.m[13], model.m[14]);
