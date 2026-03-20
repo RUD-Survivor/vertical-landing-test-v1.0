@@ -213,24 +213,23 @@ public:
                             return;
                         }
 
-                        // Trench Rollback: Pull the overriding seed towards the subduction zone
-                        Vec3 rollbackForce = norm * (force * 0.0035f);
-                        plates[gridPlate[overridingIdx]].pos = (plates[gridPlate[overridingIdx]].pos - rollbackForce).normalized();
-
-                        float felsicRate = 0.125f * dt; 
-                        deltaHeight[overridingIdx] += -force * 3.2f * dt; 
-                        
-                        // Back-arc Spreading: Convergence on one side creates tension on the other side of the seed
-                        plates[p1].pos = (plates[p1].pos + relativeV * 0.0005f).normalized(); // Dynamic boundary migration
-
-                        int ox = overridingIdx % width, oy = overridingIdx / width;
-                        for (int dy=-1; dy<=1; dy++) { 
-                            for (int dx=-1; dx<=1; dx++) {
-                                int sIdx = std::clamp(oy+dy, 0, height-1) * width + ((ox+dx+width)%width);
-                                deltaHeight[sIdx] += felsicRate;
+                        // PATCHY SUBDUCTION: Don't build a 100% solid wall.
+                        float subductionEfficiency = simpleNoise(pPos * 15.0f + Vec3(0, (float)plates[p1].density, 0));
+                        if (subductionEfficiency < 0.25f) { // Gap in the volcanic arc
+                             deltaHeight[overridingIdx] += force * 0.4f * dt; 
+                        } else {
+                            float felsicRate = 0.13f * dt * subductionEfficiency; 
+                            deltaHeight[overridingIdx] += -force * 3.5f * dt; 
+                            
+                            int ox = overridingIdx % width, oy = overridingIdx / width;
+                            for (int dy=-1; dy<=1; dy++) { 
+                                for (int dx=-1; dx<=1; dx++) {
+                                    int sIdx = std::clamp(oy+dy, 0, height-1) * width + ((ox+dx+width)%width);
+                                    deltaHeight[sIdx] += felsicRate;
+                                }
                             }
                         }
-                        deltaHeight[subductingIdx] += force * 0.9f * dt; 
+                        deltaHeight[subductingIdx] += force * 0.95f * dt; 
                     }
                     else if (force > 0.012f) { // Divergence (Spreading Ridge - Lowered Threshold)
                         float riftStrength = (gridHeight[i1] > CONT_THRESHOLD || gridHeight[i2] > CONT_THRESHOLD) ? 0.35f : 0.95f;
