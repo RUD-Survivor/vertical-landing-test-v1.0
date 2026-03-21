@@ -9,22 +9,39 @@
 
 namespace Terrain {
 
-// --- Simple Noise for CPU-side Height queries ---
+// --- High-Precision Noise matching GLSL Shader ---
 struct Noise {
-    static float hash(float n) { return fract(sinf(n) * 43758.5453123f); }
     static float fract(float x) { return x - floorf(x); }
+    static Vec3 fract(const Vec3& v) { return Vec3(fract(v.x), fract(v.y), fract(v.z)); }
+    static Vec3 floorVec(const Vec3& v) { return Vec3(floorf(v.x), floorf(v.y), floorf(v.z)); }
     
-    static float noise(const Vec3& x) {
-        Vec3 p(floorf(x.x), floorf(x.y), floorf(x.z));
-        Vec3 f(fract(x.x), fract(x.y), fract(x.z));
-        f.x = f.x * f.x * (3.0f - 2.0f * f.x);
-        f.y = f.y * f.y * (3.0f - 2.0f * f.y);
-        f.z = f.z * f.z * (3.0f - 2.0f * f.z);
-        float n = p.x + p.y * 57.0f + 113.0f * p.z;
-        return mix(mix(mix(hash(n + 0.0f), hash(n + 1.0f), f.x),
-                       mix(hash(n + 57.0f), hash(n + 58.0f), f.x), f.y),
-                   mix(mix(hash(n + 113.0f), hash(n + 114.0f), f.x),
-                       mix(hash(n + 170.0f), hash(n + 171.0f), f.x), f.y), f.z);
+    static float hash(Vec3 p) {
+        p = fract(Vec3(p.x * 443.897f, p.y * 441.423f, p.z * 437.195f));
+        p.x += p.x * (p.y + 19.19f); p.y += p.y * (p.z + 19.19f); p.z += p.z * (p.x + 19.19f);
+        return fract((p.x + p.y) * p.z);
+    }
+    
+    static float noise(const Vec3& p) {
+        Vec3 i = floorVec(p);
+        Vec3 f = fract(p);
+        // f = f * f * f * (f * (f * 6.0 - 15.0) + 10.0)
+        Vec3 u(
+            f.x*f.x*f.x*(f.x*(f.x*6.0f - 15.0f) + 10.0f),
+            f.y*f.y*f.y*(f.y*(f.y*6.0f - 15.0f) + 10.0f),
+            f.z*f.z*f.z*(f.z*(f.z*6.0f - 15.0f) + 10.0f)
+        );
+        
+        float n000 = hash(i);
+        float n100 = hash(i + Vec3(1,0,0));
+        float n010 = hash(i + Vec3(0,1,0));
+        float n110 = hash(i + Vec3(1,1,0));
+        float n001 = hash(i + Vec3(0,0,1));
+        float n101 = hash(i + Vec3(1,0,1));
+        float n011 = hash(i + Vec3(0,1,1));
+        float n111 = hash(i + Vec3(1,1,1));
+        
+        return mix(mix(mix(n000, n100, u.x), mix(n010, n110, u.x), u.y),
+                   mix(mix(n001, n101, u.x), mix(n011, n111, u.x), u.y), u.z);
     }
     
     static float mix(float a, float b, float t) { return a + (b - a) * t; }
@@ -33,15 +50,15 @@ struct Noise {
         float v = 0.0f, amp = 0.5f;
         for (int i = 0; i < octaves; i++) {
             v += noise(p) * amp;
-            p = p * 2.07f + Vec3(0.131f, -0.217f, 0.344f);
-            amp *= 0.48f;
+            p = p * 2.15f + Vec3(0.131f, -0.217f, 0.344f);
+            amp *= 0.47f;
         }
         return v;
     }
 
     static float warpedFbm(Vec3 p) {
         Vec3 q(fbm(p, 4), fbm(p + Vec3(5.2f, 1.3f, 2.8f), 4), fbm(p + Vec3(9.1f, 4.7f, 3.1f), 4));
-        return fbm(p + q * 1.6f, 8);
+        return fbm(p + q * 1.8f, 10);
     }
 };
 
@@ -151,11 +168,56 @@ public:
         }
     }
 
+    float smoothstep_local(float edge0, float edge1, float x) {
+        float t = std::clamp((x - edge0) / (edge1 - edge0), 0.0f, 1.0f);
+        return t * t * (3.0f - 2.0f * t);
+    }
+
     float getHeight(const Vec3& normalizedPos) {
-        float hStr = Noise::warpedFbm(normalizedPos * 4.8f);
+        float phi = std::acos(std::clamp((float)normalizedPos.y, -1.0f, 1.0f));
+        float theta = std::atan2((float)normalizedPos.z, (float)normalizedPos.x);
+        float u = theta / (2.0f * PI) + 0.5f;
+        float v = phi / PI;
+
+        float plateBase = 0.5f;
+        if (sim && !sim->gridHeight.empty()) {
+            int tx = std::clamp((int)(u * sim->width), 0, sim->width - 1);
+            int ty = std::clamp((int)(v * sim->height), 0, sim->height - 1);
+            plateBase = sim->gridHeight[ty * sim->width + tx] / 255.0f;
+        }
+
+        float noise = Noise::warpedFbm(normalizedPos * 6.5f);
+        float landMask = smoothstep_local(0.4f, 0.6f, plateBase);
+        float hStr = plateBase + (noise - 0.5f) * (0.12f + 0.06f * landMask);
+
+        float filledH = 0.0f;
+        if (hydroSim && hydroSim->data.filledHeight.size() > 0) {
+            int tx = std::clamp((int)(u * hydroSim->width), 0, hydroSim->width - 1);
+            int ty = std::clamp((int)(v * hydroSim->height), 0, hydroSim->height - 1);
+            filledH = hydroSim->data.filledHeight[ty * hydroSim->width + tx] / 255.0f;
+        }
+
+        float lakeMask = smoothstep_local(0.0001f, 0.01f, filledH - hStr);
+        hStr = hStr + (filledH - hStr) * lakeMask * 0.98f;
+
         float seaLevel = 0.44f;
-        if (hStr < seaLevel) return 0.0f; 
-        return (hStr - seaLevel) / (1.0f - seaLevel) * maxElevation;
+        if (hStr < seaLevel && hStr > 0.38f) {
+            float shelfT = (hStr - 0.38f) / (seaLevel - 0.38f);
+            hStr = 0.39f + (seaLevel - 0.002f - 0.39f) * smoothstep_local(0.0f, 1.0f, shelfT);
+        }
+
+        float height;
+        if (hStr < seaLevel) height = 0.0f; // Ocean surface is exactly @ Sea Level (radius)
+        else height = (hStr - seaLevel) / (1.0f - seaLevel) * maxElevation;
+
+        // --- KSC FLATTENING ---
+        Vec3 kscPos(0.1436f, 0.478f, 0.866f);
+        float kscDist = (normalizedPos - kscPos).length();
+        float kscMask = smoothstep_local(0.08f, 0.02f, kscDist); 
+        // Flatten KSC to exactly 5 meters above sea level (0.005 km)
+        height = Noise::mix(height, 0.005f, kscMask); 
+
+        return height;
     }
 
     Vec3 getPosition(const Vec3& normalizedPos) {

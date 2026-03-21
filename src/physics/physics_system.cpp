@@ -535,7 +535,7 @@ void Update(RocketState& state, const RocketConfig& config, const ControlInput& 
             state.vx = (double)world_v.x;
             state.vy = (double)world_v.y;
             state.vz = (double)world_v.z;
-            state.altitude = 0;
+            state.altitude = state.terrain_altitude;
             state.velocity = 0; state.local_vx = 0;
         }
     }
@@ -726,7 +726,7 @@ void Update(RocketState& state, const RocketConfig& config, const ControlInput& 
 
     // E. Collision and Final Sync
     double com_alt = std::sqrt(state.px*state.px+state.py*state.py+state.pz*state.pz) - current_body.radius;
-    double current_alt_f = com_alt + config.bounds_bottom;
+    double current_alt_f = com_alt - state.terrain_altitude + config.bounds_bottom;
     if (current_alt_f <= 0.0) {
         if (state.status == ASCEND && state.velocity < 0.01) {
             double theta = current_body.prime_meridian_epoch + (state.sim_time * 2.0 * PI / current_body.rotation_period);
@@ -744,9 +744,9 @@ void Update(RocketState& state, const RocketConfig& config, const ControlInput& 
             Vec3 ang_vel_world = full_rot.rotate(Vec3(0, 0, (float)omega));
             Vec3 world_v = ang_vel_world.cross(world_pos);
             state.vx = (double)world_v.x; state.vy = (double)world_v.y; state.vz = (double)world_v.z;
-            state.altitude = 0;
+            state.altitude = state.terrain_altitude;
         } else if (state.velocity < 0.1) {
-            state.altitude = 0;
+            state.altitude = state.terrain_altitude;
             if (state.status != PRE_LAUNCH && state.status != LANDED) {
                 if (std::abs(state.velocity) > 10 || std::abs(state.local_vx) > 10) state.status = CRASHED;
                 else {
@@ -836,7 +836,7 @@ void FastGravityUpdate(RocketState& state, const RocketConfig& config, double dt
         state.vx = (double)world_v.x;
         state.vy = (double)world_v.y;
         state.vz = (double)world_v.z;
-        state.altitude = 0;
+        state.altitude = state.terrain_altitude;
         
         CheckSOI_Transitions(state);
         return;
@@ -928,8 +928,8 @@ void FastGravityUpdate(RocketState& state, const RocketConfig& config, double dt
         
         state.altitude = std::sqrt(state.px*state.px + state.py*state.py + state.pz*state.pz) - SOLAR_SYSTEM[current_soi_index].radius;
         
-        if (state.altitude <= 0.0) {
-            state.altitude = 0;
+        if (state.altitude <= state.terrain_altitude) {
+            state.altitude = state.terrain_altitude;
             state.status = CRASHED;
             break;
         }

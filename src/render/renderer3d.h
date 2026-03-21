@@ -13,6 +13,8 @@
 #include <fstream>
 #include "terrain_system.h"
 #include "vegetation_system.h"
+#include "svo_system.h"
+#include "svo_meshing.h"
 
 inline void sendMat4(GLint loc, const Mat4& m) {
     float arr[16];
@@ -460,6 +462,12 @@ public:
   Mesh sharedPatchMesh;
   Terrain::QuadtreeTerrain* terrain = nullptr;
   Vegetation::VegetationSystem* vegSystem = nullptr;
+
+  // === SVO (Sparse Voxel Octree) System ===
+  GLuint svoProg = 0;
+  GLint usvo_mvp = -1, usvo_lightDir = -1, usvo_viewPos = -1;
+  GLint usvo_svoMat = -1;
+  SVO::SVOManager* svoManager = nullptr;
 
   // Cached meshes and textures for parts
   std::map<std::string, Mesh> meshCache;
@@ -3005,17 +3013,20 @@ R"(
             hStr = mix(0.39, seaLevel - 0.002, smoothstep(0.0, 1.0, shelfT));
         }
         
-        if (hStr < seaLevel) hStr = hStr * 0.6 + 0.176; 
-        float landH = max(0.0, (hStr - seaLevel) / (1.0 - seaLevel));
-        float height = landH * uMaxElevation / uPlanetRadius;
+        float height;
+        if (hStr < seaLevel) height = 0.0; // Sea Level exactly at uPlanetRadius
+        else height = (hStr - seaLevel) / (1.0 - seaLevel) * uMaxElevation / uPlanetRadius;
         
         // --- KSC FLATTENING ---
-        vec3 kscPos = vec3(0.145, -0.867, 0.477);
+        vec3 kscPos = vec3(0.1436, 0.478, 0.866);
         float kscDist = length(normPos - kscPos);
         float kscMask = smoothstep(0.08, 0.02, kscDist); 
+        // Flatten KSC to 5m altitude (0.005 km)
         height = mix(height, 0.005 / uPlanetRadius, kscMask); 
         
-        if (hStr < seaLevel) height = -0.0001; // Water depth handled by shader
+        if (hStr < seaLevel) {
+           // Base height is 0.0 for ocean pass
+        }
         
         // 4. Compute High-Precision Relative Position
         mat3 localRotScale = mat3(uModel); 
@@ -3130,7 +3141,7 @@ R"(
 
         // --- KSC FLATTENING & COASTAL GUARANTEE ---
         // Cape Canaveral: Lat 28.5, Lon -80.5 -> vec3(0.145, -0.867, 0.477)
-        vec3 kscPos = vec3(0.145, -0.867, 0.477);
+        vec3 kscPos = vec3(0.1436, 0.478, 0.866);
         float kscDist = length(vLocalPos - kscPos);
         float kscMask = smoothstep(0.08, 0.02, kscDist); // Flatten within strictly defined radius
         
@@ -3405,6 +3416,75 @@ R"(
     sharedPatchMesh = MeshGen::patch(32); // 32x32 segments per patch
     terrain = new Terrain::QuadtreeTerrain(EARTH_RADIUS);
     vegSystem = new Vegetation::VegetationSystem();
+
+    // --- SVO Shader (Camera-Relative, Vertex-Colored Phong) ---
+    const char* svoVertSrc = R"(
+      #version 330 core
+      layout(location=0) in vec3 aPos;
+      layout(location=1) in vec3 aNormal;
+      layout(location=2) in vec2 aUV;
+      layout(location=3) in vec4 aColor;
+
+      uniform mat4 uMVP;
+      uniform mat4 uSvoMat; // Transforms SVO local to Camera-Relative World
+
+      out vec3 vRelPos;
+      out vec3 vNormal;
+      out vec4 vColor;
+
+      void main() {
+        vec4 relPos = uSvoMat * vec4(aPos, 1.0);
+        vRelPos = relPos.xyz;
+        
+        // As SvoMat's upper 3x3 is pure rotation (orthonormal), 
+        // we can just multiply directly to transform normals:
+        vNormal = mat3(uSvoMat) * aNormal;
+        
+        vColor = aColor;
+        gl_Position = uMVP * relPos;
+      }
+    )";
+    const char* svoFragSrc = R"(
+      #version 330 core
+      in vec3 vRelPos;
+      in vec3 vNormal;
+      in vec4 vColor;
+
+      uniform float uTime;
+      uniform vec3 uLightDir;
+
+      out vec4 FragColor;
+
+      void main() {
+        vec3 N = normalize(vNormal);
+        vec3 L = normalize(uLightDir);
+        vec3 V = normalize(-vRelPos);
+        vec3 H = normalize(L + V);
+
+        float ambient = 0.15;
+        float diff = max(dot(N, L), 0.0);
+        float spec = pow(max(dot(N, H), 0.0), 32.0) * 0.2;
+
+        // Visual Marker: Pulsing Cyan/Magenta X-Ray glow
+        float pulse = 0.5 + 0.5 * sin(uTime * 5.0);
+        float fresnel = 1.0 - max(dot(N, V), 0.0);
+        vec3 markerGlow = mix(vec3(0.0, 1.0, 1.0), vec3(1.0, 0.0, 1.0), pulse) * pow(fresnel, 2.0);
+        
+        vec3 result = vColor.rgb * (ambient + diff * 0.75) + vec3(spec);
+        result += markerGlow * 0.8;
+        
+        // High visibility tint
+        result = mix(result, vec3(1.0, 0.0, 1.0), 0.2 * pulse);
+        
+        FragColor = vec4(result, 1.0);
+      }
+    )";
+    svoProg = compileProgram(svoVertSrc, svoFragSrc);
+    usvo_mvp = glGetUniformLocation(svoProg, "uMVP");
+    usvo_lightDir = glGetUniformLocation(svoProg, "uLightDir");
+    usvo_viewPos = glGetUniformLocation(svoProg, "uViewPos");
+    usvo_svoMat = glGetUniformLocation(svoProg, "uSvoMat");
+    svoManager = new SVO::SVOManager();
   }
 
   // Initialize or resize TAA framebuffers
@@ -3896,8 +3976,90 @@ R"(
             }
         }
         
-        // --- VEGETATION PASS (If close enough) ---
+        // --- SVO PASS (If activated and close enough) ---
         float camAlt = (camPos - planetCenter).length() - radius;
+        if (svoManager && svoManager->hasActiveChunks()) {
+            // Mesh dirty chunks
+            SVO::meshAllDirty(svoManager->chunks, svoManager->pool, svoManager->region);
+
+            // Render SVO chunks
+            glUseProgram(svoProg);
+            glEnable(GL_DEPTH_TEST);
+            glDepthMask(GL_TRUE);
+            glDisable(GL_CULL_FACE);
+
+            Mat4 viewOnlyRot2 = view;
+            viewOnlyRot2.m[12] = 0.0; viewOnlyRot2.m[13] = 0.0; viewOnlyRot2.m[14] = 0.0;
+            Mat4 vpRel2 = proj * viewOnlyRot2;
+            sendMat4(usvo_mvp, vpRel2);
+            glUniform3f(usvo_lightDir, lightDir.x, lightDir.y, lightDir.z);
+            glUniform1f(glGetUniformLocation(svoProg, "uTime"), time);
+
+            // SVO local frame relative to the planet's internal space
+            Vec3 E = svoManager->region.east;
+            Vec3 U = svoManager->region.up;
+            Vec3 N = svoManager->region.north;
+            Vec3 OLocal = svoManager->region.centerNorm * svoManager->region.centerRadius;
+
+            // Project planet-local vectors into Camera-Inertial space
+            Vec3 wE = axisX * E.x + axisY * E.y + axisZ * E.z;
+            Vec3 wU = axisX * U.x + axisY * U.y + axisZ * U.z;
+            Vec3 wN = axisX * N.x + axisY * N.y + axisZ * N.z;
+            Vec3 wO = axisX * OLocal.x + axisY * OLocal.y + axisZ * OLocal.z;
+            
+            wE = wE.normalized(); wU = wU.normalized(); wN = wN.normalized();
+            Vec3 wOCamRel = wO + planetCenterRel;
+
+            Mat4 svoMat;
+            svoMat.m[0] = wE.x; svoMat.m[1] = wE.y; svoMat.m[2] = wE.z; svoMat.m[3] = 0;
+            svoMat.m[4] = wU.x; svoMat.m[5] = wU.y; svoMat.m[6] = wU.z; svoMat.m[7] = 0;
+            svoMat.m[8] = wN.x; svoMat.m[9] = wN.y; svoMat.m[10] = wN.z; svoMat.m[11] = 0;
+            svoMat.m[12]= wOCamRel.x; svoMat.m[13]= wOCamRel.y; svoMat.m[14]= wOCamRel.z; svoMat.m[15]= 1;
+
+            sendMat4(usvo_svoMat, svoMat);
+
+            static int debugCounter = 0;
+            if (debugCounter++ % 120 == 0) {
+                printf("[SVO-RENDER] CenterCamRel: (%.2f, %.2f, %.2f) km | Dist: %.2f km\n", 
+                       wOCamRel.x, wOCamRel.y, wOCamRel.z, wOCamRel.length());
+            }
+
+            // DEBUG: Force SVO to render on top of everything (ignore depth)
+            glDisable(GL_DEPTH_TEST);
+            glDepthFunc(GL_ALWAYS);
+
+            // DEBUG 2: Draw a simple line from camera to SVO center using fixed function pipeline
+            glUseProgram(0);
+            glMatrixMode(GL_PROJECTION); 
+            float projArr[16];
+            for(int i=0; i<16; i++) projArr[i] = (float)proj.m[i];
+            glLoadMatrixf(projArr);
+            
+            glMatrixMode(GL_MODELVIEW); 
+            glLoadIdentity(); // Camera is at origin (camera-relative)
+            
+            glBegin(GL_LINES);
+            glColor3f(1.0f, 1.0f, 1.0f); // White line to highlight
+            glVertex3f(0.0f, 0.0f, 0.0f); // From Camera
+            glVertex3f((float)wOCamRel.x, (float)wOCamRel.y, (float)wOCamRel.z); // To SVO Center
+            glEnd();
+            
+            glUseProgram(svoProg); // Back to SVO program for triangles
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+            for (auto& chunk : svoManager->chunks) {
+                if (!chunk.active || chunk.indexCount == 0) continue;
+                glBindVertexArray(chunk.vao);
+                glDrawElements(GL_TRIANGLES, chunk.indexCount, GL_UNSIGNED_INT, 0);
+                glBindVertexArray(0);
+            }
+            glEnable(GL_DEPTH_TEST);
+            glDepthFunc(GL_LESS);
+            glDisable(GL_BLEND);
+        }
+
+        // --- VEGETATION PASS (If close enough) ---
         if (camAlt < 300.0f) { // 300km threshold
             std::vector<Vegetation::InstanceData> instances;
             Vec3 camNorm = (camPos - planetCenter).normalized();

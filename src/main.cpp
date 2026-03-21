@@ -1107,6 +1107,49 @@ int main() {
     }
     p_was_pressed = (shift_now && p_now);
 
+    // --- Ensure Rocket starts perfectly on the Terrain/SVO surface ---
+    if (r3d->terrain) {
+        Vec3 localUp(rocket_state.surf_px, rocket_state.surf_py, rocket_state.surf_pz);
+        localUp = localUp.normalized();
+        Quat unalign_from_z = Quat::fromAxisAngle(Vec3(1.0f, 0.0f, 0.0f), (float)(PI / 2.0));
+        Vec3 qLocal = unalign_from_z.rotate(localUp);
+        float terrH = r3d->terrain->getHeight(qLocal);
+        rocket_state.terrain_altitude = (double)terrH * 1000.0; // km to meters
+        
+        static bool terrain_adjusted = false;
+        if (rocket_state.status == PRE_LAUNCH && !terrain_adjusted) {
+            double new_R = EARTH_RADIUS + rocket_state.terrain_altitude;
+            rocket_state.surf_px = localUp.x * new_R;
+            rocket_state.surf_py = localUp.y * new_R;
+            rocket_state.surf_pz = localUp.z * new_R;
+            terrain_adjusted = true;
+            cout << "[TERRAIN] Adjusted launchpad altitude by " << rocket_state.terrain_altitude << " meters to match SVO bounds." << endl;
+        }
+    }
+
+    // --- Shift+V 切换 SVO 系统 (Phase 1 测试) ---
+    static bool v_was_pressed = false;
+    bool v_now = glfwGetKey(window, GLFW_KEY_V) == GLFW_PRESS;
+    if (shift_now && v_now && !v_was_pressed) {
+        if (r3d->svoManager) {
+            if (r3d->svoManager->hasActiveChunks()) {
+                r3d->svoManager->deactivate();
+                cout << "[SVO] System Deactivated (Quadtree active)" << endl;
+            } else {
+                // Quadtree local space expects Y-up, but surf_p is Z-up. 
+                // We must apply the inverse of `align_to_z` (from drawPlanet) to rotate it to local space.
+                Vec3 subNormal(rocket_state.surf_px, rocket_state.surf_py, rocket_state.surf_pz);
+                subNormal = subNormal.normalized();
+                Quat unalign_from_z = Quat::fromAxisAngle(Vec3(1.0f, 0.0f, 0.0f), (float)(PI / 2.0));
+                subNormal = unalign_from_z.rotate(subNormal);
+                
+                r3d->svoManager->activate(subNormal, EARTH_RADIUS * 0.001, r3d->terrain);
+                cout << "[SVO] System Activated at sub-point!" << endl;
+            }
+        }
+    }
+    v_was_pressed = (shift_now && v_now);
+
     // 全局帧计数器 (用于限制控制台打印频率)
     static int frame = 0;
     frame++;
@@ -2835,8 +2878,8 @@ int main() {
           Vec3 s_pos((float)rocket_state.surf_px, (float)rocket_state.surf_py, (float)rocket_state.surf_pz);
           // Normalized local up vector
           Vec3 localUp = s_pos.normalized();
-          // Position on surface (exactly at radius)
-          Vec3 s_surf = localUp * (float)body.radius;
+          // Position on surface (exactly at terrain elevation)
+          Vec3 s_surf = localUp * s_pos.length();
           
           // Rotate to inertial frame
           Vec3 i_surf = full_rot.rotate(s_surf);

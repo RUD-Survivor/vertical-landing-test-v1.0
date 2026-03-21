@@ -247,6 +247,7 @@ struct RocketState {
     // Physics simulation metadata
     double sim_time = 0.0;
     double altitude = 0.0;
+    double terrain_altitude = 0.0; // Dynamic ground level
     double velocity = 0.0;    // Radial velocity (vertical)
     double local_vx = 0.0;    // Tangential velocity (horizontal against terrain)
     
