@@ -2,6 +2,7 @@
 #include "math/math3d.h"
 #include "tectonic_sim.h"
 #include "climate_sim.h"
+#include "hydro_sim.h"
 #include <vector>
 #include <memory>
 #include <cmath>
@@ -84,6 +85,7 @@ public:
     float maxElevation = 25.0f; // 25km max height (Kilometers)
     Tectonic::TectonicSimulator* sim = nullptr;
     Climate::ClimateSimulator* climateSim = nullptr;
+    Hydro::HydroSimulator* hydroSim = nullptr;
     std::unique_ptr<TerrainNode> roots[6];
     
     QuadtreeTerrain(float radius) : planetRadius(radius) {
@@ -94,6 +96,20 @@ public:
         // Run Climate Simulation on finalized terrain
         climateSim = new Climate::ClimateSimulator(512, 256);
         climateSim->simulate(sim->gridHeight);
+
+        // Run Hydrology Simulation (Rivers/Lakes)
+        hydroSim = new Hydro::HydroSimulator(512, 256);
+        hydroSim->simulate(sim->gridHeight, climateSim->data.precipitation, climateSim->data.temperature);
+        
+        // Final Sync: Inject hydrology data back into climate map for GPU visualization
+        // Pack Strahler Order (Integer) and Log-Accumulation (Fraction) into ALPHA channel
+        for (int i = 0; i < 512 * 256; i++) {
+            float s = (float)hydroSim->data.strahler[i];
+            float acc = hydroSim->data.accumulation[i];
+            float logAcc = acc > 0.0f ? std::min(0.95f, log10f(1.0f + acc) / 6.0f) : 0.0f;
+            climateSim->data.moisture[i] = s + logAcc;
+        }
+        climateSim->bake(); // Re-bake with river data in Alpha channel
 
         // Initialize 6 faces of the cube
         // +X, -X, +Y, -Y, +Z, -Z

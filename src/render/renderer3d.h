@@ -1856,6 +1856,7 @@ public:
       uniform float uSunVisibility; // Global sun visibility from camera (0 to 1)
       uniform float uRingInner; // Ring inner radius (local units)
       uniform float uRingOuter; // Ring outer radius (local units)
+      uniform float uShowClouds; // Toggle clouds
       
       out vec4 FragColor;
 
@@ -2025,6 +2026,7 @@ public:
       }
       
       float cloudDensity(vec3 p, float h, bool highDetail) {
+          if (uShowClouds < 0.5) return 0.0;
           if (h < gCloudMinAlt || h > gCloudMaxAlt) return 0.0;
           
           vec3 sph = normalize(p - uPlanetCenter);
@@ -3222,12 +3224,58 @@ R"(
                 float press = (climate.b - 990.0) / 45.0; // 990 to 1035
                 vColor = mix(vec3(0,0,1), vec3(1,1,1), smoothstep(0.0, 0.5, press));
                 vColor = mix(vColor, vec3(1,0,0), smoothstep(0.5, 1.0, press));
+            } else if (uViewMode == 4) {
+                // Hydrology: River network (Strahler Hierarchy)
+                float strahler = floor(climate.a);
+                float logAcc = fract(climate.a);
+                
+                // Background
+                vColor = vec3(0.9, 0.85, 0.75);
+                
+                // Discrete thresholds to ensure 1-pixel skeletal lines
+                if (strahler >= 1.0) {
+                    // Color based on stream order
+                    vec3 branchColor = vec3(0.4, 0.7, 1.0);     // Light blue/Headwaters
+                    vec3 trunkColor = vec3(0.0, 0.15, 0.6);   // Deep blue/Major trunks
+                    vColor = mix(branchColor, trunkColor, smoothstep(1.0, 7.0, strahler));
+                }
             }
             
             // Apply simple shading to the map
             float light = 0.5 + 0.5 * max(dot(N, L), 0.0);
             FragColor = vec4(vColor * light, 1.0);
             return;
+        }
+
+        // --- RIVER OVERLAY FOR NORMAL RENDERING ---
+        {
+            float phi = acos(clamp(vLocalPos.y / length(vLocalPos), -1.0, 1.0));
+            float theta = atan(vLocalPos.z, vLocalPos.x);
+            vec2 climUV = vec2(theta / (2.0 * 3.14159) + 0.5, phi / 3.14159);
+            
+            // Domain Warping: Use high-frequency noise to organic-ize the low-res grid sampling
+            // This prevents the "rectangular blocks" when zooming in.
+            float organicJitter = warpedNoise(vLocalPos * 12.0) * 0.003;
+            vec2 searchUV = climUV + vec2(organicJitter);
+            
+            float hydroData = texture(uClimateMap, searchUV).a;
+            float strahler = floor(hydroData);
+            
+            // Major rivers only (Strahler Order 3+)
+            if (strahler >= 3.0 && vElevation > 0.445) {
+                // Procedural detail: use high-frequency terrain noise to define the river "spine"
+                // within the low-res hydrology area. This carves the fat 512-grid block into a fine line.
+                float spine = warpedNoise(vLocalPos * 150.0 + organicJitter * 20.0);
+                float widthThreshold = 0.52 - (strahler - 3.0) * 0.04;
+                
+                // Combine low-res hydrology skeleton with high-res noise spine
+                float riverMask = smoothstep(widthThreshold + 0.05, widthThreshold, spine);
+                
+                if (riverMask > 0.01) {
+                    vec3 riverColor = mix(vec3(0.05, 0.35, 0.75), vec3(0.0, 0.05, 0.25), smoothstep(3.0, 7.0, strahler));
+                    result = mix(result, riverColor, riverMask * 0.85);
+                }
+            }
         }
 
         // --- NIGHT SIDE CITY LIGHTS ---
@@ -3967,7 +4015,7 @@ R"(
 
   void drawAtmosphere(const Mesh& sphereMesh, const Mat4& model, 
                       const Vec3& camPos, const Vec3& lightDir, 
-                      const Vec3& planetCenter, float surfaceRadius, float outerRadius, double time, int planetIdx, float sunVisibility) {
+                      const Vec3& planetCenter, float surfaceRadius, float outerRadius, double time, int planetIdx, float sunVisibility, bool showClouds) {
     glUseProgram(atmoProg);
 
     Mat4 mvp = proj * view * model;
@@ -4025,6 +4073,9 @@ R"(
     // Pass frame index for animated noise (TAA jitter)
     GLint u_frameIdx = glGetUniformLocation(atmoProg, "uFrameIndex");
     glUniform1i(u_frameIdx, taaFrameIndex);
+
+    // Pass cloud toggle
+    glUniform1f(glGetUniformLocation(atmoProg, "uShowClouds"), showClouds ? 1.0f : 0.0f);
 
     // --- Graphics State for Volumetric Shell ---
     // Depth test OFF: raymarching handles planet occlusion mathematically.

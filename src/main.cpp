@@ -741,7 +741,10 @@ int main() {
   // Keep a reference to the assembly for rendering
   const RocketAssembly& assembly = builder_state.assembly;
 
-  int cam_mode_3d = 0; // 0=轨道 (优化型), 1=跟踪, 2=全景
+  int cam_mode_3d = 0; // 0=轨道 (优化型), 1=跟踪, 2=全景, 3=自由视角
+  static double free_cam_px = 0, free_cam_py = 0, free_cam_pz = 0;
+  static float free_cam_move_speed = 0.0f;
+  static bool free_cam_init = false;
   static bool c_was_pressed = false;
   // 相机参数
   Quat cam_quat; // 自由模式四元数 (用于全景和追踪微调)
@@ -872,32 +875,71 @@ int main() {
     // --- C 键切换 3D 视角 ---
     bool c_now = glfwGetKey(window, GLFW_KEY_C) == GLFW_PRESS;
     if (c_now && !c_was_pressed) {
-      cam_mode_3d = (cam_mode_3d + 1) % 3;
-      const char* names[] = {"Orbit", "Chase", "Panorama"};
+      cam_mode_3d = (cam_mode_3d + 1) % 4;
+      const char* names[] = {"Orbit", "Chase", "Panorama", "Free"};
       cout << ">> Camera: " << names[cam_mode_3d] << endl;
+      if (cam_mode_3d == 3) free_cam_init = false;
     }
     c_was_pressed = c_now;
 
     // --- 鼠标轨道控制 (3D模式下右键拖动) ---
-    {
       double mx, my;
       glfwGetCursorPos(window, &mx, &my);
       bool rmb = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
-      if (rmb) {
+      bool lmb = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+
+      if (rmb || lmb) {
         if (mouse_dragging) {
           float dx = (float)(mx - prev_mx) * 0.003f;
           float dy = (float)(my - prev_my) * 0.003f;
           
           if (cam_mode_3d == 0) {
-              // 轨道模式：更新球坐标
-              orbit_yaw -= dx;
-              orbit_pitch = std::max(-1.5f, std::min(1.5f, orbit_pitch + dy));
+              // 轨道模式：更新球坐标 (仅 RMB)
+              if (rmb) {
+                  orbit_yaw -= dx;
+                  orbit_pitch = std::max(-1.5f, std::min(1.5f, orbit_pitch + dy));
+              }
+          } else if (cam_mode_3d == 3) {
+              // 自由视角 (Free Camera)
+              if (lmb) {
+                  // 左键：改变视角方向 (Look around)
+                  Vec3 local_up = cam_quat.rotate(Vec3(0, 1, 0));
+                  Vec3 local_right = cam_quat.rotate(Vec3(1, 0, 0));
+                  Quat q_yaw = Quat::fromAxisAngle(local_up, -dx);
+                  Quat q_pitch = Quat::fromAxisAngle(local_right, -dy);
+                  cam_quat = (q_yaw * q_pitch * cam_quat).normalized();
+              } else if (rmb) {
+                  // 右键：绕着 SOI 星球旋转，保持中心天体在屏幕位置不变
+                  Vec3 rel_v((float)free_cam_px, (float)free_cam_py, (float)free_cam_pz);
+                  float dist = rel_v.length();
+                  if (dist > 1.0f) {
+                      Vec3 planet_z(0, 0, 1);
+                      Vec3 pos_norm = rel_v / dist;
+                      Vec3 orbit_right = planet_z.cross(pos_norm).normalized();
+                      if (orbit_right.length() < 0.01f) orbit_right = Vec3(1,0,0);
+                      
+                      Quat q_orbit_yaw = Quat::fromAxisAngle(planet_z, -dx);
+                      Quat q_orbit_pitch = Quat::fromAxisAngle(orbit_right, -dy);
+                      Quat q_total = q_orbit_yaw * q_orbit_pitch;
+                      
+                      // 旋转位置
+                      Vec3 new_pos = q_total.rotate(rel_v);
+                      free_cam_px = (double)new_pos.x;
+                      free_cam_py = (double)new_pos.y;
+                      free_cam_pz = (double)new_pos.z;
+                      
+                      // 补偿相机旋转以保持视野中的天体位置不变
+                      cam_quat = (q_total * cam_quat).normalized();
+                  }
+              }
           } else {
-              // 其他模式：保持原有的自由四元数旋转
-              Quat yaw_rot = Quat::fromAxisAngle(Vec3(0.0f, 0.0f, 1.0f), -dx);
-              Vec3 cam_right = cam_quat.rotate(Vec3(1.0f, 0.0f, 0.0f));
-              Quat pitch_rot = Quat::fromAxisAngle(cam_right, -dy);
-              cam_quat = (yaw_rot * pitch_rot * cam_quat).normalized();
+              // Panorama / Chase (仅 RMB)
+              if (rmb) {
+                  Quat yaw_rot = Quat::fromAxisAngle(Vec3(0.0f, 0.0f, 1.0f), -dx);
+                  Vec3 cam_right = cam_quat.rotate(Vec3(1.0f, 0.0f, 0.0f));
+                  Quat pitch_rot = Quat::fromAxisAngle(cam_right, -dy);
+                  cam_quat = (yaw_rot * pitch_rot * cam_quat).normalized();
+              }
           }
         }
         mouse_dragging = true;
@@ -907,6 +949,18 @@ int main() {
       prev_mx = mx;
       prev_my = my;
 
+      // 自由视角 EQ 键旋转 (Roll)
+      if (cam_mode_3d == 3) {
+          if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) {
+              Quat q_roll = Quat::fromAxisAngle(cam_quat.rotate(Vec3(0, 0, 1)), 0.03f);
+              cam_quat = (q_roll * cam_quat).normalized();
+          }
+          if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS) {
+              Quat q_roll = Quat::fromAxisAngle(cam_quat.rotate(Vec3(0, 0, 1)), -0.03f);
+              cam_quat = (q_roll * cam_quat).normalized();
+          }
+      }
+
       // 滚轮缩放：根据当前模式分离缩放级别
       if (g_scroll_y != 0.0f) {
         if (cam_mode_3d == 2) {
@@ -914,6 +968,12 @@ int main() {
             cam_zoom_pan *= powf(0.85f, g_scroll_y);
             if (cam_zoom_pan < 0.05f) cam_zoom_pan = 0.05f;
             if (cam_zoom_pan > 500000.0f) cam_zoom_pan = 500000.0f; 
+        } else if (cam_mode_3d == 3) {
+            // 自由视角：决定前进速度
+            if (free_cam_move_speed < 1.0f) free_cam_move_speed = 1.0f;
+            free_cam_move_speed *= powf(1.25f, g_scroll_y);
+            if (free_cam_move_speed < 1.1f) free_cam_move_speed = 0.0f;
+            if (free_cam_move_speed > 1e11f) free_cam_move_speed = 1e11f;
         } else {
             // 轨道/跟踪模式：限制缩放防止火箭消失
             cam_zoom_chase *= powf(0.85f, g_scroll_y);
@@ -922,7 +982,6 @@ int main() {
         }
         g_scroll_y = 0.0f;
       }
-    }
 
     // --- Maneuver Node Input Handling (Basic) ---
     static int dragging_handle = -1;
@@ -1037,6 +1096,17 @@ int main() {
       k_was_pressed = false;
     }
     
+    // --- Shift+P 切换云层显示 ---
+    static bool show_clouds = true;
+    static bool p_was_pressed = false;
+    bool shift_now = glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS;
+    bool p_now = glfwGetKey(window, GLFW_KEY_P) == GLFW_PRESS;
+    if (shift_now && p_now && !p_was_pressed) {
+        show_clouds = !show_clouds;
+        cout << "[CLOUDS] " << (show_clouds ? "ON" : "OFF") << endl;
+    }
+    p_was_pressed = (shift_now && p_now);
+
     // 全局帧计数器 (用于限制控制台打印频率)
     static int frame = 0;
     frame++;
@@ -1090,12 +1160,13 @@ int main() {
                            glfwGetKey(window, GLFW_KEY_LEFT_BRACKET) == GLFW_PRESS;
     manual.throttle_max = glfwGetKey(window, GLFW_KEY_Z) == GLFW_PRESS;
     manual.throttle_min = glfwGetKey(window, GLFW_KEY_X) == GLFW_PRESS;
-    manual.yaw_left = glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS;
-    manual.yaw_right = glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS;
-    manual.pitch_up = glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS;
-    manual.pitch_down = glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS;
-    manual.roll_left = glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS;
-    manual.roll_right = glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS;
+    // 在自由视角模式下，WASD 键被用于相机移动，仅保留方向键给火箭姿态。
+    manual.yaw_left   = (cam_mode_3d == 3) ? (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS) : (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS);
+    manual.yaw_right  = (cam_mode_3d == 3) ? (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) : (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS);
+    manual.pitch_up   = (cam_mode_3d == 3) ? (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS) : (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS);
+    manual.pitch_down = (cam_mode_3d == 3) ? (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS) : (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS);
+    manual.roll_left  = (cam_mode_3d == 3) ? false : glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS;
+    manual.roll_right = (cam_mode_3d == 3) ? false : glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS;
 
     // --- 物理更新 ---
     if (time_warp > 1000) {
@@ -1382,10 +1453,36 @@ int main() {
       // 决定渲染世界的绝对中心：Camera Target
       if (cam_mode_3d == 0 || cam_mode_3d == 1) {
           ro_x = r_px; ro_y = r_py; ro_z = r_pz;
-      } else {
+      } else if (cam_mode_3d == 2) {
           ro_x = SOLAR_SYSTEM[focus_target].px * ws_d; 
           ro_y = SOLAR_SYSTEM[focus_target].py * ws_d; 
           ro_z = SOLAR_SYSTEM[focus_target].pz * ws_d; 
+      } else {
+          // Free Camera Mode (cam_mode_3d == 3)
+          if (!free_cam_init) {
+              free_cam_px = rocket_state.px;
+              free_cam_py = rocket_state.py;
+              free_cam_pz = rocket_state.pz;
+              free_cam_init = true;
+          }
+          // Apply movement based on WASD keys
+          float fwd_move = 0.0f;
+          float side_move = 0.0f;
+          if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) fwd_move += 1.0f;
+          if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) fwd_move -= 1.0f;
+          if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) side_move -= 1.0f;
+          if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) side_move += 1.0f;
+
+          Vec3 gaze_dir = cam_quat.rotate(Vec3(0, 0, -1));
+          Vec3 side_dir = cam_quat.rotate(Vec3(1, 0, 0));
+          
+          free_cam_px += (double)(gaze_dir.x * fwd_move + side_dir.x * side_move) * (double)free_cam_move_speed * dt;
+          free_cam_py += (double)(gaze_dir.y * fwd_move + side_dir.y * side_move) * (double)free_cam_move_speed * dt;
+          free_cam_pz += (double)(gaze_dir.z * fwd_move + side_dir.z * side_move) * (double)free_cam_move_speed * dt;
+          
+          ro_x = (free_cam_px + SOLAR_SYSTEM[current_soi_index].px) * ws_d;
+          ro_y = (free_cam_py + SOLAR_SYSTEM[current_soi_index].py) * ws_d;
+          ro_z = (free_cam_pz + SOLAR_SYSTEM[current_soi_index].pz) * ws_d;
       }
       
       // 计算相对于渲染中心的 3D 物体坐标 (直接转成 float 后不会再有远距离网格撕裂)
@@ -1499,7 +1596,7 @@ int main() {
         camEye_rel = renderRocketPos + chase_base + slight_off * (chase_dist * 0.05f);
         camTarget_rel = renderRocketPos + rocketDir * (rh * 3.0f);
         camUpVec = rocketUp;
-      } else {
+      } else if (cam_mode_3d == 2) {
         float base_pan_radius = (float)SOLAR_SYSTEM[focus_target].radius * (float)ws_d;
         float pan_dist = fmaxf(base_pan_radius * 4.0f, earth_r * 2.0f) * cam_zoom_pan;
         if (focus_target == 0) pan_dist = sun_radius * 4.0f * cam_zoom_pan;
@@ -1510,6 +1607,11 @@ int main() {
                          (float)(SOLAR_SYSTEM[focus_target].pz * ws_d - ro_z));
         camEye_rel = renderFocus + cam_offset;
         camTarget_rel = renderFocus;
+        camUpVec = cam_quat.rotate(Vec3(0.0f, 1.0f, 0.0f));
+      } else {
+        // Free Camera (cam_mode_3d == 3)
+        camEye_rel = Vec3(0, 0, 0); // Origin at camera
+        camTarget_rel = cam_quat.rotate(Vec3(0.0f, 0.0f, -1.0f));
         camUpVec = cam_quat.rotate(Vec3(0.0f, 1.0f, 0.0f));
       }
 
@@ -1689,7 +1791,7 @@ int main() {
               atmoModel = Mat4::translate(renderPlanet) * atmoModel;
 
               // New Volumetric Scattering integration with animated hardcore clouds
-              r3d->drawAtmosphere(earthMesh, atmoModel, camEye_rel, r3d->lightDir, renderPlanet, r, atmo_radius, (float)rocket_state.sim_time, (int)i, (float)day_blend);
+              r3d->drawAtmosphere(earthMesh, atmoModel, camEye_rel, r3d->lightDir, renderPlanet, r, atmo_radius, (float)rocket_state.sim_time, (int)i, (float)day_blend, show_clouds);
           }
           if (b.type == RINGED_GAS_GIANT) {
               Mat4 ringModel = Mat4::scale(Vec3(r, r, r)); // Mesh is now pre-scaled to R_planet ratios
@@ -3093,6 +3195,16 @@ int main() {
     renderer->drawText(0.0f, 0.85f, "[MISSION CONTROL]", 0.016f, 0.4f, 1.0f, 0.4f, hud_opacity, true, Renderer::CENTER);
     renderer->drawText(0.0f, 0.80f, rocket_state.mission_msg.c_str(), 0.015f, 0.8f, 0.8f, 1.0f, hud_opacity, true, Renderer::CENTER);
 
+    // Free Camera Speed Display
+    if (cam_mode_3d == 3) {
+      char speed_buf[64];
+      if (free_cam_move_speed > 1000000.0f)
+          snprintf(speed_buf, sizeof(speed_buf), "FREE CAM SPEED: %.2f km/s", free_cam_move_speed / 1000.0f);
+      else
+          snprintf(speed_buf, sizeof(speed_buf), "FREE CAM SPEED: %.1f m/s", free_cam_move_speed);
+      renderer->drawText(0.0f, 0.75f, speed_buf, 0.015f, 0.4f, 1.0f, 1.0f, 0.9f, true, Renderer::CENTER);
+    }
+
     // Time Display & Toggle
     float time_y = 0.92f;
     float time_w = 0.35f;
@@ -3322,10 +3434,10 @@ int main() {
         float climate_btn_y = galaxy_btn_y - 0.06f;
         bool hover_climate = (hmouse_x >= adv_btn_x - adv_btn_w/2 && hmouse_x <= adv_btn_x + adv_btn_w/2 && hmouse_y >= climate_btn_y - adv_btn_h/2 && hmouse_y <= climate_btn_y + adv_btn_h/2);
         if (hover_climate && hlmb && !hlmb_prev) {
-            r3d->setClimateViewMode((r3d->climateViewMode + 1) % 4);
+            r3d->setClimateViewMode((r3d->climateViewMode + 1) % 5);
         }
         
-        static const char* climate_mode_names[] = {"NORMAL", "TEMPERATURE", "PRECIPITATION", "PRESSURE"};
+        static const char* climate_mode_names[] = {"NORMAL", "TEMPERATURE", "PRECIPITATION", "PRESSURE", "HYDROLOGY"};
         renderer->addRect(adv_btn_x, climate_btn_y, adv_btn_w, adv_btn_h, 0.4f, 0.2f, 0.6f, hover_climate ? 0.9f : 0.7f);
         renderer->drawText(adv_btn_x, climate_btn_y, "CLIMATE VIEW", 0.010f, 1, 1, 1, 1.0f, true, Renderer::CENTER);
         renderer->drawText(adv_btn_x, climate_btn_y - 0.022f, climate_mode_names[r3d->climateViewMode], 0.007f, 0.7f, 0.9f, 1.0f, 0.9f, true, Renderer::CENTER);
