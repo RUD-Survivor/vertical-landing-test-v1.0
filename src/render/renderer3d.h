@@ -422,6 +422,10 @@ public:
   GLint ut_nodePos = -1, ut_nodeSide = -1, ut_nodeUp = -1; // For patch warping
   GLint ut_planetCenterRel = -1; // New: Planet center relative to camera
   GLint ut_tectonicMap = -1;    // New: Baked Macro-Skeleton from simulation
+  GLint ut_climateMap = -1;     // New: Baked Climate Data (Temp, Precip, Pressure)
+  GLint ut_viewMode = -1;       // New: Visualization Mode (0: Normal, 1: Temp, 2: Precip, 3: Pressure)
+  int climateViewMode = 0;       // Current view mode
+  void setClimateViewMode(int mode) { climateViewMode = mode; }
   GLuint vegProg = 0;
   GLint uv_vp = -1, uv_proj = -1, uv_lightDir = -1, uv_viewPos = -1, uv_time = -1;
   GLuint treeVAO = 0, treeVBO = 0, treeEBO = 0, treeInstanceVBO = 0;
@@ -3023,8 +3027,11 @@ R"(
       in float vElevation;
 
       uniform vec3 uLightDir;
-      uniform vec3 uCamPos; // Use uCamPos for consistency, though we have vRelViewPos
+      uniform vec3 uCamPos;
       uniform float uTime;
+      uniform sampler2D uTectonicMap;
+      uniform sampler2D uClimateMap;
+      uniform int uViewMode; // 0: Normal, 1: Temperature, 2: Precipitation, 3: Pressure
 
       out vec4 FragColor;
 
@@ -3192,27 +3199,57 @@ R"(
         float ambient = 0.12; // Higher ambient for better visibility in shadows
         vec3 result = surfColor * (ambient + diff * (1.0 - ambient)) + vec3(spec);
         
-        // --- NIGHT SIDE CITY LIGHTS & MICRO-LIGHTS ---
-        float NdotL = dot(normalize(vNormal), L);
-        if (NdotL < 0.05 && waterAlpha < 0.5) {
-            float nightFade = smoothstep(0.05, -0.10, NdotL);
+        // --- CLIMATE VISUALIZATION OVERLAY ---
+        if (uViewMode > 0) {
+            float phi = acos(clamp(vLocalPos.y / length(vLocalPos), -1.0, 1.0));
+            float theta = atan(vLocalPos.z, vLocalPos.x);
+            vec2 climUV = vec2(theta / (2.0 * 3.14159) + 0.5, phi / 3.14159);
+            vec4 climate = texture(uClimateMap, climUV);
             
-            // Macro city lights (visible from orbit)
-            float city1 = noise3d(vLocalPos * 15.0);
-            float city2 = noise3d(vLocalPos * 35.0 + vec3(7.7));
-            float habitability = smoothstep(0.44, 0.48, vElevation) * smoothstep(0.6, 0.4, vElevation);
-            float cityBrightness = 0.0;
-            if (city1 > 0.58) cityBrightness += (city1 - 0.58) * 5.0;
-            if (city2 > 0.65) cityBrightness += (city2 - 0.65) * 2.0;
+            vec3 vColor = vec3(0.0);
+            if (uViewMode == 1) {
+                // Temperature: Red (Hot) to Blue (Cold)
+                float t = (climate.r + 30.0) / 70.0; // Scaled -30 to 40
+                vColor = mix(vec3(0,0,1), vec3(0,1,0), smoothstep(0.0, 0.45, t));
+                vColor = mix(vColor, vec3(1,0,0), smoothstep(0.45, 1.0, t));
+            } else if (uViewMode == 2) {
+                // Precipitation: Blue intensity
+                float p = climate.g / 3000.0; // Scaled to 3000mm
+                vColor = mix(vec3(0.9, 0.9, 0.7), vec3(0.1, 0.4, 0.9), smoothstep(0.0, 0.3, p));
+                vColor = mix(vColor, vec3(0.0, 0.1, 0.4), smoothstep(0.3, 1.0, p));
+            } else if (uViewMode == 3) {
+                // Pressure: Red (High) to Blue (Low)
+                float press = (climate.b - 990.0) / 45.0; // 990 to 1035
+                vColor = mix(vec3(0,0,1), vec3(1,1,1), smoothstep(0.0, 0.5, press));
+                vColor = mix(vColor, vec3(1,0,0), smoothstep(0.5, 1.0, press));
+            }
             
-            // Micro city lights (individual windows/lamps visible when extremely close)
-            float microLights = noise3d(vLocalPos * 150000.0) * noise3d(vLocalPos * 80000.0);
-            float mlFade = clamp(1.0 - (distToCam / 0.5), 0.0, 1.0); // Only within 500m
-            if (microLights > 0.45) cityBrightness += (microLights - 0.45) * 15.0 * mlFade;
+            // Apply simple shading to the map
+            float light = 0.5 + 0.5 * max(dot(N, L), 0.0);
+            FragColor = vec4(vColor * light, 1.0);
+            return;
+        }
 
-            cityBrightness *= habitability * nightFade;
-            vec3 cityColor = mix(vec3(1.0, 0.7, 0.2), vec3(1.0, 0.9, 0.6), city2);
-            result += cityColor * min(cityBrightness, 1.5) * 0.9;
+        // --- NIGHT SIDE CITY LIGHTS ---
+        if (uViewMode == 0) {
+            float nightFade = smoothstep(0.15, -0.15, dot(N, L));
+            if (nightFade > 0.001) {
+                float city1 = noise3d(vLocalPos * 15.0);
+                float city2 = noise3d(vLocalPos * 35.0 + vec3(7.7));
+                float habitability = smoothstep(0.44, 0.48, vElevation) * smoothstep(0.6, 0.4, vElevation);
+                float cityBrightness = 0.0;
+                if (city1 > 0.58) cityBrightness += (city1 - 0.58) * 5.0;
+                if (city2 > 0.65) cityBrightness += (city2 - 0.65) * 2.0;
+                
+                // Micro city lights (individual windows/lamps visible when extremely close)
+                float microLights = noise3d(vLocalPos * 150000.0) * noise3d(vLocalPos * 80000.0);
+                float mlFade = clamp(1.0 - (distToCam / 0.5), 0.0, 1.0); // Only within 500m
+                if (microLights > 0.45) cityBrightness += (microLights - 0.45) * 15.0 * mlFade;
+
+                cityBrightness *= habitability * nightFade;
+                vec3 cityColor = mix(vec3(1.0, 0.7, 0.2), vec3(1.0, 0.9, 0.6), city2);
+                result += cityColor * min(cityBrightness, 1.5) * 0.9;
+            }
         }
 
         // Atmospheric haze simulation (very crude, based on distance/elevation)
@@ -3235,6 +3272,8 @@ R"(
     ut_nodeUp = glGetUniformLocation(terrainProg, "uNodeUp");
     ut_planetCenterRel = glGetUniformLocation(terrainProg, "uPlanetCenterRel");
     ut_tectonicMap = glGetUniformLocation(terrainProg, "uTectonicMap");
+    ut_climateMap = glGetUniformLocation(terrainProg, "uClimateMap");
+    ut_viewMode = glGetUniformLocation(terrainProg, "uViewMode");
 
     // --- Vegetation Shader (Instanced) ---
     const char* vegVertSrc = R"(
@@ -3760,6 +3799,14 @@ R"(
             glBindTexture(GL_TEXTURE_2D, terrain->sim->textureID);
             glUniform1i(ut_tectonicMap, 4);
         }
+        
+        // --- Climate Simulation Texture ---
+        if (terrain && terrain->climateSim && terrain->getClimateTexture() != 0) {
+            glActiveTexture(GL_TEXTURE5);
+            glBindTexture(GL_TEXTURE_2D, terrain->getClimateTexture());
+            glUniform1i(ut_climateMap, 5);
+        }
+        glUniform1i(ut_viewMode, climateViewMode);
         
         // 1. Planet center from model matrix translation components
         Vec3 planetCenter(model.m[12], model.m[13], model.m[14]);

@@ -1,6 +1,7 @@
 #pragma once
 #include "math/math3d.h"
 #include "tectonic_sim.h"
+#include "climate_sim.h"
 #include <vector>
 #include <memory>
 #include <cmath>
@@ -82,12 +83,17 @@ public:
     float planetRadius;
     float maxElevation = 25.0f; // 25km max height (Kilometers)
     Tectonic::TectonicSimulator* sim = nullptr;
+    Climate::ClimateSimulator* climateSim = nullptr;
     std::unique_ptr<TerrainNode> roots[6];
     
     QuadtreeTerrain(float radius) : planetRadius(radius) {
         // Reduced simulation resolution (512x256) for massive performance boost
         sim = new Tectonic::TectonicSimulator(512, 256);
-        sim->simulate(250); // Increased generations to 250 for full continental merging
+        sim->simulate(80); // 80 generations of tectonic evolution
+
+        // Run Climate Simulation on finalized terrain
+        climateSim = new Climate::ClimateSimulator(512, 256);
+        climateSim->simulate(sim->gridHeight);
 
         // Initialize 6 faces of the cube
         // +X, -X, +Y, -Y, +Z, -Z
@@ -138,6 +144,10 @@ public:
     Vec3 getPosition(const Vec3& normalizedPos) {
         float h = getHeight(normalizedPos);
         return normalizedPos * (planetRadius + h);
+    }
+
+    GLuint getClimateTexture() {
+        return climateSim ? climateSim->data.textureID : 0;
     }
 };
 

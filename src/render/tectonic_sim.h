@@ -24,6 +24,7 @@ public:
     std::vector<float> gridHeight;
     std::vector<int> gridPlate;
     std::vector<Plate> plates;
+    std::vector<Vec3> hotspots; // Stationary mantle plumes
     GLuint textureID = 0;
     static constexpr float CONT_THRESHOLD = 0.45f;
 
@@ -206,24 +207,33 @@ public:
                         else if (!isC1 && !isC2) { 
                             if (plates[p1].density < plates[p2].density) { overridingIdx = i1; subductingIdx = i2; }
                             else { overridingIdx = i2; subductingIdx = i1; }
-                        } else { // Continent-Continent collision: Building Shields
-                            float uplift = -force * 5.8f * dt; 
+                        } else { // Continent-Continent collision: 5x5 WELDING
+                            float uplift = -force * 6.5f * dt; 
                             deltaHeight[i1] += uplift; deltaHeight[i2] += uplift;
-                            plates[p1].omega *= 0.98f; plates[p2].omega *= 0.98f;
+                            
+                            int cx = i1 % width, cy = i1 / width;
+                            for (int dy=-2; dy<=2; dy++) {
+                                for (int dx=-2; dx<=2; dx++) {
+                                    int nIdx = std::clamp(cy+dy, 0, height-1) * width + ((cx+dx+width)%width);
+                                    deltaHeight[nIdx] += uplift * (1.0f / (1.2f + dx*dx + dy*dy));
+                                }
+                            }
+                            plates[p1].omega *= 0.94f; plates[p2].omega *= 0.94f; 
+                            plates[p1].pos = (plates[p1].pos + norm * 0.006f).normalized(); 
+                            plates[p2].pos = (plates[p2].pos - norm * 0.006f).normalized();
                             return;
                         }
 
-                        // ANGLE-BASED ACCRETION: Only build if convergence is "head-on"
-                        // grazing collisions should stay as submerged ridges
+                        // ANGLE-BASED ACCRETION
                         float convergenceAngle = relativeV.normalized().dot(-norm);
-                        if (convergenceAngle > 0.65f) { // ~50 degrees 
+                        if (convergenceAngle > 0.65f) { 
                              float subductionEfficiency = simpleNoise(pPos * 25.0f + Vec3((float)gen, 0, 0));
-                             if (subductionEfficiency > 0.45f) { // High threshold for islands
-                                 float felsicRate = 0.15f * dt * (subductionEfficiency - 0.35f); 
-                                 deltaHeight[overridingIdx] += -force * 4.0f * dt; // Taller but localized
+                             if (subductionEfficiency > 0.35f) { 
+                                 float felsicRate = 0.17f * dt * (subductionEfficiency - 0.25f); 
+                                 deltaHeight[overridingIdx] += -force * 4.8f * dt; 
                                  
                                  int ox = overridingIdx % width, oy = overridingIdx / width;
-                                 for (int dy=-1; dy<=1; dy++) { 
+                                 for (int dy=-1; dy<=1; dy++) { // Reverting to 3x3 for sharper spines
                                      for (int dx=-1; dx<=1; dx++) {
                                          int sIdx = std::clamp(oy+dy, 0, height-1) * width + ((ox+dx+width)%width);
                                          deltaHeight[sIdx] += felsicRate;
@@ -231,25 +241,49 @@ public:
                                  }
                              }
                         } else {
-                             // Grazing: Minor uplift, no dry land
-                             deltaHeight[overridingIdx] += -force * 0.7f * dt; 
+                             deltaHeight[overridingIdx] += -force * 0.85f * dt; 
                         }
                         deltaHeight[subductingIdx] += force * 0.95f * dt; 
                     }
                     else if (force > 0.012f) { // Divergence (Spreading Ridge)
-                        // AGGRESSIVE RIFTING: Rifts break landmasses easily
                         bool isLand = gridHeight[i1] > CONT_THRESHOLD || gridHeight[i2] > CONT_THRESHOLD;
-                        float riftStrength = isLand ? 0.38f : 0.95f; 
+                        float riftStrength = isLand ? 0.32f : 0.98f; 
                         float rift = -force * riftStrength * dt;
                         deltaHeight[i1] += rift; deltaHeight[i2] += rift;
                         
-                        plates[p1].pos = (plates[p1].pos + norm * (force * 0.005f)).normalized();
-                        plates[p2].pos = (plates[p2].pos - norm * (force * 0.005f)).normalized();
+                        plates[p1].pos = (plates[p1].pos + norm * (force * 0.006f)).normalized();
+                        plates[p2].pos = (plates[p2].pos - norm * (force * 0.006f)).normalized();
                     }
                 };
 
                 handleBoundary(idx, y * width + (x + 1) % width, (x + 1) % width, y);
                 if (y < height - 1) handleBoundary(idx, (y + 1) * width + x, x, y + 1);
+            }
+        }
+
+        // Sedimentary Infilling (Natural Inland Sea Closure)
+        // Instead of a hard count, use a height-based weight to "ooze" land into lakes
+        for (int i = 0; i < width * height; i++) {
+            if (gridHeight[i] < CONT_THRESHOLD) {
+                int cx = i % width, cy = i / width;
+                float sumNeighborHeight = 0.0f;
+                int countLand = 0;
+                for (int dy=-1; dy<=1; dy++) {
+                    for (int dx=-1; dx<=1; dx++) {
+                        int nx = (cx + dx + width) % width;
+                        int ny = std::clamp(cy + dy, 0, height-1);
+                        float nh = gridHeight[ny * width + nx];
+                        if (nh > CONT_THRESHOLD) {
+                             sumNeighborHeight += nh;
+                             countLand++;
+                        }
+                    }
+                }
+                if (countLand >= 4) {
+                     // Gradient Sedimentation: Shallow area becomes shallower
+                     float avgH = sumNeighborHeight / countLand;
+                     deltaHeight[i] += (avgH - gridHeight[i]) * 0.075f * dt;
+                }
             }
         }
 
@@ -317,22 +351,71 @@ public:
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     }
 
+    void applyHotspots(float dt, int gen) {
+        for (const auto& hPos : hotspots) {
+            // Hotspots are stationary in the mantle frame. 
+            // We need to find which pixel is currently AT this fixed coordinate.
+            float phi = acosf(std::clamp(hPos.y, -1.0f, 1.0f));
+            float theta = atan2f(hPos.z, hPos.x);
+            if (theta < 0) theta += 2.0f * 3.14159f;
+
+            int y = (int)(phi / 3.14159f * (height - 1));
+            int x = (int)(theta / (2.0f * 3.14159f) * (width - 1));
+            
+            // Periodic Eruption: Don't grow constantly, grow in pulses every few Ma
+            if ((gen + (int)(hPos.x * 10)) % 5 == 0) {
+                float intensity = 0.38f * dt; // Taller peaks (up to 2500m+)
+                // Sharp peak falloff: mostly 1 pixel, minor 3x3 base
+                for (int dy=-1; dy<=1; dy++) {
+                    for (int dx=-1; dx<=1; dx++) {
+                        int nx = (x + dx + width) % width;
+                        int ny = std::clamp(y + dy, 0, height-1);
+                        float distSq = (float)(dx*dx + dy*dy);
+                        gridHeight[ny * width + nx] += intensity * expf(-distSq * 2.5f); // Ultra-sharp Gaussian
+                    }
+                }
+            }
+        }
+    }
+
     void simulate(int generations) {
         // High-fidelity 1Ma-resolution simulation (50 Steps)
-        initializePlates(12); // Slightly more plates for 1Ma detail
+        initializePlates(12); 
         lloydRelaxation(4);
         updatePlateMapWithWarping(0);
+
+        // Initialize stationary mantle hotspots
+        hotspots.clear();
+        std::mt19937 hGen(88); // Different seed for variety
+        std::uniform_real_distribution<float> hDist(0, 1);
+        for (int i = 0; i < 4; i++) {
+            float hTheta = hDist(hGen) * 2.0f * 3.14159f;
+            float hPhi = acosf(hDist(hGen) * 2.0f - 1.0f);
+            hotspots.push_back(Vec3(cosf(hTheta) * sinf(hPhi), cosf(hPhi), sinf(hTheta) * sinf(hPhi)));
+        }
         
-        // 1 million years per step (dt adjusted for realistic but visible drift)
         float dt = 1.2f; 
-        int totalGens = 50; 
+        int totalGens = 80; 
         
         for (int gen = 0; gen < totalGens; gen++) {
             for (auto& p : plates) p.pos = rotateVector(p.pos, p.eulerPole, p.omega * dt);
             advectHeight(dt);
             updatePlateMapWithWarping((float)gen);
-            updateHeightFromForces(dt * 3.5f, gen); // Pass gen for patchy noise
-            if (gen > 0 && gen % 20 == 0) handleReorganization();
+            updateHeightFromForces(dt * 3.5f, gen); 
+            applyHotspots(dt * 2.5f, gen); 
+            
+            // Global Tectonic Sinking / Erosion (Age-based shrinkage)
+            for (int i = 0; i < width * height; i++) {
+                float h = gridHeight[i];
+                if (h > 0.15f) { // All oceanic/island crust above basaltic floor
+                    // Islands/Arcs (below 0.6) sink faster as they age
+                    // Continental cores (above 0.6) are isostatically stable
+                    float sinkRate = (h < 0.6f) ? 0.0065f : 0.0015f; 
+                    gridHeight[i] = std::max(0.05f, h - sinkRate * dt);
+                }
+            }
+            
+            if (gen > 0 && gen % 25 == 0) handleReorganization();
         }
 
         // Final Post-Simulation Refinement: Shredding thick islands into finer chains

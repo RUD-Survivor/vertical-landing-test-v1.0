@@ -3318,6 +3318,18 @@ int main() {
         renderer->addRect(adv_btn_x, galaxy_btn_y, adv_btn_w, adv_btn_h, 0.1f, 0.6f, 0.3f, hover_galaxy ? 0.9f : 0.7f);
         renderer->drawText(adv_btn_x, galaxy_btn_y, "GALAXY INFO", 0.012f, 1, 1, 1, 1.0f, true, Renderer::CENTER);
 
+        // --- Climate View Button ---
+        float climate_btn_y = galaxy_btn_y - 0.06f;
+        bool hover_climate = (hmouse_x >= adv_btn_x - adv_btn_w/2 && hmouse_x <= adv_btn_x + adv_btn_w/2 && hmouse_y >= climate_btn_y - adv_btn_h/2 && hmouse_y <= climate_btn_y + adv_btn_h/2);
+        if (hover_climate && hlmb && !hlmb_prev) {
+            r3d->setClimateViewMode((r3d->climateViewMode + 1) % 4);
+        }
+        
+        static const char* climate_mode_names[] = {"NORMAL", "TEMPERATURE", "PRECIPITATION", "PRESSURE"};
+        renderer->addRect(adv_btn_x, climate_btn_y, adv_btn_w, adv_btn_h, 0.4f, 0.2f, 0.6f, hover_climate ? 0.9f : 0.7f);
+        renderer->drawText(adv_btn_x, climate_btn_y, "CLIMATE VIEW", 0.010f, 1, 1, 1, 1.0f, true, Renderer::CENTER);
+        renderer->drawText(adv_btn_x, climate_btn_y - 0.022f, climate_mode_names[r3d->climateViewMode], 0.007f, 0.7f, 0.9f, 1.0f, 0.9f, true, Renderer::CENTER);
+
         if (show_galaxy_info) {
             float bar_h = 0.12f;
             float bar_y = 0.92f;
