@@ -134,8 +134,8 @@ struct RocketAssembly {
             total_consumption += def.consumption * sym;
             total_drag += def.drag_coeff * sym;
             if (def.thrust > 0) thrust_isp_sum += (def.thrust * sym) * def.isp;
-            total_height = std::max(total_height, parts[i].pos.y + def.height);
-            max_diameter = std::max(max_diameter, def.diameter + sqrtf(parts[i].pos.x*parts[i].pos.x + parts[i].pos.z*parts[i].pos.z)*2.0f);
+            total_height = std::max(total_height, (float)parts[i].pos.y + def.height);
+            max_diameter = std::max(max_diameter, def.diameter + (float)sqrt(parts[i].pos.x*parts[i].pos.x + parts[i].pos.z*parts[i].pos.z)*2.0f);
         }
         avg_isp = (total_thrust > 0) ? (thrust_isp_sum / total_thrust) : 0;
         float tm = total_dry_mass + total_fuel;
@@ -238,7 +238,7 @@ struct RocketAssembly {
         float min_y = 0;
         if (!parts.empty()) {
             min_y = 1e10f;
-            for (const auto& p : parts) min_y = std::min(min_y, p.pos.y);
+            for (const auto& p : parts) min_y = std::min(min_y, (float)p.pos.y);
         }
         cfg.bounds_bottom = (double)min_y;
 
@@ -424,7 +424,7 @@ inline bool builderHandleInput(BuilderState& bs, const BuilderKeyState& k, const
         // Advanced controls (Translation & Rotation)
         float row_y = my - 0.35f;
         float btn_w = mw / 3.2f;
-        auto checkAxisBtn = [&](float x_off, float y_off, float& val, float step) {
+        auto checkAxisBtn = [&](float x_off, float y_off, double& val, float step) {
             if (builderCheckHit(k.mx, k.my, mx + x_off, row_y + y_off, btn_w, 0.035f)) { val += step; bs.assembly.recalculate(); return true; }
             return false;
         };

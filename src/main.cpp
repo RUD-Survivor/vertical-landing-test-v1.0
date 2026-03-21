@@ -714,7 +714,7 @@ int main() {
       if (!builder_state.assembly.parts.empty()) {
           lowest_y = 1e10f;
           for (const auto& p : builder_state.assembly.parts) {
-              lowest_y = std::min(lowest_y, p.pos.y);
+              lowest_y = std::min(lowest_y, (float)p.pos.y);
           }
       }
       // Distance from planet center to CoM

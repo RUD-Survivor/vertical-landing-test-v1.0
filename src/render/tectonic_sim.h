@@ -83,7 +83,7 @@ public:
     }
 
     float sampleHeight(Vec3 p) {
-        float phi = acosf(std::clamp(p.y, -1.0f, 1.0f));
+        float phi = acosf(std::clamp(p.y, -1.0, 1.0));
         float theta = atan2f(p.z, p.x);
         if (theta < 0) theta += 2.0f * 3.14159f;
         float fx = theta / (2.0f * 3.14159f) * (width - 1);
@@ -355,7 +355,7 @@ public:
         for (const auto& hPos : hotspots) {
             // Hotspots are stationary in the mantle frame. 
             // We need to find which pixel is currently AT this fixed coordinate.
-            float phi = acosf(std::clamp(hPos.y, -1.0f, 1.0f));
+            float phi = acosf(std::clamp(hPos.y, -1.0, 1.0));
             float theta = atan2f(hPos.z, hPos.x);
             if (theta < 0) theta += 2.0f * 3.14159f;
 

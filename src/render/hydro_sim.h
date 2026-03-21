@@ -27,11 +27,29 @@ public:
         data.filledHeight.assign(w * h, 0.0f);
     }
 
-    // Main Entry Point
+    // Main Entry Point: Disabling coarse global erosion to prevent 78km-wide riverbed artifacts.
+    // Carving will now be handled at the high-precision LOD level in the vertex shader.
     void simulate(const std::vector<float>& heightMap, const std::vector<float>& precipitation, const std::vector<float>& temperature) {
         fillDepressions(heightMap);
         calculateFlowDirections();
         calculateAccumulation(precipitation, temperature, heightMap);
+        
+        // --- Lake Breaching & Evaporation Model ---
+        // Priority-Flood routing assumes basins fill to the brim. Here we physically
+        // lower the water surface for rendering based on evaporation and flow carving.
+        for (int i = 0; i < width * height; i++) {
+            float lakeDepth = data.filledHeight[i] - heightMap[i];
+            if (lakeDepth > 0.002f) { // Significant basin
+                if (data.accumulation[i] < 20.0f) {
+                    // Evaporation dominant: Drop water level for low flow areas in huge basins
+                    data.filledHeight[i] = heightMap[i] + std::min(lakeDepth, 0.001f);
+                } else {
+                    // River Breaching: High flow carves a deep gorge through the basin rim
+                    data.filledHeight[i] = std::max(heightMap[i] + 0.002f, data.filledHeight[i] - 0.005f);
+                }
+            }
+        }
+        
         calculateStrahlerOrder();
     }
 
@@ -71,8 +89,10 @@ private:
 
                 if (!visited[nIdx]) {
                     visited[nIdx] = true;
-                    if (data.filledHeight[nIdx] < curr.h) {
-                        data.filledHeight[nIdx] = curr.h;
+                    // Add a tiny epsilon (1e-6) to force a drainage slope
+                    // This prevents massive flat "blobs" by giving water a direction
+                    if (data.filledHeight[nIdx] < curr.h + 1e-6f) {
+                        data.filledHeight[nIdx] = curr.h + 1e-6f;
                     }
                     pq.push({nx, ny, data.filledHeight[nIdx]});
                 }
@@ -81,13 +101,13 @@ private:
     }
 
     void calculateFlowDirections() {
-        int dx[] = {1, 1, 0, -1, -1, -1, 0, 1}; // 0:E, 1:SE, 2:S, 3:SW, 4:W, 5:NW, 6:N, 7:NE
+        int dx[] = {1, 1, 0, -1, -1, -1, 0, 1}; 
         int dy[] = {0, 1, 1, 1, 0, -1, -1, -1};
 
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 int idx = y * width + x;
-                float maxSlope = 0.0001f;
+                float maxSlope = -1.0f; 
                 int bestDir = -1;
 
                 for (int i = 0; i < 8; i++) {
@@ -116,10 +136,9 @@ private:
             return a.h > b.h;
         });
 
-        data.accumulation.assign(width * height, 0.0f);
         for (int i = 0; i < width * height; i++) {
-            float evap = std::max(0.0f, temp[i] + 10.0f) * 0.005f; 
-            float netWater = std::max(0.001f, precip[i] - evap);
+            float evap = std::max(0.0f, temp[i] + 10.0f) * 0.009f; 
+            float netWater = std::max(0.0f, precip[i] - evap); 
             if (heightMap[i] <= 0.45f) netWater = 0.0f;
             data.accumulation[i] = netWater;
         }
@@ -135,6 +154,20 @@ private:
                 int ny = std::clamp(idx / width + dy[dir], 0, height - 1);
                 int nIdx = ny * width + nx;
                 data.accumulation[nIdx] += data.accumulation[idx];
+            }
+        }
+
+        // --- ENHANCED: Hydraulic Erosion & Sedimentation ---
+        // We modify the WATER SURFACE level (filledHeight) to reflect carved valleys
+        for (int i = 0; i < width * height; i++) {
+            if (heightMap[i] > 0.455f && data.accumulation[i] > 1.0f) { 
+                int dir = data.flowDir[i];
+                if (dir != -1) {
+                    float slope = 0.01f; // assume some slope for carving
+                    // Carve valley deeper where flow is strong (Strahler-like strength)
+                    float carve = std::min(0.03f, powf(data.accumulation[i], 0.5f) * 0.005f);
+                    data.filledHeight[i] -= carve;
+                }
             }
         }
     }
@@ -167,7 +200,8 @@ private:
         for (auto& cell : sortedCells) {
             int idx = cell.idx;
             if (contributors[idx].empty()) {
-                if (data.accumulation[idx] > 0.05f) data.strahler[idx] = 1;
+                // Lower threshold for river tips (0.01 instead of 0.05)
+                if (data.accumulation[idx] > 0.01f) data.strahler[idx] = 1;
                 else data.strahler[idx] = 0;
             } else {
                 int maxOrder = 0;

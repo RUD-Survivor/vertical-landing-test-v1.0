@@ -14,6 +14,12 @@
 #include "terrain_system.h"
 #include "vegetation_system.h"
 
+inline void sendMat4(GLint loc, const Mat4& m) {
+    float arr[16];
+    m.toFloatArray(arr);
+    glUniformMatrix4fv(loc, 1, GL_FALSE, arr);
+}
+
 // ==========================================================
 // 3D Vertex Format
 // ========================================================== 
@@ -3492,8 +3498,8 @@ R"(
     glUniform1i(glGetUniformLocation(taaProg, "uDepthTex"), 2);
 
     // Pass matrices for reprojection
-    glUniformMatrix4fv(glGetUniformLocation(taaProg, "uInvViewProj"), 1, GL_FALSE, invViewProj.m);
-    glUniformMatrix4fv(glGetUniformLocation(taaProg, "uPrevViewProj"), 1, GL_FALSE, prevViewProj.m);
+    sendMat4(glGetUniformLocation(taaProg, "uInvViewProj"), invViewProj);
+    sendMat4(glGetUniformLocation(taaProg, "uPrevViewProj"), prevViewProj);
 
     // Blend factor: 10% new, 90% history for smooth accumulation
     // First few frames use more of the current frame to converge faster
@@ -3547,8 +3553,8 @@ R"(
     glUseProgram(program3d);
 
     Mat4 mvp = proj * view * model;
-    glUniformMatrix4fv(u_mvp, 1, GL_FALSE, mvp.m);
-    glUniformMatrix4fv(u_model, 1, GL_FALSE, model.m);
+    sendMat4(u_mvp, mvp);
+    sendMat4(u_model, model);
     glUniform3f(u_lightDir, lightDir.x, lightDir.y, lightDir.z);
     glUniform3f(u_viewPos, camPos.x, camPos.y, camPos.z);
     glUniform4f(u_baseColor, cr, cg, cb, ca);
@@ -3736,8 +3742,8 @@ R"(
   void drawTerrainPatch(const Mesh& mesh, const Mat4& model, float maxElev, float time) {
       glUseProgram(terrainProg);
       Mat4 mvp = proj * view * model;
-      glUniformMatrix4fv(ut_mvp, 1, GL_FALSE, mvp.m);
-      glUniformMatrix4fv(ut_model, 1, GL_FALSE, model.m);
+      sendMat4(ut_mvp, mvp);
+      sendMat4(ut_model, model);
       glUniform3f(ut_lightDir, lightDir.x, lightDir.y, lightDir.z);
       glUniform3f(ut_camPos, camPos.x, camPos.y, camPos.z); // Added ut_camPos
       glUniform3f(ut_viewPos, camPos.x, camPos.y, camPos.z);
@@ -3766,8 +3772,8 @@ R"(
   void drawVegetation(const std::vector<Vegetation::InstanceData>& instances) {
       if (instances.empty()) return;
       glUseProgram(vegProg);
-      glUniformMatrix4fv(uv_vp, 1, GL_FALSE, view.m);
-      glUniformMatrix4fv(uv_proj, 1, GL_FALSE, proj.m);
+      sendMat4(uv_vp, view);
+      sendMat4(uv_proj, proj);
       glUniform3f(uv_lightDir, lightDir.x, lightDir.y, lightDir.z);
       glUniform3f(uv_viewPos, camPos.x, camPos.y, camPos.z);
       
@@ -3830,8 +3836,8 @@ R"(
         viewOnlyRot.m[12] = 0.0f; viewOnlyRot.m[13] = 0.0f; viewOnlyRot.m[14] = 0.0f;
         Mat4 vpRel = proj * viewOnlyRot;
         
-        glUniformMatrix4fv(ut_mvp, 1, GL_FALSE, vpRel.m);
-        glUniformMatrix4fv(ut_model, 1, GL_FALSE, model.m);
+        sendMat4(ut_mvp, vpRel);
+        sendMat4(ut_model, model);
         glUniform3f(ut_lightDir, lightDir.x, lightDir.y, lightDir.z);
         glUniform3f(ut_viewPos, camPos.x, camPos.y, camPos.z);
         glUniform3f(ut_camPos, camPos.x, camPos.y, camPos.z);
@@ -3917,8 +3923,8 @@ R"(
 
     glUseProgram(prog);
     Mat4 mvp = proj * view * model;
-    glUniformMatrix4fv(mvpLoc, 1, GL_FALSE, mvp.m);
-    glUniformMatrix4fv(modelLoc, 1, GL_FALSE, model.m);
+    sendMat4(mvpLoc, mvp);
+    sendMat4(modelLoc, model);
     glUniform3f(lightLoc, lightDir.x, lightDir.y, lightDir.z);
     if (viewLoc != -1) glUniform3f(viewLoc, camPos.x, camPos.y, camPos.z);
     if (colorLoc != -1) glUniform4f(colorLoc, cr, cg, cb, ca);
@@ -3942,8 +3948,8 @@ R"(
   void drawRing(const Mesh& ringMesh, const Mat4& model, float cr, float cg, float cb, float ca) {
     glUseProgram(ringProgram);
     Mat4 mvp = proj * view * model;
-    glUniformMatrix4fv(uri_mvp, 1, GL_FALSE, mvp.m);
-    glUniformMatrix4fv(uri_model, 1, GL_FALSE, model.m);
+    sendMat4(uri_mvp, mvp);
+    sendMat4(uri_model, model);
     glUniform3f(uri_lightDir, lightDir.x, lightDir.y, lightDir.z);
     glUniform4f(uri_baseColor, cr, cg, cb, ca);
     glUniform1f(glGetUniformLocation(ringProgram, "uPlanetRadius"), 1.0f);
@@ -3957,8 +3963,8 @@ R"(
     glUseProgram(billboardProg);
     
     // Provide View and Proj separately
-    glUniformMatrix4fv(ub_vp, 1, GL_FALSE, view.m);
-    glUniformMatrix4fv(ub_proj, 1, GL_FALSE, proj.m);
+    sendMat4(ub_vp, view);
+    sendMat4(ub_proj, proj);
     
     glUniform3f(ub_pos, worldPos.x, worldPos.y, worldPos.z);
     glUniform2f(ub_size, size, size);
@@ -3996,9 +4002,9 @@ R"(
 
     Mat4 mvp = proj * view * model;
     Mat4 invModel = model.inverse();
-    glUniformMatrix4fv(uex_mvp, 1, GL_FALSE, mvp.m);
-    glUniformMatrix4fv(uex_model, 1, GL_FALSE, model.m);
-    glUniformMatrix4fv(uex_invModel, 1, GL_FALSE, invModel.m);
+    sendMat4(uex_mvp, mvp);
+    sendMat4(uex_model, model);
+    sendMat4(uex_invModel, invModel);
     glUniform3f(uex_viewPos, camPos.x, camPos.y, camPos.z);
     glUniform1f(uex_time, time);
     glUniform1f(uex_throttle, throttle);
@@ -4034,8 +4040,8 @@ R"(
     GLint u_planetIdx = glGetUniformLocation(atmoProg, "uPlanetIdx");
     GLint u_sunVisibility = glGetUniformLocation(atmoProg, "uSunVisibility");
 
-    glUniformMatrix4fv(u_atmo_mvp, 1, GL_FALSE, mvp.m);
-    glUniformMatrix4fv(u_atmo_model, 1, GL_FALSE, model.m);
+    sendMat4(u_atmo_mvp, mvp);
+    sendMat4(u_atmo_model, model);
     glUniform3f(u_camPos, camPos.x, camPos.y, camPos.z);
     glUniform3f(u_lightDir, lightDir.x, lightDir.y, lightDir.z);
     glUniform3f(u_planetCenter, planetCenter.x, planetCenter.y, planetCenter.z);
@@ -4112,8 +4118,8 @@ R"(
     Mat4 vp = stableProj * viewNoTrans;
     // Simple 4x4 matrix inverse (brute force cofactor expansion)
     float inv[16];
-    float* m = vp.m;
-    float det;
+    const double* m = vp.m;
+    double det;
     inv[0] = m[5]*m[10]*m[15] - m[5]*m[11]*m[14] - m[9]*m[6]*m[15] + m[9]*m[7]*m[14] + m[13]*m[6]*m[11] - m[13]*m[7]*m[10];
     inv[4] = -m[4]*m[10]*m[15] + m[4]*m[11]*m[14] + m[8]*m[6]*m[15] - m[8]*m[7]*m[14] - m[12]*m[6]*m[11] + m[12]*m[7]*m[10];
     inv[8] = m[4]*m[9]*m[15] - m[4]*m[11]*m[13] - m[8]*m[5]*m[15] + m[8]*m[7]*m[13] + m[12]*m[5]*m[11] - m[12]*m[7]*m[9];
@@ -4153,7 +4159,7 @@ R"(
   void drawRibbon(const std::vector<Vec3>& points, const std::vector<Vec4>& colors, float width) {
     if (points.size() < 2 || points.size() != colors.size()) return;
 
-    struct RibVert { Vec3 p; Vec4 c; float side; };
+    struct RibVert { float px, py, pz; float cr, cg, cb, ca; float side; };
     std::vector<RibVert> stripVerts;
     stripVerts.reserve(points.size() * 2);
 
@@ -4180,13 +4186,15 @@ R"(
 
       float halfW = width * 0.5f;
       // Zigzag for triangle strip: first left, then right
-      stripVerts.push_back({p + right * halfW, colors[i], 1.0f});
-      stripVerts.push_back({p - right * halfW, colors[i], -1.0f});
+      Vec3 pL = p + right * halfW;
+      stripVerts.push_back({(float)pL.x, (float)pL.y, (float)pL.z, (float)colors[i].x, (float)colors[i].y, (float)colors[i].z, (float)colors[i].w, 1.0f});
+      Vec3 pR = p - right * halfW;
+      stripVerts.push_back({(float)pR.x, (float)pR.y, (float)pR.z, (float)colors[i].x, (float)colors[i].y, (float)colors[i].z, (float)colors[i].w, -1.0f});
     }
 
     glUseProgram(ribbonProg);
     Mat4 mvp = proj * view; // No model matrix needed, points are in world space
-    glUniformMatrix4fv(ur_mvp, 1, GL_FALSE, mvp.m);
+    sendMat4(ur_mvp, mvp);
 
     // Buffer dynamic data
     glBindVertexArray(ribbonVAO);
@@ -4196,9 +4204,9 @@ R"(
     // Re-establish vertex layout
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(RibVert), (void*)0);
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(RibVert), (void*)(sizeof(Vec3)));
+    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(RibVert), (void*)(3 * sizeof(float)));
     glEnableVertexAttribArray(1);
-    glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, sizeof(RibVert), (void*)(sizeof(Vec3) + sizeof(Vec4)));
+    glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, sizeof(RibVert), (void*)(7 * sizeof(float)));
     glEnableVertexAttribArray(2);
 
     glDepthMask(GL_FALSE);
