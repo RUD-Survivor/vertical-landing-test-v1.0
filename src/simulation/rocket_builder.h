@@ -93,16 +93,16 @@ static const PartDef PART_CATALOG[] = {
     {6,  "Medium Tank 100t", CAT_FUEL_TANK, 5000.0f, 100000.0f, 0.0f, 0.0f, 0.0f, 35.0f, 3.7f, 0.3f, 0.90f, 0.90f, 0.92f, "Standard fuel tank", stackNodes(35.0f, 3.7f), true, nullptr, nullptr},
     {7,  "Large Tank 200t",  CAT_FUEL_TANK, 8000.0f, 200000.0f, 0.0f, 0.0f, 0.0f, 50.0f, 3.7f, 0.3f, 0.88f, 0.88f, 0.92f, "High-capacity tank", stackNodes(50.0f, 3.7f), true, nullptr, nullptr},
     {8,  "Jumbo Tank 500t",  CAT_FUEL_TANK, 15000.0f, 500000.0f, 0.0f, 0.0f, 0.0f, 80.0f, 5.0f, 0.3f, 0.85f, 0.85f, 0.90f, "Massive reservoir", stackNodes(80.0f, 5.0f), true, nullptr, nullptr},
-    {18, "Gold Leaf Tank",   CAT_FUEL_TANK, 1000.0f, 20000.0f, 0.0f, 0.0f, 0.0f, 12.0f, 2.0f, 0.2f, 1.0f, 0.84f, 0.0f, "Titanium-gold tank", stackNodes(12.0f, 2.0f), true, nullptr, nullptr},
     {9,  "Raptor",           CAT_ENGINE, 2000.0f, 0.0f, 1500.0f, 2200000.0f, 100.0f, 4.0f, 3.7f, 0.05f, 0.35f, 0.35f, 0.38f, "High-ISP engine", stackNodes(4.0f, 3.7f), true, nullptr, nullptr},
     {10, "Merlin 1D",        CAT_ENGINE, 1500.0f, 0.0f, 1200.0f, 845000.0f, 80.0f, 3.0f, 3.0f, 0.05f, 0.40f, 0.35f, 0.30f, "Workhorse engine", stackNodes(3.0f, 3.0f), true, nullptr, nullptr},
-    {19, "Vacuum Engine",    CAT_ENGINE, 800.0f, 0.0f, 1800.0f, 300000.0f, 20.0f, 5.0f, 4.2f, 0.02f, 0.6f, 0.6f, 0.7f, "Deep space efficient", stackNodes(5.0f, 4.2f), true, nullptr, nullptr},
-    {15, "Decoupler",        CAT_STRUCTURAL, 300.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 3.7f, 0.0f, 0.25f, 0.25f, 0.25f, "Stage separator", stackNodes(1.0f, 3.7f), false, nullptr, nullptr},
-    {16, "Fin Set (x4)",     CAT_STRUCTURAL, 200.0f, 0.0f, 0.0f, 0.0f, 0.0f, 2.0f, 3.7f, -0.1f, 0.30f, 0.30f, 0.30f, "Stability fins", stackNodes(2.0f, 3.7f), true, nullptr, nullptr}, 
-    {17, "Girder XL",        CAT_STRUCTURAL, 400.0f, 0.0f, 0.0f, 0.0f, 0.0f, 6.0f, 1.0f, 0.1f, 0.40f, 0.40f, 0.42f, "Structural beam", stackNodes(6.0f, 1.0f), true, nullptr, nullptr},
-    {20, "Landing Leg",      CAT_STRUCTURAL, 500.0f, 0.0f, 0.0f, 0.0f, 0.0f, 8.0f, 1.0f, 0.4f, 0.7f, 0.7f, 0.75f, "Heavy landing gear", stackNodes(8.0f, 1.0f), true, nullptr, nullptr},
-    {21, "Solar Panel V3",   CAT_STRUCTURAL, 100.0f, 0.0f, 0.0f, 0.0f, 0.0f, 4.0f, 5.0f, 0.0f, 0.1f, 0.3f, 0.8f, "Efficient power gen", stackNodes(4.0f, 5.0f), true, nullptr, nullptr},
-    {22, "Radial Decoupler", CAT_STRUCTURAL, 150.0f, 0.0f, 0.0f, 0.0f, 0.0f, 2.0f, 1.0f, 0.0f, 0.6f, 0.2f, 0.2f, "Side-mounted separator", stackNodes(2.0f, 1.0f), true, nullptr, nullptr},
+    {11, "Vacuum Engine",    CAT_ENGINE, 800.0f, 0.0f, 1800.0f, 300000.0f, 20.0f, 5.0f, 4.2f, 0.02f, 0.6f, 0.6f, 0.7f, "Deep space efficient", stackNodes(5.0f, 4.2f), true, nullptr, nullptr},
+    {12, "Decoupler",        CAT_STRUCTURAL, 300.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 3.7f, 0.0f, 0.25f, 0.25f, 0.25f, "Stage separator", stackNodes(1.0f, 3.7f), false, nullptr, nullptr},
+    {13, "Fin Set (x4)",     CAT_STRUCTURAL, 200.0f, 0.0f, 0.0f, 0.0f, 0.0f, 2.0f, 3.7f, -0.1f, 0.30f, 0.30f, 0.30f, "Stability fins", stackNodes(2.0f, 3.7f), true, nullptr, nullptr}, 
+    {14, "Girder XL",        CAT_STRUCTURAL, 400.0f, 0.0f, 0.0f, 0.0f, 0.0f, 6.0f, 1.0f, 0.1f, 0.40f, 0.40f, 0.42f, "Structural beam", stackNodes(6.0f, 1.0f), true, nullptr, nullptr},
+    {15, "Gold Leaf Tank",   CAT_FUEL_TANK, 1000.0f, 20000.0f, 0.0f, 0.0f, 0.0f, 12.0f, 2.0f, 0.2f, 1.0f, 0.84f, 0.0f, "Titanium-gold tank", stackNodes(12.0f, 2.0f), true, nullptr, nullptr},
+    {16, "Landing Leg",      CAT_STRUCTURAL, 500.0f, 0.0f, 0.0f, 0.0f, 0.0f, 8.0f, 1.0f, 0.4f, 0.7f, 0.7f, 0.75f, "Heavy landing gear", stackNodes(8.0f, 1.0f), true, nullptr, nullptr},
+    {17, "Solar Panel V3",   CAT_STRUCTURAL, 100.0f, 0.0f, 0.0f, 0.0f, 0.0f, 4.0f, 5.0f, 0.0f, 0.1f, 0.3f, 0.8f, "Efficient power gen", stackNodes(4.0f, 5.0f), true, nullptr, nullptr},
+    {18, "Radial Decoupler", CAT_STRUCTURAL, 150.0f, 0.0f, 0.0f, 0.0f, 0.0f, 2.0f, 1.0f, 0.0f, 0.6f, 0.2f, 0.2f, "Side-mounted separator", stackNodes(2.0f, 1.0f), true, nullptr, nullptr},
 };
 
 static const int PART_CATALOG_SIZE = sizeof(PART_CATALOG) / sizeof(PART_CATALOG[0]);
@@ -126,7 +126,9 @@ struct RocketAssembly {
         float thrust_isp_sum = 0;
 
         for (size_t i = 0; i < parts.size(); i++) {
-            const PartDef& def = PART_CATALOG[parts[i].def_id];
+            int did = parts[i].def_id;
+            if (did < 0 || did >= PART_CATALOG_SIZE) continue; 
+            const PartDef& def = PART_CATALOG[did];
             float sym = (float)parts[i].symmetry;
             total_dry_mass += def.dry_mass * sym;
             total_fuel += def.fuel_capacity * sym;

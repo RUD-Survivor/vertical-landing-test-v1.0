@@ -138,9 +138,10 @@ int main() {
   // =========================================================
   MenuSystem::MenuState menu_state;
   while (!glfwWindowShouldClose(window)) {
+      bool return_to_menu = false;
   // Check Save File
-      menu_state.has_save = SaveSystem::HasSaveFile();
-      if (menu_state.has_save) {
+      menu_state.has_save = SaveSystem::HasSaveFile() || SaveSystem::HasAgencySave();
+      if (SaveSystem::HasSaveFile()) {
           SaveSystem::GetSaveInfo(menu_state.save_time, menu_state.save_parts);
       } else {
           menu_state.save_time = 0; menu_state.save_parts = 0;
@@ -206,6 +207,7 @@ int main() {
           factory = FactorySystem();
           
           // Starter resources
+          agency_state.funds = 100000.0;
           agency_state.addItem(ITEM_IRON_ORE, 50);
           agency_state.addItem(ITEM_COPPER_ORE, 30);
           agency_state.addItem(ITEM_COAL, 40);
@@ -223,9 +225,16 @@ int main() {
           ConveyorBelt b2; b2.from_node_id = 2; b2.to_node_id = 3; factory.belts.push_back(b2);
           ConveyorBelt b3; b3.from_node_id = 3; b3.to_node_id = 4; factory.belts.push_back(b3);
           agency_is_init = true;
+          menu_choice = MenuSystem::MENU_AGENCY_HUB;
       } else {
-          // 加载存档
-          SaveSystem::LoadAgencyFactory(agency_state, factory);
+          // 加载存档 (Rocket or Agency)
+          if (SaveSystem::HasSaveFile()) {
+             // Basic rocket loading handled later in transition, 
+             // but we still need agency state if it exists.
+          }
+          if (SaveSystem::HasAgencySave()) {
+              SaveSystem::LoadAgencyFactory(agency_state, factory);
+          }
           agency_is_init = true;
       }
   

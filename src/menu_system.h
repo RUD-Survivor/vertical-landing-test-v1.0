@@ -398,9 +398,9 @@ MenuChoice HandleMenuInput(GLFWwindow* window, MenuState& menu, bool& up_pressed
         float y_start = 0.25f, spacing = 0.12f, box_w = 0.50f, box_h = 0.09f;
         int opt_idx = 0;
         if (menu.has_save) {
-            if (CheckRectHit(mx, my, 0.0f, y_start - opt_idx++ * spacing, box_w, box_h)) return MENU_AGENCY_HUB;
+            if (CheckRectHit(mx, my, 0.0f, y_start - opt_idx++ * spacing, box_w, box_h)) return MENU_CONTINUE;
         }
-        if (CheckRectHit(mx, my, 0.0f, y_start - opt_idx++ * spacing, box_w, box_h)) return MENU_AGENCY_HUB; // New Game
+        if (CheckRectHit(mx, my, 0.0f, y_start - opt_idx++ * spacing, box_w, box_h)) return MENU_NEW_GAME;
         if (CheckRectHit(mx, my, 0.0f, y_start - opt_idx++ * spacing, box_w, box_h)) return MENU_SETTINGS;
         if (CheckRectHit(mx, my, 0.0f, y_start - opt_idx++ * spacing, box_w, box_h)) return MENU_EXIT;
     }
@@ -429,8 +429,8 @@ MenuChoice HandleMenuInput(GLFWwindow* window, MenuState& menu, bool& up_pressed
     if (enter_now && !enter_pressed) {
         enter_pressed = true;
         int idx = 0;
-        if (menu.has_save && menu.selected_option == idx++) return MENU_AGENCY_HUB;
-        if (menu.selected_option == idx++) return MENU_AGENCY_HUB; // New Game
+        if (menu.has_save && menu.selected_option == idx++) return MENU_CONTINUE;
+        if (menu.selected_option == idx++) return MENU_NEW_GAME;
         if (menu.selected_option == idx++) return MENU_SETTINGS;
         if (menu.selected_option == idx++) return MENU_EXIT;
     }

@@ -292,62 +292,74 @@ inline bool LoadAgencyFactory(AgencyState& agency, FactorySystem& factory) {
     factory.next_id = 1;
 
     while (std::getline(file, line)) {
+        if (line.empty()) continue;
+        
         if (line == "STATS") {
             file >> agency.funds >> agency.science >> agency.reputation >> agency.global_time;
-            std::getline(file, line); // consume newline
+            std::getline(file, line); // finish the STATS data line
         } 
         else if (line.find("INVENTORY") == 0) {
-            int count = std::stoi(line.substr(10));
+            int count = 0;
+            if (line.length() > 10) count = std::stoi(line.substr(10));
             for (int i = 0; i < count; i++) {
                 int type, qty;
-                file >> type >> qty;
-                agency.addItem((ItemType)type, qty);
+                if (file >> type >> qty) agency.addItem((ItemType)type, qty);
             }
-            std::getline(file, line); // consume newline
+            std::getline(file, line); // finish last inventory line
         }
         else if (line.find("NODES") == 0) {
-            int count = std::stoi(line.substr(6));
+            int count = 0;
+            if (line.length() > 6) count = std::stoi(line.substr(6));
             for (int i = 0; i < count; i++) {
                 FactoryNode n;
                 int n_type, is_prod, m_out;
-                file >> n_type >> n.id >> n.grid_x >> n.grid_y >> n.progress >> is_prod >> m_out >> n.recipe_index;
+                if (!(file >> n_type >> n.id >> n.grid_x >> n.grid_y >> n.progress >> is_prod >> m_out >> n.recipe_index)) break;
                 n.type = (FactoryNodeType)n_type;
                 n.is_producing = (is_prod != 0);
                 n.mine_output = (ItemType)m_out;
-                std::getline(file, line); // newline
+                std::getline(file, line); // finish node data line
 
                 // Buffers
-                std::getline(file, line); // IBUFFER
-                int icount = std::stoi(line.substr(8));
-                for (int j = 0; j < icount; j++) {
-                    int t, q; file >> t >> q; n.input_buffer.add((ItemType)t, q);
+                for (int b = 0; b < 2; b++) {
+                    if (!std::getline(file, line)) break;
+                    if (line.find("IBUFFER") == 0) {
+                        int icount = std::stoi(line.substr(8));
+                        for (int j = 0; j < icount; j++) {
+                            int t, q; if (file >> t >> q) n.input_buffer.add((ItemType)t, q);
+                        }
+                        if (icount > 0) std::getline(file, line); // consume remainder
+                    } else if (line.find("OBUFFER") == 0) {
+                        int ocount = std::stoi(line.substr(8));
+                        for (int j = 0; j < ocount; j++) {
+                            int t, q; if (file >> t >> q) n.output_buffer.add((ItemType)t, q);
+                        }
+                        if (ocount > 0) std::getline(file, line); // consume remainder
+                    }
                 }
-                std::getline(file, line); // newline
-                std::getline(file, line); // OBUFFER
-                int ocount = std::stoi(line.substr(8));
-                for (int j = 0; j < ocount; j++) {
-                    int t, q; file >> t >> q; n.output_buffer.add((ItemType)t, q);
-                }
-                std::getline(file, line); // newline
+                
                 factory.nodes.push_back(n);
                 if (n.id >= factory.next_id) factory.next_id = n.id + 1;
             }
         }
         else if (line.find("BELTS") == 0) {
-            int count = std::stoi(line.substr(6));
+            int count = 0;
+            if (line.length() > 6) count = std::stoi(line.substr(6));
             for (int i = 0; i < count; i++) {
                 ConveyorBelt b;
-                file >> b.from_node_id >> b.to_node_id >> b.transfer_timer;
-                std::getline(file, line); // newline
-                std::getline(file, line); // ITEMS
-                int icount = std::stoi(line.substr(6));
-                for (int j = 0; j < icount; j++) {
-                    int t; float p;
-                    file >> t >> p;
-                    BeltItem itm; itm.type = (ItemType)t; itm.progress = p;
-                    b.items.push_back(itm);
+                if (!(file >> b.from_node_id >> b.to_node_id >> b.transfer_timer)) break;
+                std::getline(file, line); // finish belt line
+                
+                if (std::getline(file, line) && line.find("ITEMS") == 0) {
+                    int icount = std::stoi(line.substr(6));
+                    for (int j = 0; j < icount; j++) {
+                        int t; float p;
+                        if (file >> t >> p) {
+                            BeltItem itm; itm.type = (ItemType)t; itm.progress = p;
+                            b.items.push_back(itm);
+                        }
+                    }
+                    if (icount > 0) std::getline(file, line); // consume remainder
                 }
-                std::getline(file, line); // newline
                 factory.belts.push_back(b);
             }
         }
@@ -359,6 +371,13 @@ inline bool LoadAgencyFactory(AgencyState& agency, FactorySystem& factory) {
 // 检查是否存在保存文件
 bool HasSaveFile() {
     std::ifstream file(SAVE_FILE_PATH);
+    bool exists = file.good();
+    file.close();
+    return exists;
+}
+
+bool HasAgencySave() {
+    std::ifstream file("agency_save.dat");
     bool exists = file.good();
     file.close();
     return exists;

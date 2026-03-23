@@ -17,11 +17,12 @@ enum FactoryNodeType {
     NODE_SMELTER,
     NODE_ASSEMBLER,
     NODE_STORAGE,
+    NODE_POWER_PLANT,
     NODE_TYPE_COUNT
 };
 
 inline const char* NodeTypeName(FactoryNodeType t) {
-    static const char* names[] = {"MINER", "SMELTER", "ASSEMBLER", "STORAGE"};
+    static const char* names[] = {"MINER", "SMELTER", "ASSEMBLER", "STORAGE", "POWER PLANT"};
     return names[(int)t];
 }
 
@@ -75,6 +76,11 @@ public:
     std::vector<FactoryNode> nodes;
     std::vector<ConveyorBelt> belts;
     int next_id = 1;
+    
+    // Global Power Stats
+    float total_power_gen = 0.0f;
+    float total_power_req = 0.0f;
+    float power_efficiency = 1.0f;
 
     int addNode(FactoryNodeType type, int gx, int gy) {
         FactoryNode node;
@@ -85,7 +91,8 @@ public:
         
         // Defaults
         if (type == NODE_MINER) {
-            node.mine_output = (gx % 2 == 0) ? ITEM_IRON_ORE : ITEM_COAL;
+            ItemType raws[] = {ITEM_IRON_ORE, ITEM_COPPER_ORE, ITEM_COAL, ITEM_SILICON, ITEM_TITANIUM_ORE};
+            node.mine_output = raws[gx % 5];
             node.output_max = 100;
         } else if (type == NODE_SMELTER) {
             node.recipe_index = 0; // Smelt Steel
@@ -95,6 +102,8 @@ public:
             node.output_max = 50;
         } else if (type == NODE_STORAGE) {
             node.output_max = 500;
+        } else if (type == NODE_POWER_PLANT) {
+            node.output_max = 10; // Not really used for output
         }
 
         nodes.push_back(node);
@@ -119,10 +128,43 @@ public:
         int rcount = 0;
         const Recipe* recipes = GetRecipes(rcount);
 
+        // 0. Global Power Calculation
+        total_power_gen = 0.0f;
+        total_power_req = 0.0f;
+        for (auto& node : nodes) {
+            if (node.type == NODE_POWER_PLANT) {
+                // Power plant: if it has coal in buffer, it produces power
+                // For simplicity, let's assume it always has some base production, 
+                // but significantly more with coal.
+                float base_gen = 10.0f;
+                if (node.input_buffer.get(ITEM_COAL) > 0) {
+                    node.progress += dt * 0.2f; // consume 1 coal every 5s
+                    if (node.progress >= 1.0f) {
+                        if (node.input_buffer.remove(ITEM_COAL, 1)) {
+                            node.progress -= 1.0f;
+                        } else {
+                            node.progress = 0.0f;
+                        }
+                    }
+                    total_power_gen += 100.0f;
+                } else {
+                    total_power_gen += base_gen;
+                    node.progress = 0.0f;
+                }
+            } else if (node.type == NODE_MINER) {
+                total_power_req += 20.0f;
+            } else if (node.type == NODE_SMELTER) {
+                total_power_req += 40.0f;
+            } else if (node.type == NODE_ASSEMBLER) {
+                total_power_req += 60.0f;
+            }
+        }
+        power_efficiency = (total_power_req > 0) ? fminf(1.0f, total_power_gen / total_power_req) : 1.0f;
+
         // 1. Production Logic
         for (auto& node : nodes) {
             if (node.type == NODE_MINER) {
-                node.progress += dt * 0.5f; // 1 item every 2s
+                node.progress += dt * 0.5f * power_efficiency; // 1 item every 2s
                 if (node.progress >= 1.0f) {
                     if (node.output_buffer.get(node.mine_output) < node.output_max) {
                         node.output_buffer.add(node.mine_output, 1);
@@ -148,7 +190,7 @@ public:
                 }
 
                 if (node.is_producing) {
-                    node.progress += dt / recipe.craft_time;
+                    node.progress += (dt / recipe.craft_time) * power_efficiency;
                     if (node.progress >= 1.0f) {
                         node.progress = 0.0f;
                         node.is_producing = false;
