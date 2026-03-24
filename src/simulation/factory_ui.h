@@ -41,6 +41,9 @@ struct FactoryUIState {
 
     // Delete mode
     bool delete_mode = false;
+
+    // Last mouse position (for hover in render)
+    float last_mx = 0.0f, last_my = 0.0f;
 };
 
 // ==========================================
@@ -84,6 +87,7 @@ inline void getNodeColor(FactoryNodeType t, float& r, float& g, float& b) {
         case NODE_SMELTER:   r=0.8f; g=0.5f; b=0.1f; break;
         case NODE_ASSEMBLER: r=0.2f; g=0.7f; b=0.3f; break;
         case NODE_STORAGE:   r=0.4f; g=0.4f; b=0.6f; break;
+        case NODE_POWER_PLANT: r=0.9f; g=0.9f; b=0.2f; break;
         default:             r=0.5f; g=0.5f; b=0.5f; break;
     }
 }
@@ -251,10 +255,11 @@ inline void DrawFactoryUI(Renderer* renderer, FactoryUIState& ui, const FactoryS
         {"SMELTER",   NODE_SMELTER,   0.8f, 0.5f, 0.1f},
         {"ASSEMBLER", NODE_ASSEMBLER, 0.2f, 0.7f, 0.3f},
         {"STORAGE",   NODE_STORAGE,   0.4f, 0.4f, 0.6f},
+        {"POWER",     NODE_POWER_PLANT, 0.9f, 0.9f, 0.2f},
     };
-    int num_btns = 4;
-    float btn_x_start = -0.3f;
-    float btn_spacing = 0.28f;
+    int num_btns = 5;
+    float btn_x_start = -0.85f;
+    float btn_spacing = 0.26f;
     float btn_w = 0.22f;
     float btn_h = 0.08f;
 
@@ -275,6 +280,24 @@ inline void DrawFactoryUI(Renderer* renderer, FactoryUIState& ui, const FactoryS
         renderer->drawText(bx, tb_y, btns[i].label, 0.012f,
                           active ? 1.0f : 0.7f, active ? 1.0f : 0.7f, active ? 1.0f : 0.7f, 1.0f,
                           true, Renderer::CENTER);
+    }
+    
+    // Draw Recipe Overlay on all nodes
+    for (const auto& node : factory.nodes) {
+        float nx, ny;
+        gridToScreen(ui, node.grid_x, node.grid_y, nx, ny);
+        if (nx > -1.0f && nx < 1.0f && ny > -1.0f && ny < 1.0f) {
+            if (node.type == NODE_SMELTER || node.type == NODE_ASSEMBLER) {
+                int count = 0;
+                const Recipe* recipes = GetRecipes(count);
+                if (node.recipe_index >= 0 && node.recipe_index < count) {
+                    const char* label = recipes[node.recipe_index].name;
+                    renderer->drawText(nx, ny + 0.08f * ui.zoom, label, 0.010f * ui.zoom, 1.0f, 0.9f, 0.5f, 0.8f, true, Renderer::CENTER);
+                }
+            } else if (node.type == NODE_MINER) {
+                renderer->drawText(nx, ny + 0.08f * ui.zoom, GetItemInfo(node.mine_output).name, 0.010f * ui.zoom, 0.7f, 0.9f, 1.0f, 0.8f, true, Renderer::CENTER);
+            }
+        }
     }
 
     // Belt button
@@ -333,7 +356,29 @@ inline void DrawFactoryUI(Renderer* renderer, FactoryUIState& ui, const FactoryS
                 py -= 0.1f;
                 renderer->drawText(sp_x, py, "TARGET RECIPE:", 0.012f, 0.6f, 0.7f, 1.0f, 1.0f, true, Renderer::CENTER);
                 py -= 0.05f;
-                renderer->drawText(sp_x, py, "STEEL PLATES", 0.018f, 1.0f, 0.8f, 0.3f, 1.0f, true, Renderer::CENTER);
+                int count = 0;
+                const Recipe* recipes = GetRecipes(count);
+                if (sel_node->recipe_index >= 0 && sel_node->recipe_index < count) {
+                    renderer->drawText(sp_x, py, recipes[sel_node->recipe_index].name, 0.018f, 1.0f, 0.8f, 0.3f, 1.0f, true, Renderer::CENTER);
+                }
+                
+                // Recipe Switch Buttons
+                py -= 0.08f;
+                bool phov = (ui.last_mx >= sp_x - 0.12f - 0.15f/2 && ui.last_mx <= sp_x - 0.12f + 0.15f/2 && ui.last_my >= py - 0.06f/2 && ui.last_my <= py + 0.06f/2);
+                renderer->addRect(sp_x - 0.12f, py, 0.15f, 0.06f, phov ? 0.3f : 0.2f, phov ? 0.4f : 0.3f, phov ? 0.6f : 0.5f, 0.8f);
+                renderer->drawText(sp_x - 0.12f, py, "PREV", 0.010f, 1.0f, 1.0f, 1.0f, 1.0f, true, Renderer::CENTER);
+                
+                bool nhov = (ui.last_mx >= sp_x + 0.12f - 0.15f/2 && ui.last_mx <= sp_x + 0.12f + 0.15f/2 && ui.last_my >= py - 0.06f/2 && ui.last_my <= py + 0.06f/2);
+                renderer->addRect(sp_x + 0.12f, py, 0.15f, 0.06f, nhov ? 0.3f : 0.2f, nhov ? 0.4f : 0.3f, nhov ? 0.6f : 0.5f, 0.8f);
+                renderer->drawText(sp_x + 0.12f, py, "NEXT", 0.010f, 1.0f, 1.0f, 1.0f, 1.0f, true, Renderer::CENTER);
+            }
+            
+            // Miner output info
+            if (sel_node->type == NODE_MINER) {
+                py -= 0.1f;
+                renderer->drawText(sp_x, py, "MINING RESOURCE:", 0.012f, 0.6f, 0.7f, 1.0f, 1.0f, true, Renderer::CENTER);
+                py -= 0.05f;
+                renderer->drawText(sp_x, py, GetItemInfo(sel_node->mine_output).name, 0.018f, 0.9f, 0.6f, 0.4f, 1.0f, true, Renderer::CENTER);
             }
             
             // Stats
@@ -354,9 +399,11 @@ inline void DrawFactoryUI(Renderer* renderer, FactoryUIState& ui, const FactoryS
     renderer->addRect(0.0f, sb_y, 2.0f, 0.16f, 0.03f, 0.04f, 0.06f, 0.95f);
     renderer->addRect(0.0f, -0.82f, 2.0f, 0.008f, 0.2f, 0.5f, 0.8f, 0.6f);
 
-    char info[128];
-    snprintf(info, sizeof(info), "BUILDINGS: %d | BELTS: %d | FUNDS: $%.0f",
-             (int)factory.nodes.size(), (int)factory.belts.size(), agency.funds);
+    char info[256];
+    snprintf(info, sizeof(info), "BUILDINGS: %d | BELTS: %d | POWER: %.0f/%.0f (%.0f%%) | FUNDS: $%.0f",
+             (int)factory.nodes.size(), (int)factory.belts.size(), 
+             factory.total_power_gen, factory.total_power_req, factory.power_efficiency * 100.0f,
+             agency.funds);
     renderer->drawText(-0.95f, sb_y, info, 0.015f, 0.7f, 0.7f, 0.8f, 1.0f, true, Renderer::LEFT);
 
     // Mode indicator
@@ -376,6 +423,8 @@ inline void DrawFactoryUI(Renderer* renderer, FactoryUIState& ui, const FactoryS
 // Returns true if we should stay in factory mode, false to exit
 // ==========================================
 inline bool HandleFactoryInput(GLFWwindow* window, FactoryUIState& ui, FactorySystem& factory, AgencyState& agency, float mx, float my, bool lmb, float scroll) {
+    ui.last_mx = mx;
+    ui.last_my = my;
 
     // ESC -> return to hub
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
@@ -394,17 +443,21 @@ inline bool HandleFactoryInput(GLFWwindow* window, FactoryUIState& ui, FactorySy
 
     // Toolbar hit detection
     float tb_y = 0.9f;
-    float btn_x_start = -0.3f;
-    float btn_spacing = 0.28f;
+    float btn_x_start = -0.85f;
+    float btn_spacing = 0.26f;
     float btn_w = 0.22f;
     float btn_h = 0.08f;
-    int total_btns = 6; // 4 buildings + belt + delete
+    int total_btns = 7; // 5 buildings + belt + delete
+
+    bool over_side_panel = (ui.selected_node_id >= 0 && mx > 0.525f);
 
     ui.toolbar_hover = -1;
-    for (int i = 0; i < total_btns; i++) {
-        float bx = btn_x_start + i * btn_spacing;
-        if (mx >= bx - btn_w/2 && mx <= bx + btn_w/2 && my >= tb_y - btn_h/2 && my <= tb_y + btn_h/2) {
-            ui.toolbar_hover = i;
+    if (!over_side_panel) {
+        for (int i = 0; i < total_btns; i++) {
+            float bx = btn_x_start + i * btn_spacing;
+            if (mx >= bx - btn_w/2 && mx <= bx + btn_w/2 && my >= tb_y - btn_h/2 && my <= tb_y + btn_h/2) {
+                ui.toolbar_hover = i;
+            }
         }
     }
 
@@ -415,9 +468,9 @@ inline bool HandleFactoryInput(GLFWwindow* window, FactoryUIState& ui, FactorySy
 
     if (lmb_click) {
         // Toolbar clicks
-        if (ui.toolbar_hover >= 0 && ui.toolbar_hover < 4) {
+        if (ui.toolbar_hover >= 0 && ui.toolbar_hover < 5) {
             // Building button
-            FactoryNodeType types[] = {NODE_MINER, NODE_SMELTER, NODE_ASSEMBLER, NODE_STORAGE};
+            FactoryNodeType types[] = {NODE_MINER, NODE_SMELTER, NODE_ASSEMBLER, NODE_STORAGE, NODE_POWER_PLANT};
             if (ui.placing && ui.place_type == types[ui.toolbar_hover]) {
                 ui.placing = false; // Toggle off
             } else {
@@ -426,44 +479,40 @@ inline bool HandleFactoryInput(GLFWwindow* window, FactoryUIState& ui, FactorySy
                 ui.belt_mode = false;
                 ui.delete_mode = false;
             }
-        } else if (ui.toolbar_hover == 4) {
+        } else if (ui.toolbar_hover == 5) {
             // Belt button
             ui.belt_mode = !ui.belt_mode;
             ui.placing = false;
             ui.delete_mode = false;
             ui.belt_from_id = -1;
-        } else if (ui.toolbar_hover == 5) {
+        } else if (ui.toolbar_hover == 6) {
             // Delete button
             ui.delete_mode = !ui.delete_mode;
             ui.placing = false;
             ui.belt_mode = false;
         }
         // Grid clicks
-        else if (gridValid(ui.hover_gx, ui.hover_gy)) {
+        else if (!over_side_panel && gridValid(ui.hover_gx, ui.hover_gy)) {
             if (ui.placing) {
-                // Place building
+                // ... [Grid click handling remains same] ...
                 int existing = findNodeAtGrid(factory, ui.hover_gx, ui.hover_gy);
                 if (existing < 0) {
-                    // Check cost
                     double cost = 10000.0;
                     if (ui.place_type == NODE_ASSEMBLER) cost = 25000.0;
                     if (ui.place_type == NODE_STORAGE) cost = 5000.0;
+                    if (ui.place_type == NODE_POWER_PLANT) cost = 15000.0;
                     if (agency.funds >= cost) {
                         agency.funds -= cost;
                         factory.addNode(ui.place_type, ui.hover_gx, ui.hover_gy);
                     }
                 }
             } else if (ui.belt_mode) {
-                // Belt connection
                 int node_id = findNodeAtGrid(factory, ui.hover_gx, ui.hover_gy);
                 if (node_id >= 0) {
-                    if (ui.belt_from_id < 0) {
-                        ui.belt_from_id = node_id;
-                    } else {
+                    if (ui.belt_from_id < 0) { ui.belt_from_id = node_id; }
+                    else {
                         if (node_id != ui.belt_from_id) {
-                            ConveyorBelt belt;
-                            belt.from_node_id = ui.belt_from_id;
-                            belt.to_node_id = node_id;
+                            ConveyorBelt belt; belt.from_node_id = ui.belt_from_id; belt.to_node_id = node_id;
                             factory.belts.push_back(belt);
                         }
                         ui.belt_from_id = -1;
@@ -473,17 +522,42 @@ inline bool HandleFactoryInput(GLFWwindow* window, FactoryUIState& ui, FactorySy
                 int node_id = findNodeAtGrid(factory, ui.hover_gx, ui.hover_gy);
                 if (node_id >= 0) {
                     factory.removeNode(node_id);
-                    agency.funds += 5000.0; // Partial refund
-                    // Remove related belts
+                    agency.funds += 5000.0;
                     for (int i = (int)factory.belts.size() - 1; i >= 0; i--) {
-                        if (factory.belts[i].from_node_id == node_id || factory.belts[i].to_node_id == node_id) {
+                        if (factory.belts[i].from_node_id == node_id || factory.belts[i].to_node_id == node_id)
                             factory.belts.erase(factory.belts.begin() + i);
-                        }
                     }
                 }
             } else {
-                // Select
                 ui.selected_node_id = findNodeAtGrid(factory, ui.hover_gx, ui.hover_gy);
+            }
+        }
+        
+        // Side Panel Button Clicks
+        if (ui.selected_node_id >= 0) {
+            FactoryNode* sel_node = nullptr;
+            for (auto& n : const_cast<FactorySystem&>(factory).nodes) { if (n.id == ui.selected_node_id) sel_node = &n; }
+            
+            if (sel_node && (sel_node->type == NODE_SMELTER || sel_node->type == NODE_ASSEMBLER)) {
+                float sp_x = 0.75f;
+                float py = 0.3f - 0.1f - 0.05f - 0.08f; // approx Y of buttons
+                float btn_w = 0.15f, btn_h = 0.06f;
+                
+                int rcount = 0;
+                GetRecipes(rcount);
+                
+                // PREV
+                if (mx >= sp_x - 0.12f - btn_w/2 && mx <= sp_x - 0.12f + btn_w/2 && my >= py - btn_h/2 && my <= py + btn_h/2) {
+                    sel_node->recipe_index = (sel_node->recipe_index - 1 + rcount) % rcount;
+                    sel_node->progress = 0.0f; // reset progress on recipe change
+                    sel_node->is_producing = false;
+                }
+                // NEXT
+                if (mx >= sp_x + 0.12f - btn_w/2 && mx <= sp_x + 0.12f + btn_w/2 && my >= py - btn_h/2 && my <= py + btn_h/2) {
+                    sel_node->recipe_index = (sel_node->recipe_index + 1) % rcount;
+                    sel_node->progress = 0.0f;
+                    sel_node->is_producing = false;
+                }
             }
         }
     }
