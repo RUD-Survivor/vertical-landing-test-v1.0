@@ -1,5 +1,5 @@
 @echo off
-set "VCVARS=d:\Microsoft Visual Studio 2026\VC\Auxiliary\Build\vcvars64.bat"
+set "VCVARS=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"
 if not exist "%VCVARS%" (
     echo Cannot find vcvars64.bat
     exit /b 1

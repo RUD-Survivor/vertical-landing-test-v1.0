@@ -48,6 +48,36 @@ inline const ItemInfo& GetItemInfo(ItemType type) {
 }
 
 // ==========================================
+// Market Pricing: defines sale value per unit
+// ==========================================
+inline double GetItemPrice(ItemType type) {
+    switch (type) {
+        // RAW MATERIALS
+        case ITEM_IRON_ORE:     return 100.0;
+        case ITEM_COPPER_ORE:   return 120.0;
+        case ITEM_COAL:         return 80.0;
+        case ITEM_SILICON:      return 150.0;
+        case ITEM_TITANIUM_ORE: return 250.0;
+        
+        // PROCESSED
+        case ITEM_STEEL:        return 400.0;
+        case ITEM_COPPER_WIRE:  return 100.0;
+        case ITEM_ELECTRONICS:  return 500.0;
+        case ITEM_TITANIUM:     return 1000.0;
+        case ITEM_FUEL:         return 50.0;
+        
+        // ROCKET PARTS
+        case PART_STRUCTURAL:   return 1500.0;
+        case PART_NOSECONE:     return 2500.0;
+        case PART_FUEL_TANK:    return 6000.0;
+        case PART_ENGINE:       return 8000.0;
+        case PART_COMMAND_POD:  return 10000.0;
+        
+        default: return 0.0;
+    }
+}
+
+// ==========================================
 // Recipe: defines input -> output conversion
 // ==========================================
 struct RecipeSlot {

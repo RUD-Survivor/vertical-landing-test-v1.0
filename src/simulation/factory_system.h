@@ -18,11 +18,12 @@ enum FactoryNodeType {
     NODE_ASSEMBLER,
     NODE_STORAGE,
     NODE_POWER_PLANT,
+    NODE_MARKET,
     NODE_TYPE_COUNT
 };
 
 inline const char* NodeTypeName(FactoryNodeType t) {
-    static const char* names[] = {"MINER", "SMELTER", "ASSEMBLER", "STORAGE", "POWER PLANT"};
+    static const char* names[] = {"MINER", "SMELTER", "ASSEMBLER", "STORAGE", "POWER PLANT", "MARKET"};
     return names[(int)t];
 }
 
@@ -104,6 +105,8 @@ public:
             node.output_max = 500;
         } else if (type == NODE_POWER_PLANT) {
             node.output_max = 10; // Not really used for output
+        } else if (type == NODE_MARKET) {
+            node.output_max = 1000; // High capacity for selling
         }
 
         nodes.push_back(node);
@@ -157,6 +160,8 @@ public:
                 total_power_req += 40.0f;
             } else if (node.type == NODE_ASSEMBLER) {
                 total_power_req += 60.0f;
+            } else if (node.type == NODE_MARKET) {
+                total_power_req += 10.0f; // Minimal power for the kiosk
             }
         }
         power_efficiency = (total_power_req > 0) ? fminf(1.0f, total_power_gen / total_power_req) : 1.0f;
@@ -213,6 +218,36 @@ public:
                         agency.addItem(pair.first, pair.second);
                     }
                     node.output_buffer.items.clear();
+                }
+            }
+            else if (node.type == NODE_MARKET) {
+                // Market nodes: sell everything in input_buffer for funds
+                if (!node.input_buffer.empty()) {
+                    float sell_speed = 5.0f; // items per second
+                    node.progress += dt * sell_speed;
+                    
+                    if (node.progress >= 1.0f) {
+                        int to_sell = (int)node.progress;
+                        node.progress -= (float)to_sell;
+                        
+                        // Pick items to sell from buffer
+                        for (int i = 0; i < to_sell; i++) {
+                            ItemType type = ITEM_NONE;
+                            for (auto const& pair : node.input_buffer.items) {
+                                if (pair.second > 0) { type = pair.first; break; }
+                            }
+                            
+                            if (type != ITEM_NONE) {
+                                node.input_buffer.remove(type, 1);
+                                agency.funds += GetItemPrice(type);
+                            } else {
+                                node.progress = 0.0f;
+                                break;
+                            }
+                        }
+                    }
+                } else {
+                    node.progress = 0.0f;
                 }
             }
         }
