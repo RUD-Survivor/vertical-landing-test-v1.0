@@ -88,6 +88,7 @@ inline void getNodeColor(FactoryNodeType t, float& r, float& g, float& b) {
         case NODE_ASSEMBLER: r=0.2f; g=0.7f; b=0.3f; break;
         case NODE_STORAGE:   r=0.4f; g=0.4f; b=0.6f; break;
         case NODE_POWER_PLANT: r=0.9f; g=0.9f; b=0.2f; break;
+        case NODE_MARKET:     r=1.0f; g=0.8f; b=0.2f; break; // Gold color
         default:             r=0.5f; g=0.5f; b=0.5f; break;
     }
 }
@@ -256,11 +257,12 @@ inline void DrawFactoryUI(Renderer* renderer, FactoryUIState& ui, const FactoryS
         {"ASSEMBLER", NODE_ASSEMBLER, 0.2f, 0.7f, 0.3f},
         {"STORAGE",   NODE_STORAGE,   0.4f, 0.4f, 0.6f},
         {"POWER",     NODE_POWER_PLANT, 0.9f, 0.9f, 0.2f},
+        {"MARKET",    NODE_MARKET,    1.0f, 0.8f, 0.2f},
     };
-    int num_btns = 5;
-    float btn_x_start = -0.85f;
-    float btn_spacing = 0.26f;
-    float btn_w = 0.22f;
+    int num_btns = 6;
+    float btn_x_start = -0.92f;
+    float btn_spacing = 0.22f;
+    float btn_w = 0.19f;
     float btn_h = 0.08f;
 
     for (int i = 0; i < num_btns; i++) {
@@ -379,6 +381,11 @@ inline void DrawFactoryUI(Renderer* renderer, FactoryUIState& ui, const FactoryS
                 renderer->drawText(sp_x, py, "MINING RESOURCE:", 0.012f, 0.6f, 0.7f, 1.0f, 1.0f, true, Renderer::CENTER);
                 py -= 0.05f;
                 renderer->drawText(sp_x, py, GetItemInfo(sel_node->mine_output).name, 0.018f, 0.9f, 0.6f, 0.4f, 1.0f, true, Renderer::CENTER);
+            } else if (sel_node->type == NODE_MARKET) {
+                py -= 0.1f;
+                renderer->drawText(sp_x, py, "MARKET OPERATIONS:", 0.012f, 1.0f, 0.8f, 0.2f, 1.0f, true, Renderer::CENTER);
+                py -= 0.04f;
+                renderer->drawText(sp_x, py, "Auto-Selling Active", 0.010f, 0.4f, 1.0f, 0.5f, 1.0f, true, Renderer::CENTER);
             }
             
             // Stats
@@ -443,11 +450,11 @@ inline bool HandleFactoryInput(GLFWwindow* window, FactoryUIState& ui, FactorySy
 
     // Toolbar hit detection
     float tb_y = 0.9f;
-    float btn_x_start = -0.85f;
-    float btn_spacing = 0.26f;
-    float btn_w = 0.22f;
+    float btn_x_start = -0.92f;
+    float btn_spacing = 0.22f;
+    float btn_w = 0.19f;
     float btn_h = 0.08f;
-    int total_btns = 7; // 5 buildings + belt + delete
+    int total_btns = 8; // 6 buildings + belt + delete
 
     bool over_side_panel = (ui.selected_node_id >= 0 && mx > 0.525f);
 
@@ -468,9 +475,9 @@ inline bool HandleFactoryInput(GLFWwindow* window, FactoryUIState& ui, FactorySy
 
     if (lmb_click) {
         // Toolbar clicks
-        if (ui.toolbar_hover >= 0 && ui.toolbar_hover < 5) {
+        if (ui.toolbar_hover >= 0 && ui.toolbar_hover < 6) {
             // Building button
-            FactoryNodeType types[] = {NODE_MINER, NODE_SMELTER, NODE_ASSEMBLER, NODE_STORAGE, NODE_POWER_PLANT};
+            FactoryNodeType types[] = {NODE_MINER, NODE_SMELTER, NODE_ASSEMBLER, NODE_STORAGE, NODE_POWER_PLANT, NODE_MARKET};
             if (ui.placing && ui.place_type == types[ui.toolbar_hover]) {
                 ui.placing = false; // Toggle off
             } else {
@@ -479,13 +486,13 @@ inline bool HandleFactoryInput(GLFWwindow* window, FactoryUIState& ui, FactorySy
                 ui.belt_mode = false;
                 ui.delete_mode = false;
             }
-        } else if (ui.toolbar_hover == 5) {
+        } else if (ui.toolbar_hover == 6) {
             // Belt button
             ui.belt_mode = !ui.belt_mode;
             ui.placing = false;
             ui.delete_mode = false;
             ui.belt_from_id = -1;
-        } else if (ui.toolbar_hover == 6) {
+        } else if (ui.toolbar_hover == 7) {
             // Delete button
             ui.delete_mode = !ui.delete_mode;
             ui.placing = false;
@@ -501,6 +508,7 @@ inline bool HandleFactoryInput(GLFWwindow* window, FactoryUIState& ui, FactorySy
                     if (ui.place_type == NODE_ASSEMBLER) cost = 25000.0;
                     if (ui.place_type == NODE_STORAGE) cost = 5000.0;
                     if (ui.place_type == NODE_POWER_PLANT) cost = 15000.0;
+                    if (ui.place_type == NODE_MARKET) cost = 30000.0;
                     if (agency.funds >= cost) {
                         agency.funds -= cost;
                         factory.addNode(ui.place_type, ui.hover_gx, ui.hover_gy);
