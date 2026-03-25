@@ -9,7 +9,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 if(MSVC)
-    add_compile_options(/utf-8)
+    add_compile_options(/utf-8 /MP)
 endif()
 
 # 4. 查找系统中的依赖库 (OpenGL 和 GLFW)
@@ -52,6 +52,7 @@ set(SOURCES
     src/simulation/center_calculator.cpp
     src/simulation/center_visualizer.cpp
     src/simulation/predictor.cpp
+    src/render/stb_impl.cpp
     vendor/glad/glad.c
 )
 

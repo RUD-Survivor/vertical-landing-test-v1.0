@@ -654,7 +654,7 @@ public:
         float continent = warpedFbm(texCoord * 1.2);
 
         // Bias continent generation: more ocean (Earth is 71% water)
-        float seaLevel = 0.44;
+        float seaLevel = 0.45;
         bool isLand = continent > seaLevel;
         float landHeight = isLand ? (continent - seaLevel) / (1.0 - seaLevel) : 0.0;
 
@@ -3189,9 +3189,15 @@ R"(
             finalH += (rockCracks * sHigh + gullies * sMid + baseNoise * sLow);
             finalH += d10;
         }
-        
         vec3 kscPos = vec3(0.1436, 0.478, 0.866);
-        finalH = mix(finalH, 0.005 / uPlanetRadius, smoothstep(0.08, 0.02, length(normPos - kscPos))); 
+        float distToKSC = length(normPos - kscPos);
+        float kscMask = smoothstep(0.12, 0.04, distToKSC); 
+        
+        // Boost hRefined within KSC radius to ensure land-based coloring
+        hRefined = mix(hRefined, sLevel + 0.015, kscMask);
+        
+        // Final displacement (5m above sea level)
+        finalH = mix(finalH, 0.005 / uPlanetRadius, smoothstep(0.08, 0.02, distToKSC)); 
         
         mat3 localRotScale = mat3(uModel); 
         vRelViewPos = uPlanetCenterRel + localRotScale * (normPos * (1.0 + finalH));
@@ -3315,6 +3321,7 @@ R"(
         vec3 forest = vec3(0.06, 0.22, 0.05);
         vec3 mountainColor = vec3(0.42, 0.38, 0.35);
         vec3 snow = vec3(0.92, 0.94, 1.0);
+        vec3 concrete = vec3(0.45, 0.45, 0.48); // Industrial gray
         
         vec3 surfColor;
         float sLevel = 0.45;
@@ -3336,6 +3343,13 @@ R"(
             snowMask *= (1.0 - smoothstep(0.08, 0.22, vSlope)); 
             
             surfColor = mix(cMid, snow, snowMask) * albedoVar;
+            
+            // Apply Concrete for KSC
+            vec3 kscPos = vec3(0.1436, 0.478, 0.866);
+            float distToKSC = length(fV_normPos - kscPos);
+            // Concrete pad: sharp circle with slight fade
+            float concreteMask = smoothstep(0.015, 0.008, distToKSC); 
+            surfColor = mix(surfColor, concrete, concreteMask);
         }
 
         float diff = max(dot(N, L), 0.0);
@@ -3558,27 +3572,62 @@ R"(
 
       out vec4 FragColor;
 
+      // Simple hash for terrain detail noise
+      float hash3(vec3 p) {
+        p = fract(p * vec3(443.897, 441.423, 437.195));
+        p += dot(p, p.yzx + 19.19);
+        return fract((p.x + p.y) * p.z);
+      }
+      float noise3d(vec3 p) {
+        vec3 i = floor(p); vec3 f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
+        float n000 = hash3(i), n100 = hash3(i + vec3(1,0,0));
+        float n010 = hash3(i + vec3(0,1,0)), n110 = hash3(i + vec3(1,1,0));
+        float n001 = hash3(i + vec3(0,0,1)), n101 = hash3(i + vec3(1,0,1));
+        float n011 = hash3(i + vec3(0,1,1)), n111 = hash3(i + vec3(1,1,1));
+        float nx00 = mix(n000, n100, f.x), nx10 = mix(n010, n110, f.x);
+        float nx01 = mix(n001, n101, f.x), nx11 = mix(n011, n111, f.x);
+        return mix(mix(nx00, nx10, f.y), mix(nx01, nx11, f.y), f.z);
+      }
+
       void main() {
         vec3 N = normalize(vNormal);
         vec3 L = normalize(uLightDir);
         vec3 V = normalize(-vRelPos);
         vec3 H = normalize(L + V);
 
-        float ambient = 0.15;
-        float diff = max(dot(N, L), 0.0);
-        float spec = pow(max(dot(N, H), 0.0), 32.0) * 0.2;
+        // Triplanar blending weights for natural texture detail
+        vec3 blendW = abs(N);
+        blendW = pow(blendW, vec3(4.0));
+        blendW /= (blendW.x + blendW.y + blendW.z + 0.001);
 
-        // Visual Marker: Pulsing Cyan/Magenta X-Ray glow
-        float pulse = 0.5 + 0.5 * sin(uTime * 5.0);
-        float fresnel = 1.0 - max(dot(N, V), 0.0);
-        vec3 markerGlow = mix(vec3(0.0, 1.0, 1.0), vec3(1.0, 0.0, 1.0), pulse) * pow(fresnel, 2.0);
-        
-        vec3 result = vColor.rgb * (ambient + diff * 0.75) + vec3(spec);
-        result += markerGlow * 0.8;
-        
-        // High visibility tint
-        result = mix(result, vec3(1.0, 0.0, 1.0), 0.2 * pulse);
-        
+        // Multi-scale noise for surface micro-detail
+        vec3 wp = vRelPos * 500.0; // Scale to meters
+        float n1 = noise3d(wp * 0.5) * blendW.x
+                 + noise3d(wp.yzx * 0.5) * blendW.y
+                 + noise3d(wp.zxy * 0.5) * blendW.z;
+        float n2 = noise3d(wp * 2.0) * blendW.x
+                 + noise3d(wp.yzx * 2.0) * blendW.y
+                 + noise3d(wp.zxy * 2.0) * blendW.z;
+        float detail = n1 * 0.6 + n2 * 0.4;
+
+        // Material color with noise variation
+        vec3 baseColor = vColor.rgb * (0.85 + 0.3 * detail);
+
+        // Phong lighting (terrain-consistent)
+        float ambient = 0.12;
+        float diff = max(dot(N, L), 0.0);
+        float spec = pow(max(dot(N, H), 0.0), 48.0) * 0.15;
+
+        // Soft shadow via terminator smoothstep
+        float terminator = smoothstep(-0.05, 0.15, dot(N, L));
+
+        vec3 result = baseColor * (ambient + diff * 0.85 * terminator) + vec3(spec * terminator);
+
+        // Subtle AO approximation from normal dot up
+        float ao = 0.85 + 0.15 * max(N.y, 0.0);
+        result *= ao;
+
         FragColor = vec4(result, 1.0);
       }
     )";
@@ -4098,12 +4147,15 @@ R"(
             // Mesh dirty chunks
             SVO::meshAllDirty(svoManager->chunks, svoManager->pool, svoManager->region);
 
-            // Render SVO chunks
+            // Render SVO chunks with proper shader
             glUseProgram(svoProg);
             glEnable(GL_DEPTH_TEST);
+            glDepthFunc(GL_LEQUAL);
             glDepthMask(GL_TRUE);
-            glDisable(GL_CULL_FACE);
+            glEnable(GL_CULL_FACE);
+            glCullFace(GL_BACK);
 
+            // Camera-relative VP (no translation in view matrix)
             Mat4 viewOnlyRot2 = view;
             viewOnlyRot2.m[12] = 0.0; viewOnlyRot2.m[13] = 0.0; viewOnlyRot2.m[14] = 0.0;
             Mat4 vpRel2 = proj * viewOnlyRot2;
@@ -4111,7 +4163,7 @@ R"(
             glUniform3f(usvo_lightDir, lightDir.x, lightDir.y, lightDir.z);
             glUniform1f(glGetUniformLocation(svoProg, "uTime"), time);
 
-            // SVO local frame relative to the planet's internal space
+            // Build SVO-local-to-camera-relative transformation matrix
             Vec3 E = svoManager->region.east;
             Vec3 U = svoManager->region.up;
             Vec3 N = svoManager->region.north;
@@ -4134,45 +4186,17 @@ R"(
 
             sendMat4(usvo_svoMat, svoMat);
 
-            static int debugCounter = 0;
-            if (debugCounter++ % 120 == 0) {
-                printf("[SVO-RENDER] CenterCamRel: (%.2f, %.2f, %.2f) km | Dist: %.2f km\n", 
-                       wOCamRel.x, wOCamRel.y, wOCamRel.z, wOCamRel.length());
-            }
-
-            // DEBUG: Force SVO to render on top of everything (ignore depth)
-            glDisable(GL_DEPTH_TEST);
-            glDepthFunc(GL_ALWAYS);
-
-            // DEBUG 2: Draw a simple line from camera to SVO center using fixed function pipeline
-            glUseProgram(0);
-            glMatrixMode(GL_PROJECTION); 
-            float projArr[16];
-            for(int i=0; i<16; i++) projArr[i] = (float)proj.m[i];
-            glLoadMatrixf(projArr);
-            
-            glMatrixMode(GL_MODELVIEW); 
-            glLoadIdentity(); // Camera is at origin (camera-relative)
-            
-            glBegin(GL_LINES);
-            glColor3f(1.0f, 1.0f, 1.0f); // White line to highlight
-            glVertex3f(0.0f, 0.0f, 0.0f); // From Camera
-            glVertex3f((float)wOCamRel.x, (float)wOCamRel.y, (float)wOCamRel.z); // To SVO Center
-            glEnd();
-            
-            glUseProgram(svoProg); // Back to SVO program for triangles
-            glEnable(GL_BLEND);
-            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
+            // Draw all active chunks
             for (auto& chunk : svoManager->chunks) {
                 if (!chunk.active || chunk.indexCount == 0) continue;
                 glBindVertexArray(chunk.vao);
                 glDrawElements(GL_TRIANGLES, chunk.indexCount, GL_UNSIGNED_INT, 0);
                 glBindVertexArray(0);
             }
-            glEnable(GL_DEPTH_TEST);
+
+            // Restore state
             glDepthFunc(GL_LESS);
-            glDisable(GL_BLEND);
+            glDisable(GL_CULL_FACE);
         }
 
         // --- VEGETATION PASS (If close enough) ---

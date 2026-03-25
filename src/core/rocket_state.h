@@ -230,9 +230,10 @@ struct RocketState {
     // Body-fixed surface coordinates (relative to planet center, rotated frame)
     double surf_px = 0.0, surf_py = EARTH_RADIUS, surf_pz = 0.0;
     
-    // Launch site coordinates (degrees)
+    // Launch site coordinates
     double launch_latitude = 28.5;  // Default: Cape Canaveral
     double launch_longitude = -80.6;
+    double launch_site_px = 0.0, launch_site_py = EARTH_RADIUS, launch_site_pz = 0.0;
     
     // Attitude
     Quat attitude;           // True 3D attitude

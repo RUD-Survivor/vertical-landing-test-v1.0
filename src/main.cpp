@@ -1,3 +1,4 @@
+// Build optimization test
 #include<glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <algorithm>
@@ -734,6 +735,11 @@ int main() {
       rocket_state.surf_py = R * cos(lat_rad) * sin(lon_rad);
       rocket_state.surf_pz = R * sin(lat_rad);
 
+      // Store fixed launch site for pad rendering
+      rocket_state.launch_site_px = rocket_state.surf_px;
+      rocket_state.launch_site_py = rocket_state.surf_py;
+      rocket_state.launch_site_pz = rocket_state.surf_pz;
+
       // Initialize inertial coordinates immediately for the first frame
       CelestialBody& body = SOLAR_SYSTEM[current_soi_index];
       double theta = body.prime_meridian_epoch; // sim_time = 0
@@ -1137,28 +1143,87 @@ int main() {
         }
     }
 
-    // --- Shift+V 切换 SVO 系统 (Phase 1 测试) ---
+    // --- Shift+V 切换 SVO 系统 / Auto-activate on landing ---
     static bool v_was_pressed = false;
+    static bool svo_auto_activated = false;  // Track auto-activation to avoid re-triggering
+    static int svo_dig_mode = 0; // 0=off, 1=dig, 2=build
     bool v_now = glfwGetKey(window, GLFW_KEY_V) == GLFW_PRESS;
+
+    // Manual toggle: Shift+V
     if (shift_now && v_now && !v_was_pressed) {
         if (r3d->svoManager) {
             if (r3d->svoManager->hasActiveChunks()) {
                 r3d->svoManager->deactivate();
-                cout << "[SVO] System Deactivated (Quadtree active)" << endl;
+                svo_auto_activated = false;
+                svo_dig_mode = 0;
+                cout << "[SVO] System Deactivated" << endl;
             } else {
-                // Quadtree local space expects Y-up, but surf_p is Z-up. 
-                // We must apply the inverse of `align_to_z` (from drawPlanet) to rotate it to local space.
                 Vec3 subNormal(rocket_state.surf_px, rocket_state.surf_py, rocket_state.surf_pz);
                 subNormal = subNormal.normalized();
                 Quat unalign_from_z = Quat::fromAxisAngle(Vec3(1.0f, 0.0f, 0.0f), (float)(PI / 2.0));
                 subNormal = unalign_from_z.rotate(subNormal);
-                
                 r3d->svoManager->activate(subNormal, EARTH_RADIUS * 0.001, r3d->terrain);
-                cout << "[SVO] System Activated at sub-point!" << endl;
+                svo_auto_activated = true;
+                cout << "[SVO] System Activated at landing site" << endl;
             }
         }
     }
     v_was_pressed = (shift_now && v_now);
+
+    // Auto-activate SVO when rocket lands
+    if (r3d->svoManager && !r3d->svoManager->hasActiveChunks() && !svo_auto_activated) {
+        if (rocket_state.status == LANDED && rocket_state.altitude < 1000.0) {
+            Vec3 subNormal(rocket_state.surf_px, rocket_state.surf_py, rocket_state.surf_pz);
+            subNormal = subNormal.normalized();
+            Quat unalign_from_z = Quat::fromAxisAngle(Vec3(1.0f, 0.0f, 0.0f), (float)(PI / 2.0));
+            subNormal = unalign_from_z.rotate(subNormal);
+            r3d->svoManager->activate(subNormal, EARTH_RADIUS * 0.001, r3d->terrain);
+            svo_auto_activated = true;
+            cout << "[SVO] Auto-activated on landing" << endl;
+        }
+    }
+
+    // Auto-deactivate SVO when launching
+    if (r3d->svoManager && r3d->svoManager->hasActiveChunks()) {
+        if (rocket_state.status == ASCEND && rocket_state.altitude > 2000.0) {
+            r3d->svoManager->deactivate();
+            svo_auto_activated = false;
+            svo_dig_mode = 0;
+            cout << "[SVO] Auto-deactivated on ascent" << endl;
+        }
+    }
+
+    // --- B key: Cycle SVO mode (off → dig → build → off) ---
+    static bool b_was_pressed = false;
+    bool b_now = glfwGetKey(window, GLFW_KEY_B) == GLFW_PRESS;
+    if (b_now && !b_was_pressed && !shift_now) {
+        if (r3d->svoManager && r3d->svoManager->hasActiveChunks()) {
+            svo_dig_mode = (svo_dig_mode + 1) % 3;
+            const char* modeNames[] = {"OFF", "DIG", "BUILD"};
+            cout << "[SVO] Mode: " << modeNames[svo_dig_mode] << endl;
+        }
+    }
+    b_was_pressed = b_now;
+
+    // --- Execute dig/build on mouse click (Left mouse button while in mode) ---
+    if (r3d->svoManager && r3d->svoManager->hasActiveChunks() && svo_dig_mode > 0) {
+        static int svo_op_cooldown = 0;
+        if (svo_op_cooldown > 0) svo_op_cooldown--;
+
+        if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS && svo_op_cooldown == 0) {
+            // Operate at rocket position in SVO local frame
+            Vec3 rocketWorldPos((float)rocket_state.px, (float)rocket_state.py, (float)rocket_state.pz);
+            Vec3 svoLocal = r3d->svoManager->planetLocalToSVOLocal(rocketWorldPos);
+            double opRadius = 0.005; // ~5 meters
+
+            if (svo_dig_mode == 1) {
+                r3d->svoManager->dig(svoLocal, opRadius);
+            } else if (svo_dig_mode == 2) {
+                r3d->svoManager->build(svoLocal, opRadius, SVO::Material::ROCK);
+            }
+            svo_op_cooldown = 5; // Cooldown frames
+        }
+    }
 
     // 全局帧计数器 (用于限制控制台打印频率)
     static int frame = 0;
@@ -2886,8 +2951,8 @@ int main() {
           Quat tilt = Quat::fromAxisAngle(Vec3(1, 0, 0), (float)body.axial_tilt);
           Quat full_rot = tilt * rot;
           
-          // Use rocket's launch site coordinates
-          Vec3 s_pos((float)rocket_state.surf_px, (float)rocket_state.surf_py, (float)rocket_state.surf_pz);
+          // Use FIXED launch site coordinates instead of dynamic ground track
+          Vec3 s_pos((float)rocket_state.launch_site_px, (float)rocket_state.launch_site_py, (float)rocket_state.launch_site_pz);
           // Normalized local up vector
           Vec3 localUp = s_pos.normalized();
           // Position on surface (exactly at terrain elevation)

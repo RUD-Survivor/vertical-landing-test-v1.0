@@ -748,9 +748,14 @@ void Update(RocketState& state, const RocketConfig& config, const ControlInput& 
         } else if (state.velocity < 0.1) {
             state.altitude = state.terrain_altitude;
             if (state.status != PRE_LAUNCH && state.status != LANDED) {
-                if (std::abs(state.velocity) > 10 || std::abs(state.local_vx) > 10) state.status = CRASHED;
-                else {
+                if (std::abs(state.velocity) > 10 || std::abs(state.local_vx) > 10) {
+                    state.status = CRASHED;
+                    state.mission_msg = "CRASHED INTO TERRAIN (HIGH IMPACT)!";
+                    state.vx = 0; state.vy = 0; state.vz = 0;
+                    state.ang_vel = 0; state.ang_vel_z = 0; state.ang_vel_roll = 0;
+                } else {
                     state.status = LANDED;
+                    state.mission_msg = "LANDED!";
                     double theta = current_body.prime_meridian_epoch + (state.sim_time * 2.0 * PI / current_body.rotation_period);
                     Quat rot = Quat::fromAxisAngle(Vec3(0, 0, 1), (float)theta);
                     Quat tilt = Quat::fromAxisAngle(Vec3(1, 0, 0), (float)current_body.axial_tilt);
@@ -768,6 +773,22 @@ void Update(RocketState& state, const RocketConfig& config, const ControlInput& 
                     state.vx = (double)world_v.x; state.vy = (double)world_v.y; state.vz = (double)world_v.z;
                 }
                 state.ang_vel = 0; state.ang_vel_z = 0; state.ang_vel_roll = 0;
+            }
+        } else {
+            // HIGH SPEED CRASH: If vertical velocity is >= 0.1 but we are below ground
+            state.status = CRASHED;
+            state.mission_msg = "SUDDEN IMPACT: CRASHED!";
+            state.vx = 0; state.vy = 0; state.vz = 0;
+            state.ang_vel = 0; state.ang_vel_z = 0; state.ang_vel_roll = 0;
+            state.altitude = state.terrain_altitude;
+            
+            // Snap position to surface
+            double r_surf = current_body.radius + state.terrain_altitude - config.bounds_bottom;
+            double r_current = std::sqrt(state.px*state.px + state.py*state.py + state.pz*state.pz);
+            if (r_current > 1e-6) {
+                state.px *= (r_surf / r_current);
+                state.py *= (r_surf / r_current);
+                state.pz *= (r_surf / r_current);
             }
         }
     } else {
@@ -926,11 +947,13 @@ void FastGravityUpdate(RocketState& state, const RocketConfig& config, double dt
         state.py += (dt / 6.0) * (k1_py + 2.0 * k2_py + 2.0 * k3_py + k4_py);
         state.pz += (dt / 6.0) * (k1_pz + 2.0 * k2_pz + 2.0 * k3_pz + k4_pz);
         
-        state.altitude = std::sqrt(state.px*state.px + state.py*state.py + state.pz*state.pz) - SOLAR_SYSTEM[current_soi_index].radius;
-        
-        if (state.altitude <= state.terrain_altitude) {
+        // FAST PHYSICS COLLISION (Time Warp)
+        double current_com_alt = std::sqrt(state.px*state.px + state.py*state.py + state.pz*state.pz) - SOLAR_SYSTEM[current_soi_index].radius;
+        if (current_com_alt + config.bounds_bottom <= state.terrain_altitude) {
             state.altitude = state.terrain_altitude;
             state.status = CRASHED;
+            state.mission_msg = "CRASHED (WARP IMPACT)!";
+            state.vx = 0; state.vy = 0; state.vz = 0;
             break;
         }
     }

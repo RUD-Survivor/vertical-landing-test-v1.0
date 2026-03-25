@@ -69,7 +69,7 @@ struct SVONode {
 // Index 0 is reserved as NULL_NODE.
 class NodePool {
 public:
-    static constexpr uint32_t POOL_SIZE = 16 * 1024 * 1024; // 16M nodes (~576 MB)
+    static constexpr uint32_t POOL_SIZE = 4 * 1024 * 1024; // 4M nodes (~144 MB) — Phase 1
     static constexpr uint32_t NULL_NODE = 0;
 
     std::vector<SVONode> nodes;

@@ -17,9 +17,12 @@ struct Noise {
     static Vec3 floorVec(const Vec3& v) { return Vec3(floorf(v.x), floorf(v.y), floorf(v.z)); }
     
     static float hash(Vec3 p) {
-        p = fract(Vec3(p.x * 443.897f, p.y * 441.423f, p.z * 437.195f));
-        p.x += p.x * (p.y + 19.19f); p.y += p.y * (p.z + 19.19f); p.z += p.z * (p.x + 19.19f);
-        return fract((p.x + p.y) * p.z);
+        p.x = fract(p.x * 443.897f);
+        p.y = fract(p.y * 441.423f);
+        p.z = fract(p.z * 437.195f);
+        float d = (float)(p.x * (p.y + 19.19) + p.y * (p.z + 19.19) + p.z * (p.x + 19.19));
+        p.x += d; p.y += d; p.z += d;
+        return fract((float)((p.x + p.y) * p.z));
     }
     
     static float noise(const Vec3& p) {
@@ -77,6 +80,40 @@ struct Noise {
         );
         return ridgedFbm(p + offset * 0.15f, 6);
     }
+    static Vec3 hash33(Vec3 p) {
+        p.x = fract(p.x * 443.897f);
+        p.y = fract(p.y * 441.423f);
+        p.z = fract(p.z * 437.195f);
+        float d = (float)(p.x * (p.y + 19.19) + p.y * (p.z + 19.19) + p.z * (p.x + 19.19));
+        p.x += d; p.y += d; p.z += d;
+        return fract(p);
+    }
+
+    static float worley(Vec3 p) {
+        Vec3 i = floorVec(p);
+        Vec3 f = fract(p);
+        float minDist = 1.0f;
+        for (int z = -1; z <= 1; z++) {
+            for (int y = -1; y <= 1; y++) {
+                for (int x = -1; x <= 1; x++) {
+                    Vec3 neighbor((float)x, (float)y, (float)z);
+                    Vec3 point = hash33(i + neighbor);
+                    Vec3 diff = neighbor + point - f;
+                    minDist = std::min(minDist, (float)diff.length());
+                }
+            }
+        }
+        return minDist;
+    }
+
+    static float gullyNoise(Vec3 p, float angle) {
+        float ca = cosf(angle), sa = sinf(angle);
+        float sU = (float)p.x * ca - (float)p.z * sa;
+        float sV = (float)p.x * sa + (float)p.z * ca;
+        Vec3 pS(sU * 1500000.0f, (float)p.y * 1500000.0f, sV * 40000.0f);
+        return ridgedFbm(pS, 3);
+    }
+
     static float detail10m(const Vec3& p) {
         float n = noise(p * 2500000.0f);
         n += noise(p * 5000000.0f) * 0.5f;
@@ -411,24 +448,46 @@ public:
         }
 
         // Sea Level Normalization
-        float seaLevel = 0.44f;
+        float seaLevel = 0.45f;
         if (hRefined < seaLevel && hRefined > 0.38f) {
             float shelfT = (hRefined - 0.38f) / (seaLevel - 0.38f);
             hRefined = 0.395f + (seaLevel - 0.001f - 0.395f) * smoothstep_local(0.0f, 1.0f, shelfT);
         }
 
         // Translate normalized height [0,1] to kilometers
-        float heightKm;
-        if (hRefined < seaLevel) {
-            heightKm = 0.0f;
-        } else {
-            heightKm = (hRefined - seaLevel) / (1.0f - seaLevel) * maxElevation;
-            // Apply 10m scale micro-noise physically
-            heightKm += Noise::detail10m(normalizedPos) * planetRadius;
+        float finalH = (hRefined < seaLevel) ? 0.0f : (hRefined - seaLevel) / (1.0f - seaLevel) * maxElevation / planetRadius;
+        
+        if (hRefined >= seaLevel) {
+            float epsS = 0.0015f;
+            float hX = (sampleTectonic(u + epsS, v) - sampleTectonic(u - epsS, v));
+            float hY = (sampleTectonic(u, v + epsS) - sampleTectonic(u, v - epsS));
+            float currentSlope = sqrtf(hX*hX + hY*hY) * 100.0f;
+            float sAngle = std::atan2(-hX, hY);
+
+            float sHigh = smoothstep_local(0.12f, 0.25f, currentSlope);
+            float sMid = smoothstep_local(0.04f, 0.12f, currentSlope) * (1.0f - sHigh);
+            float sLow = 1.0f - smoothstep_local(0.04f, 0.12f, currentSlope);
+
+            float rockCracks = (1.0f - Noise::worley(normalizedPos * 1800000.0f)) * 0.000003f;
+            float gullies = Noise::gullyNoise(normalizedPos, sAngle) * 0.000002f;
+            float baseNoise = (Noise::noise(normalizedPos * 4000000.0f) - 0.5f) * 0.0000005f;
+
+            finalH += (rockCracks * sHigh + gullies * sMid + baseNoise * sLow);
+            finalH += Noise::detail10m(normalizedPos);
         }
 
-        // --- KSC FLATTENING REMOVED ---
-        return heightKm;
+        // KSC FLATTENING & LANDIFICATION
+        Vec3 kscPos(0.1436, 0.478, 0.866);
+        float distToKSC = (float)(normalizedPos - kscPos).length();
+        float kscMask = smoothstep_local(0.12f, 0.04f, distToKSC); 
+        
+        // Ensure hRefined is above seaLevel at KSC for land-based coloring
+        hRefined = Noise::mix(hRefined, seaLevel + 0.015f, kscMask);
+        
+        // Final displacement (5m above sea level)
+        finalH = Noise::mix(finalH, 0.005f / planetRadius, smoothstep_local(0.08f, 0.02f, distToKSC));
+
+        return finalH * planetRadius;
     }
 
     Vec3 getPosition(const Vec3& normalizedPos) {
