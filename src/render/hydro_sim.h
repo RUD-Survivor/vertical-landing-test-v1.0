@@ -6,6 +6,13 @@
 
 namespace Hydro {
 
+struct RiverSkeleton {
+    std::vector<Vec3> points;
+    Vec3 minPos, maxPos;
+    float maxAccumulation;
+    int order;
+};
+
 struct HydroData {
     std::vector<float> accumulation; // Flow accumulation (River volume)
     std::vector<int> flowDir;       // D8 Flow direction index (0-7)
@@ -13,6 +20,7 @@ struct HydroData {
     std::vector<float> waterTable;   // Surface water / Lake depth
     std::vector<float> filledHeight; // Terrain height after depression filling
     std::vector<float> sedimentLoad; // Current sediment carrier load
+    std::vector<RiverSkeleton> skeletons; // High-precision vector paths
 };
 
 class HydroSimulator {
@@ -44,23 +52,42 @@ public:
                 float pEvap = std::max(0.0f, temperature[i] + 15.0f) * 0.05f;
                 float inflow = data.accumulation[i]; 
 
-                if (inflow > pEvap * 1.5f) {
+                // 1. Non-linear Evaporation Scaling: Large basins require significantly 
+                // more water to saturate a 78km pixel.
+                float scaleAwareThreshold = 1.2f * (1.0f + log10f(1.0f + inflow) * 6.0f);
+
+                if (inflow > pEvap * scaleAwareThreshold) {
                     // Humid: Permanent lake with outlet.
-                    // Boosted Breaching: High flow or proximity to coast carves deeper
-                    float breachFactor = (inflow > 50.0f) ? 0.005f : 0.001f;
-                    data.filledHeight[i] -= std::max(breachFactor, lakeDepth * 0.3f * (inflow / 200.0f));
+                    // AGGRESSIVE BREACHING for global map: quickly carve an exit
+                    float breachFactor = (inflow > 10.0f) ? 0.012f : 0.003f;
+                    data.filledHeight[i] -= std::max(breachFactor, lakeDepth * 0.75f * (inflow / 50.0f));
                     data.filledHeight[i] = std::max(heightMap[i] + 0.0001f, data.filledHeight[i]);
-                } else if (inflow > pEvap * 0.2f) {
-                    // Semi-Arid: Seasonal/Ephemeral lake. Partial fill.
-                    data.filledHeight[i] = heightMap[i] + lakeDepth * 0.2f;
+                } else if (inflow > pEvap * 0.1f) {
+                    // Semi-Arid: Seasonal fill.
+                    data.filledHeight[i] = heightMap[i] + lakeDepth * 0.05f;
                 } else {
-                    // Arid: Endorheic Basin / Salt Flat. Drain the "water" but keep the depression.
+                    // Arid: Drain completely to keep terrain dry on plains.
                     data.filledHeight[i] = heightMap[i];
                 }
+            }
+            
+            // INDUSTRIAL GRADE: Clamp Global Lake Depth to prevent 'Resolution Drowning'
+            // Even if the coarse map has a huge pit, we cap the visual/reference water 
+            // at about 60 meters (0.00001 units) relative to planetary radius.
+            float maxGlobalWaterDepth = 0.00001f;
+            if (data.filledHeight[i] > heightMap[i] + maxGlobalWaterDepth) {
+                data.filledHeight[i] = heightMap[i] + maxGlobalWaterThresholdMapping(lakeDepth, maxGlobalWaterDepth);
             }
         }
         
         calculateStrahlerOrder();
+        extractSkeletons();
+    }
+
+private:
+    float maxGlobalWaterThresholdMapping(float actualDepth, float cap) {
+        // Soft-ceiling: allow slightly more depth for major oceans/lakes but prevent 60km pits
+        return cap + (actualDepth * 0.001f); 
     }
 
 private:
@@ -101,8 +128,9 @@ private:
                     visited[nIdx] = true;
                     // Add a slightly more significant epsilon (1e-5) to force a drainage slope
                     // This prevents massive flat "blobs" by giving water a direction
-                    if (data.filledHeight[nIdx] < curr.h + 1e-5f) {
-                        data.filledHeight[nIdx] = curr.h + 1e-5f;
+                    // Use a much smaller epsilon (1e-7) to prevent visible 'tilting' on plains
+                    if (data.filledHeight[nIdx] < curr.h + 1e-7f) {
+                        data.filledHeight[nIdx] = curr.h + 1e-7f;
                     }
                     pq.push({nx, ny, data.filledHeight[nIdx]});
                 }
@@ -148,7 +176,8 @@ private:
 
         for (int i = 0; i < width * height; i++) {
             float evap = std::max(0.0f, temp[i] + 10.0f) * 0.009f; 
-            float netWater = std::max(0.0f, precip[i] - evap); 
+            float seepage = 0.0001f; // ~630 meters of annual absorption (more realistic)
+            float netWater = std::max(0.0f, precip[i] - (evap + seepage)); 
             if (heightMap[i] <= 0.45f) netWater = 0.0f;
             data.accumulation[i] = netWater;
             data.sedimentLoad[i] = 0.0f;
@@ -190,6 +219,69 @@ private:
                         data.filledHeight[idx] += data.sedimentLoad[idx] * 0.5f; // Deposit at coast
                         data.sedimentLoad[idx] = 0.0f;
                     }
+                }
+            }
+        }
+    }
+
+    void extractSkeletons() {
+        data.skeletons.clear();
+        std::vector<bool> onSkeleton(width * height, false);
+
+        int dx[] = {1, 1, 0, -1, -1, -1, 0, 1}; 
+        int dy[] = {0, 1, 1, 1, 0, -1, -1, -1};
+
+        // Trace and extract major drainage stems (Strahler >= 4)
+        for (int i = 0; i < width * height; i++) {
+            // Start a skeleton at the mouth of a major river or a high-order tributary
+            if (data.strahler[i] >= 4 && !onSkeleton[i]) {
+                RiverSkeleton skel;
+                skel.order = data.strahler[i];
+                skel.maxAccumulation = data.accumulation[i];
+
+                int curr = i;
+                int safety = 0;
+                while (curr != -1 && safety < 1000) {
+                    onSkeleton[curr] = true;
+                    
+                    // Convert grid coord to spherical Vec3
+                    float u = (float)(curr % width) / (width - 1);
+                    float v = (float)(curr / width) / (height - 1);
+                    float theta = (u - 0.5f) * 2.0f * 3.14159f;
+                    float phi = v * 3.14159f;
+                    Vec3 p(
+                        sinf(phi) * cosf(theta),
+                        cosf(phi),
+                        sinf(phi) * sinf(theta)
+                    );
+                    skel.points.push_back(p);
+
+                    // Update AABB
+                    if (skel.points.size() == 1) {
+                        skel.minPos = skel.maxPos = p;
+                    } else {
+                        skel.minPos.x = std::min(skel.minPos.x, p.x);
+                        skel.minPos.y = std::min(skel.minPos.y, p.y);
+                        skel.minPos.z = std::min(skel.minPos.z, p.z);
+                        skel.maxPos.x = std::max(skel.maxPos.x, p.x);
+                        skel.maxPos.y = std::max(skel.maxPos.y, p.y);
+                        skel.maxPos.z = std::max(skel.maxPos.z, p.z);
+                    }
+
+                    int dir = data.flowDir[curr];
+                    if (dir == -1) break;
+
+                    int nx = (curr % width + dx[dir] + width) % width;
+                    int ny = std::clamp(curr / width + dy[dir], 0, height - 1);
+                    int next = ny * width + nx;
+                    
+                    if (onSkeleton[next] || data.strahler[next] < 3) break;
+                    curr = next;
+                    safety++;
+                }
+
+                if (skel.points.size() > 5) {
+                    data.skeletons.push_back(skel);
                 }
             }
         }
@@ -313,8 +405,9 @@ public:
                 if (!visited[nIdx]) {
                     visited[nIdx] = true;
                     // Apply the same tiny gradient for drainage
-                    if (grid[nIdx] < curr.h + 0.00001f) {
-                        grid[nIdx] = curr.h + 0.00001f;
+                    // Local simulation uses 0.0 epsilon to ensure perfect flatness across edges
+                    if (grid[nIdx] < curr.h) {
+                        grid[nIdx] = curr.h;
                     }
                     pq.push({nx, ny, grid[nIdx]});
                 }

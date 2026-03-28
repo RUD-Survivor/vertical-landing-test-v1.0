@@ -23,22 +23,25 @@ inline void sendMat4(GLint loc, const Mat4& m) {
 }
 
 // ==========================================================
-// 3D Vertex Format
+// 3D 顶点格式 (Vertex3D)
+// 定义了渲染一个 3D 点所需的所有属性。
 // ========================================================== 
 struct Vertex3D {
-  float px, py, pz;     // position
-  float nx, ny, nz;     // normal
-  float u, v;           // UV
-  float r, g, b, a;     // color
+  float px, py, pz;     // 世界/局部空间位置
+  float nx, ny, nz;     // 法线向量 (用于光照计算)
+  float u, v;           // 纹理贴图坐标
+  float r, g, b, a;     // 顶点颜色
 };
 
 // ==========================================================
-// Mesh — 可重用的3D几何体
+// Mesh — 3D 网格模型
+// 封装了 OpenGL 的 VAO/VBO/EBO 排队逻辑，负责将几何数据上传到 GPU。
 // ==========================================================
 struct Mesh {
   GLuint vao = 0, vbo = 0, ebo = 0;
   int indexCount = 0;
 
+  // 将顶点与索引数据上传至显存
   void upload(const std::vector<Vertex3D>& verts,
               const std::vector<unsigned int>& indices) {
     indexCount = (int)indices.size();
@@ -94,6 +97,7 @@ struct Mesh {
 
 // ==========================================================
 // Texture — 2D 纹理对象
+// 负责管理显存中的图像数据，支持不同的贴图槽位。
 // ==========================================================
 struct Texture {
   GLuint id = 0;
@@ -104,6 +108,7 @@ struct Texture {
     id = 0;
   }
 
+  // 将纹理绑定到指定的着色器槽位 (Slot)
   void bind(GLuint slot = 0) const {
     glActiveTexture(GL_TEXTURE0 + slot);
     glBindTexture(GL_TEXTURE_2D, id);
@@ -111,11 +116,13 @@ struct Texture {
 };
 
 // ==========================================================
-// Mesh Generators
+// MeshGen — 几何体生成器
+// 提供了一组静态函数，用于快速生成球体、圆柱、圆锥等基础形状。
 // ==========================================================
 namespace MeshGen {
 
-// 球体 (UV sphere)
+// 生成球体 (UV Sphere)
+// 广泛用于行星、恒星的基础几何模型。
 inline Mesh sphere(int latSegs, int lonSegs, float radius) {
   std::vector<Vertex3D> verts;
   std::vector<unsigned int> indices;
@@ -141,6 +148,7 @@ inline Mesh sphere(int latSegs, int lonSegs, float radius) {
       verts.push_back(v);
     }
   }
+  // 生成三角形索引
   for (int lat = 0; lat < latSegs; lat++) {
     for (int lon = 0; lon < lonSegs; lon++) {
       int a = lat * (lonSegs + 1) + lon;
@@ -363,7 +371,8 @@ inline Mesh patch(int units) {
 // ==========================================================
 class Renderer3D {
 public:
-  // Simple TGA Loader (for uncompressed 24/32-bit TGA)
+  // 简易 TGA 图像加载器 (支持 24/32 位无压缩 TGA)
+  // 用于加载各种贴图（地球、木星、背景等）
   static Texture loadTGA(const char* filepath) {
     Texture tex;
     std::ifstream file(filepath, std::ios::binary);
@@ -382,7 +391,7 @@ public:
     std::vector<unsigned char> data(size);
     file.read((char*)data.data(), size);
 
-    // BGR(A) to RGB(A)
+    // BGR(A) 转换为 RGB(A)，因为 OpenGL 通常期望 RGB 顺序
     for (int i = 0; i < size; i += (bpp / 8)) {
         unsigned char tmp = data[i];
         data[i] = data[i + 2];
@@ -421,6 +430,10 @@ public:
   GLint ub_vp = -1, ub_proj = -1, ub_pos = -1, ub_size = -1, ub_color = -1;
   // Atmosphere uniforms
   GLint ua_mvp = -1, ua_model = -1, ua_lightDir = -1, ua_viewPos = -1;
+  GLint ua_camPos = -1, ua_planetCenter = -1, ua_innerRadius = -1, ua_outerRadius = -1, ua_surfaceRadius = -1;
+  GLint ua_time = -1, ua_planetIdx = -1, ua_sunVisibility = -1, ua_showClouds = -1;
+  GLint ua_ringInner = -1, ua_ringOuter = -1, ua_cloudTime = -1, ua_cloudPhaseSin = -1, ua_cloudPhaseCos = -1;
+  GLint ua_frameIdx = -1, ua_res = -1, ua_invProj = -1, ua_depthTex = -1;
   // Skybox uniforms
   GLint us_invViewProj = -1, us_skyVibrancy = -1;
 
@@ -499,7 +512,8 @@ public:
   Mat4 invViewProj;                 // Current inverse matrix
 
   Renderer3D() {
-    // --- Standard 3D Shader (Phong) ---
+    // --- 标准 3D 着色器 (Phong 光照模型) ---
+    // 用于渲染火箭组件和其他普通 3D 物体。
     const char* vertSrc = R"(
       #version 330 core
       layout(location=0) in vec3 aPos;
@@ -507,8 +521,8 @@ public:
       layout(location=2) in vec2 aUV;
       layout(location=3) in vec4 aColor;
 
-      uniform mat4 uMVP;
-      uniform mat4 uModel;
+      uniform mat4 uMVP;     // 投影矩阵
+      uniform mat4 uModel;   // 模型变换矩阵
 
       out vec3 vWorldPos;
       out vec3 vNormal;
@@ -570,7 +584,8 @@ public:
     u_sampler = glGetUniformLocation(program3d, "uSampler");
     u_hasTexture = glGetUniformLocation(program3d, "uHasTexture");
 
-    // --- Earth Shader (RSS-Reborn quality procedural rendering) ---
+    // --- 地球着色器 (RSS-Reborn 级程序化渲染) ---
+    // 这是最核心的着色器之一：它不需要外部纹理，而是通过数学噪声实时生成陆地、海洋和山脉。
     const char* earthFragSrc = R"(
       #version 330 core
       in vec3 vWorldPos;
@@ -585,7 +600,8 @@ public:
 
       out vec4 FragColor;
 
-      // ---- Noise Primitives ----
+      // ---- 噪声原语 (Noise Primitives) ----
+      // 使用三维哈希函数生成基础随机性
       float hash(vec3 p) {
         p = fract(p * vec3(443.897, 441.423, 437.195));
         p += dot(p, p.yzx + 19.19);
@@ -593,10 +609,11 @@ public:
       }
       float hash1(float n) { return fract(sin(n) * 43758.5453123); }
 
+      // 3D 噪声：在 3D 空间中进行三线性插值，生成平滑的连续噪声。
       float noise3d(vec3 p) {
         vec3 i = floor(p);
         vec3 f = fract(p);
-        f = f * f * f * (f * (f * 6.0 - 15.0) + 10.0); // quintic smoothstep
+        f = f * f * f * (f * (f * 6.0 - 15.0) + 10.0); // 五次平滑插值 (Quintic)
         float n000 = hash(i); float n100 = hash(i + vec3(1,0,0));
         float n010 = hash(i + vec3(0,1,0)); float n110 = hash(i + vec3(1,1,0));
         float n001 = hash(i + vec3(0,0,1)); float n101 = hash(i + vec3(1,0,1));
@@ -607,6 +624,7 @@ public:
         return mix(nxy0, nxy1, f.z);
       }
 
+      // 分形布朗运动 (FBM)：通过叠加多个不同频率和振幅的噪声层来模拟自然界的自相似性（如山脉）。
       float fbm(vec3 p, int octaves) {
         float v = 0.0, amp = 0.5;
         for (int i = 0; i < octaves; i++) {
@@ -617,19 +635,19 @@ public:
         return v;
       }
 
-      // Domain-warped FBM for more organic continent shapes
+      // 领域扭曲 (Domain-warped FBM)：用一个噪声去扭曲另一个噪声的输入，生成更自然的海岸线。
       float warpedFbm(vec3 p) {
         vec3 q = vec3(fbm(p, 4), fbm(p + vec3(5.2, 1.3, 2.8), 4), fbm(p + vec3(9.1, 4.7, 3.1), 4));
         return fbm(p + q * 1.6, 8);
       }
 
-      // Ridge noise for mountain ranges
+      // 脊状噪声 (Ridge noise)：用于生成尖锐的山脉脊线。
       float ridgeNoise(vec3 p, int octaves) {
         float v = 0.0, amp = 0.5, prev = 1.0;
         for (int i = 0; i < octaves; i++) {
           float n = abs(noise3d(p));
-          n = 1.0 - n;  // Invert to create ridges
-          n = n * n;     // Sharpen ridges
+          n = 1.0 - n;  // 翻转以创建山脊
+          n = n * n;     // 加剧山脊的尖锐度
           v += n * amp * prev;
           prev = n;
           p = p * 2.07 + vec3(0.131, -0.217, 0.344);
@@ -644,16 +662,17 @@ public:
         vec3 V = normalize(uViewPos - vWorldPos);
         vec3 H = normalize(L + V);
 
-        // 3D texture coordinate from unit sphere surface
+        // 3D 纹理坐标，从单位球体表面采样
         vec3 sph = normalize(vLocalPos);
         vec3 texCoord = sph * 3.5;
-        float lat = sph.y; // -1 to 1 (south to north pole)
+        float lat = sph.y; // -1 到 1 (南极到北极)
         float absLat = abs(lat);
 
-        // ---- TERRAIN (domain-warped 8-octave FBM) ----
+        // ---- 陆地生成 (地形) ----
+        // 使用 8 层分形噪声生成大陆轮廓
         float continent = warpedFbm(texCoord * 1.2);
 
-        // Bias continent generation: more ocean (Earth is 71% water)
+        // 陆地/海洋阈值判断：地球表面约 71% 是海洋。
         float seaLevel = 0.45;
         bool isLand = continent > seaLevel;
         float landHeight = isLand ? (continent - seaLevel) / (1.0 - seaLevel) : 0.0;
@@ -680,17 +699,17 @@ public:
         float specMask = 0.0; // 1.0 for water (enables specular)
 
         if (!isLand) {
-          // Ocean depth gradient
+          // 海洋深度渐变：根据高度场计算深浅，模拟大陆架。
           float oceanDepth = (seaLevel - continent) / seaLevel;
           if (oceanDepth < 0.05) surfColor = mix(coastWater, shallowSea, oceanDepth / 0.05);
           else if (oceanDepth < 0.3) surfColor = mix(shallowSea, midOcean, (oceanDepth - 0.05) / 0.25);
           else surfColor = mix(midOcean, deepOcean, min(1.0, (oceanDepth - 0.3) / 0.7));
-          specMask = 1.0;
+          specMask = 1.0; // 海洋启用高光反射
         } else {
-          // Biome distribution based on latitude + altitude + noise + moisture
+          // 生物群系分布 (Biomes)：根据 纬度 + 海拔 + 湿度 动态决定。
           float biomeNoise = noise3d(texCoord * 6.0);
-          float moisture = fbm(texCoord * 3.0 + vec3(42.0), 4); // Moisture gradient
-          float ridgeH = ridgeNoise(texCoord * 2.5, 6); // Mountain ridge detail
+          float moisture = fbm(texCoord * 3.0 + vec3(42.0), 4); // 随机湿度梯度
+          float ridgeH = ridgeNoise(texCoord * 2.5, 6); // 山脉细节
           float combinedH = landHeight * 0.7 + ridgeH * 0.3;
 
           if (combinedH < 0.02) {
@@ -720,74 +739,73 @@ public:
             else surfColor = mix(mountain, peak, (combinedH - 0.55) / 0.45);
           }
 
-          // High-altitude snow line (affected by ridge height)
+          // 高海拔雪线
           float snowLine = 0.65 - absLat * 0.45;
           if (combinedH > snowLine) {
             float snowBlend = smoothstep(snowLine, snowLine + 0.12, combinedH);
-            snowBlend *= (0.7 + 0.3 * ridgeH); // More snow on ridges
+            snowBlend *= (0.7 + 0.3 * ridgeH); // 山脊处积雪更厚
             surfColor = mix(surfColor, snow, snowBlend);
           }
         }
 
-        // ---- POLAR ICE CAPS ----
+        // ---- 极地冰盖 ----
         float iceNoise = fbm(texCoord * 4.0 + vec3(100.0), 4);
-        float iceEdge = 0.82 - iceNoise * 0.08; // Fractal ice edge
+        float iceEdge = 0.82 - iceNoise * 0.08; // 锯齿状冰盖边缘
         if (absLat > iceEdge) {
           float ice = smoothstep(iceEdge, iceEdge + 0.06, absLat);
           surfColor = mix(surfColor, snow, ice * 0.95);
-          specMask = mix(specMask, 0.3, ice); // Ice has some specular
+          specMask = mix(specMask, 0.3, ice); // 冰层也具有一定的反光度
         }
 
         // ---- CLOUD LAYERS REMOVED (Replaced by Volumetric Atmo Shader) ----
 
-        // ---- LIGHTING ----
+        // ---- 光照计算 (Lighting) ----
         float NdotL = dot(N, L);
         float diff = max(NdotL, 0.0);
-        float ambient = 0.008; // Very dark ambient for space realism
+        float ambient = 0.008; // 真空环境下的极暗环境光
 
-        // Terminator softening (smooth day-night transition)
+        // 晨昏线软化 (Terminator softening)：让昼夜交替更加自然。
         float terminator = smoothstep(-0.1, 0.15, NdotL);
 
-        // Specular: ocean sun glint (Blinn-Phong)
+        // 太阳反光 (Sun Glint)：海洋表面的高光。
         float NdotH = max(dot(N, H), 0.0);
-        float specPower = 256.0; // Sharp sun glint
+        float specPower = 256.0; 
         float spec = pow(NdotH, specPower) * specMask * 2.5;
-        // Fresnel enhancement at grazing angles
+        // 菲涅尔反射 (Fresnel)：在掠射角处反光更强。
         float fresnel = pow(1.0 - max(dot(N, V), 0.0), 4.0);
         spec *= (1.0 + fresnel * 3.0);
 
-        // ---- ATMOSPHERE RIM ----
+        // ---- 大气晕边 (Atmosphere Rim) ----
         float rim = 1.0 - max(dot(N, V), 0.0);
         float rimPow = pow(rim, 4.0);
-        // Rayleigh blue on day side, warm sunset at terminator
+        // 日间蓝光，晨昏线处转为暖橘色
         vec3 dayRim = vec3(0.25, 0.50, 1.0);
         vec3 sunsetRim = vec3(1.0, 0.35, 0.08);
         float rimSunsetZone = smoothstep(-0.05, 0.12, NdotL) * smoothstep(0.35, 0.0, NdotL);
         vec3 atmosColor = mix(sunsetRim, dayRim, smoothstep(0.0, 0.3, NdotL));
         atmosColor = atmosColor * rimPow * 0.65 * smoothstep(-0.15, 0.1, NdotL);
-        // Sunset boost
-        atmosColor += sunsetRim * rimSunsetZone * rimPow * 0.5;
-
+        
         vec3 result = surfColor * (ambient + diff * 0.92) + atmosColor;
-        result += vec3(1.0, 0.95, 0.85) * spec * diff; // Sun glint only on lit side
+        result += vec3(1.0, 0.95, 0.85) * spec * diff; // 仅在光照面显示高光
 
-        // ---- NIGHT SIDE CITY LIGHTS ----
+        // ---- 夜间城市灯光 (Night Side City Lights) ----
+        // 当半球进入黑夜时，根据地形特征（陆地、海拔、纬度）模拟人类城市的灯光。
         if (NdotL < 0.03 && isLand) {
           float nightFade = smoothstep(0.03, -0.08, NdotL);
-          // Multi-scale city noise for clustering
+          // 多尺度噪声嵌套：模拟不同规模的城市集群
           float city1 = noise3d(texCoord * 12.0);
           float city2 = noise3d(texCoord * 25.0 + vec3(7.7));
           float city3 = noise3d(texCoord * 50.0 + vec3(13.1));
-          // Cities cluster in lowlands, avoid mountains and deserts
+          // 栖息地权重：城市倾向于在沿海、低地分布，避开高山和极地。
           float habitability = smoothstep(0.5, 0.0, landHeight) * smoothstep(0.0, 0.1, landHeight);
-          habitability *= (1.0 - smoothstep(0.6, 0.85, absLat)); // Less at poles
+          habitability *= (1.0 - smoothstep(0.6, 0.85, absLat)); 
           float cityBrightness = 0.0;
           if (city1 > 0.55) cityBrightness += (city1 - 0.55) * 4.0;
           if (city2 > 0.6) cityBrightness += (city2 - 0.6) * 2.0;
           if (city3 > 0.65) cityBrightness += (city3 - 0.65) * 1.0;
           cityBrightness *= habitability * nightFade;
           cityBrightness = min(cityBrightness, 1.2);
-          // Warm amber/sodium light color
+          // 暖色调灯光 (类似高压钠灯)
           vec3 cityColor = mix(vec3(1.0, 0.7, 0.2), vec3(1.0, 0.9, 0.6), city2);
           result += cityColor * cityBrightness * 0.8;
         }
@@ -1844,7 +1862,7 @@ public:
     glEnableVertexAttribArray(0);
     glBindVertexArray(0);
 
-    // --- Atmosphere Shader (Volumetric Raymarching Scattering) ---
+    // --- 大气层顶点着色器 ---
     const char* atmoVertSrc = R"(
       #version 330 core
       layout(location=0) in vec3 aPos;
@@ -1852,37 +1870,39 @@ public:
       uniform mat4 uModel;
       out vec3 vWorldPos;
       void main() {
+        // 将球体顶点转换到世界空间，用于后续的光线步进计算。
         vWorldPos = (uModel * vec4(aPos, 1.0)).xyz;
         gl_Position = uMVP * vec4(aPos, 1.0);
       }
     )";
 
-    // --- Atmosphere Shader (HARDCORE Rayleigh + Mie + Ozone Volumetric Raymarching) ---
-    // Designed for smooth ground-to-space transition with dramatic scattering
+    // --- 大气层片段着色器 (核心：基于物理权重的分步光线步进) ---
+    // 该着色器模拟了瑞利散射、米氏散射和臭氧吸收，实现了极其逼真的星球边缘和日落效果。
     const char* atmoFragSrc = R"(
       #version 330 core
       in vec3 vWorldPos;
       
-      uniform vec3 uCamPos;
-      uniform vec3 uLightDir;
-      uniform vec3 uPlanetCenter;
-      uniform float uInnerRadius;
-      uniform float uOuterRadius;
+      uniform vec3 uCamPos;       // 摄像机位置
+      uniform vec3 uLightDir;     // 太阳光方向
+      uniform vec3 uPlanetCenter; // 星球中心点
+      uniform float uInnerRadius; // 星球表面半径 (km)
+      uniform float uOuterRadius; // 大气层外缘半径 (km)
       uniform float uSurfaceRadius;
       uniform float uTime;
-      uniform int uPlanetIdx;
-      uniform float uSunVisibility; // Global sun visibility from camera (0 to 1)
-      uniform float uRingInner; // Ring inner radius (local units)
-      uniform float uRingOuter; // Ring outer radius (local units)
-      uniform float uShowClouds; // Toggle clouds
+      uniform int uPlanetIdx;     // 星球索引（用于加载不同的物理参数）
+      
+      uniform float uShowClouds;
+      uniform float uSunVisibility;
+      uniform float uRingInner;
+      uniform float uRingOuter;
       
       out vec4 FragColor;
 
       #define PI 3.14159265359
 
-      // High step counts for quality inside-atmosphere rendering
-      const int PRIMARY_STEPS = 48;
-      const int LIGHT_STEPS = 16;
+      // 步进采样数：采样越多，过渡越平滑，但性能消耗越高。
+      const int PRIMARY_STEPS = 48; // 主光线步进数
+      const int LIGHT_STEPS = 16;   // 辅助（向太阳）的光线步进数
       
       // --- Dynamic Atmosphere Parameters ---
       vec3 gRayleighCoeff;
@@ -1899,26 +1919,29 @@ public:
       vec3 gCloudExtinction;
       vec3 gCloudScattering;
 
+      // 设置星球的大气物理属性
       void setupPlanetProfile() {
           if (uPlanetIdx == 3) {
-              // EARTH
+              // --- 地球 (Earth) ---
+              // 瑞利散射系数 (RGB)：蓝色分量最大，所以天空是蓝色的。
               gRayleighCoeff = vec3(0.0058, 0.0135, 0.0331) * 1.2;
+              // 米氏散射系数 (尘埃/气溶胶)
               gMieCoeff = 0.005; gHRayleigh = 8.0; gHMie = 1.0; gGMie = 0.8;
+              // 臭氧吸收系数 (吸收特定红色波段，增强蓝天的饱和度)
               gOzoneCoeff = vec3(0.00035, 0.00085, 0.00009); gHOzoneCenter = 25.0; gHOzoneWidth = 15.0;
               gCloudMinAlt = 3.0; gCloudMaxAlt = 14.0;
               gCloudExtinction = vec3(0.08); gCloudScattering = vec3(0.45);
           } else if (uPlanetIdx == 2) {
-              // VENUS - thick CO2 atmosphere with sulfuric acid clouds
-              // Rayleigh must follow physical spectrum (blue > green > red) to avoid blue terminator artifact
+              // --- 金星 (Venus) ---
+              // 极厚的大气层和硫酸云，天空呈现土黄色。
               gRayleighCoeff = vec3(0.005, 0.012, 0.028);
               gMieCoeff = 0.04; gHRayleigh = 15.0; gHMie = 5.0; gGMie = 0.76;
-              // Sulfur UV absorber strips blue, creates yellow/orange sky color
               gOzoneCoeff = vec3(0.0005, 0.005, 0.02); gHOzoneCenter = 50.0; gHOzoneWidth = 20.0;
               gCloudMinAlt = 45.0; gCloudMaxAlt = 65.0;
-              // Low scattering so cloud texture is visible, not blown out white
               gCloudExtinction = vec3(0.08); gCloudScattering = vec3(0.15);
           } else if (uPlanetIdx == 5) {
-              // MARS
+              // --- 火星 (Mars) ---
+              // 稀薄的大气，红色尘埃导致傍晚的天空变蓝，白天是红色。
               gRayleighCoeff = vec3(0.01, 0.005, 0.001);
               gMieCoeff = 0.015; gHRayleigh = 11.0; gHMie = 3.0; gGMie = 0.85;
               gOzoneCoeff = vec3(0.0); gHOzoneCenter = 1.0; gHOzoneWidth = 1.0;
@@ -2427,6 +2450,25 @@ R"(
     atmoProg = compileProgram(atmoVertSrc, atmoFragSrc);
     ua_mvp = glGetUniformLocation(atmoProg, "uMVP");
     ua_model = glGetUniformLocation(atmoProg, "uModel");
+    ua_camPos = glGetUniformLocation(atmoProg, "uCamPos");
+    ua_lightDir = glGetUniformLocation(atmoProg, "uLightDir");
+    ua_planetCenter = glGetUniformLocation(atmoProg, "uPlanetCenter");
+    ua_innerRadius = glGetUniformLocation(atmoProg, "uInnerRadius");
+    ua_outerRadius = glGetUniformLocation(atmoProg, "uOuterRadius");
+    ua_surfaceRadius = glGetUniformLocation(atmoProg, "uSurfaceRadius");
+    ua_time = glGetUniformLocation(atmoProg, "uTime");
+    ua_planetIdx = glGetUniformLocation(atmoProg, "uPlanetIdx");
+    ua_sunVisibility = glGetUniformLocation(atmoProg, "uSunVisibility");
+    ua_showClouds = glGetUniformLocation(atmoProg, "uShowClouds");
+    ua_ringInner = glGetUniformLocation(atmoProg, "uRingInner");
+    ua_ringOuter = glGetUniformLocation(atmoProg, "uRingOuter");
+    ua_cloudTime = glGetUniformLocation(atmoProg, "uCloudTime");
+    ua_cloudPhaseSin = glGetUniformLocation(atmoProg, "uCloudPhaseSin");
+    ua_cloudPhaseCos = glGetUniformLocation(atmoProg, "uCloudPhaseCos");
+    ua_frameIdx = glGetUniformLocation(atmoProg, "uFrameIndex");
+    ua_res = glGetUniformLocation(atmoProg, "uResolution");
+    ua_invProj = glGetUniformLocation(atmoProg, "uInvProj");
+    ua_depthTex = glGetUniformLocation(atmoProg, "uDepthTex");
 
     // --- Ribbon Shader (Trajectory Trails) ---
     const char* ribbonVertSrc = R"(
@@ -2994,6 +3036,34 @@ R"(
       out float vWaterDepth;
       out float vSlope;
 
+      // --- INDUSTRIAL BICUBIC FILTERING ---
+      float w0(float a) { return (1.0/6.0)*(a*(a*(-a + 3.0) - 3.0) + 1.0); }
+      float w1(float a) { return (1.0/6.0)*(a*a*(3.0*a - 6.0) + 4.0); }
+      float w2(float a) { return (1.0/6.0)*(a*a*(-3.0*a + 3.0) + 3.0*a + 1.0); }
+      float w3(float a) { return (1.0/6.0)*(a*a*a); }
+      float g0(float a) { return w0(a) + w1(a); }
+      float g1(float a) { return w2(a) + w3(a); }
+      float h0(float a) { return -1.0 + w1(a) / (w0(a) + w1(a)); }
+      float h1(float a) { return 1.0 + w3(a) / (w2(a) + w3(a)); }
+
+      vec4 textureBicubic(sampler2D tex, vec2 uv) {
+        vec2 res = vec2(textureSize(tex, 0));
+        vec2 p = uv * res - 0.5;
+        vec2 f = fract(p); p -= f;
+        float x_h0 = h0(f.x), x_h1 = h1(f.x);
+        float y_h0 = h0(f.y), y_h1 = h1(f.y);
+        float x_g0 = g0(f.x), x_g1 = g1(f.x);
+        float y_g0 = g0(f.y), y_g1 = g1(f.y);
+        return (texture(tex, (p + vec2(x_h0, y_h0) + 0.5) / res) * x_g0 * y_g0 +
+                texture(tex, (p + vec2(x_h1, y_h0) + 0.5) / res) * x_g1 * y_g0 +
+                texture(tex, (p + vec2(x_h0, y_h1) + 0.5) / res) * x_g0 * y_g1 +
+                texture(tex, (p + vec2(x_h1, y_h1) + 0.5) / res) * x_g1 * y_g1);
+      }
+
+      vec4 sampleHydroSmooth(vec2 uv) {
+          return textureBicubic(uHydroMap, uv);
+      }
+
       vec3 hash33(vec3 p) {
         p = fract(p * vec3(443.897, 441.423, 437.195));
         p += dot(p, p.yzx + 19.19);
@@ -3020,21 +3090,6 @@ R"(
         p = fract(p * vec3(443.897, 441.423, 437.195));
         p += dot(p, p.yzx + 19.19);
         return fract((p.x + p.y) * p.z);
-      }
-      
-      vec4 sampleHydroSmooth(vec2 uv) {
-          vec2 res = vec2(512.0, 256.0);
-          vec2 st = uv * res - 0.5;
-          vec2 i = floor(st);
-          vec2 f = fract(st);
-          vec4 t00 = texture(uHydroMap, (i + vec2(0.5, 0.5)) / res);
-          vec4 t10 = texture(uHydroMap, (i + vec2(1.5, 0.5)) / res);
-          vec4 t01 = texture(uHydroMap, (i + vec2(0.5, 1.5)) / res);
-          vec4 t11 = texture(uHydroMap, (i + vec2(1.5, 1.5)) / res);
-          float r = mix(mix(t00.r, t10.r, f.x), mix(t01.r, t11.r, f.x), f.y);
-          float g = mix(mix(t00.g, t10.g, f.x), mix(t01.g, t11.g, f.x), f.y);
-          vec4 point = texture(uHydroMap, uv);
-          return vec4(r, g, point.b, point.a);
       }
 
       float noise3d(vec3 p) {
@@ -3140,12 +3195,15 @@ R"(
         // 2.1 River Valley Carving (V-to-U shaped)
         vec4 hydro = sampleHydroSmooth(geoUV);
         if (uHasLocalHydro == 1) {
-            hydro.r = texture(uLocalHydroMap, vLocalUV).r;
+            hydro.r = textureBicubic(uLocalHydroMap, vLocalUV).r;
         }
-        float strahler = hydro.b; 
-        if (strahler >= 2.0 && plateBase > 0.445) {
+
+        // Corrected Strahler scaling: B channel is order / 255.0f
+        float actualStrahler = hydro.b * 255.0; 
+        if (actualStrahler >= 2.0 && plateBase > 0.445) {
             float vNoise = noise3d(normPos * 250.0 + noise3d(normPos * 120.0) * 0.004);
-            float depth = 0.015 * (strahler / 7.0);
+            // River carving depth: Order 7 ~ 50 meters
+            float depth = 0.000008 * (actualStrahler / 7.0); 
             float isLow = 1.0 - smoothstep(0.45, 0.55, plateBase);
             float profile = mix(abs(vNoise * 2.0 - 1.0), pow(abs(vNoise * 2.0 - 1.0), 0.4), isLow);
             hRefined -= (1.0 - profile) * depth;
@@ -3156,7 +3214,7 @@ R"(
 
         float sLevel = 0.45;
         float hydroDiff = hydro.r - hRefined;
-        float hydroMask = smoothstep(0.0001, 0.005, hydroDiff);
+        float hydroMask = smoothstep(0.000001, 0.00002, hydroDiff);
         hRefined = mix(hRefined, hydro.r, hydroMask * 1.0);
 
         if (hRefined < sLevel && hRefined > 0.38) {
@@ -3205,7 +3263,7 @@ R"(
         vNormal = localRotScale * normPos; 
         vUV = aUV;
         vLocalPos = normPos;
-        vWaterDepth = max(0.0, hydroDiff);
+        vWaterDepth = max(0.0, hydro.r - hRefined);
         vSlope = currentSlope;
         gl_Position = uMVP * vec4(vRelViewPos, 1.0);
       }
@@ -3233,25 +3291,38 @@ R"(
       uniform sampler2D uClimateMap;
       out vec4 FragColor;
 
+      // --- BICUBIC FILTERING ---
+      float w0(float a) { return (1.0/6.0)*(a*(a*(-a + 3.0) - 3.0) + 1.0); }
+      float w1(float a) { return (1.0/6.0)*(a*a*(3.0*a - 6.0) + 4.0); }
+      float w2(float a) { return (1.0/6.0)*(a*a*(-3.0*a + 3.0) + 3.0*a + 1.0); }
+      float w3(float a) { return (1.0/6.0)*(a*a*a); }
+      float g0(float a) { return w0(a) + w1(a); }
+      float g1(float a) { return w2(a) + w3(a); }
+      float h0(float a) { return -1.0 + w1(a) / (w0(a) + w1(a)); }
+      float h1(float a) { return 1.0 + w3(a) / (w2(a) + w3(a)); }
+
+      vec4 textureBicubic(sampler2D tex, vec2 uv) {
+        vec2 res = vec2(textureSize(tex, 0));
+        vec2 p = uv * res - 0.5;
+        vec2 f = fract(p); p -= f;
+        float x_h0 = h0(f.x), x_h1 = h1(f.x);
+        float y_h0 = h0(f.y), y_h1 = h1(f.y);
+        float x_g0 = g0(f.x), x_g1 = g1(f.x);
+        float y_g0 = g0(f.y), y_g1 = g1(f.y);
+        return (texture(tex, (p + vec2(x_h0, y_h0) + 0.5) / res) * x_g0 * y_g0 +
+                texture(tex, (p + vec2(x_h1, y_h0) + 0.5) / res) * x_g1 * y_g0 +
+                texture(tex, (p + vec2(x_h0, y_h1) + 0.5) / res) * x_g0 * y_g1 +
+                texture(tex, (p + vec2(x_h1, y_h1) + 0.5) / res) * x_g1 * y_g1);
+      }
+
+      vec4 sampleHydroSmooth(vec2 uv) {
+          return textureBicubic(uHydroMap, uv);
+      }
+
       float hash(vec3 p) {
         p = fract(p * vec3(443.897, 441.423, 437.195));
         p += dot(p, p.yzx + 19.19);
         return fract((p.x + p.y) * p.z);
-      }
-
-      vec4 sampleHydroSmooth(vec2 uv) {
-          vec2 res = vec2(512.0, 256.0);
-          vec2 st = uv * res - 0.5;
-          vec2 i = floor(st);
-          vec2 f = fract(st);
-          vec4 t00 = texture(uHydroMap, (i + vec2(0.5, 0.5)) / res);
-          vec4 t10 = texture(uHydroMap, (i + vec2(1.5, 0.5)) / res);
-          vec4 t01 = texture(uHydroMap, (i + vec2(0.5, 1.5)) / res);
-          vec4 t11 = texture(uHydroMap, (i + vec2(1.5, 1.5)) / res);
-          float r = mix(mix(t00.r, t10.r, f.x), mix(t01.r, t11.r, f.x), f.y);
-          float g = mix(mix(t00.g, t10.g, f.x), mix(t01.g, t11.g, f.x), f.y);
-          vec4 point = texture(uHydroMap, uv);
-          return vec4(r, g, point.b, point.a);
       }
 
       float noise3d(vec3 p) {
@@ -3326,7 +3397,8 @@ R"(
         vec3 surfColor;
         float sLevel = 0.45;
         
-        if (hRefined < sLevel || vWaterDepth > 0.0001) {
+        // Water rendering detection: 0.000001 is roughly 6 meters depth
+        if (hRefined < sLevel || vWaterDepth > 0.000001) {
             float depth = (hRefined < sLevel) ? (sLevel - hRefined) : vWaterDepth * 2.0;
             surfColor = mix(shallowWater, deepWater, smoothstep(0.0, 0.15, depth));
         } else {
@@ -4330,72 +4402,52 @@ R"(
     glUseProgram(atmoProg);
 
     Mat4 mvp = proj * view * model;
-    GLint u_atmo_mvp = glGetUniformLocation(atmoProg, "uMVP");
-    GLint u_atmo_model = glGetUniformLocation(atmoProg, "uModel");
-    GLint u_camPos = glGetUniformLocation(atmoProg, "uCamPos");
-    GLint u_lightDir = glGetUniformLocation(atmoProg, "uLightDir");
-    GLint u_planetCenter = glGetUniformLocation(atmoProg, "uPlanetCenter");
-    GLint u_innerRadius = glGetUniformLocation(atmoProg, "uInnerRadius");
-    GLint u_outerRadius = glGetUniformLocation(atmoProg, "uOuterRadius");
-    GLint u_surfaceRadius = glGetUniformLocation(atmoProg, "uSurfaceRadius");
-    GLint u_time = glGetUniformLocation(atmoProg, "uTime");
-    GLint u_planetIdx = glGetUniformLocation(atmoProg, "uPlanetIdx");
-    GLint u_sunVisibility = glGetUniformLocation(atmoProg, "uSunVisibility");
-
-    sendMat4(u_atmo_mvp, mvp);
-    sendMat4(u_atmo_model, model);
-    glUniform3f(u_camPos, camPos.x, camPos.y, camPos.z);
-    glUniform3f(u_lightDir, lightDir.x, lightDir.y, lightDir.z);
-    glUniform3f(u_planetCenter, planetCenter.x, planetCenter.y, planetCenter.z);
+    sendMat4(ua_mvp, mvp);
+    sendMat4(ua_model, model);
+    glUniform3f(ua_camPos, camPos.x, camPos.y, camPos.z);
+    glUniform3f(ua_lightDir, lightDir.x, lightDir.y, lightDir.z);
+    glUniform3f(ua_planetCenter, planetCenter.x, planetCenter.y, planetCenter.z);
     
     // Slightly push inner radius into the planet to hide mesh-sphere gaps
     // Increased safety margin to 0.998 to resolve edge cases in terminator shadowing
     float innerRadius = surfaceRadius * 0.9995f; // Tighter shadow sphere for realism
-    glUniform1f(u_innerRadius, innerRadius);
-    glUniform1f(u_outerRadius, outerRadius);
-    glUniform1f(u_surfaceRadius, surfaceRadius);
-    glUniform1f(u_time, (float)time);
-    glUniform1i(u_planetIdx, planetIdx);
-    glUniform1f(u_sunVisibility, sunVisibility);
+    glUniform1f(ua_innerRadius, innerRadius);
+    glUniform1f(ua_outerRadius, outerRadius);
+    glUniform1f(ua_surfaceRadius, surfaceRadius);
+    glUniform1f(ua_time, (float)time);
+    glUniform1i(ua_planetIdx, planetIdx);
+    glUniform1f(ua_sunVisibility, sunVisibility);
 
     // Pass ring shadows for Saturn's atmosphere
     if (planetIdx == 7) {
-        glUniform1f(glGetUniformLocation(atmoProg, "uRingInner"), 1.11f);
-        glUniform1f(glGetUniformLocation(atmoProg, "uRingOuter"), 2.35f);
+        glUniform1f(ua_ringInner, 1.11f);
+        glUniform1f(ua_ringOuter, 2.35f);
     } else {
-        glUniform1f(glGetUniformLocation(atmoProg, "uRingOuter"), 0.0f);
+        glUniform1f(ua_ringOuter, 0.0f);
     }
-
-    // Industrial Grade: Phase Separation & Time Wrapping
-    GLint u_cloudTime = glGetUniformLocation(atmoProg, "uCloudTime");
-    GLint u_cloudPhaseSin = glGetUniformLocation(atmoProg, "uCloudPhaseSin");
-    GLint u_cloudPhaseCos = glGetUniformLocation(atmoProg, "uCloudPhaseCos");
 
     // Wrap time for noise (reset every 10,000s) to keep float precision high
     float wrappedTime = (float)fmod(time, 10000.0);
-    glUniform1f(u_cloudTime, wrappedTime);
+    glUniform1f(ua_cloudTime, wrappedTime);
 
     // Precompute global phase for clouds on CPU using double precision
     // Speed matches shader logic (t * -0.2 * 0.004)
     double phase = time * 0.004 * -0.2;
-    glUniform1f(u_cloudPhaseSin, (float)sin(phase));
-    glUniform1f(u_cloudPhaseCos, (float)cos(phase));
+    glUniform1f(ua_cloudPhaseSin, (float)sin(phase));
+    glUniform1f(ua_cloudPhaseCos, (float)cos(phase));
 
     // Pass frame index for animated noise (TAA jitter)
-    GLint u_frameIdx = glGetUniformLocation(atmoProg, "uFrameIndex");
-    glUniform1i(u_frameIdx, taaFrameIndex);
+    glUniform1i(ua_frameIdx, taaFrameIndex);
 
     // Pass cloud toggle
-    glUniform1f(glGetUniformLocation(atmoProg, "uShowClouds"), showClouds ? 1.0f : 0.0f);
+    glUniform1f(ua_showClouds, showClouds ? 1.0f : 0.0f);
 
     // Bind Depth Texture for Physical Terrain Occlusion
-    GLint u_res = glGetUniformLocation(atmoProg, "uResolution");
-    glUniform2f(u_res, (float)taaWidth, (float)taaHeight);
-    GLint u_invProj = glGetUniformLocation(atmoProg, "uInvProj");
-    sendMat4(u_invProj, proj.inverse());
+    glUniform2f(ua_res, (float)taaWidth, (float)taaHeight);
+    sendMat4(ua_invProj, proj.inverse());
     glActiveTexture(GL_TEXTURE7);
     glBindTexture(GL_TEXTURE_2D, taaDepthTex);
-    glUniform1i(glGetUniformLocation(atmoProg, "uDepthTex"), 7);
+    glUniform1i(ua_depthTex, 7);
 
     // --- Graphics State for Volumetric Shell ---
     glDisable(GL_DEPTH_TEST);

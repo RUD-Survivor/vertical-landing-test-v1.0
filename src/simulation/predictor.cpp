@@ -12,25 +12,29 @@ AsyncOrbitPredictor::~AsyncOrbitPredictor() {
     Stop();
 }
 
+// 启动后台线程
 void AsyncOrbitPredictor::Start() {
     if (m_running) return;
     m_running = true;
     m_worker = std::thread(&AsyncOrbitPredictor::WorkerLoop, this);
 }
 
+// 停止后台线程并回收资源
 void AsyncOrbitPredictor::Stop() {
     m_running = false;
-    m_cv.notify_all();
+    m_cv.notify_all(); // 唤醒正在等待的工作线程
     if (m_worker.joinable()) {
         m_worker.join();
     }
 }
 
+// 请求轨道预测更新 (RequestUpdate)
+// 此函数由主线程调用，用于提交一个新的初始状态供后台预测。
 void AsyncOrbitPredictor::RequestUpdate(RocketState* target, const RocketState& state, const RocketConfig& config, double pred_days, int iters, int ref_mode, int ref_body, int secondary_ref_body, bool force_reset) {
     if (!target) return;
     std::lock_guard<std::mutex> lock(m_request_mutex);
     
-    // Auto reset if reference frame changed
+    // 自动重置判断：如果参考系（目标天体）发生了变化，之前的预测点就完全失效了。
     if (m_request.ref_body != ref_body || m_request.ref_mode != ref_mode || m_request.secondary_ref_body != secondary_ref_body) force_reset = true;
     
     m_request.target = target;
@@ -45,7 +49,7 @@ void AsyncOrbitPredictor::RequestUpdate(RocketState* target, const RocketState& 
     m_request.force_reset = force_reset;
     m_request.pending = true;
     
-    m_cv.notify_one();
+    m_cv.notify_one(); // 通知工作线程开始
 }
 
 void AsyncOrbitPredictor::WorkerLoop() {
@@ -61,20 +65,19 @@ void AsyncOrbitPredictor::WorkerLoop() {
 
         m_busy = true;
 
-        // Progressive Logic: Should we clear the context?
+        // 1. 偏差检查 (Deviation Check)
+        // 决定是直接“修剪”旧路径并继续计算，还是彻底“从头重算”。
         double t_start = req.state.sim_time;
         bool reset_needed = req.force_reset || (m_context.t_last < 0);
         
-        // Deviation Check: If t_start has moved backwards or far forward, or if the initial state changed
         if (!reset_needed) {
-            // Check if the current request's rocket state corresponds to our starting epoch
-            // For industrial grade: we'd ideally simulate from epoch to t_start and compare.
-            // Simpler: if sim_time is within a small window of where we expect, or if throttle was 0.
+            // 如果模拟时间跳跃太大（超过 1 小时）或者时间倒流，必须重算。
             if (t_start < m_context.t_epoch || t_start > m_context.t_last + 3600.0) {
                 reset_needed = true;
             } else if (req.state.maneuvers.size() != m_context.last_maneuvers.size()) {
                 reset_needed = true;
             } else if (!req.state.maneuvers.empty()) {
+                // 如果用户修改了变轨节点 (Maneuver Node)，之前的预测就作废了。
                 auto& curr_m = req.state.maneuvers[0];
                 auto& last_m = m_context.last_maneuvers[0];
                 if (std::abs(curr_m.sim_time - last_m.sim_time) > 1.0 ||
@@ -111,10 +114,9 @@ void AsyncOrbitPredictor::WorkerLoop() {
         }
         
         if (reset_needed) {
+            // 从当前位置和速度开始新的轨迹积分
             m_context.t_epoch = t_start;
             m_context.t_last = t_start;
-            m_context.init_px = req.state.abs_px; m_context.init_py = req.state.abs_py; m_context.init_pz = req.state.abs_pz;
-            m_context.init_vx = req.state.abs_vx; m_context.init_vy = req.state.abs_vy; m_context.init_vz = req.state.abs_vz;
             m_context.px = req.state.abs_px; m_context.py = req.state.abs_py; m_context.pz = req.state.abs_pz;
             m_context.vx = req.state.abs_vx; m_context.vy = req.state.abs_vy; m_context.vz = req.state.abs_vz;
             m_context.points.clear();
@@ -130,40 +132,22 @@ void AsyncOrbitPredictor::WorkerLoop() {
                 m_context.mnv_px = req.state.abs_px; m_context.mnv_py = req.state.abs_py; m_context.mnv_pz = req.state.abs_pz;
                 m_context.mnv_vx = req.state.abs_vx; m_context.mnv_vy = req.state.abs_vy; m_context.mnv_vz = req.state.abs_vz;
             }
-            m_context.mnv_remaining_dv = 0;
-            
-            m_context.apsides.clear();
-            m_context.mnv_apsides.clear();
-            m_context.last_r = -1.0;
-            m_context.last_dr = 0.0;
-            m_context.last_mnv_r = -1.0;
-            m_context.last_mnv_dr = 0.0;
-            
             m_context.last_maneuvers = req.state.maneuvers;
             m_context.last_ref_body = req.ref_body;
         } else {
-            // PRUNING: Remove points older than current t_start to avoid memory/lag ballooning
+            // 路径修剪 (Pruning)
+            // 移除那些已经过去的路径点（早于当前时间 - 30秒），防止预测线无限拉长导致渲染和内存开销。
             auto it = std::lower_bound(m_context.point_times.begin(), m_context.point_times.end(), t_start - 30.0);
             size_t idx = std::distance(m_context.point_times.begin(), it);
             if (idx > 0) {
                 m_context.points.erase(m_context.points.begin(), m_context.points.begin() + idx);
                 m_context.point_times.erase(m_context.point_times.begin(), it);
             }
-            
-            auto it_m = std::lower_bound(m_context.mnv_point_times.begin(), m_context.mnv_point_times.end(), t_start - 30.0);
-            size_t idx_m = std::distance(m_context.mnv_point_times.begin(), it_m);
-            if (idx_m > 0) {
-                m_context.mnv_points.erase(m_context.mnv_points.begin(), m_context.mnv_points.begin() + idx_m);
-                m_context.mnv_point_times.erase(m_context.mnv_point_times.begin(), it_m);
-            }
-            // Prune apsides as well
-            m_context.apsides.erase(std::remove_if(m_context.apsides.begin(), m_context.apsides.end(), 
-                                                   [t_start](const RocketState::Apsis& a) { return a.sim_time < t_start - 30.0; }), m_context.apsides.end());
-            m_context.mnv_apsides.erase(std::remove_if(m_context.mnv_apsides.begin(), m_context.mnv_apsides.end(), 
-                                                       [t_start](const RocketState::Apsis& a) { return a.sim_time < t_start - 30.0; }), m_context.mnv_apsides.end());
         }
 
-        // Integration Constants
+        // 2. 数值积分 (Numerical Integration)
+        // 使用 4 阶辛积分 (FR Integrator) 来保证轨道的能量守恒。
+        // 这对于长时间的轨道预测比普通 RK4 更稳定。
         const double FR_theta = 1.0 / (2.0 - std::cbrt(2.0));
         const double c1 = FR_theta / 2.0, c2 = (1.0 - FR_theta) / 2.0;
         const double d1 = FR_theta, d2 = 1.0 - 2.0 * FR_theta;
@@ -174,15 +158,15 @@ void AsyncOrbitPredictor::WorkerLoop() {
         double cur_h_px = m_context.px, cur_h_py = m_context.py, cur_h_pz = m_context.pz;
         double cur_h_vx = m_context.vx, cur_h_vy = m_context.vy, cur_h_vz = m_context.vz;
 
-        // Snapshot of post-maneuver state for dashed line
         double mnv_h_px = m_context.mnv_px, mnv_h_py = m_context.mnv_py, mnv_h_pz = m_context.mnv_pz;
         double mnv_h_vx = m_context.mnv_vx, mnv_h_vy = m_context.mnv_vy, mnv_h_vz = m_context.mnv_vz;
 
         bool loop_has_mnv = has_mnv;
         if (freeze_mnv) {
-            loop_has_mnv = false; // Disable new maneuver line integration to preserve the frozen flight plan orbit
+            loop_has_mnv = false; // 冻结构思中的轨道，不再进行新的变轨积分
         }
         
+        // 重力加速度计算函数
         auto calc_acc = [&](double t, double x, double y, double z, double& ax, double& ay, double& az) {
             ax = 0; ay = 0; az = 0;
             if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) return;
@@ -194,7 +178,7 @@ void AsyncOrbitPredictor::WorkerLoop() {
                 double dx = bpx - x, dy = bpy - y, dz = bpz - z;
                 double r2 = dx*dx + dy*dy + dz*dz;
                 double r = std::sqrt(r2);
-                if (r > body.radius * 0.1) { // Basic singularity protection
+                if (r > body.radius * 0.1) { // 简单的奇点保护
                     double f = (6.67430e-11 * body.mass) / (r2 * r);
                     ax += dx * f; ay += dy * f; az += dz * f;
                 }
@@ -208,7 +192,8 @@ void AsyncOrbitPredictor::WorkerLoop() {
             if (!m_running || m_request.pending) break;
             if (t_sim >= max_pred_time) break;
 
-            // Adaptive step
+            // 3. 自适应步长 (Adaptive Step)
+            // 距离天体越近，重力梯度变化越剧烈，需要越小的步长来维持数值稳定。
             double min_dist_sq = 1e30;
             int nearest_body = 0;
             for (int b=0; b<(int)req.celestial_snapshot.size(); b++) {
@@ -219,9 +204,11 @@ void AsyncOrbitPredictor::WorkerLoop() {
                 if (dsq < min_dist_sq) { min_dist_sq = dsq; nearest_body = b; }
             }
             double v_sq = cur_h_vx*cur_h_vx + cur_h_vy*cur_h_vy + cur_h_vz*cur_h_vz;
+            // 启发式步长公式：根据距离和速度的比例动态调整。
             double step_dt = 0.1 * std::sqrt(min_dist_sq / std::max(v_sq, 1.0));
-            step_dt = std::clamp(step_dt, 5.0, 14400.0);
+            step_dt = std::clamp(step_dt, 5.0, 14400.0); // 最小 5 秒，最大 4 小时
 
+            // 如果即将到达变轨点，对齐步长
             if (loop_has_mnv && !m_context.mnv_done) {
                 if (t_sim < trigger_t && t_sim + step_dt > trigger_t) {
                     step_dt = trigger_t - t_sim;
@@ -236,11 +223,12 @@ void AsyncOrbitPredictor::WorkerLoop() {
                 step_dt = 1e-5;
             }
 
-            // Maneuver handling
+            // 4. 变轨特殊处理 (Maneuver Handling)
             if (loop_has_mnv && !m_context.mnv_done && t_sim >= trigger_t - 1e-4) {
                 const auto& node = req.state.maneuvers[0];
                 double bpx, bpy, bpz, bvx, bvy, bvz;
                 PhysicsSystem::GetCelestialStateAt(nearest_body, t_sim, bpx, bpy, bpz, bvx, bvy, bvz);
+                // 计算当前局部轨道系的坐标轴（Prograde, Normal, Radial）
                 Vec3 r_rel((float)(cur_h_px - bpx), (float)(cur_h_py - bpy), (float)(cur_h_pz - bpz));
                 Vec3 v_rel((float)(cur_h_vx - bvx), (float)(cur_h_vy - bvy), (float)(cur_h_vz - bvz));
                 ManeuverFrame frame = ManeuverSystem::getFrame(r_rel, v_rel);
@@ -249,19 +237,20 @@ void AsyncOrbitPredictor::WorkerLoop() {
                               frame.radial   * node.delta_v.z;
                 
                 if (node.burn_mode == 0) {
-                    // === IMPULSE MODE: instant delta-v ===
+                    // === 瞬间冲量模式 (Impulse Mode) ===
+                    // 模拟理想的瞬间速度增益（常见于简单的轨道力学模型）
                     mnv_h_px = cur_h_px; mnv_h_py = cur_h_py; mnv_h_pz = cur_h_pz;
                     mnv_h_vx = cur_h_vx + dv_dir.x; mnv_h_vy = cur_h_vy + dv_dir.y; mnv_h_vz = cur_h_vz + dv_dir.z;
                     m_context.mnv_done = true;
                 } else {
-                    // === SUSTAINED/FINITE BURN MODE ===
+                    // === 有限时长点火模式 (Finite Burn Mode) ===
                     if (!m_context.mnv_burning) {
-                        // Initialize burn state
+                        // 初始化点火状态：捕捉这一瞬间的推进方向并锁定（惯性锁定）
                         m_context.mnv_burning = true;
                         m_context.mnv_remaining_dv = dv_dir.length();
                         m_context.mnv_mass = req.state.fuel + req.config.dry_mass + req.config.upper_stages_mass;
-                        m_context.mnv_thrust_dir = dv_dir.normalized(); // Inertial Lock captured at ignition
-                        // Fork the mnv trajectory from current state
+                        m_context.mnv_thrust_dir = dv_dir.normalized();
+                        // 变轨轨迹从当前常规轨迹处“分叉”出来
                         mnv_h_px = cur_h_px; mnv_h_py = cur_h_py; mnv_h_pz = cur_h_pz;
                         mnv_h_vx = cur_h_vx; mnv_h_vy = cur_h_vy; mnv_h_vz = cur_h_vz;
                     }
@@ -269,26 +258,24 @@ void AsyncOrbitPredictor::WorkerLoop() {
                 if (step_dt < 1e-5 && !m_context.mnv_burning) continue;
             }
             
-            // Finite burn thrust application (on the mnv trajectory)
+            // 持续点火时的推力积分 (Finite Burn Integration)
             if (m_context.mnv_burning && !m_context.mnv_done) {
-                // High-precision adaptive step for burn
+                // 点火期间需要极高的计算频率 (1秒或更低)，因为质量在变，加速度也在变。
                 step_dt = std::min(step_dt, 1.0);
                 
-                // Compute thrust parameters
                 double thrust = 0;
                 if (req.state.current_stage < (int)req.config.stage_configs.size())
                     thrust = req.config.stage_configs[req.state.current_stage].thrust;
-                double ve = req.config.specific_impulse * 9.80665;
-                double mdot = (ve > 0) ? thrust / ve : 0;
+                double ve = req.config.specific_impulse * 9.80665; // 有效排气速度
+                double mdot = (ve > 0) ? thrust / ve : 0;        // 质量流率 (齐奥尔科夫斯基公式)
                 
                 if (thrust > 0 && m_context.mnv_mass > req.config.dry_mass && m_context.mnv_remaining_dv > 0.01) {
-                    Vec3 thrust_dir = m_context.mnv_thrust_dir; // Principia-style Inertial Lock
+                    Vec3 thrust_dir = m_context.mnv_thrust_dir; 
                     
-                    // Apply thrust acceleration (a = F/m)
+                    // 根据 F=ma 应用加速度
                     double accel = thrust / m_context.mnv_mass;
                     double dv_this_step = accel * step_dt;
                     if (dv_this_step > m_context.mnv_remaining_dv) {
-                        // Don't overshoot - adjust step
                         dv_this_step = m_context.mnv_remaining_dv;
                         step_dt = dv_this_step / accel;
                     }
@@ -297,34 +284,29 @@ void AsyncOrbitPredictor::WorkerLoop() {
                     mnv_h_vy += thrust_dir.y * dv_this_step;
                     mnv_h_vz += thrust_dir.z * dv_this_step;
                     
-                    // Mass decay
+                    // 燃料消耗导致的质量衰减
                     m_context.mnv_mass -= mdot * step_dt;
                     m_context.mnv_remaining_dv -= dv_this_step;
                     
-                    // Record during burn at higher frequency
-                    record_interval = 30.0;
-                    // Burn complete
-                    m_context.mnv_burning = false;
-                    m_context.mnv_done = true;
-                    record_interval = 600.0;
+                    if (m_context.mnv_remaining_dv <= 0.01) {
+                        m_context.mnv_burning = false;
+                        m_context.mnv_done = true;
+                    }
                     
-                    // ARCHIVE: Capture the integrated absolute state for guidance synchronization
+                    // 将积分出来的关键点位反馈回主线程，用于导航引导。
                     if (!req.state.maneuvers.empty()) {
                         auto& node = req.target->maneuvers[0];
                         std::lock_guard<std::mutex> lock(*req.target->path_mutex);
-                        node.snap_px = mnv_h_px;
-                        node.snap_py = mnv_h_py;
-                        node.snap_pz = mnv_h_pz;
-                        node.snap_vx = mnv_h_vx;
-                        node.snap_vy = mnv_h_vy;
-                        node.snap_vz = mnv_h_vz;
+                        node.snap_px = mnv_h_px; node.snap_py = mnv_h_py; node.snap_pz = mnv_h_pz;
+                        node.snap_vx = mnv_h_vx; node.snap_vy = mnv_h_vy; node.snap_vz = mnv_h_vz;
                         node.snap_time = t_sim;
                         node.locked_burn_dir = m_context.mnv_thrust_dir;
                     }
                 }
             }
 
-            // Integrator
+            // 5. 应用辛积分子步 (Symplectic Substeps)
+            // 分别更新位置 (Q) 和速度 (P)
             #define SYM_W_Q(C) { \
                 if (!m_context.crashed) { cur_h_px += (C)*cur_h_vx*step_dt; cur_h_py += (C)*cur_h_vy*step_dt; cur_h_pz += (C)*cur_h_vz*step_dt; } \
                 if (loop_has_mnv && (m_context.mnv_done || m_context.mnv_burning) && !m_context.mnv_crashed) { \
@@ -349,7 +331,8 @@ void AsyncOrbitPredictor::WorkerLoop() {
             #undef SYM_W_Q
             #undef SYM_W_P
 
-            // Collision Detection
+            // 碰撞检测 (Collision Detection)
+            // 简单的球面距离检测，判断火箭是否已经撞上任何行星或恒星。
             if (!m_context.crashed || (m_context.mnv_done && !m_context.mnv_crashed)) {
                 for (int b=0; b<(int)req.celestial_snapshot.size(); b++) {
                     const auto& body = req.celestial_snapshot[b];
@@ -367,17 +350,19 @@ void AsyncOrbitPredictor::WorkerLoop() {
 
             if (m_context.crashed && (!m_context.mnv_done || m_context.mnv_crashed)) break;
 
-            // ADAPTIVE RECORDING: Much higher resolution near bodies
+            // 6. 录制路径点 (Recording)
+            // 我们不能把每一秒的位置都存下来，那会拖慢渲染。
+            // 这里根据路径的“弯曲程度”和重要性来动态决定记录间隔。
             double rb_dist = std::sqrt(min_dist_sq);
             double v_mag = std::sqrt(v_sq);
             record_interval = std::clamp(rb_dist / (v_mag + 1.0) * 0.05, 10.0, 1200.0);
             if (m_context.mnv_burning) record_interval = 10.0;
 
-            // Recording
             if (t_sim >= last_record_t + record_interval || (loop_has_mnv && std::abs(t_sim - trigger_t) < 1e-4)) {
                 double rbpx, rbpy, rbpz;
                 PhysicsSystem::GetCelestialPositionAt(req.ref_body, t_sim, rbpx, rbpy, rbpz);
                 
+                // 将坐标从绝对的“日心系”转换到渲染所用的“局部参考系”。
                 Quat q_inv = PhysicsSystem::GetFrameRotation(req.ref_mode, req.ref_body, req.secondary_ref_body, t_sim).conjugate();
                 
                 if (!m_context.crashed) {
@@ -388,12 +373,13 @@ void AsyncOrbitPredictor::WorkerLoop() {
                         m_context.point_times.push_back(t_sim);
                     }
                     
-                    // Apsis detection for primary path
+                    // 轨道近地点/远地点检测 (Apsis Detection)
+                    // 通过检测径向速度 (dr) 的正负切换来寻找距离的极值点。
                     double double_r = p_inertial.length();
                     double rbx, rby, rbz, rbvx, rbvy, rbvz;
                     PhysicsSystem::GetCelestialStateAt(req.ref_body, t_sim, rbx, rby, rbz, rbvx, rbvy, rbvz);
                     double drx = cur_h_vx - rbvx, dry = cur_h_vy - rbvy, drz = cur_h_vz - rbvz;
-                    double dr = (p_inertial.x * drx + p_inertial.y * dry + p_inertial.z * drz); // dot product tells us if distance is expanding or contracting
+                    double dr = (p_inertial.x * drx + p_inertial.y * dry + p_inertial.z * drz);
                     
                     if (m_context.last_r > 0) {
                         if (m_context.last_dr < 0 && dr >= 0) {
@@ -413,23 +399,6 @@ void AsyncOrbitPredictor::WorkerLoop() {
                         m_context.mnv_points.push_back(mnv_local);
                         m_context.mnv_point_times.push_back(t_sim);
                     }
-                    
-                    // Apsis detection for maneuver path
-                    double double_r = mnv_inertial.length();
-                    double rbx, rby, rbz, rbvx, rbvy, rbvz;
-                    PhysicsSystem::GetCelestialStateAt(req.ref_body, t_sim, rbx, rby, rbz, rbvx, rbvy, rbvz);
-                    double drx = mnv_h_vx - rbvx, dry = mnv_h_vy - rbvy, drz = mnv_h_vz - rbvz;
-                    double dr = (mnv_inertial.x * drx + mnv_inertial.y * dry + mnv_inertial.z * drz);
-                    
-                    if (m_context.last_mnv_r > 0) {
-                        if (m_context.last_mnv_dr < 0 && dr >= 0) {
-                            if (m_context.mnv_apsides.size() < 10) m_context.mnv_apsides.push_back({false, mnv_local, t_sim, double_r - req.celestial_snapshot[req.ref_body].radius});
-                        } else if (m_context.last_mnv_dr > 0 && dr <= 0) {
-                            if (m_context.mnv_apsides.size() < 10) m_context.mnv_apsides.push_back({true, mnv_local, t_sim, double_r - req.celestial_snapshot[req.ref_body].radius});
-                        }
-                    }
-                    m_context.last_mnv_r = double_r;
-                    m_context.last_mnv_dr = dr;
                 }
                 last_record_t = t_sim;
             }

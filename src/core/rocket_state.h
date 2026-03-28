@@ -9,17 +9,18 @@
 #include <mutex>
 #include "math/math3d.h"
 
-// Constants
+// --- 物理常数 (Constants) ---
+// 这些是宇宙运行的基本规则。初学者可以把它们看作是“游戏规则的参数”。
 #ifndef PI
-constexpr double PI = 3.14159265358979323846;
+constexpr double PI = 3.14159265358979323846; // 圆周率：半圆的角度（180度）
 #endif
-constexpr double G0 = 9.80665;             // Standard gravity (m/s^2)
-constexpr double EARTH_RADIUS = 6371000.0; // Earth radius (m)
-constexpr double SLP = 1013.25;            // Sea level pressure (hPa)
-const double au_meters = 149597870700.0;
-const double G_const = 6.67430e-11;
-const double M_sun = 1.989e30;
-const double GM_sun = G_const * M_sun;
+constexpr double G0 = 9.80665;             // 地表重力加速度：物体在地球表面下落的速度变化率 (m/s^2)
+constexpr double EARTH_RADIUS = 6371000.0; // 地球平均半径：从地心到海平面的距离 (m)
+constexpr double SLP = 1013.25;            // 海平面大气压：呼吸时的标准压力 (hPa)
+const double au_meters = 149597870700.0;   // 天文单位：地球到太阳的平均距离
+const double G_const = 6.67430e-11;        // 万有引力常数：决定两个物体之间引力大小的关键系数
+const double M_sun = 1.989e30;             // 太阳质量 (kg)
+const double GM_sun = G_const * M_sun;     // 太阳引力参数：用于快速计算绕日轨道
 
 enum BodyType {
     STAR,
@@ -29,40 +30,43 @@ enum BodyType {
     RINGED_GAS_GIANT
 };
 
+// 天体结构体 (Celestial Body)
+// 描述一颗行星、恒星或卫星。它既包含了它的物理属性，也包含了它在宇宙中的运动状态。
 struct CelestialBody {
-    std::string name;
-    double mass;
-    double radius;
-    BodyType type;
+    std::string name;        // 名字 (如 "Earth" 或 "Mars")
+    double mass;             // 质量 (kg)：决定引力的大小
+    double radius;           // 半径 (m)：决定碰撞检测和地表渲染
+    BodyType type;           // 类型：恒星、类地行星、气态巨行星等
     
-    // Rendering colors
+    // 渲染颜色
     float r, g, b;
 
-    // Rotation parameters
-    double axial_tilt;                 // Obliquity to orbit (radians)
-    double rotation_period;            // Sidereal day (seconds)
-    double prime_meridian_epoch;       // Prime meridian angle at epoch (radians)
+    // 自转参数 (Rotation)
+    double axial_tilt;                 // 轴倾角 (弧度)：决定季节变化和极昼极夜
+    double rotation_period;            // 自转周期 (秒)：一个“昼夜”的长度
+    double prime_meridian_epoch;       // 初始相位：在初始时刻，0度经线对着哪个方向
     
-    // Ephemeris elements (VSOP87 / Secular perturbations)
-    double sma_base;          // Semi-major axis base (meters)
-    double sma_rate;          // Rate of change (meters/century)
-    double ecc_base;          // Eccentricity base
-    double ecc_rate;          // Rate of change (1/century)
-    double inc_base;          // Inclination base (radians)
-    double inc_rate;          // Rate of change (rad/century)
-    double lan_base;          // Longitude of ascending node base (radians)
-    double lan_rate;          // Rate of change (rad/century)
-    double arg_peri_base;     // Argument of periapsis base (radians)
-    double arg_peri_rate;     // Rate of change (rad/century)
-    double mean_anom_base;    // Mean anomaly at epoch (radians)
-    double mean_anom_rate;    // Mean motion (rad/sec)
+    // 轨道根数 (Orbital Elements)
+    // 这些变量描述了星星是如何绕着母星转动的。
+    double sma_base;          // 半长轴 (m)：椭圆轨道的“平均半径”
+    double sma_rate;          // 半长轴变化率：轨道是否在慢慢变大或变小
+    double ecc_base;          // 离心率：0 是正圆，越接近 1 轨道越扁（长椭圆）
+    double ecc_rate;          // 离心率变化率
+    double inc_base;          // 轨道倾角 (弧度)：轨道相对于基准平面的倾斜程度
+    double inc_rate;          // 倾角变化率
+    double lan_base;          // 升交点黄经：轨道在基准平面上“指”的方向
+    double lan_rate;          // 升交点变化率
+    double arg_peri_base;     // 近地点幅角：轨道椭圆的“尖端”朝向哪里
+    double arg_peri_rate;     // 近地点幅角变化率
+    double mean_anom_base;    // 平近点角：决定了星星在轨道上的初始位置
+    double mean_anom_rate;    // 平均运动速度：星星跑多快 (rad/sec)
     
-    // Dynamic physics state
-    double px, py, pz;        // Heliocentric position (meters)
-    double vx, vy, vz;        // Heliocentric velocity (meters/sec)
+    // 实时物理状态 (Dynamic State)
+    double px, py, pz;        // 以太阳为中心的 3D 坐标 (x, y, z)
+    double vx, vy, vz;        // 3D 运行速度 (m/s)
     
-    // Pre-calculated SOI
-    double soi_radius;        // Sphere of Influence radius (meters)
+    // 引力范围 (Sphere of Influence)
+    double soi_radius;        // 只有进入这个半径范围，我们才认为飞船是绕着这个天体转的
 
     // Galaxy Info Fields
     int parent_index = -1;             // Index of parent body (for moons)
@@ -105,12 +109,18 @@ inline float hash11(int n) {
 }
 
 // PID Controller Struct
+// PID 控制器 (Proportional-Integral-Derivative)
+// 这是一个非常经典的控制算法。对于萌新来说：
+// kp (比例)：发现误差，立刻用力纠正（误差越大，力越大）。
+// ki (积分)：发现误差一直消除不了，积攒怒气，加大力度。
+// kd (微分)：“刹车”项。快要到达目标时，提前减速，防止冲过头。
 struct PID {
     double kp, ki, kd;
-    double integral = 0;
-    double prev_error = 0;
-    double integral_limit = 50.0;
+    double integral = 0;             // 误差的累计
+    double prev_error = 0;           // 上一次的误差（用于计算微分）
+    double integral_limit = 50.0;    // 防止“怒气”积攒无上限导致失控
 
+    // 更新函数：输入你想要达到的目标（target）和当前实际值（current），返回你应该施加的力。
     double update(double target, double current, double dt) {
         if (dt <= 0.0) return 0.0;
         double error = target - current;
@@ -182,21 +192,22 @@ struct StageConfig {
 };
 
 // Static Rocket Configuration (immutable during flight)
+// 静态火箭配置 (Rocket Configuration)
+// 描述火箭的物理结构，这些属性通常在飞行中不会改变（直到你抛弃一级火箭）。
 struct RocketConfig {
-    // Current active stage shorthand (synced by StageManager)
-    double dry_mass;
-    double diameter;
-    double height;
-    double bounds_bottom = 0; // Distance from origin to the lowest point of the rocket (usually negative)
-    int stages;
-    double specific_impulse;
-    double cosrate; // fuel_consumption_rate / mass flow rate parameter
-    double nozzle_area;
+    double dry_mass;          // 干重 (kg)：燃料烧完后的重量
+    double diameter;          // 直径 (m)：影响空气阻力
+    double height;            // 高度 (m)
+    double bounds_bottom = 0; // 底部偏移：通常为负数，表示从火箭中心到最底部的距离
+    int stages;               // 总级数 (如 2 或 3 段)
+    double specific_impulse;  // 比冲 (s)：衡量发动机效率，数值越高燃料越耐烧
+    double cosrate;           // 燃料消耗率参数 (kg/s)
+    double nozzle_area;       // 喷嘴面积：在不同气压环境下影响推力
 
-    // Multi-stage configurations (stage 0 = bottom, fires first)
+    // 多级配置 (Stage 0 = 底部第一级)
     std::vector<StageConfig> stage_configs;
 
-    // Total mass of stages above the active one (payload for current stage)
+    // 上方级别的总质量：除了当前正在喷火的那一级，上面还背了多少东西
     double upper_stages_mass = 0;
 };
 
@@ -209,67 +220,65 @@ struct ControlInput {
 };
 
 // Dynamic Rocket State (updated by physics)
+// 实时火箭状态 (Rocket State)
+// 这是整个物理模拟中最核心的结构体，记录了火箭在这一秒钟里的所有状态。
 struct RocketState {
-    // Basic properties
-    double fuel = 0.0;
+    // 1. 燃料与分级状态
+    double fuel = 0.0;                  // 当前剩余可用燃料 (kg)
+    int current_stage = 0;              // 指向当前活跃的级（0 是底部，越往上越大）
+    int total_stages = 1;               // 火箭总共有几段
+    std::vector<double> stage_fuels;    // 每一级各自还剩多少燃料
+    double jettisoned_mass = 0.0;       // 已经扔掉的空壳总重量 (kg)
     
-    // Multi-stage state
-    int current_stage = 0;              // Active stage index (0 = bottom, fires first)
-    int total_stages = 1;               // Total number of stages
-    std::vector<double> stage_fuels;    // Remaining fuel per stage
-    double jettisoned_mass = 0.0;       // Cumulative mass of jettisoned stages
+    // 2. 坐标与运动 (相对于当前所在的星球中心)
+    double px = 0.0, py = EARTH_RADIUS + 0.1, pz = 0.0; // 3D 位置 (m)
+    double vx = 0.0, vy = 0.0, vz = 0.0;               // 3D 速度 (m/s)
     
-    // Position/Velocity relative to current SOI origin
-    double px = 0.0, py = EARTH_RADIUS + 0.1, pz = 0.0;
-    double vx = 0.0, vy = 0.0, vz = 0.0;
-    
-    // Absolute Heliocentric Position/Velocity (used for continuous global tracking and Eclipse checks)
+    // 绝对坐标 (以太阳为中心)
     double abs_px = 0.0, abs_py = 0.0, abs_pz = 0.0;
     double abs_vx = 0.0, abs_vy = 0.0, abs_vz = 0.0;
-    
-    // Body-fixed surface coordinates (relative to planet center, rotated frame)
+
+    // 地表坐标 (相对于行星中心，但在行星自转坐标系下)
     double surf_px = 0.0, surf_py = EARTH_RADIUS, surf_pz = 0.0;
     
-    // Launch site coordinates
-    double launch_latitude = 28.5;  // Default: Cape Canaveral
-    double launch_longitude = -80.6;
+    // 发射场坐标与经纬度
+    double launch_latitude = 28.5;  // 纬度 (度)
+    double launch_longitude = -80.6; // 经度 (度)
     double launch_site_px = 0.0, launch_site_py = EARTH_RADIUS, launch_site_pz = 0.0;
     
-    // Attitude
-    Quat attitude;           // True 3D attitude
+    // 3. 姿态控制 (Orientance)
+    Quat attitude;           // 四元数：描述火箭在 3D 空间里的朝向
     bool attitude_initialized = false;
-    double angle = 0.0;      // Yaw (in 2D plane)
-    double ang_vel = 0.0;
-    double angle_z = 0.0;    // Out-of-plane pitch
+    double angle = 0.0;      // 偏航角
+    double ang_vel = 0.0;    // 偏航角速度
+    double angle_z = 0.0;    // 俯仰角
     double ang_vel_z = 0.0;
-    double angle_roll = 0.0; // Self-spin (Roll)
+    double angle_roll = 0.0; // 滚转角
     double ang_vel_roll = 0.0;
     
-    // Physics simulation metadata
-    double sim_time = 0.0;
-    double altitude = 0.0;
-    double terrain_altitude = 0.0; // Dynamic ground level
-    double velocity = 0.0;    // Radial velocity (vertical)
-    double local_vx = 0.0;    // Tangential velocity (horizontal against terrain)
+    // 4. 环境感知与物理量
+    double sim_time = 0.0;          // 游戏内的总时间 (s)
+    double altitude = 0.0;          // 海拔高度 (m)
+    double terrain_altitude = 0.0;  // 地形高度 (m)
+    double velocity = 0.0;          // 垂直速度 (m/s)
+    double local_vx = 0.0;          // 水平平移速度 (m/s)
     
-    // Engine states
-    double fuel_consumption_rate = 0.0;
-    double thrust_power = 0.0;
-    double acceleration = 0.0;
+    // 发动机实时数据
+    double fuel_consumption_rate = 0.0; // 实时燃料流速 (kg/s)
+    double thrust_power = 0.0;          // 当前推力百分比或功率 (0~1)
+    double acceleration = 0.0;          // 当前总加速度 (m/s^2)
+    double solar_occlusion = 1.0;       // 光照遮挡率 (1.0 = 全阳光，0.0 = 阴影)
     
-    // Environment
-    double solar_occlusion = 1.0;    // 0.0 to 1.0 (0=Umbra, 1=Fully lit)
-    
-    // AI / Autopilot flags
-    bool suicide_burn_locked = false;
-    MissionState status = PRE_LAUNCH;
+    // 5. 任务与自动驾驶
+    bool suicide_burn_locked = false; // 是否已经锁定“自杀点火”逻辑
+    MissionState status = PRE_LAUNCH; // 任务大状态
     std::string mission_msg = "SYSTEM READY";
-    int mission_phase = 0;
-    double mission_timer = 0.0;
-    bool show_absolute_time = false;
-    bool auto_mode = true;
-    bool sas_active = true;
-    bool rcs_active = true;
+    int mission_phase = 0;           // 任务细分阶段 (如：0=上升, 1=滑行...)
+    double mission_timer = 0.0;      // 阶段计时器
+    bool show_absolute_time = false; // 是否显示绝对时间 (UT)
+    bool auto_mode = true;           // 自动驾驶开关
+    bool sas_active = true;          // 姿态稳定开关
+    bool rcs_active = true;          // 姿态发动机 (RCS) 开关
     SASMode sas_mode = SAS_STABILITY;
     Vec3 sas_target_vec = {0, 0, 0}; // Normalized target vector in world space (relative to body)
     double leg_deploy_progress = 0.0;

@@ -39,6 +39,9 @@
     <ClCompile Include="..\src\simulation\predictor.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\render\stb_impl.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\src\physics\physics_system.h">
@@ -80,5 +83,16 @@
     <ClInclude Include="..\src\simulation\predictor.h">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="..\src\render\HUD_system.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <Font Include="..\assets\fonts\SourceHanSansCN-Regular.otf" />
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="..\src\keys.txt">
+      <Filter>头文件</Filter>
+    </Text>
   </ItemGroup>
 </Project>

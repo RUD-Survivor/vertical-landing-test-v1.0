@@ -133,9 +133,39 @@ struct TerrainNode {
     
     GLuint localHydroTex = 0;
     bool hydroGenerated = false;
+    std::vector<float> hydroCache; // 64x64 canonical filledHeight for inheritance
+    bool hasHydroCache = false;
 
     TerrainNode(Vec3 c, Vec3 sa, Vec3 sb, float s, int l) 
         : center(c), sideA(sa), sideB(sb), size(s), level(l) {}
+
+    void inheritHydro(const std::vector<float>& parentCache, int quadrant) {
+        hydroCache.assign(64 * 64, 0.0f);
+        // Offsets for the 4 quadrants in a 64x64 parent map
+        int ox = (quadrant == 1 || quadrant == 3) ? 32 : 0;
+        int oy = (quadrant == 2 || quadrant == 3) ? 32 : 0;
+        
+        for (int y = 0; y < 64; y++) {
+            for (int x = 0; x < 64; x++) {
+                // Bilinear upscale from parent's 32x32 quadrant to child's 64x64
+                float fx = (float)x * 0.5f + (float)ox;
+                float fy = (float)y * 0.5f + (float)oy;
+                int ix0 = (int)fx, iy0 = (int)fy;
+                int ix1 = std::min(ix0 + 1, 63);
+                int iy1 = std::min(iy0 + 1, 63);
+                float tx = fx - (float)ix0;
+                float ty = fy - (float)iy0;
+                
+                float v00 = parentCache[iy0 * 64 + ix0];
+                float v10 = parentCache[iy0 * 64 + ix1];
+                float v01 = parentCache[iy1 * 64 + ix0];
+                float v11 = parentCache[iy1 * 64 + ix1];
+                
+                hydroCache[y * 64 + x] = (v00*(1-tx)*(1-ty) + v10*tx*(1-ty) + v01*(1-tx)*ty + v11*tx*ty);
+            }
+        }
+        hasHydroCache = true;
+    }
 
     ~TerrainNode() {
         if (localHydroTex) glDeleteTextures(1, &localHydroTex);
@@ -152,6 +182,14 @@ struct TerrainNode {
         children[1] = std::make_unique<TerrainNode>(center + sa * 0.5f + sb * 0.5f, sa, sb, s, level + 1);
         children[2] = std::make_unique<TerrainNode>(center - sa * 0.5f - sb * 0.5f, sa, sb, s, level + 1);
         children[3] = std::make_unique<TerrainNode>(center + sa * 0.5f - sb * 0.5f, sa, sb, s, level + 1);
+        
+        // --- INDUSTRIAL GRADE: Propagate Hierarchical Hydro Data ---
+        for (int i = 0; i < 4; i++) {
+            if (hasHydroCache) {
+                children[i]->inheritHydro(hydroCache, i);
+            }
+        }
+        
         isLeaf = false;
     }
 
@@ -234,52 +272,136 @@ public:
     void generateLocalHydro(TerrainNode* node) {
         if (node->hydroGenerated || !hydroSim) return;
         
-        int res = 64;
-        std::vector<float> grid(res * res);
-        std::vector<float> boundaries(res * 4);
+        // --- INDUSTRIAL GRADE: 66x66 grid for 1-pixel Overlapping (Ghost Cells) ---
+        // This ensures boundary pixels have context from neighbors, fixing seams.
+        const int simRes = 66; 
+        const int texRes = 64; 
+        std::vector<float> grid(simRes * simRes);
+        std::vector<float> boundaries(simRes * 4);
 
-        // 1. Generate local height field
-        for (int y = 0; y < res; y++) {
-            for (int x = 0; x < res; x++) {
-                float u = (float)x / (res - 1);
-                float v = (float)y / (res - 1);
+        // 1. Generate local height field using Refined Height 
+        // We initialize the grid with PURE refined terrain.
+        // DO NOT max with parent cache here, as it would flatten river valleys.
+        for (int y = 0; y < simRes; y++) {
+            for (int x = 0; x < simRes; x++) {
+                float u = (float)(x - 1) / (64.0f - 1.0f);
+                float v = (float)(y - 1) / (64.0f - 1.0f);
                 Vec3 p = node->center + node->sideA * (u - 0.5f) + node->sideB * (v - 0.5f);
-                // Sample raw tectonic + regional noise (matches shader's plateBase scale)
-                // We use sLevel=0.45 as the baseline.
-                grid[y * res + x] = getHeightRaw(p.normalized());
+                grid[y * simRes + x] = getRefinedHeight(p.normalized());
             }
         }
 
-        // 2. Sample global filledHeights for boundaries
+        // 2. INDUSTRIAL GRADE: Pre-Carve River Skeletons into the Simulation Grid
+        // This ensures the local Priority Flood 'recognizes' the global drainage path.
+        if (hydroSim && !hydroSim->data.skeletons.empty()) {
+            for (const auto& skel : hydroSim->data.skeletons) {
+                // Check if this skeleton intersects this node's bounding region
+                float margin = node->size * 0.2f + 0.005f;
+                if (node->center.x < skel.minPos.x - margin || node->center.x > skel.maxPos.x + margin ||
+                    node->center.y < skel.minPos.y - margin || node->center.y > skel.maxPos.y + margin ||
+                    node->center.z < skel.minPos.z - margin || node->center.z > skel.maxPos.z + margin) continue;
+
+                for (int y = 0; y < simRes; y++) {
+                    for (int x = 0; x < simRes; x++) {
+                        float gu = (float)(x - 1) / (texRes - 1);
+                        float gv = (float)(y - 1) / (texRes - 1);
+                        Vec3 p = (node->center + node->sideA * (gu - 0.5f) + node->sideB * (gv - 0.5f)).normalized();
+                        
+                        // Exact same carving logic as getRefinedHeight to ensure alignment
+                        for (size_t i = 1; i < skel.points.size(); i++) {
+                            const Vec3& p1 = skel.points[i - 1];
+                            const Vec3& p2 = skel.points[i];
+                            Vec3 v = p2 - p1; Vec3 w = p - p1;
+                            float c1 = w.dot(v); float c2 = v.dot(v);
+                            if (c1 <= 0 || c2 <= c1) continue;
+                            float b = c1 / c2;
+                            float distSq = (p - (p1 + v * b)).lengthSq();
+                            float riverWidth = 0.00005f * (float)skel.order;
+                            if (distSq < riverWidth * riverWidth) {
+                                float dist = sqrtf(distSq);
+                                grid[y * simRes + x] -= (1.0f - smoothstep_local(0.0f, riverWidth, dist)) * 0.000004f * (float)skel.order;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Sample global filledHeights for boundaries with high-precision sphere mapping
         auto getGlobalFilled = [&](const Vec3& p) {
             float phi = std::acos(std::clamp((float)p.y, -1.0f, 1.0f));
             float theta = std::atan2((float)p.z, (float)p.x);
             float u = theta / (2.0f * 3.14159f) + 0.5f;
             float v = phi / 3.14159f;
-            int tx = std::clamp((int)(u * (hydroSim->width - 1)), 0, (int)hydroSim->width - 1);
-            int ty = std::clamp((int)(v * (hydroSim->height - 1)), 0, (int)hydroSim->height - 1);
-            return hydroSim->data.filledHeight[ty * (int)hydroSim->width + tx];
+            // High-precision Bilinear lookup on global hydro map
+            float fx = u * (hydroSim->width - 1);
+            float fy = v * (hydroSim->height - 1);
+            int tx0 = (int)fx, ty0 = (int)fy;
+            int tx1 = (tx0 + 1) % hydroSim->width, ty1 = std::min((int)hydroSim->height - 1, ty0 + 1);
+            float mx = fx - tx0, my = fy - ty0;
+            float h00 = hydroSim->data.filledHeight[ty0 * hydroSim->width + tx0];
+            float h10 = hydroSim->data.filledHeight[ty0 * hydroSim->width + tx1];
+            float h01 = hydroSim->data.filledHeight[ty1 * hydroSim->width + tx0];
+            float h11 = hydroSim->data.filledHeight[ty1 * hydroSim->width + tx1];
+            return (h00*(1-mx)*(1-my) + h10*mx*(1-my) + h01*(1-mx)*my + h11*mx*my);
         };
 
-        for (int i = 0; i < res; i++) {
-            float t = (float)i / (res - 1);
-            // Top
-            boundaries[i] = getGlobalFilled((node->center - node->sideA*0.5f + node->sideB*0.5f + node->sideA*t).normalized());
-            // Bottom
-            boundaries[res + i] = getGlobalFilled((node->center - node->sideA*0.5f - node->sideB*0.5f + node->sideA*t).normalized());
-            // Left
-            boundaries[2*res + i] = getGlobalFilled((node->center - node->sideA*0.5f - node->sideB*0.5f + node->sideB*t).normalized());
-            // Right
-            boundaries[3*res + i] = getGlobalFilled((node->center + node->sideA*0.5f - node->sideB*0.5f + node->sideB*t).normalized());
+        for (int i = 0; i < simRes; i++) {
+            float t = (float)(i - 1) / (texRes - 1);
+            
+            // INDUSTRIAL GRADE: Hierarchical Boundary Consensus
+            // If parent has a cache, sample it for boundaries to ensure brothers match.
+            // Otherwise, fall back to global bilinear map.
+            auto getSyncH = [&](float u, float v, const Vec3& p) {
+                if (node->hasHydroCache) {
+                    // Bilinear sample the pre-inherited 64x64 cache
+                    float fx = u * 63.0f, fy = v * 63.0f;
+                    int ix0 = std::clamp((int)fx, 0, 63), iy0 = std::clamp((int)fy, 0, 63);
+                    int ix1 = std::min(ix0+1, 63), iy1 = std::min(iy0+1, 63);
+                    float tx = fx-ix0, ty = fy-iy0;
+                    float h00 = node->hydroCache[iy0*64+ix0], h10 = node->hydroCache[iy0*64+ix1];
+                    float h01 = node->hydroCache[iy1*64+ix0], h11 = node->hydroCache[iy1*64+ix1];
+                    return (h00*(1-tx)*(1-ty) + h10*tx*(1-ty) + h01*(1-tx)*ty + h11*tx*ty);
+                }
+                return getGlobalFilled(p);
+            };
+
+            boundaries[i] = getSyncH(t, 1.0f, (node->center - node->sideA*0.5f + node->sideB*0.5f + node->sideA*t).normalized());
+            boundaries[simRes + i] = getSyncH(t, 0.0f, (node->center - node->sideA*0.5f - node->sideB*0.5f + node->sideA*t).normalized());
+            boundaries[simRes*2 + i] = getSyncH(0.0f, 1.0f-t, (node->center - node->sideA*0.5f - node->sideB*0.5f + node->sideB*t).normalized());
+            boundaries[simRes*3 + i] = getSyncH(1.0f, 1.0f-t,(node->center + node->sideA*0.5f - node->sideB*0.5f + node->sideB*t).normalized());
         }
 
-        // 3. Run Local Flood
-        Hydro::HydroSimulator::fillDepressionsLocal(res, grid, boundaries);
+        // 3. Run Local Flood (Industrial: remove epsilon or reduce it significantly elsewhere)
+        Hydro::HydroSimulator::fillDepressionsLocal(simRes, grid, boundaries);
 
-        // 4. Upload to Texture
+        // 4. Extract 64x64 core and UPDATE CACHE for children
+        std::vector<float> texData(texRes * texRes);
+        node->hydroCache.assign(texRes * texRes, 0.0f);
+        node->hasHydroCache = true;
+
+        for(int y=0; y<texRes; y++) {
+            for(int x=0; x<texRes; x++) {
+                float simVal = grid[(y+1)*simRes + (x+1)];
+                
+                // Soft Blending with parent/global boundary
+                int distToEdge = std::min({x, y, texRes-1-x, texRes-1-y});
+                if (distToEdge < 3) {
+                    float edgeU = (float)x / (texRes - 1);
+                    float edgeV = (float)y / (texRes - 1);
+                    float edgeRef = node->hasHydroCache ? node->hydroCache[y*64+x] : getGlobalFilled((node->center + node->sideA*(edgeU-0.5f) + node->sideB*(edgeV-0.5f)).normalized());
+                    float blend = powf((float)distToEdge / 3.0f, 1.5f); 
+                    simVal = Noise::mix(edgeRef, simVal, blend);
+                }
+                
+                texData[y*texRes + x] = simVal;
+                node->hydroCache[y*texRes + x] = simVal; // Save for next subdivision sweep
+            }
+        }
+
         if (node->localHydroTex == 0) glGenTextures(1, &node->localHydroTex);
         glBindTexture(GL_TEXTURE_2D, node->localHydroTex);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, res, res, 0, GL_RED, GL_FLOAT, grid.data());
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, texRes, texRes, 0, GL_RED, GL_FLOAT, texData.data());
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -351,6 +473,97 @@ public:
         return base;
     }
 
+    // --- INDUSTRIAL GRADE: Get Normalized Refined Elevation [0, 1] ---
+    // This matches the vertex shader's 'hRefined' perfectly to prevent fake puddles.
+    float getRefinedHeight(const Vec3& normalizedPos) {
+        float phi = std::acos(std::clamp((float)normalizedPos.y, -1.0f, 1.0f));
+        float theta = std::atan2((float)normalizedPos.z, (float)normalizedPos.x);
+        float u = theta / (2.0f * 3.14159f) + 0.5f;
+        float v = phi / 3.14159f;
+
+        float plateBase = sampleTectonic(u, v);
+        float hRefined = plateBase;
+        
+        float mountainMask = smoothstep_local(0.55f, 0.75f, plateBase);
+        float coastalMask = smoothstep_local(0.435f, 0.445f, plateBase) * (1.0f - smoothstep_local(0.455f, 0.465f, plateBase));
+        
+        float temp = 0.5f, precip = 0.5f;
+        if (climateSim) {
+            int tx = std::clamp((int)(u * (climateSim->width - 1)), 0, climateSim->width - 1);
+            int ty = std::clamp((int)(v * (climateSim->height - 1)), 0, climateSim->height - 1);
+            temp = (climateSim->data.temperature[ty * climateSim->width + tx] + 30.0f) / 70.0f;
+            precip = climateSim->data.precipitation[ty * climateSim->width + tx] / 2000.0f;
+        }
+
+        if (mountainMask > 0.01f) {
+            float epsG = 0.005f;
+            float hX = (sampleTectonic(u + epsG, v) - sampleTectonic(u - epsG, v));
+            float hY = (sampleTectonic(u, v + epsG) - sampleTectonic(u, v - epsG));
+            float sAngle = std::atan2(-hX, hY);
+            float ca = std::cos(sAngle), sa = std::sin(sAngle);
+            float strikeU = normalizedPos.x * ca - normalizedPos.z * sa;
+            float strikeV = normalizedPos.x * sa + normalizedPos.z * ca;
+            Vec3 pS(strikeU * 0.72f, normalizedPos.y, strikeV * 1.28f);
+            hRefined += Noise::mountainNoise(pS * 6.5f) * 0.18f * mountainMask;
+            if (hRefined > 0.78f) hRefined -= smoothstep_local(0.78f, 0.96f, hRefined) * 0.045f;
+        }
+        if (coastalMask > 0.1f) {
+            float cliffNoise = 1.0f - fabsf(Noise::noise(normalizedPos * 180.0f) * 1.5f - 0.5f);
+            hRefined += smoothstep_local(0.6f, 0.9f, cliffNoise) * 0.007f * coastalMask;
+        }
+
+        // --- INDUSTRIAL GRADE: Global Skeleton Carving ---
+        // Forces local alignment with global river vectors for continuity.
+        if (hydroSim && !hydroSim->data.skeletons.empty()) {
+            for (const auto& skel : hydroSim->data.skeletons) {
+                // AABB Pruning for fast intersection
+                float margin = 0.005f; 
+                if (normalizedPos.x < skel.minPos.x - margin || normalizedPos.x > skel.maxPos.x + margin ||
+                    normalizedPos.y < skel.minPos.y - margin || normalizedPos.y > skel.maxPos.y + margin ||
+                    normalizedPos.z < skel.minPos.z - margin || normalizedPos.z > skel.maxPos.z + margin) continue;
+
+                // Segment distance check
+                for (size_t i = 1; i < skel.points.size(); i++) {
+                    const Vec3& p1 = skel.points[i - 1];
+                    const Vec3& p2 = skel.points[i];
+                    Vec3 v = p2 - p1; Vec3 w = normalizedPos - p1;
+                    float c1 = w.dot(v); float c2 = v.dot(v);
+                    if (c1 <= 0 || c2 <= c1) continue;
+                    float b = c1 / c2;
+                    float distSq = (normalizedPos - (p1 + v * b)).lengthSq();
+                    
+                float riverWidth = 0.00005f * (float)skel.order; 
+                if (distSq < riverWidth * riverWidth) {
+                    float dist = sqrtf(distSq);
+                    float mask = 1.0f - smoothstep_local(0.0f, riverWidth, dist);
+                    hRefined -= mask * 0.000004f * (float)skel.order; 
+                }
+            }
+        }
+    }
+
+        if (hydroSim && !hydroSim->data.strahler.empty()) {
+            int tx = std::clamp((int)(u * (hydroSim->width - 1)), 0, (int)hydroSim->width - 1);
+            int ty = std::clamp((int)(v * (hydroSim->height - 1)), 0, (int)hydroSim->height - 1);
+            float s = (float)hydroSim->data.strahler[ty * hydroSim->width + tx];
+            if (s >= 2.0f && plateBase > 0.445f) {
+                float offset = Noise::noise(normalizedPos * 120.0f) * 0.004f;
+                float vNoise = Noise::noise(normalizedPos * 250.0f + Vec3(offset, offset, offset));
+                float depth = 0.000008f * (s / 7.0f);
+                float isLowland = 1.0f - smoothstep_local(0.45f, 0.55f, plateBase);
+                float profile = Noise::mix(fabsf(vNoise * 2.0f - 1.0f), powf(fabsf(vNoise * 2.0f - 1.0f), 0.4f), isLowland);
+                hRefined -= (1.0f - profile) * depth;
+            }
+        }
+        
+        float seaLevel = 0.45f;
+        if (hRefined < seaLevel && hRefined > 0.38f) {
+            float shelfT = (hRefined - 0.38f) / (seaLevel - 0.38f);
+            hRefined = 0.395f + (seaLevel - 0.001f - 0.395f) * smoothstep_local(0.0f, 1.0f, shelfT);
+        }
+        return hRefined;
+    }
+
     float getHeight(const Vec3& normalizedPos) {
         float phi = std::acos(std::clamp((float)normalizedPos.y, -1.0f, 1.0f));
         float theta = std::atan2((float)normalizedPos.z, (float)normalizedPos.x);
@@ -414,17 +627,15 @@ public:
         // --- LAYER 2: LOCAL GEOLOGICAL SCULPTING (Physics-Ready) ---
 
         // 2.1 River Valley Carving (V-to-U shaped)
-        if (hydroSim && hydroSim->data.strahler.size() > 0) {
+        if (hydroSim && !hydroSim->data.strahler.empty()) {
             int tx = std::clamp((int)(u * (hydroSim->width - 1)), 0, (int)hydroSim->width - 1);
             int ty = std::clamp((int)(v * (hydroSim->height - 1)), 0, (int)hydroSim->height - 1);
             float s = (float)hydroSim->data.strahler[ty * hydroSim->width + tx];
             if (s >= 2.0f && plateBase > 0.445f) {
-                // Approximate valley using local distance noise
                 float valleyWarp = Noise::noise(normalizedPos * 120.0f) * 0.004f;
                 float vNoise = Noise::noise(normalizedPos * 250.0f + Vec3(valleyWarp, valleyWarp, valleyWarp));
-                float depth = 0.015f * (s / 7.0f); // Depth scale by Strahler
+                float depth = 0.000008f * (s / 7.0f);
                 
-                // V-shape (Mountain) to U-shape (Plains) based on height
                 float isLowland = 1.0f - smoothstep_local(0.45f, 0.55f, plateBase);
                 float vShape = fabsf(vNoise * 2.0f - 1.0f);
                 float uShape = powf(vShape, 0.4f);
@@ -438,13 +649,15 @@ public:
         float mounds = Noise::noise(normalizedPos * 1200.0f);
         hRefined += (mounds - 0.5f) * 0.0008f;
 
-        // --- Hydrology Integration (Lakes) ---
-        if (hydroSim && hydroSim->data.filledHeight.size() > 0) {
-            int tx = std::clamp((int)(u * (hydroSim->width - 1)), 0, hydroSim->width - 1);
-            int ty = std::clamp((int)(v * (hydroSim->height - 1)), 0, hydroSim->height - 1);
-            float filledH = hydroSim->data.filledHeight[ty * (int)hydroSim->width + tx] / 255.0f;
-            float hydroMask = smoothstep_local(0.0001f, 0.01f, filledH - plateBase);
-            hRefined = Noise::mix(hRefined, filledH, hydroMask * 0.97f);
+        // --- Hydrology Integration (Global Lakes) ---
+        if (hydroSim && !hydroSim->data.filledHeight.empty()) {
+            int tx = std::clamp((int)(u * (hydroSim->width - 1)), 0, (int)hydroSim->width - 1);
+            int ty = std::clamp((int)(v * (hydroSim->height - 1)), 0, (int)hydroSim->height - 1);
+            float filledH = hydroSim->data.filledHeight[ty * (int)hydroSim->width + tx];
+            float hydroDiff = filledH - plateBase;
+            // High sensitivity: Detect water as shallow as 6-12 meters (0.000001 - 0.000002)
+            float hydroMask = smoothstep_local(0.000001f, 0.00002f, hydroDiff);
+            hRefined = Noise::mix(hRefined, filledH, hydroMask * 1.0f);
         }
 
         // Sea Level Normalization

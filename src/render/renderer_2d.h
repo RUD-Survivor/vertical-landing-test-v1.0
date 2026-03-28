@@ -47,27 +47,37 @@ inline float hash11(float p) {
 // Renderer Class: modern OpenGL GUI/HUD
 // ==========================================
 
+// -------------------------------------------------------------
+// 2D 渲染顶点着色器 (Vertex Shader)
+// 负责将 2D 屏幕坐标转换为 OpenGL 的标准化设备坐标 (NDC: -1 to 1)。
+// -------------------------------------------------------------
 static const char *vertexShaderSource2D = R"(
     #version 330 core
-    layout (location = 0) in vec2 aPos;
-    layout (location = 1) in vec4 aColor;
-    layout (location = 2) in vec2 aTexCoord;
+    layout (location = 0) in vec2 aPos;      // 顶点位置 (x, y)
+    layout (location = 1) in vec4 aColor;    // 顶点颜色 (r, g, b, a)
+    layout (location = 2) in vec2 aTexCoord; // 纹理坐标 (u, v)
     out vec4 ourColor;
     out vec2 TexCoord;
     void main() {
+        // 直接使用传入的坐标，假定调用者已处理好屏幕比例。
         gl_Position = vec4(aPos.x, aPos.y, 0.0, 1.0);
         ourColor = aColor;
         TexCoord = aTexCoord;
     }
 )";
 
+// -------------------------------------------------------------
+// 2D 渲染片段着色器 (Fragment Shader)
+// 处理颜色混合和文字/图标的纹理采样。
+// -------------------------------------------------------------
 static const char *fragmentShaderSource2D = R"(
     #version 330 core
     out vec4 FragColor;
     in vec4 ourColor;
     in vec2 TexCoord;
-    uniform sampler2D ourTexture;
+    uniform sampler2D ourTexture; // 文字图集或 UI 图块
     void main() {
+        // 对于文字，纹理只有单通道（红色），用它作为 Alpha 值来实现抗锯齿渲染。
         float alpha = texture(ourTexture, TexCoord).r;
         FragColor = vec4(ourColor.rgb, ourColor.a * alpha);
     }
@@ -98,44 +108,49 @@ public:
   enum Align { LEFT, CENTER, RIGHT };
   void beginFrame() { vertices.clear(); }
   Renderer() {
+    // 1. 编译并链接 2D 着色器程序
     unsigned int v = compileShader(GL_VERTEX_SHADER, vertexShaderSource2D);
     unsigned int f = compileShader(GL_FRAGMENT_SHADER, fragmentShaderSource2D);
     shaderProgram = glCreateProgram();
     glAttachShader(shaderProgram, v);
     glAttachShader(shaderProgram, f);
-
     glLinkProgram(shaderProgram);
     glDeleteShader(v);
     glDeleteShader(f);
 
+    // 2. 初始化顶点数组与缓冲区 (VAO/VBO)
     glGenVertexArrays(1, &VAO);
     glGenBuffers(1, &VBO);
     glBindVertexArray(VAO);
     glBindBuffer(GL_ARRAY_BUFFER, VBO);
+    // 预分配大容量缓冲区，用于批量渲染（Batch Rendering）
     glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 5000000, NULL, GL_DYNAMIC_DRAW);
 
-    // X, Y (0)
+    // X, Y (位置属性)
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)0);
     glEnableVertexAttribArray(0);
-    // R, G, B, A (1)
+    // R, G, B, A (颜色属性)
     glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(2 * sizeof(float)));
     glEnableVertexAttribArray(1);
-    // U, V (2)
+    // U, V (纹理坐标属性)
     glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(6 * sizeof(float)));
     glEnableVertexAttribArray(2);
     
+    // 3. 构建字体图集 (Font Atlas)
     buildFontAtlas();
   }
 
   // Unified Atlas build logic
   // Moved into buildFontAtlas above
 
+  // 向顶点缓冲区添加一个顶点
   void addVertex(float x, float y, float r, float g, float b, float a, float u = 0, float v = 0) {
     vertices.push_back(x); vertices.push_back(y);
     vertices.push_back(r); vertices.push_back(g); vertices.push_back(b); vertices.push_back(a);
     vertices.push_back(u); vertices.push_back(v);
   }
   
+  // 添加一个“纯色”顶点（使用图集中预留的白色像素）
   void addVertexWhite(float x, float y, float r, float g, float b, float a) {
       addVertex(x, y, r, g, b, a, 1.0f/512.0f, 1.0f/512.0f);
   }
@@ -211,7 +226,7 @@ public:
     }
   }
 
-  // 画直线
+  // 画直线（通过生成一个长条矩形实现）
   void addLine(float x1, float y1, float x2, float y2, float thick, float r, float g, float b, float a = 1.0f) {
       float dx = x2 - x1;
       float dy = y2 - y1;
@@ -324,17 +339,19 @@ public:
     }
 
     // 2. 坐标转换逻辑 (直接基于四元数投影，消除万向锁)
-    // p 处于水平参考系 (X=East, Y=Up, Z=North)
+    // 此算法将虚拟球体上的 3D 点投影到 2D 屏幕上的“姿态球”圆面上。
     auto project = [&](Vec3 p) -> Vec2 {
-        // 先转到世界空间
+        // 先根据火箭所在的地理参考系（Up/North/East）转到世界空间
         Vec3 pW = localRight * p.x + localUp * p.y + localNorth * p.z;
-        // 再转到火箭局部空间
+        // 再通过火箭姿态四元数的共轭，转到火箭视角下的局部空间
         Vec3 pR = qRocket.conjugate().rotate(pW);
-        // 火箭纵轴为 Y+ (Depth)，左右为 X+，上下为 Z+ (Screen Y)
+        // 如果点在火箭“脑后”（pR.y < 0），则不绘制（或返回无效坐标）
         if (pR.y < 0) return {999, 999}; 
+        // 最终映射到屏幕圆盘坐标
         return {cx + pR.x * radius, cy + pR.z * radius};
     };
 
+    // 获取球面上的 3D 坐标（经纬度转笛卡尔）
     auto getSpherePt = [&](float lat, float lon) -> Vec3 {
         float phi = lat * (PI / 180.0f), theta = lon * (PI / 180.0f);
         return { cosf(phi) * sinf(theta), sinf(phi), cosf(phi) * cosf(theta) };
@@ -503,13 +520,17 @@ public:
     if (vManeuver.length() > 0.1f) drawMarker(vManeuver, "MNV", 0.2f, 0.6f, 1.0f);
   }
 
+  // 构建字体图集 (Font Atlas)
+  // 此函数使用 stb_truetype 将 .otf 字体文件转化为一个大的 2D 纹理网格。
   void buildFontAtlas() {
-      const int ATLAS_SIZE = 1024;
+      const int ATLAS_SIZE = 1024; // 1024x1024 的单通道纹理
       std::vector<unsigned char> atlasData(ATLAS_SIZE * ATLAS_SIZE, 0);
       
+      // 在纹理的最左上角（0,0处）预留几个白色像素，用于绘制不带纹理的纯色几何体。
       for(int y=0; y<4; y++) for(int x=0; x<4; x++) atlasData[y*ATLAS_SIZE + x] = 255;
       glyphCache[0] = {0.5f/ATLAS_SIZE, 0.5f/ATLAS_SIZE, 3.5f/ATLAS_SIZE, 3.5f/ATLAS_SIZE, 4, 4, 0, 0, 0};
 
+      // 读取中文字体文件
       std::ifstream file("assets/fonts/SourceHanSansCN-Regular.otf", std::ios::binary | std::ios::ate);
       if (!file.is_open()) {
           std::cerr << "Failed to open font file: assets/fonts/SourceHanSansCN-Regular.otf" << std::endl;
@@ -520,23 +541,28 @@ public:
       fontBuffer = new unsigned char[size];
       if (!file.read((char*)fontBuffer, size)) return;
       
+      // 初始化 stb_truetype
       if (!stbtt_InitFont(&fontInfo, fontBuffer, 0)) {
           std::cerr << "Failed to init stb_truetype" << std::endl;
           delete[] fontBuffer; fontBuffer = nullptr;
           return;
       }
 
-      const int FONT_HEIGHT = 24;
+      const int FONT_HEIGHT = 24; // 基础字号
       int curX = 8, curY = 0, maxHeight = 0;
       float scale = stbtt_ScaleForPixelHeight(&fontInfo, (float)FONT_HEIGHT);
 
+      // 将特定的 Unicode 字符光栅化并存入图集
       auto bakeChar = [&](unsigned int unicode) {
           if (glyphCache.count(unicode)) return;
           int w, h, xoff, yoff;
+          // 生成字符位图
           unsigned char* bitmap = stbtt_GetCodepointBitmap(&fontInfo, scale, scale, (int)unicode, &w, &h, &xoff, &yoff);
           if (bitmap) {
+              // 自动换行算法：如果当前行放不下了，就换到下一行。
               if (curX + w + 1 >= ATLAS_SIZE) { curX = 0; curY += maxHeight + 1; maxHeight = 0; }
               if (curY + h + 1 >= ATLAS_SIZE) { stbtt_FreeBitmap(bitmap, 0); return; }
+              // 拷贝位图到图集数据中
               for (int j = 0; j < h; j++) {
                   for (int k = 0; k < w; k++) {
                       atlasData[(curY + j) * ATLAS_SIZE + (curX + k)] = bitmap[j * w + k];
@@ -544,6 +570,7 @@ public:
               }
               int advance;
               stbtt_GetCodepointHMetrics(&fontInfo, (int)unicode, &advance, nullptr);
+              // 记录字符在图集中的 UV 坐标
               glyphCache[unicode] = {
                   (float)curX / ATLAS_SIZE, (float)curY / ATLAS_SIZE,
                   (float)(curX + w) / ATLAS_SIZE, (float)(curY + h) / ATLAS_SIZE,
@@ -555,9 +582,9 @@ public:
           }
       };
 
-      // 1. Bake ASCII
+      // 1. 烘焙 ASCII 字符
       for (int i = 32; i < 127; i++) bakeChar(i);
-      // 2. Bake common Chinese from localization.h
+      // 2. 烘焙 UI 中常用的中文字符
       const unsigned int common_cn[] = {
           0x8BBE, 0x7F6E, 0x8BED, 0x8A00, 0x7EE7, 0x7EED, 0x65B0, 0x6E38, 0x620F, 0x9000, 0x51FA, 0x8FD4, 0x56DE, 0x786E, 0x8BA4, 0x4E2D,
           0x6587, 0x82F1, 0x8D44, 0x6E90, 0x5929, 0x77FF, 0x673A, 0x91D1, 0x544A, 0x8B66, 0x7194, 0x7089, 0x88C5, 0x914D, 0x4ED3, 0x5E93,
@@ -567,6 +594,7 @@ public:
       };
       for (unsigned int u : common_cn) bakeChar(u);
 
+      // 创建 OpenGL 纹理对象
       glGenTextures(1, &fontTexture);
       glBindTexture(GL_TEXTURE_2D, fontTexture);
       glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, ATLAS_SIZE, ATLAS_SIZE, 0, GL_RED, GL_UNSIGNED_BYTE, atlasData.data());
@@ -574,6 +602,8 @@ public:
       glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
   }
 
+  // 绘制文本 (Draw Text)
+  // 支持 UTF-8 编码，可以混合绘制中英文。
   void drawText(float x, float y, const char* text, float size, float r, float g, float b, float a = 1.0f, bool shadow = true, Align align = LEFT) {
     if (!text || !text[0]) return;
     float px = size * 0.05f;
@@ -581,31 +611,39 @@ public:
     std::vector<CachedChar> cached;
     float total_w = 0;
     const unsigned char* p = (const unsigned char*)text;
+    
+    // 1. UTF-8 解码与宽度预计算
     while (*p) {
         unsigned int u = 0; int step = 0;
-        if (*p < 0x80) { u = *p; step = 1; }
-        else if ((*p & 0xE0) == 0xE0) { u = ((*p & 0x0F) << 12) | ((*(p+1) & 0x3F) << 6) | (*(p+2) & 0x3F); step = 3; }
+        if (*p < 0x80) { u = *p; step = 1; } // 单字节 (ASCII)
+        else if ((*p & 0xE0) == 0xE0) { u = ((*p & 0x0F) << 12) | ((*(p+1) & 0x3F) << 6) | (*(p+2) & 0x3F); step = 3; } // 三字节 (常用中文)
         else { step = 1; u = *p; }
+        
         auto it = glyphCache.find(u);
         float adv = (it != glyphCache.end()) ? it->second.xadvance * px : (u > 128 ? px * 24.0f : px * 12.0f);
         cached.push_back({u, adv});
         total_w += adv;
         p += step;
     }
+    
+    // 2. 处理文字对齐 (左对齐、居中、右对齐)
     float ox = x;
     if (align == CENTER) ox -= total_w * 0.5f;
     else if (align == RIGHT) ox -= total_w;
+    
     auto renderString = [&](float startX, float startY, float cr, float cg, float cb, float ca) {
         float curX = startX;
         for (const auto& cc : cached) {
             auto it = glyphCache.find(cc.unicode);
             if (it != glyphCache.end()) {
                 const GlyphInfo& gi = it->second;
+                // 计算字符在屏幕上的矩形位置
                 float x1 = curX + gi.xoff * px;
                 float x2 = x1 + gi.w * px;
-                float y2 = startY - gi.yoff * px; // Top of glyph
-                float y1 = y2 - gi.h * px;         // Bottom of glyph
+                float y2 = startY - gi.yoff * px;
+                float y1 = y2 - gi.h * px;
                 
+                // 添加两个三角形（6个顶点）组成一个字符矩形
                 addVertex(x1, y1, cr, cg, cb, ca, gi.u1, gi.v2);
                 addVertex(x2, y1, cr, cg, cb, ca, gi.u2, gi.v2);
                 addVertex(x2, y2, cr, cg, cb, ca, gi.u2, gi.v1);
@@ -616,7 +654,10 @@ public:
             curX += cc.xadvance;
         }
     };
+    
+    // 绘制阴影（偏移一点坐标并使用半透明黑色）
     if (shadow) renderString(ox + size * 0.01f, y + size * 0.01f, 0, 0, 0, a * 0.5f);
+    // 绘制主体文字
     renderString(ox, y, r, g, b, a);
   }
 

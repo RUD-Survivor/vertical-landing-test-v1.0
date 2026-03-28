@@ -19,14 +19,15 @@ struct RocketAssembly;
 struct RocketConfig;
 namespace StageManager { void BuildStages(const RocketAssembly& assembly, RocketConfig& config); }
 
-// 2. Core Part Enums
+// 2. 核心零件分类 (Core Part Categories)
+// 定义了在编辑器中可以使用的零件类型。
 enum PartCategory {
-    CAT_NOSE_CONE,
-    CAT_COMMAND_POD,
-    CAT_FUEL_TANK,
-    CAT_ENGINE,
-    CAT_BOOSTER,
-    CAT_STRUCTURAL,
+    CAT_NOSE_CONE,    // 整流罩/鼻锥：用于减少空气阻力。
+    CAT_COMMAND_POD,   // 控制舱/探测器：火箭的大脑，提供控制能力。
+    CAT_FUEL_TANK,     // 燃料箱：储存推进剂（燃料）。
+    CAT_ENGINE,        // 发动机：将燃料转化为推力。
+    CAT_BOOSTER,       // 助推器：通常是固体火箭，提供巨大的起飞推力。
+    CAT_STRUCTURAL,    // 结构件：分离器、支架、起落架等。
     CAT_COUNT
 };
 
@@ -42,34 +43,38 @@ struct SnapNode {
     int type;       
 };
 
+// 零件定义 (Part Definition)
+// 这是一个模板，定义了某种零件的所有物理和视觉属性。
 struct PartDef {
-    int id;
-    const char* name;
-    PartCategory category;
-    float dry_mass;
-    float fuel_capacity;
-    float isp;
-    float thrust;
-    float consumption;
-    float height;
-    float diameter;
-    float drag_coeff;
-    float r, g, b;
-    const char* description;
-    std::vector<SnapNode> snap_nodes;
-    bool surf_attach;
-    const char* model_path;   // Path to .obj file
-    const char* texture_path; // Path to texture file
+    int id;                   // 唯一标识符
+    const char* name;         // 零件名称
+    PartCategory category;    // 所属分类
+    float dry_mass;           // 空重 (不含燃料的重量, kg)
+    float fuel_capacity;      // 燃料容量 (kg)
+    float isp;                // 比冲 (Specific Impulse, s)：衡量发动机效率的关键指标。
+    float thrust;             // 最大推力 (Newtons)
+    float consumption;        // 燃料消耗率 (kg/s)
+    float height;             // 零件高度 (meters)
+    float diameter;           // 零件直径 (meters)
+    float drag_coeff;         // 阻力系数：越小越符合流体力学。
+    float r, g, b;            // 颜色 (Red, Green, Blue)
+    const char* description;  // 零件介绍
+    std::vector<SnapNode> snap_nodes; // 对齐点：零件相互连接的位置。
+    bool surf_attach;         // 是否允许表面贴装（例如侧推器或控制翼面）。
+    const char* model_path;   // .obj 模型文件路径
+    const char* texture_path; // 贴图文件路径
 };
 
+// 已放置的零件 (Placed Part)
+// 代表了在火箭组装体中实际存在的一个零件实例。
 struct PlacedPart {
-    int def_id;          
-    int stage;
-    Vec3 pos;            
-    Quat rot;            
-    int parent_idx;      
-    int symmetry;        
-    float stack_y;       
+    int def_id;          // 指向 PART_CATALOG 中的零件定义 ID
+    int stage;           // 所属分级（0 代表最先分离的级）
+    Vec3 pos;            // 在火箭局部坐标系下的位置
+    Quat rot;            // 旋转姿态 (四元数)
+    int parent_idx;      // 父零件索引（用于构建树状结构，实现整体移动）
+    int symmetry;        // 对称倍数（例如 4 代表四个对称的零件）
+    float stack_y;       // 堆叠高度辅助计算
 
     PlacedPart() : def_id(0), stage(0), pos(Vec3(0,0,0)), rot(Quat()), parent_idx(-1), symmetry(1), stack_y(0) {}
 };
@@ -114,12 +119,18 @@ static const int PART_CATALOG_SIZE = sizeof(PART_CATALOG) / sizeof(PART_CATALOG[
 #include "render/renderer_2d.h"
 
 // 6. Assembly & State Logic
+// 火箭组装体 (Rocket Assembly)
+// 这是编辑器的核心数据结构，存储了所有零件并计算整体物理属性。
 struct RocketAssembly {
-    std::vector<PlacedPart> parts;
+    std::vector<PlacedPart> parts; // 当前火箭包含的所有零件
+    // 基础物理属性
     float total_dry_mass = 0, total_fuel = 0, total_height = 0, max_diameter = 0;
+    // 性能指标
     float total_thrust = 0, avg_isp = 0, total_consumption = 0, total_delta_v = 0, twr = 0, total_drag = 0;
-    Vec3 com = Vec3(0, 0, 0); // Center of Mass (local space)
+    Vec3 com = Vec3(0, 0, 0); // 质心 (Center of Mass)
 
+    // 重新计算火箭的整体属性
+    // 每当添加或删除零件时都会调用此方法。
     void recalculate() {
         total_dry_mass = 0; total_fuel = 0; total_height = 0; max_diameter = 0;
         total_thrust = 0; total_consumption = 0; total_drag = 0;
@@ -129,20 +140,25 @@ struct RocketAssembly {
             int did = parts[i].def_id;
             if (did < 0 || did >= PART_CATALOG_SIZE) continue; 
             const PartDef& def = PART_CATALOG[did];
-            float sym = (float)parts[i].symmetry;
+            float sym = (float)parts[i].symmetry; // 考虑对称放置的零件数量
             total_dry_mass += def.dry_mass * sym;
             total_fuel += def.fuel_capacity * sym;
             total_thrust += def.thrust * sym;
             total_consumption += def.consumption * sym;
             total_drag += def.drag_coeff * sym;
+            // 计算加权平均比冲 (Effective ISP)
             if (def.thrust > 0) thrust_isp_sum += (def.thrust * sym) * def.isp;
+            // 更新火箭外廓尺寸
             total_height = std::max(total_height, (float)parts[i].pos.y + def.height);
             max_diameter = std::max(max_diameter, def.diameter + (float)sqrt(parts[i].pos.x*parts[i].pos.x + parts[i].pos.z*parts[i].pos.z)*2.0f);
         }
         avg_isp = (total_thrust > 0) ? (thrust_isp_sum / total_thrust) : 0;
         float tm = total_dry_mass + total_fuel;
+        // 计算 Delta-V：火箭科学中最著名的齐奥尔科夫斯基公式 (Tsiolkovsky rocket equation)
+        // dV = Ve * ln(m0 / m1)，其中 Ve = Isp * g
         if (total_dry_mass > 0 && avg_isp > 0) total_delta_v = (float)(avg_isp * 9.80665 * log((double)tm / (double)total_dry_mass));
         else total_delta_v = 0;
+        // 推重比 (TWR)：推力除以起飞重力。必须 > 1 才能起飞。
         twr = (tm > 0) ? total_thrust / (tm * 9.80665f) : 0;
     }
 
@@ -165,6 +181,8 @@ struct RocketAssembly {
         recalculate();
     }
 
+    // 寻找最佳对齐点 (Snap Node)
+    // 当鼠标移动到已放置零件的连接点附近时，新零件会自动“吸附”过去。
     struct SnapResult { int parent_idx = -1; int p_node = -1; int c_node = -1; Vec3 pos = Vec3(0,0,0); float score = 1e10f; };
     SnapResult findBestSnapNode(int d_id, Vec3 rayPos, Vec3 rayDir) const {
         SnapResult best; const PartDef& dDef = PART_CATALOG[d_id];
@@ -172,15 +190,18 @@ struct RocketAssembly {
             const auto& pPart = parts[i];
             const PartDef& pDef = PART_CATALOG[pPart.def_id];
             for (int pn = 0; pn < (int)pDef.snap_nodes.size(); pn++) {
-                // Account for parent rotation
+                // 将零件的本地对齐点坐标转换到世界空间
                 Vec3 nodeLocal = pDef.snap_nodes[pn].pos;
                 Vec3 nodeWorld = pPart.rot.rotate(nodeLocal);
                 Vec3 wPos = pPart.pos + nodeWorld;
                 
+                // 计算鼠标射线（或拾取点）到该对齐点的距离
                 float d = (wPos - rayPos).length();
                 for (int cn = 0; cn < (int)dDef.snap_nodes.size(); cn++) {
+                    // 如果距离足够近 ( < 5.0m)，则认为是有效的吸附
                     if (d < 5.0f && d < best.score) {
                         best.score = d; best.parent_idx = i; best.p_node = pn; best.c_node = cn;
+                        // 计算新零件应该处于的坐标，使得它的 cn 号节点刚好对齐到父零件的 pn 号节点
                         best.pos = wPos - dDef.snap_nodes[cn].pos; 
                     }
                 }
@@ -188,13 +209,15 @@ struct RocketAssembly {
         }
         return best;
     }
+    // 寻找表面贴装位置 (Surface Snap)
+    // 用于将小零件（如控制舵、侧挂燃料箱）贴在圆柱体零件的侧面。
     SnapResult findSurfaceSnap(int d_id, Vec3 rayPos, Vec3 rayDir) const {
         SnapResult best; const PartDef& dDef = PART_CATALOG[d_id];
-        if (!dDef.surf_attach) return best;
+        if (!dDef.surf_attach) return best; // 检查零件是否支持表面贴装
 
         for (int i = 0; i < (int)parts.size(); i++) {
             const PartDef& pDef = PART_CATALOG[parts[i].def_id];
-            // Broaden snapping: allow attachment to tanks, structural, engines, and commands
+            // 只允许贴在燃料箱、结构件等具有圆柱形外观的零件上
             bool valid_parent = (pDef.category == CAT_FUEL_TANK || 
                                  pDef.category == CAT_STRUCTURAL || 
                                  pDef.category == CAT_ENGINE || 
@@ -202,26 +225,27 @@ struct RocketAssembly {
                                  pDef.category == CAT_NOSE_CONE);
             if (!valid_parent) continue;
             
-            float r = pDef.diameter * 0.5f;
-            // Central axis of parent cylinder
+            float r = pDef.diameter * 0.5f; // 父零件半径
+            // 父零件的中央轴线
             Vec3 p0 = parts[i].pos;
             Vec3 p1 = parts[i].pos + Vec3(0, pDef.height, 0);
 
-            // Find point on central axis closest to the ray/mouse point
+            // 寻找轴线上最接近鼠标射线 Y 轴高度的点
             float t = (rayPos.y - p0.y) / fmaxf(0.001f, pDef.height);
             if (t >= -0.1f && t <= 1.1f) {
                 t = std::max(0.0f, std::min(1.0f, t));
                 Vec3 axisPt = p0 + Vec3(0, t * pDef.height, 0);
-                // Vector from axis to cursor
-                Vec3 diff = rayPos - axisPt; diff.y = 0; // Stick to 2D radial offset
+                // 计算从轴心指向鼠标位置的径向向量
+                Vec3 diff = rayPos - axisPt; diff.y = 0; 
                 float dist = diff.length();
+                // 如果鼠标在零件半径附近，则吸附到圆柱表面
                 if (dist < r * 3.5f && dist > 0.01f) {
                     float score = std::abs(dist - r);
                     if (score < best.score || best.score > 2.0f) {
                         best.score = score; best.parent_idx = i;
+                        // 计算表面上的吸附坐标
                         best.pos = axisPt + diff.normalized() * r;
-                        // Surface snap uses a specific node index to signify surface
-                        best.p_node = -2; 
+                        best.p_node = -2; // 使用 -2 标记这是一个特殊的表面贴装（而非节点吸附）
                     }
                 }
             }
@@ -257,25 +281,35 @@ struct CenterVisualizationState {
     size_t lastAssemblyHash = 0;
 };
 
+// 编辑器状态 (Builder State)
+// 记录了当前用户在编辑器中的实时操作，如相机角度、正在拖动的零件等。
 struct BuilderState {
-    bool is_placement_valid = true;
-    RocketAssembly assembly;
-    CenterVisualizationState centerViz;
+    bool is_placement_valid = true;    // 当前位置是否允许放置
+    RocketAssembly assembly;          // 正在组装的火箭
+    CenterVisualizationState centerViz; // 质心/推力中心/阻力中心的显示状态
     int selected_category = 0, catalog_cursor = 0, assembly_cursor = -1;
     bool in_assembly_mode = false;
-    int dragging_def_id = -1, dragging_parent_idx = -1, moving_part_idx = -1;
-    Vec3 dragging_pos = Vec3(0,0,0); Quat dragging_rot = Quat();
-    int current_symmetry = 1, hovered_part_def_id = -1;
+    // 拖动参数
+    int dragging_def_id = -1;       // 正在从目录拖出的零件 ID
+    int dragging_parent_idx = -1;   // 正在吸附到的父零件索引
+    int moving_part_idx = -1;       // 正在从火箭上拆解并移动的零件索引
+    Vec3 dragging_pos = Vec3(0,0,0);
+    Quat dragging_rot = Quat();
+    int current_symmetry = 1;       // 当前对称级别 (1x, 2x, 4x 等)
+    int hovered_part_def_id = -1;   // 鼠标悬停的零件定义 ID（用于显示详细说明）
+    
+    // 相机参数
     float hover_timer = 0, orbit_angle = 0.0f, orbit_pitch = 0.2f, cam_dist = 15.0f, orbit_speed = 0.0f, launch_blink = 0.0f;
     float cam_y_offset = 0.0f;
-    Quat placement_manual_rot = Quat(); // Manual rotation adjustment during placement
+    Quat placement_manual_rot = Quat(); // 放置时的手动旋转调整 (Q/E/W/S/A/D)
 
-    // Context Menu State
+    // 右键上下文菜单状态
     bool show_part_menu = false;
     int r_clicked_part_idx = -1;
     Vec2 menu_pos = Vec2(0,0);
     float last_mx = 0, last_my = 0;
 
+    // 获取特定分类下的所有零件列表
     void getPartsInCategory(std::vector<int>& out) const {
         out.clear();
         for (int i = 0; i < PART_CATALOG_SIZE; i++) {
@@ -398,32 +432,35 @@ inline void drawBuilderUI_KSP(Renderer* r, BuilderState& bs, const AgencyState& 
     }
 }
 
+// 编辑器输入处理函数 (builderHandleInput)
+// 处理鼠标点击、零件拖拽、菜单操作等所有交互逻辑。
 inline bool builderHandleInput(BuilderState& bs, const BuilderKeyState& k, const BuilderKeyState& pk) {
     bs.last_mx = k.mx; bs.last_my = k.my;
-    // Context Menu Interactivity (Highest Priority)
+    
+    // 1. 上下文菜单交互 (最高优先级)
     if (bs.show_part_menu && k.lmb && !pk.lmb) {
         float mx = bs.menu_pos.x, my = bs.menu_pos.y, mw = 0.32f, mh = 0.68f;
         auto& p = bs.assembly.parts[bs.r_clicked_part_idx];
         
-        // Button 1: DUPLICATE
+        // (1) 复制零件
         if (builderCheckHit(k.mx, k.my, mx + mw/2.0f, my - 0.17f, mw, 0.045f)) {
             bs.dragging_def_id = p.def_id;
             bs.moving_part_idx = -1;
             bs.show_part_menu = false; return false; 
         }
-        // Button 2: CYCLE STAGE
+        // (2) 循环设置分级 (Stage)
         if (builderCheckHit(k.mx, k.my, mx + mw/2.0f, my - 0.23f, mw, 0.045f)) {
             p.stage = (p.stage + 1) % 5;
             bs.assembly.recalculate();
             return false;
         }
-        // Button 3: DELETE
+        // (3) 删除零件
         if (builderCheckHit(k.mx, k.my, mx + mw/2.0f, my - 0.29f, mw, 0.045f)) {
             bs.assembly.removePart(bs.r_clicked_part_idx);
             bs.show_part_menu = false; return false;
         }
 
-        // Advanced controls (Translation & Rotation)
+        // (4) 精细调整：位置与旋转
         float row_y = my - 0.35f;
         float btn_w = mw / 3.2f;
         auto checkAxisBtn = [&](float x_off, float y_off, double& val, float step) {
@@ -453,59 +490,55 @@ inline bool builderHandleInput(BuilderState& bs, const BuilderKeyState& k, const
         if (checkRotBtn(btn_w*0.6f, -0.22f, Vec3(0,0,1), 5.0f)) return false;
         if (checkRotBtn(btn_w*1.6f, -0.22f, Vec3(0,0,1), -5.0f)) return false;
 
-        // Project a click outside menu or specialized "Close" area
+        // 点击菜单外部则关闭菜单
         if (!builderCheckHit(k.mx, k.my, mx + mw/2.0f, my - mh/2.0f, mw, mh)) {
             bs.show_part_menu = false; 
         }
     }
     
+    // 2. 零件拾取与拖拽初始化
+    // 如果没有正在拖动的零件，检查鼠标是否点击了零件目录或已组装的零件。
     int dragging_id_at_start = bs.dragging_def_id;
     bs.hovered_part_def_id = -1;
     float pl=-0.98f,pw=0.65f,gx=pl+0.08f,gy=0.70f,cw=0.16f,ch=0.16f;
     std::vector<int> cat_p; bs.getPartsInCategory(cat_p);
     
-    // Check catalog hits
+    // (1) 检查目录点击
     bool over_catalog = (k.mx < pl + pw);
-    bool over_icon = false;
     for (int i=0;i<(int)cat_p.size();i++) {
         float cx=gx+(i%3)*(cw+0.02f), cy=gy-(i/3)*(ch+0.02f);
         if (builderCheckHit(k.mx,k.my,cx,cy,cw,ch)) {
             bs.hovered_part_def_id=cat_p[i];
-            over_icon = true;
             if(k.lmb && !pk.lmb) { 
-                // Pick from catalog
                 bs.dragging_def_id=cat_p[i]; 
                 bs.moving_part_idx = -1;
                 bs.in_assembly_mode = false; 
-                bs.placement_manual_rot = Quat(); // Reset manual rotation
+                bs.placement_manual_rot = Quat(); 
             }
         }
     }
-
-    // Tabs
-    float tab_y=0.82f, tab_w=pw/CAT_COUNT;
-    for(int c=0;c<CAT_COUNT;c++) {
-        float tx=pl+tab_w*c+tab_w/2.0f;
-        if(builderCheckHit(k.mx,k.my,tx,tab_y,tab_w,0.06f)&&k.lmb&&!pk.lmb) bs.selected_category=c;
-    }
-
-    // Camera Sync with main.cpp: Dynamic target and distance
+    
+    // (2) 相机同步与射线投射设置
+    // 计算当前火箭的高度，以便动态调整相机焦点和观察距离。
     float current_height = std::max(5.0f, bs.assembly.total_height);
     float look_y = current_height * 0.4f + bs.cam_y_offset;
     float view_dist = bs.cam_dist + current_height * 0.5f;
     Vec3 camTarget(0, look_y, 0);
 
-    // Pick/Right-click from assembly (Improved Proximity/Picking Logic)
+    // 3. 从组装体中拾取零件
+    // 如果没有正在拖动零件且点击了空白区域，尝试选中火箭上的某个零件。
     if (bs.dragging_def_id == -1 && !over_catalog && ((k.lmb && !pk.lmb) || (k.rmb && !pk.rmb))) {
         float best_d = 0.15f; int best_idx = -1;
         float cosA = cosf(bs.orbit_angle), sinA = sinf(bs.orbit_angle);
         float cosP = cosf(bs.orbit_pitch), sinP = sinf(bs.orbit_pitch);
+        // 计算相机的右向量和上向量，用于在屏幕空间进行碰撞检测
         Vec3 camRight(sinA, 0, -cosA);
         Vec3 camUp(-cosA * sinP, cosP, -sinA * sinP);
 
         for(int i=0; i<(int)bs.assembly.parts.size(); i++) {
             const auto& p = bs.assembly.parts[i];
             const auto& def = PART_CATALOG[p.def_id];
+            // 简单的点测试：检查鼠标是否接近零件中心或顶部
             Vec3 testPoints[] = { p.pos, p.pos + Vec3(0, def.height * 0.5f, 0) };
             for (const auto& pt : testPoints) {
                 Vec3 relPos = pt - camTarget;
@@ -517,6 +550,7 @@ inline bool builderHandleInput(BuilderState& bs, const BuilderKeyState& k, const
             }
         }
         
+        // 左键点击：拆解零件并开始拖拽
         if (k.lmb && !pk.lmb && best_idx != -1) {
             bs.dragging_def_id = bs.assembly.parts[best_idx].def_id;
             bs.moving_part_idx = best_idx;
@@ -524,7 +558,9 @@ inline bool builderHandleInput(BuilderState& bs, const BuilderKeyState& k, const
             bs.assembly.removePart(best_idx);
             dragging_id_at_start = bs.dragging_def_id; 
             bs.show_part_menu = false;
-        } else if (k.rmb && !pk.rmb) {
+        } 
+        // 右键点击：打开零件上下文菜单
+        else if (k.rmb && !pk.rmb) {
             if (best_idx != -1) {
                 bs.show_part_menu = true;
                 bs.r_clicked_part_idx = best_idx;
@@ -535,7 +571,7 @@ inline bool builderHandleInput(BuilderState& bs, const BuilderKeyState& k, const
         }
     }
 
-    // Dragging Logic (Sticky)
+    // 4. 拖拽逻辑 (Dragging Logic)
     if (bs.dragging_def_id != -1) {
         float cosA = cosf(bs.orbit_angle), sinA = sinf(bs.orbit_angle);
         float cosP = cosf(bs.orbit_pitch), sinP = sinf(bs.orbit_pitch);
@@ -543,27 +579,30 @@ inline bool builderHandleInput(BuilderState& bs, const BuilderKeyState& k, const
         Vec3 camUp(-cosA * sinP, cosP, -sinA * sinP);
         Vec3 camFwd(-cosA * cosP, -sinP, -sinA * cosP);
 
+        // 将屏幕坐标映射到 3D 空间中的拾取位置
         float aspect = 1.6f; 
         float scale = view_dist * 0.5f;
-        // Project relative to camTarget
         Vec3 mouseWorldPosRelative = camRight * (k.mx * scale * aspect) + camUp * (k.my * scale);
         Vec3 mouseWorldPos = camTarget + mouseWorldPosRelative;
         
+        // 尝试寻找吸附点和表面贴装位置
         auto snap = bs.assembly.findBestSnapNode(bs.dragging_def_id, mouseWorldPos, camFwd);
         auto surf = bs.assembly.findSurfaceSnap(bs.dragging_def_id, mouseWorldPos, camFwd);
         
         if (snap.parent_idx != -1 && snap.score < 5.0f) { 
+            // 如果找到吸附点，零件会自动“对齐”到该位置
             bs.dragging_pos = snap.pos; 
             bs.dragging_parent_idx = snap.parent_idx; 
             bs.is_placement_valid = true;
-            // Snapped parts inherit parent rotation + manual shift
+            // 继承父零件的旋转并叠加手动旋转
             bs.dragging_rot = bs.assembly.parts[snap.parent_idx].rot * bs.placement_manual_rot;
         } else if (surf.parent_idx != -1 && surf.score < 2.0f) {
+            // 如果找到表面贴装，零件会“贴”在圆柱侧面
             bs.dragging_pos = surf.pos;
             bs.dragging_parent_idx = surf.parent_idx;
             bs.is_placement_valid = true;
             
-            // Outward rotation for surface attachment
+            // 计算朝向外侧的法线旋转
             Vec3 normal = (surf.pos - bs.assembly.parts[surf.parent_idx].pos); normal.y = 0;
             Quat surf_rot = Quat();
             if (normal.length() > 0.01f) {
@@ -572,8 +611,9 @@ inline bool builderHandleInput(BuilderState& bs, const BuilderKeyState& k, const
             }
             bs.dragging_rot = surf_rot * bs.placement_manual_rot;
         } else { 
+            // 自由拖拽
             if (bs.assembly.parts.empty()) {
-                bs.dragging_pos = Vec3(0, 0, 0); // Snap first part to origin
+                bs.dragging_pos = Vec3(0, 0, 0); // 首个零件固定在原点
                 bs.is_placement_valid = true;
             } else {
                 bs.dragging_pos = mouseWorldPos; 
@@ -583,7 +623,7 @@ inline bool builderHandleInput(BuilderState& bs, const BuilderKeyState& k, const
             bs.dragging_rot = bs.placement_manual_rot;
         }
 
-        // --- Keyboard Rotation Controls ---
+        // --- 键盘旋转控制 (Q/E/W/S/A/D) ---
         float rot_step = 90.0f * (float)PI / 180.0f;
         if (k.q && !pk.q) bs.placement_manual_rot = bs.placement_manual_rot * Quat::fromAxisAngle(Vec3(0, 1, 0), rot_step);
         if (k.e && !pk.e) bs.placement_manual_rot = bs.placement_manual_rot * Quat::fromAxisAngle(Vec3(0, 1, 0), -rot_step);
@@ -593,39 +633,39 @@ inline bool builderHandleInput(BuilderState& bs, const BuilderKeyState& k, const
         if (k.d && !pk.d) bs.placement_manual_rot = bs.placement_manual_rot * Quat::fromAxisAngle(Vec3(0, 0, 1), -rot_step);
         bs.placement_manual_rot = bs.placement_manual_rot.normalized();
 
-        // Place or Delete
+        // 5. 放置零件 (Place)
         if (k.lmb && !pk.lmb && dragging_id_at_start != -1) {
-            bool picked_this_frame = (bs.moving_part_idx != -1 && !pk.lmb); // Simple heuristic: if we were moving and just pressed LMB, it might be the same click
-            // Actually, a better check: did dragging_id_at_start just become valid?
-            // Since we set bs.dragging_def_id = -1 at the end of placement, we can check if it was -1 in the previous state's handle input call.
-            // But we don't have pk's BuilderState here. Let's use a more direct check.
-            
             if (over_catalog) {
+                // 如果把零件拖回目录，相当于取消操作
                 bs.dragging_def_id = -1;
                 bs.moving_part_idx = -1;
-            } else if (bs.is_placement_valid && bs.hover_timer > 0.05f) { // Add a tiny delay (1-2 frames) before allowing placement
+            } else if (bs.is_placement_valid && bs.hover_timer > 0.05f) { 
+                // 添加零件到火箭组装体
                 bs.assembly.addPart(bs.dragging_def_id, bs.dragging_parent_idx, bs.current_symmetry);
                 auto& newP = bs.assembly.parts.back();
                 newP.pos = bs.dragging_pos;
-                newP.rot = bs.dragging_rot; // Apply the rotated orientation
+                newP.rot = bs.dragging_rot; 
                 bs.dragging_def_id = -1; 
                 bs.moving_part_idx = -1;
-                bs.show_part_menu = false; // Cancel selection/menu after placement
+                bs.show_part_menu = false; 
             }
         }
-        bs.hover_timer += 0.016f; // Update timer while dragging
+        bs.hover_timer += 0.016f; 
     } else {
-        bs.hover_timer = 0; // Reset timer when not dragging
+        bs.hover_timer = 0; 
     }
 
-    // Symmetry & UI Buttons
+    // 对称设置与功能按钮
     if (k.mx < -0.7f && k.my < -0.5f && k.lmb && !pk.lmb) {
         int syms[] = {1,2,4,6,8}; static int s_idx=0; s_idx=(s_idx+1)%5; bs.current_symmetry=syms[s_idx];
     }
+    // 质心、推力中心显隐切换
     float ax=0.62f;
     if (builderCheckHit(k.mx,k.my, ax, 0.05f, 0.3f, 0.05f)&&k.lmb&&!pk.lmb) bs.centerViz.showCoM=!bs.centerViz.showCoM;
     if (builderCheckHit(k.mx,k.my, ax, -0.01f, 0.3f, 0.05f)&&k.lmb&&!pk.lmb) bs.centerViz.showCoL=!bs.centerViz.showCoL;
     if (builderCheckHit(k.mx,k.my, ax, -0.07f, 0.3f, 0.05f)&&k.lmb&&!pk.lmb) bs.centerViz.showCoT=!bs.centerViz.showCoT;
+    
+    // 空格键：发射火箭 (如果组装完成)
     if (k.space && !pk.space && !bs.assembly.parts.empty() && bs.assembly.hasEngine()) return true;
     return false;
 }
