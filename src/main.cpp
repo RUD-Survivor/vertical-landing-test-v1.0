@@ -54,6 +54,7 @@ void framebuffer_size_callback(GLFWwindow *window, int width, int height) {
 }
 
 #include "render/HUD_system.h"
+#include "simulation/simulation_controller.h"
 FlightHUD hud;
 Renderer *renderer;
 
@@ -150,7 +151,15 @@ int main() {
   // 萌新必看：这是程序的心脏。每一个 while 循环代表了一个不同的游戏模式。
   // =========================================================
   MenuSystem::MenuState menu_state;
-  while (!glfwWindowShouldClose(window)) {
+  SimulationController sim_ctrl;
+    double last_time = glfwGetTime();
+
+    while (!glfwWindowShouldClose(window)) {
+        double current_time = glfwGetTime();
+        double real_dt = current_time - last_time;
+        last_time = current_time;
+        if (real_dt > 0.1) real_dt = 0.02; // Limit spikes
+
       bool return_to_menu = false;
   // Check Save File
       menu_state.has_save = SaveSystem::HasSaveFile() || SaveSystem::HasAgencySave();
@@ -802,7 +811,15 @@ int main() {
   int frame = 0;
   // --- 5. 核心飞行模拟循环 (The Main Flight Loop) ---
   // 这里是游戏最核心的部分：物理计算、姿态控制、轨道绘图都在这里执行。
-  while (!glfwWindowShouldClose(window)) {
+  SimulationController sim_ctrl;
+    double last_time = glfwGetTime();
+
+    while (!glfwWindowShouldClose(window)) {
+        double current_time = glfwGetTime();
+        double real_dt = current_time - last_time;
+        last_time = current_time;
+        if (real_dt > 0.1) real_dt = 0.02; // Limit spikes
+
     frame++;
     glfwPollEvents();
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
@@ -1116,297 +1133,15 @@ int main() {
     static int frame = 0;
     frame++;
 
-    // --- 时间加速逻辑 ---
-    static int time_warp = 1;
-    // 条件：手动模式、没开推力(或者没燃料了)、处于真空(真空设为>100000m) 或者是 在地面且速度极低 才可以开启极速加速 (5,6,7,8)
-    double surface_speed = std::sqrt(rocket_state.velocity * rocket_state.velocity + rocket_state.local_vx * rocket_state.local_vx);
-    bool is_parked = (rocket_state.status == PRE_LAUNCH || rocket_state.status == LANDED) && surface_speed < 0.1;
-    bool can_super_warp = (!rocket_state.auto_mode && (rocket_state.thrust_power <= 0.01 || rocket_state.fuel <= 0) && (rocket_state.altitude > 100000.0 || is_parked));
+    // --- Simulation & Physics Update ---
+        sim_ctrl.handleInput(window, rocket_state);
+        sim_ctrl.update(real_dt, rocket_state, rocket_config, control_input, hud, window, cam.mode);
 
-    if (rocket_state.auto_mode) {
-      if (glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_KP_1) == GLFW_PRESS) time_warp = 1;
-      if (glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_KP_2) == GLFW_PRESS) time_warp = 10;
-      if (glfwGetKey(window, GLFW_KEY_3) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_KP_3) == GLFW_PRESS) time_warp = 100;
-      if (glfwGetKey(window, GLFW_KEY_4) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_KP_4) == GLFW_PRESS) time_warp = 1000;
-      // 在自动模式中降级时间加速
-      if (time_warp > 1000) time_warp = 1; 
-    } else {
-      if (glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_KP_1) == GLFW_PRESS) time_warp = 1;
-      if (glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_KP_2) == GLFW_PRESS) time_warp = 10;
-      if (glfwGetKey(window, GLFW_KEY_3) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_KP_3) == GLFW_PRESS) time_warp = 100;
-      if (glfwGetKey(window, GLFW_KEY_4) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_KP_4) == GLFW_PRESS) time_warp = 1000;
-
-      if (can_super_warp) {
-          if (glfwGetKey(window, GLFW_KEY_5) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_KP_5) == GLFW_PRESS) { time_warp = 10000; cout << "WARP: 10K SPEED ENGAGED!" << endl; }
-          if (glfwGetKey(window, GLFW_KEY_6) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_KP_6) == GLFW_PRESS) { time_warp = 100000; cout << "WARP: 100K SPEED ENGAGED!" << endl; }
-          if (glfwGetKey(window, GLFW_KEY_7) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_KP_7) == GLFW_PRESS) { time_warp = 1000000; cout << "WARP: 1M SPEED ENGAGED!" << endl; }
-          if (glfwGetKey(window, GLFW_KEY_8) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_KP_8) == GLFW_PRESS) { time_warp = 10000000; cout << "WARP: 10M SPEED ENGAGED!" << endl; }
-      } else {
-          // 如果条件不满足，强制降级到最高 1000倍
-          if (time_warp > 1000) {
-              time_warp = 1; 
-              static int last_warn = 0;
-              if (frame - last_warn > 60) {
-                 cout << ">> WARP DISENGAGED: Unsafe conditions (Alt < 100km or Engine Active)" << endl;
-                 last_warn = frame;
-              }
-          }
-      }
-    }
-
-    ControlSystem::ManualInputs manual;
-    manual.throttle_up = glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS || 
-                         glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS ||
-                         glfwGetKey(window, GLFW_KEY_KP_ADD) == GLFW_PRESS || 
-                         glfwGetKey(window, GLFW_KEY_RIGHT_BRACKET) == GLFW_PRESS;
-    manual.throttle_down = glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS || 
-                           glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS ||
-                           glfwGetKey(window, GLFW_KEY_KP_SUBTRACT) == GLFW_PRESS || 
-                           glfwGetKey(window, GLFW_KEY_LEFT_BRACKET) == GLFW_PRESS;
-    manual.throttle_max = glfwGetKey(window, GLFW_KEY_Z) == GLFW_PRESS;
-    manual.throttle_min = glfwGetKey(window, GLFW_KEY_X) == GLFW_PRESS;
-    // 在自由视角模式下，WASD 键被用于相机移动，仅保留方向键给火箭姿态。
-    manual.yaw_left   = (cam.mode == 3) ? (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS) : (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS);
-    manual.yaw_right  = (cam.mode == 3) ? (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) : (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS);
-    manual.pitch_up   = (cam.mode == 3) ? (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS) : (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS);
-    manual.pitch_down = (cam.mode == 3) ? (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS) : (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS);
-    manual.roll_left  = (cam.mode == 3) ? false : glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS;
-    manual.roll_right = (cam.mode == 3) ? false : glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS;
-
-    // --- 物理更新 ---
-    if (time_warp > 1000) {
-        // 超级时间加速！
-        if (is_parked) {
-            // 确保状态正确并强制静止，不再重新计算 surf_px/py/pz 以免误差累加
-            if (rocket_state.status != PRE_LAUNCH && rocket_state.status != LANDED) {
-                rocket_state.status = LANDED;
-                // 仅在首次切换到 LANDED 时捕捉地面坐标
-                CelestialBody& cur_b = SOLAR_SYSTEM[current_soi_index];
-                double theta = cur_b.prime_meridian_epoch + (rocket_state.sim_time * 2.0 * PI / cur_b.rotation_period);
-                rocket_state.surf_px = rocket_state.px * std::cos(-theta) - rocket_state.py * std::sin(-theta);
-                rocket_state.surf_py = rocket_state.px * std::sin(-theta) + rocket_state.py * std::cos(-theta);
-                rocket_state.surf_pz = rocket_state.pz;
-            }
-            
-            rocket_state.vx = 0; rocket_state.vy = 0; rocket_state.vz = 0;
-            rocket_state.velocity = 0; rocket_state.local_vx = 0;
-            rocket_state.ang_vel = 0; rocket_state.ang_vel_z = 0;
-        }
-        PhysicsSystem::FastGravityUpdate(rocket_state, rocket_config, dt * time_warp);
-    } else {
-        // === Auto-Execute Maneuver Node ===
-        bool mnv_autopilot_active = false;
-        if (!rocket_state.maneuvers.empty() && (rocket_state.status == ASCEND || rocket_state.status == DESCEND)) {
-            auto& node = rocket_state.maneuvers[0];
-            
-            // Compute burn time for this node
-            double total_dv_mag = node.delta_v.length();
-            double current_mass = rocket_state.fuel + rocket_config.dry_mass + rocket_config.upper_stages_mass;
-            double max_thrust = 0;
-            if (rocket_state.current_stage < (int)rocket_config.stage_configs.size())
-                max_thrust = rocket_config.stage_configs[rocket_state.current_stage].thrust;
-            double ve = rocket_config.specific_impulse * 9.80665;
-            double estimated_burn_time = 0;
-            if (max_thrust > 0 && ve > 0 && total_dv_mag > 0) {
-                double m_0 = current_mass;
-                double m_f = m_0 * exp(-total_dv_mag / ve);
-                double delta_m = m_0 - m_f;
-                double mdot = max_thrust / ve;
-                estimated_burn_time = delta_m / mdot;
-            }
-            node.burn_duration = estimated_burn_time;
-            
-            double time_to_node = node.sim_time - rocket_state.sim_time;
-            double burn_start_offset = 0; // Ignition precisely at node per user request
-            double time_to_burn_start = time_to_node - burn_start_offset;
-            
-            // Populate velocity snapshot when approaching burn time (first time only)
-            if (!node.snap_valid && time_to_burn_start < 5.0) {
-                // Use the node's specific reference body
-                int ref_idx = (node.ref_body >= 0) ? node.ref_body : current_soi_index;
-                CelestialBody& ref_b = SOLAR_SYSTEM[ref_idx];
-                
-                // 1. Get celestial state AT node time
-                double rbpx, rbpy, rbpz, rbvx, rbvy, rbvz;
-                PhysicsSystem::GetCelestialStateAt(ref_idx, node.sim_time, rbpx, rbpy, rbpz, rbvx, rbvy, rbvz);
-                
-                // 2. Project rocket state to node time relative to THAT body
-                double mu_ref = G_const * ref_b.mass;
-                double npx, npy, npz, nvx, nvy, nvz;
-                get3DStateAtTime(rocket_state.px, rocket_state.py, rocket_state.pz, 
-                                rocket_state.vx, rocket_state.vy, rocket_state.vz, 
-                                mu_ref, node.sim_time - rocket_state.sim_time, 
-                                npx, npy, npz, nvx, nvy, nvz);
-
-                // 3. Compute burn direction in world space at node time
-                ManeuverFrame frame = ManeuverSystem::getFrame(Vec3((float)npx, (float)npy, (float)npz), Vec3((float)nvx, (float)nvy, (float)nvz));
-                Vec3 target_dv_world = (frame.prograde * node.delta_v.x + 
-                                       frame.normal   * node.delta_v.y + 
-                                       frame.radial   * node.delta_v.z);
-                
-                node.locked_burn_dir = target_dv_world.normalized();
-                
-                // 4. Capture TARGET ABSOLUTE STATE for guidance
-                node.snap_px = rbpx + npx;
-                node.snap_py = rbpy + npy;
-                node.snap_pz = rbpz + npz;
-                node.snap_vx = rbvx + nvx + target_dv_world.x;
-                node.snap_vy = rbvy + nvy + target_dv_world.y;
-                node.snap_vz = rbvz + nvz + target_dv_world.z;
-                node.snap_time = node.sim_time; // Fallback: impulsive completion time
-                node.snap_valid = true;
-            }
-
-            if (hud.auto_exec_mnv) {
-                // Compute remaining dv
-                double remaining_dv = total_dv_mag;
-                if (node.snap_valid) {
-                    int ref_idx = (node.ref_body >= 0) ? node.ref_body : current_soi_index;
-                    CelestialBody& ref_b = SOLAR_SYSTEM[ref_idx];
-                    
-                    // 1. Current relative state
-                    double cur_rel_vx = rocket_state.vx + SOLAR_SYSTEM[current_soi_index].vx - ref_b.vx;
-                    double cur_rel_vy = rocket_state.vy + SOLAR_SYSTEM[current_soi_index].vy - ref_b.vy;
-                    double cur_rel_vz = rocket_state.vz + SOLAR_SYSTEM[current_soi_index].vz - ref_b.vz;
-                    
-                    // 2. Propagate Goal Orbit to current time
-                    double mu_ref = G_const * ref_b.mass;
-                    double snap_rel_px = node.snap_px - ref_b.px;
-                    double snap_rel_py = node.snap_py - ref_b.py;
-                    double snap_rel_pz = node.snap_pz - ref_b.pz;
-                    double snap_rel_vx = node.snap_vx - ref_b.vx;
-                    double snap_rel_vy = node.snap_vy - ref_b.vy;
-                    double snap_rel_vz = node.snap_vz - ref_b.vz;
-                    
-                    double dt_snap = rocket_state.sim_time - node.snap_time;
-                    double tpx, tpy, tpz, tvx, tvy, tvz;
-                    get3DStateAtTime(snap_rel_px, snap_rel_py, snap_rel_pz, snap_rel_vx, snap_rel_vy, snap_rel_vz, 
-                                     mu_ref, dt_snap, tpx, tpy, tpz, tvx, tvy, tvz);
-                    
-                    Vec3 rem_v((float)(tvx - cur_rel_vx), (float)(tvy - cur_rel_vy), (float)(tvz - cur_rel_vz));
-                    
-                    // PROJECTION-BASED Delta-V for shutdown precision
-                    remaining_dv = (double)rem_v.dot(node.locked_burn_dir);
-                    
-                    double total_error_mag = (double)rem_v.length();
-                    if (total_error_mag < 0.05) remaining_dv = 0; 
-                }
-            
-            // Phase 1: Point toward burn direction (60s before burn start)
-            if (time_to_burn_start < 60.0) {
-                mnv_autopilot_active = true;
-                
-                // Compute burn direction in world space
-                Vec3 burn_dir(0,0,0);
-                if (node.snap_valid) {
-                    // Inertial guidance locking
-                    burn_dir = node.locked_burn_dir;
-                } 
-                
-                if (burn_dir.length() < 0.1f) {
-                    // Pre-burn or fallback: Point towards the planned prograde at the node time
-                    double mu = 6.67430e-11 * SOLAR_SYSTEM[current_soi_index].mass;
-                    double npx, npy, npz, nvx, nvy, nvz;
-                    double dt_node = node.sim_time - rocket_state.sim_time;
-                    get3DStateAtTime(rocket_state.px, rocket_state.py, rocket_state.pz, rocket_state.vx, rocket_state.vy, rocket_state.vz, mu, dt_node, npx, npy, npz, nvx, nvy, nvz);
-                    ManeuverFrame frame = ManeuverSystem::getFrame(Vec3((float)npx, (float)npy, (float)npz), Vec3((float)nvx, (float)nvy, (float)nvz));
-                    burn_dir = (frame.prograde * node.delta_v.x + frame.normal * node.delta_v.y + frame.radial * node.delta_v.z).normalized();
-                }
-
-                // Attitude control via PD controller
-                Vec3 fwd = rocket_state.attitude.forward();
-                float dot_prod = fwd.dot(burn_dir);
-                Vec3 error_axis = fwd.cross(burn_dir);
-                float error_mag = error_axis.length();
-
-                // Singularity fix: if looking exactly AWAY from target
-                if (dot_prod < -0.999f && error_mag < 0.01f) {
-                    error_axis = rocket_state.attitude.right(); 
-                    error_mag = 1.0f; 
-                }
-
-                if (error_mag > 0.001f) {
-                    error_axis = error_axis / error_mag;
-                    float error_angle = std::asin(std::min(error_mag, 1.0f));
-                    if (dot_prod < 0) error_angle = (float)PI - error_angle; 
-
-                    // PD torque control with MOI scaling
-                    double total_mass = rocket_config.dry_mass + rocket_state.fuel + rocket_config.upper_stages_mass;
-                    float moi = (float)(50000.0 * (total_mass / 50000.0));
-                    float kp = moi * 32.0f;
-                    float kd = moi * 12.0f; // Critical damping (zeta ~ 1.0)
-                    
-                    // Decompose error into rocket's local axes
-                    Vec3 right_axis = rocket_state.attitude.right();
-                    Vec3 up_axis = rocket_state.attitude.up();
-                    float err_pitch = error_axis.dot(right_axis) * error_angle;
-                    float err_yaw = error_axis.dot(up_axis) * error_angle;
-                    
-                    control_input.torque_cmd = kp * err_yaw - kd * (float)rocket_state.ang_vel;
-                    control_input.torque_cmd_z = kp * err_pitch - kd * (float)rocket_state.ang_vel_z;
-                } else {
-                    double total_mass = rocket_config.dry_mass + rocket_state.fuel + rocket_config.upper_stages_mass;
-                    float moi = (float)(50000.0 * (total_mass / 50000.0));
-                    control_input.torque_cmd = -moi * 8.0f * (float)rocket_state.ang_vel;
-                    control_input.torque_cmd_z = -moi * 8.0f * (float)rocket_state.ang_vel_z;
-                }
-                double total_mass = rocket_config.dry_mass + rocket_state.fuel + rocket_config.upper_stages_mass;
-                float moi = (float)(50000.0 * (total_mass / 50000.0));
-                control_input.torque_cmd_roll = -moi * 8.0f * (float)rocket_state.ang_vel_roll;
-            }
-            
-            // Phase 2: Throttle control
-            if (time_to_burn_start <= 0 && remaining_dv > 0.5) {
-                // Currently burning
-                control_input.throttle = 1.0;
-                mnv_autopilot_active = true;
-            } else if (node.snap_valid && remaining_dv <= 0.5) {
-                // Burn complete!
-                control_input.throttle = 0;
-                rocket_state.mission_msg = "MNV COMPLETE";
-                // Remove the completed maneuver node
-                rocket_state.maneuvers.erase(rocket_state.maneuvers.begin());
-                if (rocket_state.selected_maneuver_index >= 0) rocket_state.selected_maneuver_index--;
-                if (rocket_state.maneuvers.empty()) {
-                    hud.auto_exec_mnv = false;
-                } 
-            } else if (!mnv_autopilot_active) {
-                control_input.throttle = 0; // Not yet time
-            }
-            }
-        }
-        
-        // 普通循环执行实现加速
-        for (int i = 0; i < time_warp; i++) {
-          // Skip normal autopilot if maneuver auto-exec is controlling attitude
-          if (!mnv_autopilot_active) {
-              if (rocket_state.auto_mode) ControlSystem::UpdateAutoPilot(rocket_state, rocket_config, control_input, dt);
-              else ControlSystem::UpdateManualControl(rocket_state, rocket_config, control_input, manual, dt);
-          }
-          PhysicsSystem::Update(rocket_state, rocket_config, control_input, dt);
-          
-          // Auto-staging: when current stage fuel is depleted, advance to next
-          if (StageManager::IsCurrentStageEmpty(rocket_state) 
-              && rocket_state.current_stage < rocket_state.total_stages - 1
-              && (rocket_state.status == ASCEND || rocket_state.status == DESCEND)) {
-              StageManager::SeparateStage(rocket_state, rocket_config);
-          }
-          
-          if (rocket_state.status == LANDED || rocket_state.status == CRASHED) break;
-        }
-
-        // --- 额外一步物理更新 (用于尾烟特效) ---
-        if (time_warp == 1) {
-            PhysicsSystem::EmitSmoke(rocket_state, rocket_config, dt);
-            PhysicsSystem::UpdateSmoke(rocket_state, dt);
-        }
-    }
-
-    // 只有每隔一定帧数才打印，防止控制台看不清
+        // 只有每隔一定帧数才打印，防止控制台看不清
     if (frame % 10 == 0)
       Report_Status(rocket_state, control_input);
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(20)); // 限制帧率
+    // Frame rate limited by vsync/simulation
 
     //画面刷新
 
@@ -2652,9 +2387,9 @@ int main() {
 
       // Dynamic TAA blend: reduce temporal accumulation during fast changes
       // to prevent ghosting/smearing of orbit lines
-      if (time_warp > 1 || hud.mnv_popup_slider_dragging >= 0) {
+      if (sim_ctrl.time_warp > 1 || hud.mnv_popup_slider_dragging >= 0) {
           // In time warp or during slider drag, favor current frame heavily
-          float warp_blend = (time_warp > 100) ? 0.8f : (time_warp > 1 ? 0.5f : 0.4f);
+          float warp_blend = (sim_ctrl.time_warp > 100) ? 0.8f : (sim_ctrl.time_warp > 1 ? 0.5f : 0.4f);
           if (hud.mnv_popup_slider_dragging >= 0) warp_blend = fmaxf(warp_blend, 0.6f);
           r3d->taaBlendOverride = warp_blend;
       } else {
@@ -2750,7 +2485,7 @@ int main() {
       }
 
       // ===== 发射台渲染 (Launch Pad Generation / Rendering) =====
-      if (rocket_state.altitude < 2000.0) {
+      if (rocket_state.altitude < 12000.0) {
           CelestialBody& body = SOLAR_SYSTEM[current_soi_index];
           
           // Launch pad should rotate with the body (Axial Tilt + Rotation)
@@ -2893,7 +2628,7 @@ int main() {
     hud_ctx.macroProjMat = macroProjMat;
     hud_ctx.camEye_rel = camEye_rel;
     hud_ctx.aspect = aspect;
-    hud_ctx.time_warp = time_warp;
+    hud_ctx.time_warp = sim_ctrl.time_warp;
     hud_ctx.dt = dt;
     double mx, my; glfwGetCursorPos(window, &mx, &my);
     hud_ctx.mouse_x = (mx / ww * 2.0 - 1.0);
