@@ -1,0 +1,1746 @@
+﻿閫傜敤浜?.NET Framework MSBuild 鐗堟湰 18.0.5+e22287bf1
+
+  glfw.vcxproj -> C:\antigravity_code\RocketSim3D\build\_deps\glfw-build\src\Release\glfw3.lib
+  CenterCalculatorTest.vcxproj -> C:\antigravity_code\RocketSim3D\build\Release\CenterCalculatorTest.exe
+  CenterOfLiftTest.vcxproj -> C:\antigravity_code\RocketSim3D\build\Release\CenterOfLiftTest.exe
+  CenterOfMassTest.vcxproj -> C:\antigravity_code\RocketSim3D\build\Release\CenterOfMassTest.exe
+  CenterOfThrustTest.vcxproj -> C:\antigravity_code\RocketSim3D\build\Release\CenterOfThrustTest.exe
+  agency_scene.cpp
+  workshop_scene.cpp
+  flight_scene.cpp
+C:\antigravity_code\RocketSim3D\dependencires\include\glad\glad.h(27,1): error C1189: #error:  OpenGL header already included, remove this include, glad already provides it [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/flight_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(181,28): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(181,22): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(182,28): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(182,22): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(183,28): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(183,22): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(184,28): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(184,22): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(185,29): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(185,18): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(186,29): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(186,18): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(187,29): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(187,18): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(188,29): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(188,18): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(189,29): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(189,18): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(190,29): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(190,18): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(197,28): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(197,22): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(198,28): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(198,22): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(199,28): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(199,22): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(200,29): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(200,18): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(201,29): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(201,18): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(202,29): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(202,18): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(376,63): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(376,56): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(376,49): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(376,42): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(376,37): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(377,63): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(377,56): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(377,49): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(377,42): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(377,37): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(378,63): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(378,56): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(378,49): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(378,42): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(378,37): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(389,67): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(389,61): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(389,55): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(389,49): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(400,45): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(400,39): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(400,33): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(400,27): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(409,48): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(412,42): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(412,32): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(181,28): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(181,22): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(422,71): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(182,28): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(182,22): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(422,65): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(183,28): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(422,59): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(183,22): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(422,53): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(184,28): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(184,22): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(185,29): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(185,18): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(186,29): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(186,18): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(430,46): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(187,29): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(187,18): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(188,29): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(188,18): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(432,36): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(189,29): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(432,27): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(189,18): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(190,29): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(190,18): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(197,28): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(197,22): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(198,28): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(198,22): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(199,28): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(199,22): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(200,29): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(200,18): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(201,29): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(201,18): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(202,29): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(202,18): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(459,40): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(460,18): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(461,18): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(376,63): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(376,56): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(376,49): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(376,42): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(376,37): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(377,63): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(377,56): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(377,49): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(377,42): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(377,37): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(378,63): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(378,56): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(378,49): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(378,42): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(378,37): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(389,67): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(389,61): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(389,55): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(389,49): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(400,45): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(400,39): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(400,33): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(400,27): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(409,48): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(412,42): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(412,32): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(422,71): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(422,65): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(422,59): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(422,53): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(430,46): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(432,36): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(432,27): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(459,40): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(460,18): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(461,18): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(734,69): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(738,44): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(738,38): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(739,44): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(739,38): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(740,44): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(740,38): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(734,69): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(738,44): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(738,38): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(739,44): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(739,38): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(740,44): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(740,38): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\simulation\rocket_builder.h(199,25): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\simulation\rocket_builder.h(234,21): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\simulation\rocket_builder.h(240,28): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\simulation\rocket_builder.h(199,25): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\simulation\rocket_builder.h(234,21): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\simulation\rocket_builder.h(240,28): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\simulation\rocket_builder.h(376,18): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\simulation\rocket_builder.h(376,38): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\simulation\rocket_builder.h(442,18): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\simulation\rocket_builder.h(442,38): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\simulation\rocket_builder.h(376,18): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\simulation\rocket_builder.h(376,38): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\simulation\rocket_builder.h(545,26): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\simulation\rocket_builder.h(546,26): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\simulation\rocket_builder.h(609,29): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\simulation\rocket_builder.h(442,18): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\simulation\rocket_builder.h(442,38): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\simulation\rocket_builder.h(545,26): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\simulation\rocket_builder.h(546,26): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\simulation\rocket_builder.h(609,29): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\tectonic_sim.h(86,37): warning C4244: 鈥滃弬鏁扳€? 浠庘€渃onst _Ty鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\render\tectonic_sim.h(86,37): warning C4244:         with [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\render\tectonic_sim.h(86,37): warning C4244:         [ [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\render\tectonic_sim.h(86,37): warning C4244:             _Ty=double [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\render\tectonic_sim.h(86,37): warning C4244:         ] [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\tectonic_sim.h(87,36): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\tectonic_sim.h(87,31): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\tectonic_sim.h(128,36): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\tectonic_sim.h(153,29): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\tectonic_sim.h(198,33): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\tectonic_sim.h(228,48): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\tectonic_sim.h(312,53): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\tectonic_sim.h(312,133): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\tectonic_sim.h(358,41): warning C4244: 鈥滃弬鏁扳€? 浠庘€渃onst _Ty鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\render\tectonic_sim.h(358,41): warning C4244:         with [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\render\tectonic_sim.h(358,41): warning C4244:         [ [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\render\tectonic_sim.h(358,41): warning C4244:             _Ty=double [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\render\tectonic_sim.h(358,41): warning C4244:         ] [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\tectonic_sim.h(359,46): warning C4244: 鈥滃弬鏁扳€? 浠庘€渃onst double鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\tectonic_sim.h(359,38): warning C4244: 鈥滃弬鏁扳€? 浠庘€渃onst double鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\climate_sim.h(146,48): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\climate_sim.h(147,58): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\climate_sim.h(196,48): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\climate_sim.h(197,58): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\climate_sim.h(208,49): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\climate_sim.h(209,59): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\tectonic_sim.h(86,37): warning C4244: 鈥滃弬鏁扳€? 浠庘€渃onst _Ty鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\render\tectonic_sim.h(86,37): warning C4244:         with [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\render\tectonic_sim.h(86,37): warning C4244:         [ [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\render\tectonic_sim.h(86,37): warning C4244:             _Ty=double [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\render\tectonic_sim.h(86,37): warning C4244:         ] [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\tectonic_sim.h(87,36): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\tectonic_sim.h(87,31): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\tectonic_sim.h(128,36): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\tectonic_sim.h(153,29): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\tectonic_sim.h(198,33): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\tectonic_sim.h(228,48): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\tectonic_sim.h(312,53): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\tectonic_sim.h(312,133): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\tectonic_sim.h(358,41): warning C4244: 鈥滃弬鏁扳€? 浠庘€渃onst _Ty鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\render\tectonic_sim.h(358,41): warning C4244:         with [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\render\tectonic_sim.h(358,41): warning C4244:         [ [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\render\tectonic_sim.h(358,41): warning C4244:             _Ty=double [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\render\tectonic_sim.h(358,41): warning C4244:         ] [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\tectonic_sim.h(359,46): warning C4244: 鈥滃弬鏁扳€? 浠庘€渃onst double鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\tectonic_sim.h(359,38): warning C4244: 鈥滃弬鏁扳€? 浠庘€渃onst double鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(16,59): warning C4244: 鈥滃弬鏁扳€? 浠庘€渃onst double鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(16,71): warning C4244: 鈥滃弬鏁扳€? 浠庘€渃onst double鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(16,83): warning C4244: 鈥滃弬鏁扳€? 浠庘€渃onst double鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(17,63): warning C4244: 鈥滃弬鏁扳€? 浠庘€渃onst double鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(17,76): warning C4244: 鈥滃弬鏁扳€? 浠庘€渃onst double鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(17,89): warning C4244: 鈥滃弬鏁扳€? 浠庘€渃onst double鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(20,25): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(21,25): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(22,25): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(47,41): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(47,63): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(47,69): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(48,41): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(48,63): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(48,69): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(48,75): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(84,25): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(85,25): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(86,25): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\climate_sim.h(146,48): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\climate_sim.h(147,58): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\climate_sim.h(196,48): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\climate_sim.h(197,58): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\climate_sim.h(208,49): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\climate_sim.h(209,59): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(252,20): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(255,22): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(315,38): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(315,59): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(318,42): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(504,27): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(505,27): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(530,30): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(530,51): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(533,34): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(600,27): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(601,27): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(16,59): warning C4244: 鈥滃弬鏁扳€? 浠庘€渃onst double鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(16,71): warning C4244: 鈥滃弬鏁扳€? 浠庘€渃onst double鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(16,83): warning C4244: 鈥滃弬鏁扳€? 浠庘€渃onst double鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(17,63): warning C4244: 鈥滃弬鏁扳€? 浠庘€渃onst double鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(17,76): warning C4244: 鈥滃弬鏁扳€? 浠庘€渃onst double鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(17,89): warning C4244: 鈥滃弬鏁扳€? 浠庘€渃onst double鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(20,25): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(21,25): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(22,25): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(47,41): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(47,63): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(47,69): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(48,41): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(48,63): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(48,69): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(48,75): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(84,25): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(85,25): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(86,25): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(252,20): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(255,22): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(315,38): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(315,59): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(318,42): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(504,27): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(505,27): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(530,30): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(530,51): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(533,34): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(600,27): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\terrain_system.h(601,27): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(276,17): warning C4244: 鈥?鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(276,31): warning C4244: 鈥?鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(276,45): warning C4244: 鈥?鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(277,18): warning C4244: 鈥?鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(277,33): warning C4244: 鈥?鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(277,48): warning C4244: 鈥?鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(3862,61): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(3862,49): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(3862,37): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(3863,54): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(3863,44): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(3863,34): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(3878,26): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渃onst double鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(3881,18): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(3882,18): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(3885,26): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(3891,32): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(3897,33): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(3914,15): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(3915,15): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(3916,15): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(3917,15): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(3928,52): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(3928,42): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(3933,24): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(3964,106): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(3964,80): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4053,64): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4053,52): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4053,40): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4054,56): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4054,46): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4054,36): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4055,57): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4055,47): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4055,37): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4067,79): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4067,63): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4067,47): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4068,77): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4068,62): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4068,47): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4069,75): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4069,60): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4069,45): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4094,64): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4094,52): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4094,40): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4095,57): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4095,47): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4095,37): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4158,66): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4158,54): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4158,42): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4159,59): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4159,49): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4159,39): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4160,58): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4160,48): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4160,38): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4188,94): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4188,75): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4188,56): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4217,22): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4235,72): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4235,60): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4235,48): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4302,59): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4302,47): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4302,35): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4303,71): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4303,61): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4303,51): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4327,63): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4327,51): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4327,39): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4343,57): warning C4244: 鈥滃弬鏁扳€? 浠庘€渃onst double鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4343,45): warning C4244: 鈥滃弬鏁扳€? 浠庘€渃onst double鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4343,33): warning C4244: 鈥滃弬鏁扳€? 浠庘€渃onst double鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4382,56): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4382,46): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4382,36): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4407,54): warning C4244: 鈥滃弬鏁扳€? 浠庘€渃onst double鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4407,44): warning C4244: 鈥滃弬鏁扳€? 浠庘€渃onst double鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4407,34): warning C4244: 鈥滃弬鏁扳€? 浠庘€渃onst double鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4408,62): warning C4244: 鈥滃弬鏁扳€? 浠庘€渃onst double鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4408,50): warning C4244: 鈥滃弬鏁扳€? 浠庘€渃onst double鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4408,38): warning C4244: 鈥滃弬鏁扳€? 浠庘€渃onst double鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4409,78): warning C4244: 鈥滃弬鏁扳€? 浠庘€渃onst double鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4409,62): warning C4244: 鈥滃弬鏁扳€? 浠庘€渃onst double鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4409,46): warning C4244: 鈥滃弬鏁扳€? 浠庘€渃onst double鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4489,105): warning C4244: 鈥?鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4490,106): warning C4244: 鈥?鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4491,104): warning C4244: 鈥?鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4492,106): warning C4244: 鈥?鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4493,106): warning C4244: 鈥?鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4494,105): warning C4244: 鈥?鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4495,105): warning C4244: 鈥?鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4496,105): warning C4244: 鈥?鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4497,102): warning C4244: 鈥?鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4498,103): warning C4244: 鈥?鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4499,103): warning C4244: 鈥?鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4500,104): warning C4244: 鈥?鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4501,102): warning C4244: 鈥?鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4502,101): warning C4244: 鈥?鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4503,101): warning C4244: 鈥?鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4504,100): warning C4244: 鈥?鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4506,15): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4508,46): warning C4244: 鈥?=鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(276,17): warning C4244: 鈥?鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(276,31): warning C4244: 鈥?鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(276,45): warning C4244: 鈥?鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(277,18): warning C4244: 鈥?鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(277,33): warning C4244: 鈥?鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(277,48): warning C4244: 鈥?鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(160,15): error C3861: 鈥渕ax鈥? 鎵句笉鍒版爣璇嗙 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(161,15): error C3861: 鈥渕ax鈥? 鎵句笉鍒版爣璇嗙 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(413,5): error C2065: 鈥渟tring鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(413,12): error C2146: 璇硶閿欒: 缂哄皯鈥?鈥?鍦ㄦ爣璇嗙鈥渢ime_str鈥濈殑鍓嶉潰) [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(413,12): error C2065: 鈥渢ime_str鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(414,38): error C2065: 鈥渢ime_str鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(414,15): error C2664: 鈥渧oid Renderer::drawText(float,float,const char *,float,float,float,float,float,bool,Renderer::Align)鈥? 鏃犳硶灏嗗弬鏁?3 浠庘€渇loat鈥濊浆鎹负鈥渃onst char *鈥?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+      C:\antigravity_code\RocketSim3D\src\render\renderer_2d.h(607,8):
+      鍙傝鈥淩enderer::drawText鈥濈殑澹版槑
+      C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(414,15):
+      灏濊瘯鍖归厤鍙傛暟鍒楄〃鈥?float, float, float, float, float, float, float, bool, Renderer::Align)鈥濇椂
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(471,9): error C2653: 鈥淪aveSystem鈥? 涓嶆槸绫绘垨鍛藉悕绌洪棿鍚嶇О [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(471,21): error C3861: 鈥淪aveGame鈥? 鎵句笉鍒版爣璇嗙 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(536,26): error C2653: 鈥淢aneuverSystem鈥? 涓嶆槸绫绘垨鍛藉悕绌洪棿鍚嶇О [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(536,42): error C3861: 鈥渃alculateRemainingDV鈥? 鎵句笉鍒版爣璇嗙 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(544,13): error C3861: 鈥済et3DStateAtTime鈥? 鎵句笉鍒版爣璇嗙 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(545,13): error C2065: 鈥淢aneuverFrame鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(545,27): error C2146: 璇硶閿欒: 缂哄皯鈥?鈥?鍦ㄦ爣璇嗙鈥渇rame鈥濈殑鍓嶉潰) [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(545,35): error C2653: 鈥淢aneuverSystem鈥? 涓嶆槸绫绘垨鍛藉悕绌洪棿鍚嶇О [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(545,51): error C3861: 鈥済etFrame鈥? 鎵句笉鍒版爣璇嗙 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(588,13): error C2065: 鈥渃out鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(588,76): error C2065: 鈥渆ndl鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(1051,21): error C3861: 鈥済et3DStateAtTime鈥? 鎵句笉鍒版爣璇嗙 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(1056,21): error C2065: 鈥淢aneuverFrame鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(1056,35): error C2146: 璇硶閿欒: 缂哄皯鈥?鈥?鍦ㄦ爣璇嗙鈥渇rame鈥濈殑鍓嶉潰) [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(1056,43): error C2653: 鈥淢aneuverSystem鈥? 涓嶆槸绫绘垨鍛藉悕绌洪棿鍚嶇О [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(1056,59): error C3861: 鈥済etFrame鈥? 鎵句笉鍒版爣璇嗙 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(1078,21): error C2065: 鈥渃out鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(1078,103): error C2065: 鈥渆ndl鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(1320,28): error C2653: 鈥淢aneuverSystem鈥? 涓嶆槸绫绘垨鍛藉悕绌洪棿鍚嶇О [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(1320,44): error C3861: 鈥減rojectToScreen鈥? 鎵句笉鍒版爣璇嗙 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(1330,58): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(1330,48): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(1331,53): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(1331,43): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(1333,58): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(1333,48): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(1334,53): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(1334,43): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(1338,50): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(1338,77): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(1355,32): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(1356,32): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(1472,40): warning C4838: 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濋渶瑕佹敹缂╄浆鎹?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(1472,40): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(1472,56): warning C4838: 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濋渶瑕佹敹缂╄浆鎹?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(1472,56): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(1472,72): warning C4838: 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濋渶瑕佹敹缂╄浆鎹?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(1472,72): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(3862,61): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(3862,49): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(3862,37): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(3863,54): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(3863,44): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(3863,34): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\HUD_system.h(1532,24): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(3878,26): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渃onst double鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(3881,18): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(3882,18): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(3885,26): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(3891,32): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(3897,33): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(3914,15): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(3915,15): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(3916,15): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(3917,15): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(3928,52): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(3928,42): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(3933,24): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(3964,106): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(3964,80): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4053,64): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4053,52): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4053,40): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4054,56): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4054,46): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4054,36): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4055,57): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4055,47): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4055,37): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4067,79): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4067,63): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4067,47): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4068,77): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4068,62): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4068,47): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4069,75): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4069,60): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4069,45): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4094,64): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4094,52): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4094,40): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4095,57): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4095,47): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4095,37): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4158,66): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4158,54): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4158,42): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4159,59): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4159,49): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4159,39): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4160,58): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4160,48): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4160,38): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4188,94): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4188,75): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4188,56): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4217,22): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4235,72): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4235,60): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4235,48): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4302,59): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4302,47): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4302,35): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4303,71): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4303,61): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4303,51): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4327,63): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4327,51): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4327,39): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4343,57): warning C4244: 鈥滃弬鏁扳€? 浠庘€渃onst double鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4343,45): warning C4244: 鈥滃弬鏁扳€? 浠庘€渃onst double鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4343,33): warning C4244: 鈥滃弬鏁扳€? 浠庘€渃onst double鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4382,56): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4382,46): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4382,36): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4407,54): warning C4244: 鈥滃弬鏁扳€? 浠庘€渃onst double鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4407,44): warning C4244: 鈥滃弬鏁扳€? 浠庘€渃onst double鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4407,34): warning C4244: 鈥滃弬鏁扳€? 浠庘€渃onst double鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4408,62): warning C4244: 鈥滃弬鏁扳€? 浠庘€渃onst double鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4408,50): warning C4244: 鈥滃弬鏁扳€? 浠庘€渃onst double鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4408,38): warning C4244: 鈥滃弬鏁扳€? 浠庘€渃onst double鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4409,78): warning C4244: 鈥滃弬鏁扳€? 浠庘€渃onst double鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4409,62): warning C4244: 鈥滃弬鏁扳€? 浠庘€渃onst double鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4409,46): warning C4244: 鈥滃弬鏁扳€? 浠庘€渃onst double鈥濊浆鎹㈠埌鈥淕Lfloat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4489,105): warning C4244: 鈥?鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4490,106): warning C4244: 鈥?鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4491,104): warning C4244: 鈥?鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4492,106): warning C4244: 鈥?鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4493,106): warning C4244: 鈥?鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4494,105): warning C4244: 鈥?鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4495,105): warning C4244: 鈥?鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4496,105): warning C4244: 鈥?鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4497,102): warning C4244: 鈥?鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4498,103): warning C4244: 鈥?鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4499,103): warning C4244: 鈥?鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4500,104): warning C4244: 鈥?鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4501,102): warning C4244: 鈥?鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4502,101): warning C4244: 鈥?鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4503,101): warning C4244: 鈥?鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4504,100): warning C4244: 鈥?鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4506,15): warning C4244: 鈥滃弬鏁扳€? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\render\renderer3d.h(4508,46): warning C4244: 鈥?=鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/agency_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\simulation\maneuver_system.h(41,17): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\simulation\maneuver_system.h(42,17): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\scene\agency_scene.cpp(27,86): error C2065: 鈥渦p_pressed鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\agency_scene.cpp(27,98): error C2065: 鈥渄own_pressed鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\agency_scene.cpp(27,112): error C2065: 鈥渆nter_pressed鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\agency_scene.cpp(28,19): error C2065: 鈥渇actory鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\agency_scene.cpp(28,40): error C2065: 鈥渁gency_state鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\agency_scene.cpp(31,19): error C2065: 鈥渞enderer鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\agency_scene.cpp(32,45): error C2065: 鈥渞enderer鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\agency_scene.cpp(32,67): error C2065: 鈥渁gency_state鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\agency_scene.cpp(32,103): error C2065: 鈥渇actory鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\agency_scene.cpp(33,19): error C2065: 鈥渞enderer鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\agency_scene.cpp(37,45): error C2065: 鈥渁gency_state鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\agency_scene.cpp(37,59): error C2065: 鈥渇actory鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\agency_scene.cpp(40,11): error C2059: 璇硶閿欒:鈥渋f鈥?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\agency_scene.cpp(40,56): error C2143: 璇硶閿欒: 缂哄皯鈥?鈥?鍦ㄢ€渰鈥濈殑鍓嶉潰) [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\agency_scene.cpp(40,56): error C2447: 鈥渰鈥? 缂哄皯鍑芥暟鏍囬(鏄惁鏄€佸紡鐨勫舰寮忚〃?) [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\agency_scene.cpp(61,11): error C2059: 璇硶閿欒:鈥渋f鈥?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\agency_scene.cpp(61,96): error C2143: 璇硶閿欒: 缂哄皯鈥?鈥?鍦ㄢ€渰鈥濈殑鍓嶉潰) [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\agency_scene.cpp(61,96): error C2447: 鈥渰鈥? 缂哄皯鍑芥暟鏍囬(鏄惁鏄€佸紡鐨勫舰寮忚〃?) [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\agency_scene.cpp(66,5): error C2059: 璇硶閿欒:鈥渋f鈥?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\agency_scene.cpp(66,90): error C2143: 璇硶閿欒: 缂哄皯鈥?鈥?鍦ㄢ€渰鈥濈殑鍓嶉潰) [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\agency_scene.cpp(66,90): error C2447: 鈥渰鈥? 缂哄皯鍑芥暟鏍囬(鏄惁鏄€佸紡鐨勫舰寮忚〃?) [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\agency_scene.cpp(69,7): error C2059: 璇硶閿欒:鈥渆lse鈥?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\agency_scene.cpp(69,87): error C2143: 璇硶閿欒: 缂哄皯鈥?鈥?鍦ㄢ€渰鈥濈殑鍓嶉潰) [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\agency_scene.cpp(69,87): error C2447: 鈥渰鈥? 缂哄皯鍑芥暟鏍囬(鏄惁鏄€佸紡鐨勫舰寮忚〃?) [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\agency_scene.cpp(73,1): error C2059: 璇硶閿欒:鈥渳鈥?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\agency_scene.cpp(73,1): error C2143: 璇硶閿欒: 缂哄皯鈥?鈥?鍦ㄢ€渳鈥濈殑鍓嶉潰) [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\agency_scene.cpp(75,28): error C2143: 璇硶閿欒: 缂哄皯鈥?鈥?鍦ㄢ€渰鈥濈殑鍓嶉潰) [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\agency_scene.cpp(75,28): error C2447: 鈥渰鈥? 缂哄皯鍑芥暟鏍囬(鏄惁鏄€佸紡鐨勫舰寮忚〃?) [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\simulation\simulation_controller.h(214,28): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\simulation\simulation_controller.h(216,29): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+  (compiling source file '../src/scene/workshop_scene.cpp')
+  
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(96,9): error C2065: 鈥済_scroll_y鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(98,51): error C2065: 鈥済_scroll_y鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(101,43): error C2065: 鈥済_scroll_y鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(103,9): error C2065: 鈥済_scroll_y鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(109,5): error C2065: 鈥渞3d鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(127,5): error C2065: 鈥渞3d鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(135,5): error C2065: 鈥渞3d鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(135,19): error C2065: 鈥渞ocketBox鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(142,9): error C2065: 鈥渞3d鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(142,23): error C2065: 鈥渞ocketBox鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(143,9): error C2065: 鈥渞3d鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(143,23): error C2065: 鈥渞ocketBox鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(149,5): error C2065: 鈥渞3d鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(149,19): error C2065: 鈥渞ocketBox鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(150,5): error C2065: 鈥渞3d鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(150,19): error C2065: 鈥渞ocketBox鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(169,17): error C2065: 鈥渞3d鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(169,44): error C2065: 鈥渞3d鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(170,17): error C2065: 鈥渞3d鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(170,38): error C2653: 鈥淢odelLoader鈥? 涓嶆槸绫绘垨鍛藉悕绌洪棿鍚嶇О [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(170,51): error C3861: 鈥渓oadOBJ鈥? 鎵句笉鍒版爣璇嗙 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(172,27): error C2065: 鈥渞3d鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(176,17): error C2065: 鈥渞3d鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(176,47): error C2065: 鈥渞3d鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(177,17): error C2065: 鈥渞3d鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(179,17): error C2065: 鈥渞3d鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(180,17): error C2065: 鈥渞3d鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(184,21): error C2065: 鈥渞3d鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(185,21): error C2065: 鈥渞3d鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(191,28): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(193,35): warning C4244: 鈥滃垵濮嬪寲鈥? 浠庘€渄ouble鈥濊浆鎹㈠埌鈥渇loat鈥濓紝鍙兘涓㈠け鏁版嵁 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(202,17): error C2065: 鈥渞3d鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(208,21): error C2065: 鈥渞3d鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(208,35): error C2065: 鈥渞ocketNose鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(213,21): error C2065: 鈥渞3d鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(213,35): error C2065: 鈥渞ocketBody鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(215,21): error C2065: 鈥渞3d鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(215,35): error C2065: 鈥渞ocketNose鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(219,25): error C2065: 鈥渞3d鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(219,39): error C2065: 鈥渞ocketBox鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(222,25): error C2065: 鈥渞3d鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(222,39): error C2065: 鈥渞ocketBox鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(225,25): error C2065: 鈥渞3d鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(225,39): error C2065: 鈥渞ocketBody鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(229,21): error C2065: 鈥渞3d鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(229,35): error C2065: 鈥渞ocketBody鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(234,21): error C2065: 鈥渞3d鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(264,13): error C2065: 鈥渞enderer鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(265,13): error C2065: 鈥渞enderer鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(273,17): error C2065: 鈥渞3d鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(273,31): error C2065: 鈥渞ocketBox鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(279,27): error C2653: 鈥淐enterCalculator鈥? 涓嶆槸绫绘垨鍛藉悕绌洪棿鍚嶇О [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(279,45): error C3861: 鈥渉ashAssembly鈥? 鎵句笉鍒版爣璇嗙 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(284,42): error C2653: 鈥淐enterCalculator鈥? 涓嶆槸绫绘垨鍛藉悕绌洪棿鍚嶇О [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(284,60): error C3861: 鈥渃alculateCenterOfMass鈥? 鎵句笉鍒版爣璇嗙 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(285,42): error C2653: 鈥淐enterCalculator鈥? 涓嶆槸绫绘垨鍛藉悕绌洪棿鍚嶇О [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(285,60): error C3861: 鈥渃alculateCenterOfLift鈥? 鎵句笉鍒版爣璇嗙 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(286,42): error C2653: 鈥淐enterCalculator鈥? 涓嶆槸绫绘垨鍛藉悕绌洪棿鍚嶇О [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(286,60): error C3861: 鈥渃alculateCenterOfThrust鈥? 鎵句笉鍒版爣璇嗙 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(299,9): error C2653: 鈥淐enterVisualizer鈥? 涓嶆槸绫绘垨鍛藉悕绌洪棿鍚嶇О [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(299,40): error C2065: 鈥渞3d鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(300,39): error C2653: 鈥淐enterVisualizer鈥? 涓嶆槸绫绘垨鍛藉悕绌洪棿鍚嶇О [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(300,57): error C2065: 鈥淢ARKER_COM鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(299,27): error C3861: 鈥渞enderMarker鈥? 鎵句笉鍒版爣璇嗙 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(305,9): error C2653: 鈥淐enterVisualizer鈥? 涓嶆槸绫绘垨鍛藉悕绌洪棿鍚嶇О [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(305,40): error C2065: 鈥渞3d鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(306,39): error C2653: 鈥淐enterVisualizer鈥? 涓嶆槸绫绘垨鍛藉悕绌洪棿鍚嶇О [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(306,57): error C2065: 鈥淢ARKER_COL鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(305,27): error C3861: 鈥渞enderMarker鈥? 鎵句笉鍒版爣璇嗙 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(311,9): error C2653: 鈥淐enterVisualizer鈥? 涓嶆槸绫绘垨鍛藉悕绌洪棿鍚嶇О [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(311,40): error C2065: 鈥渞3d鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(312,39): error C2653: 鈥淐enterVisualizer鈥? 涓嶆槸绫绘垨鍛藉悕绌洪棿鍚嶇О [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(312,57): error C2065: 鈥淢ARKER_COT鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(311,27): error C3861: 鈥渞enderMarker鈥? 鎵句笉鍒版爣璇嗙 [C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(315,5): error C2065: 鈥渞3d鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(319,5): error C2065: 鈥渞enderer鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp(319,5): error C1003: 閿欒璁℃暟瓒呰繃 100锛涙鍦ㄥ仠姝㈢紪璇?[C:\antigravity_code\RocketSim3D\build\RocketSim3D.vcxproj]

@@ -1,0 +1,27 @@
+﻿
+C:\antigravity_code\RocketS
+im3D\src\save_system.h(20,1
+8): error C2017: 闈炴硶鐨勮浆涔夊簭鍒
+?[C:\antigravity_code\Rocke
+tSim3D\build\RocketSim3D.vc
+xproj]
+C:\antigravity_code\RocketS
+im3D\src\save_system.h(20,1
+8): error C2017: 闈炴硶鐨勮浆涔夊簭鍒
+?[C:\antigravity_code\Rocke
+tSim3D\build\RocketSim3D.vc
+xproj]
+C:\antigravity_code\RocketS
+im3D\src\save_system.h(20,1
+8): error C2017: 闈炴硶鐨勮浆涔夊簭鍒
+?[C:\antigravity_code\Rocke
+tSim3D\build\RocketSim3D.vc
+xproj]
+C:\antigravity_code\RocketS
+im3D\src\save_system.h(20,1
+8): error C2017: 闈炴硶鐨勮浆涔夊簭鍒
+?[C:\antigravity_code\Rocke
+tSim3D\build\RocketSim3D.vc
+xproj]
+
+

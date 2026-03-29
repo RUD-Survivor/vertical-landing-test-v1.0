@@ -1,0 +1,42 @@
+﻿
+C:\antigravity_code\RocketS
+im3D\src\scene\flight_scene
+.cpp(53,29): error C2039: "
+viewMat": 涓嶆槸 "CameraDirect
+or" 鐨勬垚鍛?[C:\antigravity_co
+de\RocketSim3D\build\Rocket
+Sim3D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\scene\flight_scene
+.cpp(53,51): error C2039: "
+eye": 涓嶆槸 "CameraDirector" 
+鐨勬垚鍛?[C:\antigravity_code\R
+ocketSim3D\build\RocketSim3
+D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\scene\flight_scene
+.cpp(53,14): error C2660: 鈥
+淩enderer3D::beginFrame鈥? 鍑芥
+暟涓嶆帴鍙?2 涓弬鏁?[C:\antigravit
+y_code\RocketSim3D\build\Ro
+cketSim3D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\scene\flight_scene
+.cpp(65,18): error C2065: 鈥
+渄t鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigra
+vity_code\RocketSim3D\build
+\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\scene\menu_scene.c
+pp(25,35): error C2664: 鈥淢e
+nuSystem::MenuChoice MenuSy
+stem::HandleSettingsInput(G
+LFWwindow *,MenuSystem::Men
+uState &,bool &,bool &,bool
+ &,bool &,bool &,float,floa
+t,bool)鈥? 鏃犳硶灏嗗弬鏁?5 浠庘€渂ool
+鈥濊浆鎹负鈥渂ool &鈥?[C:\antigrav
+ity_code\RocketSim3D\build\
+RocketSim3D.vcxproj]
+
+

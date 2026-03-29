@@ -1,73 +1,46 @@
-// Transition to Rocket Building/Flight
-load_from_save = (menu_choice == MenuSystem::MENU_CONTINUE);
-bool skip_builder = false; // Default behavior
-bool factory_mode_active = false;
+#include "scene/workshop_scene.h"
+#include "scene/flight_scene.h"
+#include "scene/game_context.h"
+#include "scene/scene_manager.h"
+#include "save_system.h"
 
-// =========================================================
-// ³õÊ¼»¯ 3D äÖÈ¾Æ÷ºÍÍø¸ñ (Early instantiation for Workshop)
-// =========================================================
-Renderer3D* r3d = new Renderer3D();
-Mesh earthMesh = MeshGen::sphere(256, 512, 1.0f);  // Extreme-res unit sphere for terrain detail
-Mesh ringMesh = MeshGen::ring(128, 1.11f, 2.35f);  // NASA Real Ratios: D-ring start to F-ring end (1.11R to 2.35R)
-Mesh rocketBody = MeshGen::cylinder(32, 1.0f, 1.0f);
-Mesh rocketNose = MeshGen::cone(32, 1.0f, 1.0f);
-Mesh rocketBox = MeshGen::box(1.0f, 1.0f, 1.0f);
-
-// Try to load launch pad model
-Mesh launchPadMesh = ModelLoader::loadOBJ("assets/launch_pad.obj");
-bool has_launch_pad = (launchPadMesh.indexCount > 0);
-
-// =========================================================
-// 3. BUILD ½×¶Î£ºKSP Ê½»ğ¼ı×é×°
-// Íæ¼ÒÔÚÕâÀï°ÑÁã¼ş£¨·¢¶¯»ú¡¢ÓÍÏäµÈ£©Æ´´ÕÔÚÒ»Æğ¡£
-// =========================================================
-BuilderState builder_state;
-RocketState loaded_state;
-ControlInput loaded_input;
-// skip_builder is already set by Hub transition logic above
-
-if (load_from_save) {
-    // ´Ó´æµµ¼ÓÔØ
-    if (SaveSystem::LoadGame(builder_state.assembly, loaded_state, loaded_input)) {
-        skip_builder = true;
-        cout << ">> SAVE FILE LOADED SUCCESSFULLY!" << endl;
-    }
-    else {
-        cout << ">> FAILED TO LOAD SAVE FILE, STARTING NEW GAME" << endl;
-        // ¼ÓÔØÊ§°Ü,Ê¹ÓÃÄ¬ÈÏ»ğ¼ı
-        builder_state.assembly.addPart(9);   // Raptor engine
-        builder_state.assembly.addPart(6);   // Medium fuel tank 100t
-        builder_state.assembly.addPart(0);   // Standard fairing nosecone
-    }
-}
-else {
-    // ĞÂÓÎÏ·,Ê¹ÓÃÄ¬ÈÏ»ğ¼ı
-    builder_state.assembly.addPart(9);   // Raptor engine
-    builder_state.assembly.addPart(6);   // Medium fuel tank 100t
-    builder_state.assembly.addPart(0);   // Standard fairing nosecone
+void WorkshopScene::onEnter() {
+    auto& ctx = GameContext::getInstance();
+    build_done = ctx.skip_builder;
+    
+    // Default rocket setup moved to MenuScene if load failed, but 
+    // if skip_builder is false, we might just be starting.
 }
 
-bool build_done = skip_builder;
+void WorkshopScene::update(double dt) {
+    if (build_done) {
+        auto& ctx = GameContext::getInstance();
+        ctx.launch_assembly = builder_state.assembly;
+        SceneManager::getInstance().changeScene(std::make_unique<FlightScene>());
+        return;
+    }
+    
+    auto& ctx = GameContext::getInstance();
+    auto window = ctx.window;
+    
 
-BuilderKeyState bk_prev = {};
-
-while (!build_done && !glfwWindowShouldClose(window)) {
-    // ´¦Àí´°¿ÚÊÂ¼ş£¨Èç°´¼ü¡¢Êó±êÒÆ¶¯£©
+  while (!build_done && !glfwWindowShouldClose(window)) {
+    // å¤„ç†çª—å£äº‹ä»¶ï¼ˆå¦‚æŒ‰é”®ã€é¼ æ ‡ç§»åŠ¨ï¼‰
     glfwPollEvents();
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
-        glfwSetWindowShouldClose(window, true);
+      glfwSetWindowShouldClose(window, true);
 
     // Read builder inputs
     BuilderKeyState bk_now;
-    bk_now.up = glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS;
-    bk_now.down = glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS;
-    bk_now.left = glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS;
+    bk_now.up    = glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS;
+    bk_now.down  = glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS;
+    bk_now.left  = glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS;
     bk_now.right = glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS;
     bk_now.enter = glfwGetKey(window, GLFW_KEY_ENTER) == GLFW_PRESS;
-    bk_now.del = glfwGetKey(window, GLFW_KEY_DELETE) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_BACKSPACE) == GLFW_PRESS;
-    bk_now.tab = glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS;
-    bk_now.pgup = glfwGetKey(window, GLFW_KEY_PAGE_UP) == GLFW_PRESS;
-    bk_now.pgdn = glfwGetKey(window, GLFW_KEY_PAGE_DOWN) == GLFW_PRESS;
+    bk_now.del   = glfwGetKey(window, GLFW_KEY_DELETE) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_BACKSPACE) == GLFW_PRESS;
+    bk_now.tab   = glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS;
+    bk_now.pgup  = glfwGetKey(window, GLFW_KEY_PAGE_UP) == GLFW_PRESS;
+    bk_now.pgdn  = glfwGetKey(window, GLFW_KEY_PAGE_DOWN) == GLFW_PRESS;
     bk_now.space = glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS;
     bk_now.q = glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS;
     bk_now.e = glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS;
@@ -86,7 +59,7 @@ while (!build_done && !glfwWindowShouldClose(window)) {
     bk_now.lmb = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
     bk_now.rmb = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
 
-    // ºËĞÄÂß¼­£º´¦Àí½¨ÔìÕßµÄ½»»¥£¨Èç£ºÁã¼şµã»÷¡¢ÍÏ×§¡¢Îü¸½Âß¼­£©
+    // æ ¸å¿ƒé€»è¾‘ï¼šå¤„ç†å»ºé€ è€…çš„äº¤äº’ï¼ˆå¦‚ï¼šé›¶ä»¶ç‚¹å‡»ã€æ‹–æ‹½ã€å¸é™„é€»è¾‘ï¼‰
     build_done = builderHandleInput(builder_state, bk_now, bk_prev);
     bk_prev = bk_now;
 
@@ -98,15 +71,14 @@ while (!build_done && !glfwWindowShouldClose(window)) {
     if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS) {
         double mx, my;
         glfwGetCursorPos(window, &mx, &my);
-
+        
         if (!workshop_is_dragging) {
             workshop_prev_mx = mx;
             workshop_prev_my = my;
             workshop_is_dragging = true;
             // Only allow rotation if no part menu was JUST opened this frame
             allowed_rotation = !builder_state.show_part_menu;
-        }
-        else if (allowed_rotation) {
+        } else if (allowed_rotation) {
             float dx = (float)(mx - workshop_prev_mx) * 0.005f;
             float dy = (float)(my - workshop_prev_my) * 0.005f;
             builder_state.orbit_angle -= dx;
@@ -114,20 +86,18 @@ while (!build_done && !glfwWindowShouldClose(window)) {
             workshop_prev_mx = mx;
             workshop_prev_my = my;
         }
-    }
-    else {
+    } else {
         workshop_is_dragging = false;
         allowed_rotation = false;
         if (!builder_state.show_part_menu) builder_state.orbit_angle += 0.001f;
     }
-
+    
     // Zoom and Pan controls
     if (g_scroll_y != 0.0f) {
         if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS) {
             builder_state.cam_dist *= powf(0.85f, g_scroll_y);
             builder_state.cam_dist = std::max(2.0f, std::min(100.0f, builder_state.cam_dist));
-        }
-        else {
+        } else {
             builder_state.cam_y_offset += g_scroll_y * (builder_state.cam_dist * 0.05f);
         }
         g_scroll_y = 0.0f;
@@ -141,29 +111,29 @@ while (!build_done && !glfwWindowShouldClose(window)) {
     // Dynamic camera based on rocket height and manual pan
     float current_height = std::max(5.0f, builder_state.assembly.total_height);
     float look_y = current_height * 0.4f + builder_state.cam_y_offset;
-
+    
     Vec3 camTarget(0.0f, look_y, 0.0f);
     float dist = builder_state.cam_dist + current_height * 0.5f;
     float cy = sinf(builder_state.orbit_pitch) * dist;
     float cx = cosf(builder_state.orbit_pitch) * cosf(builder_state.orbit_angle) * dist;
     float cz = cosf(builder_state.orbit_pitch) * sinf(builder_state.orbit_angle) * dist;
     Vec3 camEye = camTarget + Vec3(cx, cy, cz);
-
+    
     Mat4 viewMat = Mat4::lookAt(camEye, camTarget, Vec3(0.0f, 1.0f, 0.0f));
     Mat4 projMat = Mat4::perspective(1.0f, (float)ww / (float)wh, 0.1f, 1000.0f);
 
-    // --- 3D ½¨ÔìÊÒäÖÈ¾ (Workshop Render Pass) ---
-    // ÎÒÃÇÔÚÕâÀï°Ñ×é×°ºÃµÄ»ğ¼ı»­ÔÚÆÁÄ»ÉÏ£¬ÈÃÍæ¼Ò¿´µ½ 3D Ä£ĞÍ¡£
+    // --- 3D å»ºé€ å®¤æ¸²æŸ“ (Workshop Render Pass) ---
+    // æˆ‘ä»¬åœ¨è¿™é‡ŒæŠŠç»„è£…å¥½çš„ç«ç®­ç”»åœ¨å±å¹•ä¸Šï¼Œè®©ç©å®¶çœ‹åˆ° 3D æ¨¡å‹ã€‚
     r3d->beginFrame(viewMat, projMat, camEye);
 
     // Dark foggy background for the massive VAB interior
     glClearColor(0.02f, 0.025f, 0.03f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
+    
     // Draw Workshop Environment
     Mat4 padMat = Mat4::translate(Vec3(0, -0.1f, 0)) * Mat4::scale(Vec3(40.0f, 0.2f, 40.0f));
     r3d->drawMesh(rocketBox, padMat, 0.15f, 0.16f, 0.18f, 1.0f, 0.1f); // Concrete floor
-
+    
     // Draw grid lines on the pad
     for (int i = -10; i <= 10; i++) {
         if (i == 0) continue;
@@ -179,9 +149,9 @@ while (!build_done && !glfwWindowShouldClose(window)) {
     r3d->drawMesh(rocketBox, pillar1, 0.2f, 0.2f, 0.2f, 1.0f, 0.1f);
     r3d->drawMesh(rocketBox, pillar2, 0.2f, 0.2f, 0.2f, 1.0f, 0.1f);
 
-    // ÕâÊÇÒ»¸ö Lambda º¯Êı£ºÓÃÓÚÔÚ 3D ¿Õ¼äÀï»­³öÒ»¸öÁã¼ş¡£
-    // Ëü»á¿¼ÂÇ¶Ô³ÆĞÔ (Symmetry)£¬±ÈÈçÄã×°Ò»¸ö²à¹ÒÓÍÏä£¬Ëü»á×Ô¶¯ÔÚÁíÒ»²àÒ²»­Ò»¸ö¡£
-    auto drawPartWithSymmetry = [&](const PartDef& def, Vec3 pos, Quat rot, bool highlight, bool selected, float alpha = 1.0f, int sym = 1, float rm = 1.0f, float gm = 1.0f, float bm = 1.0f) {
+        // è¿™æ˜¯ä¸€ä¸ª Lambda å‡½æ•°ï¼šç”¨äºåœ¨ 3D ç©ºé—´é‡Œç”»å‡ºä¸€ä¸ªé›¶ä»¶ã€‚
+        // å®ƒä¼šè€ƒè™‘å¯¹ç§°æ€§ (Symmetry)ï¼Œæ¯”å¦‚ä½ è£…ä¸€ä¸ªä¾§æŒ‚æ²¹ç®±ï¼Œå®ƒä¼šè‡ªåŠ¨åœ¨å¦ä¸€ä¾§ä¹Ÿç”»ä¸€ä¸ªã€‚
+        auto drawPartWithSymmetry = [&](const PartDef& def, Vec3 pos, Quat rot, bool highlight, bool selected, float alpha = 1.0f, int sym = 1, float rm = 1.0f, float gm = 1.0f, float bm = 1.0f) {
         float r = def.r * rm, g = def.g * gm, b = def.b * bm;
         if (highlight) {
             float blink = 0.5f + 0.5f * sinf((float)glfwGetTime() * 8.0f);
@@ -218,11 +188,11 @@ while (!build_done && !glfwWindowShouldClose(window)) {
             float angle = (s * 2.0f * 3.14159f) / sym;
             Vec3 symPos = pos;
             if (sym > 1) {
-                float dist = sqrt(pos.x * pos.x + pos.z * pos.z);
+                float dist = sqrt(pos.x*pos.x + pos.z*pos.z);
                 if (dist > 0.01f) {
-                    float curAngle = atan2(pos.z, pos.x);
-                    symPos.x = cos(curAngle + angle) * dist;
-                    symPos.z = sin(curAngle + angle) * dist;
+                   float curAngle = atan2(pos.z, pos.x);
+                   symPos.x = cos(curAngle + angle) * dist;
+                   symPos.z = sin(curAngle + angle) * dist;
                 }
             }
 
@@ -230,74 +200,68 @@ while (!build_done && !glfwWindowShouldClose(window)) {
                 // Use custom model
                 Mat4 partMat = Mat4::translate(symPos) * Mat4::fromQuat(rot) * Mat4::fromQuat(Quat::fromAxisAngle(Vec3(0, 1, 0), angle));
                 r3d->drawMesh(*customMesh, partMat, r, g, b, alpha, 0.2f);
-            }
-            else {
+            } else {
                 // Procedural fallback
                 float pd = def.diameter;
                 if (def.category == CAT_NOSE_CONE) {
-                    Mat4 partMat = Mat4::translate(symPos) * Mat4::fromQuat(rot) * Mat4::scale({ pd, def.height, pd });
+                    Mat4 partMat = Mat4::translate(symPos) * Mat4::fromQuat(rot) * Mat4::scale({pd, def.height, pd});
                     r3d->drawMesh(rocketNose, partMat, r, g, b, alpha, 0.2f);
-                }
-                else if (def.category == CAT_ENGINE) {
+                } else if (def.category == CAT_ENGINE) {
                     float bf = 0.4f; float nf = 1.0f - bf;
                     Mat4 rotMat = Mat4::fromQuat(rot);
-                    Mat4 bodyMat = Mat4::translate(symPos) * rotMat * Mat4::translate(Vec3(0, def.height * (1.0f - bf * 0.5f), 0)) * Mat4::scale({ pd * 0.6f, def.height * bf, pd * 0.6f });
-                    r3d->drawMesh(rocketBody, bodyMat, 0.2f * rm, 0.2f * gm, 0.22f * bm, alpha, 0.4f);
-                    Mat4 bellMat = Mat4::translate(symPos) * rotMat * Mat4::scale({ pd * 0.85f, def.height * nf, pd * 0.85f });
-                    r3d->drawMesh(rocketNose, bellMat, r * 0.8f, g * 0.8f, b * 0.8f, alpha, 0.1f);
-                }
-                else if (def.category == CAT_STRUCTURAL) {
+                    Mat4 bodyMat = Mat4::translate(symPos) * rotMat * Mat4::translate(Vec3(0, def.height*(1.0f-bf*0.5f), 0)) * Mat4::scale({pd*0.6f, def.height*bf, pd*0.6f});
+                    r3d->drawMesh(rocketBody, bodyMat, 0.2f*rm, 0.2f*gm, 0.22f*bm, alpha, 0.4f);
+                    Mat4 bellMat = Mat4::translate(symPos) * rotMat * Mat4::scale({pd*0.85f, def.height*nf, pd*0.85f});
+                    r3d->drawMesh(rocketNose, bellMat, r*0.8f, g*0.8f, b*0.8f, alpha, 0.1f);
+                } else if (def.category == CAT_STRUCTURAL) {
                     if (strstr(def.name, "Fin") || strstr(def.name, "Solar")) {
-                        Mat4 finMat = Mat4::translate(symPos + Vec3(0, def.height * 0.5f, 0)) * Mat4::fromQuat(Quat::fromAxisAngle(Vec3(0, 1, 0), angle)) * Mat4::scale({ pd * 0.05f, def.height, pd * 0.5f });
+                        Mat4 finMat = Mat4::translate(symPos + Vec3(0, def.height*0.5f, 0)) * Mat4::fromQuat(Quat::fromAxisAngle(Vec3(0, 1, 0), angle)) * Mat4::scale({pd*0.05f, def.height, pd*0.5f});
                         r3d->drawMesh(rocketBox, finMat, r, g, b, alpha, 0.1f);
-                    }
-                    else if (strstr(def.name, "Leg")) {
-                        Mat4 legMat = Mat4::translate(symPos + Vec3(0, def.height * 0.5f, 0)) * Mat4::fromQuat(Quat::fromAxisAngle(Vec3(0, 1, 0), angle)) * Mat4::scale({ pd * 0.15f, def.height, pd * 0.15f });
+                    } else if (strstr(def.name, "Leg")) {
+                        Mat4 legMat = Mat4::translate(symPos + Vec3(0, def.height*0.5f, 0)) * Mat4::fromQuat(Quat::fromAxisAngle(Vec3(0, 1, 0), angle)) * Mat4::scale({pd*0.15f, def.height, pd*0.15f});
                         r3d->drawMesh(rocketBox, legMat, r, g, b, alpha, 0.1f);
-                    }
-                    else {
-                        Mat4 partMat = Mat4::translate(symPos) * Mat4::fromQuat(rot) * Mat4::translate(Vec3(0, def.height * 0.5f, 0)) * Mat4::scale({ pd, def.height, pd });
+                    } else {
+                        Mat4 partMat = Mat4::translate(symPos) * Mat4::fromQuat(rot) * Mat4::translate(Vec3(0, def.height*0.5f, 0)) * Mat4::scale({pd, def.height, pd});
                         r3d->drawMesh(rocketBody, partMat, r, g, b, alpha, 0.2f);
                     }
-                }
-                else {
-                    Mat4 partMat = Mat4::translate(symPos) * Mat4::fromQuat(rot) * Mat4::translate(Vec3(0, def.height * 0.5f, 0)) * Mat4::scale({ pd, def.height, pd });
+                } else {
+                    Mat4 partMat = Mat4::translate(symPos) * Mat4::fromQuat(rot) * Mat4::translate(Vec3(0, def.height*0.5f, 0)) * Mat4::scale({pd, def.height, pd});
                     r3d->drawMesh(rocketBody, partMat, r, g, b, alpha, 0.2f);
                 }
             }
         }
         // Cleanup texture binding
         glUniform1i(r3d->u_hasTexture, 0);
-        };
+    };
 
 
     for (int i = 0; i < (int)builder_state.assembly.parts.size(); i++) {
         const PlacedPart& pp = builder_state.assembly.parts[i];
         bool is_selected = builder_state.show_part_menu && (builder_state.r_clicked_part_idx == i);
-        drawPartWithSymmetry(PART_CATALOG[pp.def_id], pp.pos, pp.rot,
-            (builder_state.in_assembly_mode && builder_state.assembly_cursor == i), is_selected, 1.0f, pp.symmetry);
+        drawPartWithSymmetry(PART_CATALOG[pp.def_id], pp.pos, pp.rot, 
+                            (builder_state.in_assembly_mode && builder_state.assembly_cursor == i), is_selected, 1.0f, pp.symmetry);
     }
 
-    // ´¦Àí»ğ¼ıÁã¼şÔÚ½¨Ôì½×¶ÎÖĞµÄÍÏ¶¯½»»¥Âß¼­£¬°üÀ¨ÍÏ¶¯µÄ¿ÉÊÓ»¯Ğ§¹ûºÍÇ±ÔÚÁ¬½ÓµãµÄÏÔÊ¾
+    // Draw Dragging Ghost
     if (builder_state.dragging_def_id != -1) {
         float pl = -0.98f, pw = 0.65f;
         bool over_catalog = (bk_now.mx < pl + pw);
-
+        
         float rt = 1.0f, gt = 1.0f, bt = 1.0f;
         float alpha = 0.4f;
-        if (!builder_state.is_placement_valid) {
+        if (!builder_state.is_placement_valid) { 
             float pulse = 0.5f + 0.5f * sinf((float)glfwGetTime() * 10.0f);
-            rt = 1.0f; gt = 0.1f * pulse; bt = 0.1f * pulse;
+            rt = 1.0f; gt = 0.1f * pulse; bt = 0.1f * pulse; 
             alpha = 0.5f + 0.2f * pulse;
         }
         if (over_catalog) { rt = 1.0f; gt = 0.0f; bt = 0.0f; alpha = 0.3f; }
 
-        drawPartWithSymmetry(PART_CATALOG[builder_state.dragging_def_id],
-            builder_state.dragging_pos, builder_state.dragging_rot,
-            false, false, alpha, builder_state.current_symmetry, rt, gt, bt);
-
+        drawPartWithSymmetry(PART_CATALOG[builder_state.dragging_def_id], 
+                            builder_state.dragging_pos, builder_state.dragging_rot, 
+                            false, false, alpha, builder_state.current_symmetry, rt, gt, bt);
+        
         if (over_catalog) {
-            renderer->addRect(pl + pw / 2.0f, 0.15f, pw, 1.40f, 0.5f, 0.0f, 0.0f, 0.3f);
+            renderer->addRect(pl + pw/2.0f, 0.15f, pw, 1.40f, 0.5f, 0.0f, 0.0f, 0.3f);
             renderer->drawText(pl + 0.15f, 0.15f, "DROP TO DELETE", 0.015f, 1, 1, 1);
         }
 
@@ -305,82 +269,167 @@ while (!build_done && !glfwWindowShouldClose(window)) {
         for (const auto& p : builder_state.assembly.parts) {
             const auto& pdef = PART_CATALOG[p.def_id];
             for (const auto& node : pdef.snap_nodes) {
-                Mat4 nodeMat = Mat4::translate(p.pos + node.pos) * Mat4::scale({ 0.3f, 0.3f, 0.3f });
+                Mat4 nodeMat = Mat4::translate(p.pos + node.pos) * Mat4::scale({0.3f, 0.3f, 0.3f});
                 r3d->drawMesh(rocketBox, nodeMat, 0, 1, 0, 0.8f, 0); // Green glow
             }
         }
     }
 
-    //¼ì²â»ğ¼ı×°Åä×´Ì¬µÄ±ä»¯£¬²¢ÔÚ´Ë»ù´¡ÉÏ¸üĞÂ»ğ¼ıµÄ¸÷¸öÖĞĞÄµã£¨ÖÊĞÄ¡¢ÉıÁ¦ÖĞĞÄ¡¢ÍÆÁ¦ÖĞĞÄ£©µÄ¿ÉÊÓ»¯ĞÅÏ¢¡£
+    // Update center visualization state (detect assembly changes and recalculate)
     size_t current_hash = CenterCalculator::hashAssembly(builder_state.assembly);
     if (current_hash != builder_state.centerViz.lastAssemblyHash) {
         builder_state.centerViz.lastAssemblyHash = current_hash;
-
+        
         // Recalculate all center positions
         builder_state.centerViz.comPos = CenterCalculator::calculateCenterOfMass(builder_state.assembly);
         builder_state.centerViz.colPos = CenterCalculator::calculateCenterOfLift(builder_state.assembly);
         builder_state.centerViz.cotPos = CenterCalculator::calculateCenterOfThrust(builder_state.assembly);
-
+        
         // Update validity flags
         builder_state.centerViz.hasCoM = !builder_state.assembly.parts.empty();
         builder_state.centerViz.hasCoL = (builder_state.centerViz.colPos.y > 0.0f);
         builder_state.centerViz.hasCoT = builder_state.assembly.hasEngine();
     }
-
+    
     // Render center point markers (if enabled)
     Mat4 rocketTransform; // Default constructor creates identity matrix
-
+    
     if (builder_state.centerViz.showCoM && builder_state.centerViz.hasCoM) {
         std::cout << "Rendering CoM at y=" << builder_state.centerViz.comPos.y << std::endl;
-        CenterVisualizer::renderMarker(r3d, builder_state.centerViz.comPos,
-            CenterVisualizer::MARKER_COM, rocketTransform);
+        CenterVisualizer::renderMarker(r3d, builder_state.centerViz.comPos, 
+                                      CenterVisualizer::MARKER_COM, rocketTransform);
     }
-
+    
     if (builder_state.centerViz.showCoL && builder_state.centerViz.hasCoL) {
         std::cout << "Rendering CoL at y=" << builder_state.centerViz.colPos.y << std::endl;
-        CenterVisualizer::renderMarker(r3d, builder_state.centerViz.colPos,
-            CenterVisualizer::MARKER_COL, rocketTransform);
+        CenterVisualizer::renderMarker(r3d, builder_state.centerViz.colPos, 
+                                      CenterVisualizer::MARKER_COL, rocketTransform);
     }
-
+    
     if (builder_state.centerViz.showCoT && builder_state.centerViz.hasCoT) {
         std::cout << "Rendering CoT at y=" << builder_state.centerViz.cotPos.y << std::endl;
-        CenterVisualizer::renderMarker(r3d, builder_state.centerViz.cotPos,
-            CenterVisualizer::MARKER_COT, rocketTransform);
+        CenterVisualizer::renderMarker(r3d, builder_state.centerViz.cotPos, 
+                                      CenterVisualizer::MARKER_COT, rocketTransform);
     }
 
     r3d->endFrame();
-    //
-
 
     // Render builder UI OVERLAY (clear depth buffer so 2D renders on top)
     glClear(GL_DEPTH_BUFFER_BIT);
-    //Çå¿ÕÉî¶È»º³åÇøÊÇÎªÁËÈ·±£2D UIÄÜ¹»äÖÈ¾ÔÚ3D³¡¾°µÄ¶¥²¿£¬¶ø²»ÊÇ±»3D³¡¾°ÖĞµÄÎïÌåÕÚµ²¡£
-    // Éî¶È»º³åÇøÓÃÓÚÈ·¶¨3D³¡¾°ÖĞÄÄ¸öÎïÌåÓ¦¸ÃÔÚÄÄ¸öÎïÌåµÄÇ°Ãæ¡£
     renderer->beginFrame();
-
+    
     // Render center point labels (2D overlay)
     if (builder_state.centerViz.showCoM && builder_state.centerViz.hasCoM) {
-        CenterVisualizer::renderLabel(renderer, builder_state.centerViz.comPos,
-            "CoM", viewMat * projMat);
+        CenterVisualizer::renderLabel(renderer, builder_state.centerViz.comPos, 
+                                     "CoM", viewMat * projMat);
     }
-
+    
     if (builder_state.centerViz.showCoL && builder_state.centerViz.hasCoL) {
-        CenterVisualizer::renderLabel(renderer, builder_state.centerViz.colPos,
-            "CoL", viewMat * projMat);
+        CenterVisualizer::renderLabel(renderer, builder_state.centerViz.colPos, 
+                                     "CoL", viewMat * projMat);
     }
-
+    
     if (builder_state.centerViz.showCoT && builder_state.centerViz.hasCoT) {
-        CenterVisualizer::renderLabel(renderer, builder_state.centerViz.cotPos,
-            "CoT", viewMat * projMat);
+        CenterVisualizer::renderLabel(renderer, builder_state.centerViz.cotPos, 
+                                     "CoT", viewMat * projMat);
     }
-
+    
     drawBuilderUI_KSP(renderer, builder_state, agency_state, (float)glfwGetTime());
     renderer->endFrame();
 
     glfwSwapBuffers(window);
-    //½«µ±Ç°äÖÈ¾µÄÍ¼Ïñ»º³åÇøÏÔÊ¾µ½´°¿ÚÉÏ£¬²¢½«ºóÌ¨»º³åÇøÓëÇ°Ì¨»º³åÇø½»»»¡£
-    // ÕâÑùÍæ¼Ò¾ÍÄÜ¿´µ½×îĞÂµÄäÖÈ¾½á¹û¡£
 
     std::this_thread::sleep_for(std::chrono::milliseconds(16));
-    //¿ØÖÆÖ¡ÂÊ£¬³ÌĞò»áÔÚÃ¿Ò»Ö¡äÖÈ¾½áÊøºóĞİÃß´óÔ¼16ºÁÃë¡£
+  }
+
+  // =========================================================
+  // 4. å‡†å¤‡é£å‘å¤ªç©ºï¼šä»ç»„è£…é›¶ä»¶æ„å»ºç‰©ç†é…ç½®
+  // æ­¤æ—¶æˆ‘ä»¬å°†é™æ€çš„ 3D æ¨¡å‹è½¬æ¢ä¸ºå…·æœ‰è´¨é‡ã€æ¨åŠ›å’Œé‡å¿ƒçš„ç‰©ç†å®ä½“ã€‚
+  // æ³¨æ„ï¼šç‰©ç†å¼•æ“ä¸éœ€è¦çŸ¥é“ 3D æ¨¡å‹é•¿ä»€ä¹ˆæ ·ï¼Œå®ƒåªéœ€è¦çŸ¥é“â€œå¤šé‡â€ã€â€œå¤šå¿«â€ã€‚
+  // =========================================================
+  if (!skip_builder && !builder_state.assembly.parts.empty()) {
+      // é‡æ–°å¯¹é½é‡å¿ƒ (CoM)ï¼šè®©ç«ç®­çš„åæ ‡ç³»ä¸­å¿ƒåˆšå¥½åœ¨ç‰©ç†é‡å¿ƒä¸Šï¼Œè¿™æ ·è½¬å¼¯æ‰è‡ªç„¶ã€‚
+      Vec3 com = CenterCalculator::calculateCenterOfMass(builder_state.assembly);
+      for (auto& p : builder_state.assembly.parts) {
+          p.pos = p.pos - com;
+      }
+      builder_state.assembly.com = Vec3(0,0,0); // é‡å¿ƒå½’é›¶
+      builder_state.assembly.recalculate();
+  }
+  RocketConfig rocket_config = builder_state.assembly.buildRocketConfig();
+  
+  // Consume parts from agency inventory
+  for (const auto& p : builder_state.assembly.parts) {
+      const PartDef& def = PART_CATALOG[p.def_id];
+      ItemType it = ITEM_NONE;
+      if (def.category == CAT_NOSE_CONE) it = PART_NOSECONE;
+      else if (def.category == CAT_COMMAND_POD) it = PART_COMMAND_POD;
+      else if (def.category == CAT_FUEL_TANK) it = PART_FUEL_TANK;
+      else if (def.category == CAT_ENGINE) it = PART_ENGINE;
+      else if (def.category == CAT_BOOSTER) it = PART_FUEL_TANK;
+      else if (def.category == CAT_STRUCTURAL) it = PART_STRUCTURAL;
+      if (it != ITEM_NONE) {
+          agency_state.removeItem(it, 1);
+      }
+  }
+
+  RocketState rocket_state;
+  ControlInput control_input;
+  
+  if (skip_builder) {
+      // ä½¿ç”¨åŠ è½½çš„çŠ¶æ€
+      rocket_state = loaded_state;
+      control_input = loaded_input;
+      // Sync config to loaded stage
+      StageManager::SyncActiveConfig(rocket_config, rocket_state.current_stage);
+  } else {
+      // æ–°æ¸¸æˆåˆå§‹åŒ–
+      rocket_state.fuel = builder_state.assembly.total_fuel;
+      rocket_state.status = PRE_LAUNCH;
+      rocket_state.mission_msg = "READY ON PAD - PRESS SPACE TO LAUNCH";
+      
+      // Initialize multi-stage fuel distribution
+      rocket_state.total_stages = rocket_config.stages;
+      rocket_state.current_stage = 0;
+      rocket_state.stage_fuels.clear();
+      for (int i = 0; i < (int)rocket_config.stage_configs.size(); i++) {
+          rocket_state.stage_fuels.push_back(rocket_config.stage_configs[i].fuel_capacity);
+      }
+      // Set initial fuel to stage 0â€™s capacity
+      if (!rocket_state.stage_fuels.empty()) {
+          rocket_state.fuel = rocket_state.stage_fuels[0];
+      }
+      
+      // Calculate initial surface coordinates from launch latitude/longitude
+      double lat_rad = rocket_state.launch_latitude * PI / 180.0;
+      double lon_rad = rocket_state.launch_longitude * PI / 180.0;
+
+      float lowest_y = 0.0f;
+      if (!builder_state.assembly.parts.empty()) {
+          lowest_y = 1e10f;
+          for (const auto& p : builder_state.assembly.parts) {
+              lowest_y = std::min(lowest_y, (float)p.pos.y);
+          }
+      }
+      // Distance from planet center to CoM
+      double R = SOLAR_SYSTEM[current_soi_index].radius - (double)lowest_y;
+
+      // Z is the North-South axis, XY is the equatorial plane
+      rocket_state.surf_px = R * cos(lat_rad) * cos(lon_rad);
+      rocket_state.surf_py = R * cos(lat_rad) * sin(lon_rad);
+      rocket_state.surf_pz = R * sin(lat_rad);
+
+      // Store fixed launch site for pad rendering
+      rocket_state.launch_site_px = rocket_state.surf_px;
+      rocket_state.launch_site_py = rocket_state.surf_py;
+      rocket_state.launch_site_pz = rocket_state.surf_pz;
+
+      // Initialize inertial coordinates immediately for the first frame
+      CelestialBody& body = SOLAR_SYSTEM[current_soi_index];
+      double theta = body.prime_meridian_epoch; // sim_time = 0
+      Quat rot = Quat::fromAxisAngle(Vec3(0, 0, 1), (float)theta);
+
+}
+
+void WorkshopScene::render() {
 }

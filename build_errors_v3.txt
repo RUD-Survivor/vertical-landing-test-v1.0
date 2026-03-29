@@ -1,0 +1,115 @@
+﻿
+C:\antigravity_code\RocketS
+im3D\dependencires\include\
+glad\glad.h(27,1): error C1
+189: #error:  OpenGL header
+ already included, remove t
+his include, glad already p
+rovides it [C:\antigravity_
+code\RocketSim3D\build\Rock
+etSim3D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\dependencires\include\
+glad\glad.h(27,1): error C1
+189: #error:  OpenGL header
+ already included, remove t
+his include, glad already p
+rovides it [C:\antigravity_
+code\RocketSim3D\build\Rock
+etSim3D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\dependencires\include\
+glad\glad.h(27,1): error C1
+189: #error:  OpenGL header
+ already included, remove t
+his include, glad already p
+rovides it [C:\antigravity_
+code\RocketSim3D\build\Rock
+etSim3D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\scene\game_context
+.h(12,19): error C3646: 鈥渇a
+ctory鈥? 鏈煡閲嶅啓璇存槑绗?[C:\anti
+gravity_code\RocketSim3D\bu
+ild\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\scene\game_context
+.h(12,5): error C4430: 缂哄皯绫
+诲瀷璇存槑绗?- 鍋囧畾涓?int銆傛敞鎰? C++ 
+涓嶆敮鎸侀粯璁?int [C:\antigravity
+_code\RocketSim3D\build\Roc
+ketSim3D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(160,15): error C3861: 鈥渕a
+x鈥? 鎵句笉鍒版爣璇嗙 [C:\antigravi
+ty_code\RocketSim3D\build\R
+ocketSim3D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(161,15): error C3861: 鈥渕a
+x鈥? 鎵句笉鍒版爣璇嗙 [C:\antigravi
+ty_code\RocketSim3D\build\R
+ocketSim3D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(413,5): error C2065: 鈥渟tr
+ing鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigr
+avity_code\RocketSim3D\buil
+d\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(413,12): error C2146: 璇硶
+閿欒: 缂哄皯鈥?鈥?鍦ㄦ爣璇嗙鈥渢ime_str
+鈥濈殑鍓嶉潰) [C:\antigravity_cod
+e\RocketSim3D\build\RocketS
+im3D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(413,12): error C2065: 鈥渢i
+me_str鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\ant
+igravity_code\RocketSim3D\b
+uild\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(414,38): error C2065: 鈥渢i
+me_str鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\ant
+igravity_code\RocketSim3D\b
+uild\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(414,15): error C2664: 鈥渧o
+id Renderer::drawText(float
+,float,const char *,float,f
+loat,float,float,float,bool
+,Renderer::Align)鈥? 鏃犳硶灏嗗弬鏁
+?3 浠庘€渇loat鈥濊浆鎹负鈥渃onst cha
+r *鈥?[C:\antigravity_code\R
+ocketSim3D\build\RocketSim3
+D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(588,13): error C2065: 鈥渃o
+ut鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigra
+vity_code\RocketSim3D\build
+\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(588,76): error C2065: 鈥渆n
+dl鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigra
+vity_code\RocketSim3D\build
+\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(1078,21): error C2065: 鈥渃
+out鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antigr
+avity_code\RocketSim3D\buil
+d\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(1078,103): error C2065: 鈥
+渆ndl鈥? 鏈０鏄庣殑鏍囪瘑绗?[C:\antig
+ravity_code\RocketSim3D\bui
+ld\RocketSim3D.vcxproj]
+
+

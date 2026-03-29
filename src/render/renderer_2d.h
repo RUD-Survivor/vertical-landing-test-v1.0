@@ -103,6 +103,7 @@ private:
     glCompileShader(id);
     return id;
   }
+  // 编译着色器函数，根据给定的类型和源代码创建并返回一个着色器ID
 
 public:
   enum Align { LEFT, CENTER, RIGHT };
@@ -113,7 +114,7 @@ public:
     unsigned int f = compileShader(GL_FRAGMENT_SHADER, fragmentShaderSource2D);
     shaderProgram = glCreateProgram();
     glAttachShader(shaderProgram, v);
-    glAttachShader(shaderProgram, f);
+    glad_glAttachShader(shaderProgram, f);
     glLinkProgram(shaderProgram);
     glDeleteShader(v);
     glDeleteShader(f);

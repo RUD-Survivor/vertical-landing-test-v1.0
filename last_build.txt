@@ -1,0 +1,138 @@
+﻿
+C:\antigravity_code\RocketS
+im3D\src\scene\game_context
+.h(30,14): error C2143: 璇硶
+閿欒: 缂哄皯鈥?鈥?鍦ㄢ€?鈥濈殑鍓嶉潰) [C:
+\antigravity_code\RocketSim
+3D\build\RocketSim3D.vcxpro
+j]
+C:\antigravity_code\RocketS
+im3D\src\scene\game_context
+.h(30,5): error C4430: 缂哄皯绫
+诲瀷璇存槑绗?- 鍋囧畾涓?int銆傛敞鎰? C++ 
+涓嶆敮鎸侀粯璁?int [C:\antigravity
+_code\RocketSim3D\build\Roc
+ketSim3D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\scene\game_context
+.h(30,19): error C2238: 鎰忓
+鐨勬爣璁颁綅浜庘€?鈥濅箣鍓?[C:\antigrav
+ity_code\RocketSim3D\build\
+RocketSim3D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\scene\game_context
+.h(32,95): error C2614: 鈥淕a
+meContext鈥? 闈炴硶鐨勬垚鍛樺垵濮嬪寲:鈥渉
+ud鈥濅笉鏄熀鎴栨垚鍛?[C:\antigravit
+y_code\RocketSim3D\build\Ro
+cketSim3D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\scene\game_context
+.h(30,14): error C2143: 璇硶
+閿欒: 缂哄皯鈥?鈥?鍦ㄢ€?鈥濈殑鍓嶉潰) [C:
+\antigravity_code\RocketSim
+3D\build\RocketSim3D.vcxpro
+j]
+C:\antigravity_code\RocketS
+im3D\src\scene\game_context
+.h(30,5): error C4430: 缂哄皯绫
+诲瀷璇存槑绗?- 鍋囧畾涓?int銆傛敞鎰? C++ 
+涓嶆敮鎸侀粯璁?int [C:\antigravity
+_code\RocketSim3D\build\Roc
+ketSim3D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\scene\game_context
+.h(30,19): error C2238: 鎰忓
+鐨勬爣璁颁綅浜庘€?鈥濅箣鍓?[C:\antigrav
+ity_code\RocketSim3D\build\
+RocketSim3D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\scene\game_context
+.h(32,95): error C2614: 鈥淕a
+meContext鈥? 闈炴硶鐨勬垚鍛樺垵濮嬪寲:鈥渉
+ud鈥濅笉鏄熀鎴栨垚鍛?[C:\antigravit
+y_code\RocketSim3D\build\Ro
+cketSim3D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\scene\game_context
+.h(30,14): error C2143: 璇硶
+閿欒: 缂哄皯鈥?鈥?鍦ㄢ€?鈥濈殑鍓嶉潰) [C:
+\antigravity_code\RocketSim
+3D\build\RocketSim3D.vcxpro
+j]
+C:\antigravity_code\RocketS
+im3D\src\scene\game_context
+.h(30,5): error C4430: 缂哄皯绫
+诲瀷璇存槑绗?- 鍋囧畾涓?int銆傛敞鎰? C++ 
+涓嶆敮鎸侀粯璁?int [C:\antigravity
+_code\RocketSim3D\build\Roc
+ketSim3D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\scene\game_context
+.h(30,19): error C2238: 鎰忓
+鐨勬爣璁颁綅浜庘€?鈥濅箣鍓?[C:\antigrav
+ity_code\RocketSim3D\build\
+RocketSim3D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\scene\game_context
+.h(32,95): error C2614: 鈥淕a
+meContext鈥? 闈炴硶鐨勬垚鍛樺垵濮嬪寲:鈥渉
+ud鈥濅笉鏄熀鎴栨垚鍛?[C:\antigravit
+y_code\RocketSim3D\build\Ro
+cketSim3D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\scene\game_context
+.h(30,14): error C2143: 璇硶
+閿欒: 缂哄皯鈥?鈥?鍦ㄢ€?鈥濈殑鍓嶉潰) [C:
+\antigravity_code\RocketSim
+3D\build\RocketSim3D.vcxpro
+j]
+C:\antigravity_code\RocketS
+im3D\src\scene\game_context
+.h(30,5): error C4430: 缂哄皯绫
+诲瀷璇存槑绗?- 鍋囧畾涓?int銆傛敞鎰? C++ 
+涓嶆敮鎸侀粯璁?int [C:\antigravity
+_code\RocketSim3D\build\Roc
+ketSim3D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\scene\game_context
+.h(30,19): error C2238: 鎰忓
+鐨勬爣璁颁綅浜庘€?鈥濅箣鍓?[C:\antigrav
+ity_code\RocketSim3D\build\
+RocketSim3D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\scene\game_context
+.h(32,95): error C2614: 鈥淕a
+meContext鈥? 闈炴硶鐨勬垚鍛樺垵濮嬪寲:鈥渉
+ud鈥濅笉鏄熀鎴栨垚鍛?[C:\antigravit
+y_code\RocketSim3D\build\Ro
+cketSim3D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\main.cpp(47,9): er
+ror C2039: "hud": 涓嶆槸 "Game
+Context" 鐨勬垚鍛?[C:\antigravi
+ty_code\RocketSim3D\build\R
+ocketSim3D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\scene\flight_scene
+.cpp(44,74): error C2039: "
+hud": 涓嶆槸 "GameContext" 鐨勬垚
+鍛?[C:\antigravity_code\Rock
+etSim3D\build\RocketSim3D.v
+cxproj]
+C:\antigravity_code\RocketS
+im3D\src\scene\flight_scene
+.cpp(44,14): error C2660: 鈥
+淪imulationController::updat
+e鈥? 鍑芥暟涓嶆帴鍙?6 涓弬鏁?[C:\anti
+gravity_code\RocketSim3D\bu
+ild\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\scene\flight_scene
+.cpp(70,9): error C2039: "h
+ud": 涓嶆槸 "GameContext" 鐨勬垚鍛
+?[C:\antigravity_code\Rocke
+tSim3D\build\RocketSim3D.vc
+xproj]
+
+

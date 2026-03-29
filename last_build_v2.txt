@@ -1,0 +1,387 @@
+﻿
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(539,26): error C2653: 鈥淢a
+neuverSystem鈥? 涓嶆槸绫绘垨鍛藉悕绌洪棿
+鍚嶇О [C:\antigravity_code\Ro
+cketSim3D\build\RocketSim3D
+.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(539,42): error C3861: 鈥渃a
+lculateRemainingDV鈥? 鎵句笉鍒版爣
+璇嗙 [C:\antigravity_code\Ro
+cketSim3D\build\RocketSim3D
+.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(547,13): error C3861: 鈥済e
+t3DStateAtTime鈥? 鎵句笉鍒版爣璇嗙 
+[C:\antigravity_code\Rocket
+Sim3D\build\RocketSim3D.vcx
+proj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(548,13): error C2065: 鈥淢a
+neuverFrame鈥? 鏈０鏄庣殑鏍囪瘑绗?[C
+:\antigravity_code\RocketSi
+m3D\build\RocketSim3D.vcxpr
+oj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(548,27): error C2146: 璇硶
+閿欒: 缂哄皯鈥?鈥?鍦ㄦ爣璇嗙鈥渇rame鈥濈殑
+鍓嶉潰) [C:\antigravity_code\R
+ocketSim3D\build\RocketSim3
+D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(548,35): error C2653: 鈥淢a
+neuverSystem鈥? 涓嶆槸绫绘垨鍛藉悕绌洪棿
+鍚嶇О [C:\antigravity_code\Ro
+cketSim3D\build\RocketSim3D
+.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(548,51): error C3861: 鈥済e
+tFrame鈥? 鎵句笉鍒版爣璇嗙 [C:\anti
+gravity_code\RocketSim3D\bu
+ild\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(539,26): error C2653: 鈥淢a
+neuverSystem鈥? 涓嶆槸绫绘垨鍛藉悕绌洪棿
+鍚嶇О [C:\antigravity_code\Ro
+cketSim3D\build\RocketSim3D
+.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(539,42): error C3861: 鈥渃a
+lculateRemainingDV鈥? 鎵句笉鍒版爣
+璇嗙 [C:\antigravity_code\Ro
+cketSim3D\build\RocketSim3D
+.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(547,13): error C3861: 鈥済e
+t3DStateAtTime鈥? 鎵句笉鍒版爣璇嗙 
+[C:\antigravity_code\Rocket
+Sim3D\build\RocketSim3D.vcx
+proj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(548,13): error C2065: 鈥淢a
+neuverFrame鈥? 鏈０鏄庣殑鏍囪瘑绗?[C
+:\antigravity_code\RocketSi
+m3D\build\RocketSim3D.vcxpr
+oj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(548,27): error C2146: 璇硶
+閿欒: 缂哄皯鈥?鈥?鍦ㄦ爣璇嗙鈥渇rame鈥濈殑
+鍓嶉潰) [C:\antigravity_code\R
+ocketSim3D\build\RocketSim3
+D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(548,35): error C2653: 鈥淢a
+neuverSystem鈥? 涓嶆槸绫绘垨鍛藉悕绌洪棿
+鍚嶇О [C:\antigravity_code\Ro
+cketSim3D\build\RocketSim3D
+.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(548,51): error C3861: 鈥済e
+tFrame鈥? 鎵句笉鍒版爣璇嗙 [C:\anti
+gravity_code\RocketSim3D\bu
+ild\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(539,26): error C2653: 鈥淢a
+neuverSystem鈥? 涓嶆槸绫绘垨鍛藉悕绌洪棿
+鍚嶇О [C:\antigravity_code\Ro
+cketSim3D\build\RocketSim3D
+.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(539,42): error C3861: 鈥渃a
+lculateRemainingDV鈥? 鎵句笉鍒版爣
+璇嗙 [C:\antigravity_code\Ro
+cketSim3D\build\RocketSim3D
+.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(547,13): error C3861: 鈥済e
+t3DStateAtTime鈥? 鎵句笉鍒版爣璇嗙 
+[C:\antigravity_code\Rocket
+Sim3D\build\RocketSim3D.vcx
+proj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(548,13): error C2065: 鈥淢a
+neuverFrame鈥? 鏈０鏄庣殑鏍囪瘑绗?[C
+:\antigravity_code\RocketSi
+m3D\build\RocketSim3D.vcxpr
+oj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(548,27): error C2146: 璇硶
+閿欒: 缂哄皯鈥?鈥?鍦ㄦ爣璇嗙鈥渇rame鈥濈殑
+鍓嶉潰) [C:\antigravity_code\R
+ocketSim3D\build\RocketSim3
+D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(548,35): error C2653: 鈥淢a
+neuverSystem鈥? 涓嶆槸绫绘垨鍛藉悕绌洪棿
+鍚嶇О [C:\antigravity_code\Ro
+cketSim3D\build\RocketSim3D
+.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(548,51): error C3861: 鈥済e
+tFrame鈥? 鎵句笉鍒版爣璇嗙 [C:\anti
+gravity_code\RocketSim3D\bu
+ild\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(1054,21): error C3861: 鈥済
+et3DStateAtTime鈥? 鎵句笉鍒版爣璇嗙
+ [C:\antigravity_code\Rocke
+tSim3D\build\RocketSim3D.vc
+xproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(1059,21): error C2065: 鈥淢
+aneuverFrame鈥? 鏈０鏄庣殑鏍囪瘑绗?[
+C:\antigravity_code\RocketS
+im3D\build\RocketSim3D.vcxp
+roj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(1059,35): error C2146: 璇
+硶閿欒: 缂哄皯鈥?鈥?鍦ㄦ爣璇嗙鈥渇rame鈥濈
+殑鍓嶉潰) [C:\antigravity_code\
+RocketSim3D\build\RocketSim
+3D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(1059,43): error C2653: 鈥淢
+aneuverSystem鈥? 涓嶆槸绫绘垨鍛藉悕绌洪
+棿鍚嶇О [C:\antigravity_code\R
+ocketSim3D\build\RocketSim3
+D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(1059,59): error C3861: 鈥済
+etFrame鈥? 鎵句笉鍒版爣璇嗙 [C:\ant
+igravity_code\RocketSim3D\b
+uild\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(539,26): error C2653: 鈥淢a
+neuverSystem鈥? 涓嶆槸绫绘垨鍛藉悕绌洪棿
+鍚嶇О [C:\antigravity_code\Ro
+cketSim3D\build\RocketSim3D
+.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(539,42): error C3861: 鈥渃a
+lculateRemainingDV鈥? 鎵句笉鍒版爣
+璇嗙 [C:\antigravity_code\Ro
+cketSim3D\build\RocketSim3D
+.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(547,13): error C3861: 鈥済e
+t3DStateAtTime鈥? 鎵句笉鍒版爣璇嗙 
+[C:\antigravity_code\Rocket
+Sim3D\build\RocketSim3D.vcx
+proj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(548,13): error C2065: 鈥淢a
+neuverFrame鈥? 鏈０鏄庣殑鏍囪瘑绗?[C
+:\antigravity_code\RocketSi
+m3D\build\RocketSim3D.vcxpr
+oj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(548,27): error C2146: 璇硶
+閿欒: 缂哄皯鈥?鈥?鍦ㄦ爣璇嗙鈥渇rame鈥濈殑
+鍓嶉潰) [C:\antigravity_code\R
+ocketSim3D\build\RocketSim3
+D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(548,35): error C2653: 鈥淢a
+neuverSystem鈥? 涓嶆槸绫绘垨鍛藉悕绌洪棿
+鍚嶇О [C:\antigravity_code\Ro
+cketSim3D\build\RocketSim3D
+.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(548,51): error C3861: 鈥済e
+tFrame鈥? 鎵句笉鍒版爣璇嗙 [C:\anti
+gravity_code\RocketSim3D\bu
+ild\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(1054,21): error C3861: 鈥済
+et3DStateAtTime鈥? 鎵句笉鍒版爣璇嗙
+ [C:\antigravity_code\Rocke
+tSim3D\build\RocketSim3D.vc
+xproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(1059,21): error C2065: 鈥淢
+aneuverFrame鈥? 鏈０鏄庣殑鏍囪瘑绗?[
+C:\antigravity_code\RocketS
+im3D\build\RocketSim3D.vcxp
+roj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(1059,35): error C2146: 璇
+硶閿欒: 缂哄皯鈥?鈥?鍦ㄦ爣璇嗙鈥渇rame鈥濈
+殑鍓嶉潰) [C:\antigravity_code\
+RocketSim3D\build\RocketSim
+3D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(1059,43): error C2653: 鈥淢
+aneuverSystem鈥? 涓嶆槸绫绘垨鍛藉悕绌洪
+棿鍚嶇О [C:\antigravity_code\R
+ocketSim3D\build\RocketSim3
+D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(1059,59): error C3861: 鈥済
+etFrame鈥? 鎵句笉鍒版爣璇嗙 [C:\ant
+igravity_code\RocketSim3D\b
+uild\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(1323,28): error C2653: 鈥淢
+aneuverSystem鈥? 涓嶆槸绫绘垨鍛藉悕绌洪
+棿鍚嶇О [C:\antigravity_code\R
+ocketSim3D\build\RocketSim3
+D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(1323,44): error C3861: 鈥減
+rojectToScreen鈥? 鎵句笉鍒版爣璇嗙 
+[C:\antigravity_code\Rocket
+Sim3D\build\RocketSim3D.vcx
+proj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(1054,21): error C3861: 鈥済
+et3DStateAtTime鈥? 鎵句笉鍒版爣璇嗙
+ [C:\antigravity_code\Rocke
+tSim3D\build\RocketSim3D.vc
+xproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(1059,21): error C2065: 鈥淢
+aneuverFrame鈥? 鏈０鏄庣殑鏍囪瘑绗?[
+C:\antigravity_code\RocketS
+im3D\build\RocketSim3D.vcxp
+roj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(1059,35): error C2146: 璇
+硶閿欒: 缂哄皯鈥?鈥?鍦ㄦ爣璇嗙鈥渇rame鈥濈
+殑鍓嶉潰) [C:\antigravity_code\
+RocketSim3D\build\RocketSim
+3D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(1059,43): error C2653: 鈥淢
+aneuverSystem鈥? 涓嶆槸绫绘垨鍛藉悕绌洪
+棿鍚嶇О [C:\antigravity_code\R
+ocketSim3D\build\RocketSim3
+D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(1059,59): error C3861: 鈥済
+etFrame鈥? 鎵句笉鍒版爣璇嗙 [C:\ant
+igravity_code\RocketSim3D\b
+uild\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(1323,28): error C2653: 鈥淢
+aneuverSystem鈥? 涓嶆槸绫绘垨鍛藉悕绌洪
+棿鍚嶇О [C:\antigravity_code\R
+ocketSim3D\build\RocketSim3
+D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(1323,44): error C3861: 鈥減
+rojectToScreen鈥? 鎵句笉鍒版爣璇嗙 
+[C:\antigravity_code\Rocket
+Sim3D\build\RocketSim3D.vcx
+proj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(1323,28): error C2653: 鈥淢
+aneuverSystem鈥? 涓嶆槸绫绘垨鍛藉悕绌洪
+棿鍚嶇О [C:\antigravity_code\R
+ocketSim3D\build\RocketSim3
+D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(1323,44): error C3861: 鈥減
+rojectToScreen鈥? 鎵句笉鍒版爣璇嗙 
+[C:\antigravity_code\Rocket
+Sim3D\build\RocketSim3D.vcx
+proj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(1054,21): error C3861: 鈥済
+et3DStateAtTime鈥? 鎵句笉鍒版爣璇嗙
+ [C:\antigravity_code\Rocke
+tSim3D\build\RocketSim3D.vc
+xproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(1059,21): error C2065: 鈥淢
+aneuverFrame鈥? 鏈０鏄庣殑鏍囪瘑绗?[
+C:\antigravity_code\RocketS
+im3D\build\RocketSim3D.vcxp
+roj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(1059,35): error C2146: 璇
+硶閿欒: 缂哄皯鈥?鈥?鍦ㄦ爣璇嗙鈥渇rame鈥濈
+殑鍓嶉潰) [C:\antigravity_code\
+RocketSim3D\build\RocketSim
+3D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(1059,43): error C2653: 鈥淢
+aneuverSystem鈥? 涓嶆槸绫绘垨鍛藉悕绌洪
+棿鍚嶇О [C:\antigravity_code\R
+ocketSim3D\build\RocketSim3
+D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(1059,59): error C3861: 鈥済
+etFrame鈥? 鎵句笉鍒版爣璇嗙 [C:\ant
+igravity_code\RocketSim3D\b
+uild\RocketSim3D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(1323,28): error C2653: 鈥淢
+aneuverSystem鈥? 涓嶆槸绫绘垨鍛藉悕绌洪
+棿鍚嶇О [C:\antigravity_code\R
+ocketSim3D\build\RocketSim3
+D.vcxproj]
+C:\antigravity_code\RocketS
+im3D\src\render\HUD_system.
+h(1323,44): error C3861: 鈥減
+rojectToScreen鈥? 鎵句笉鍒版爣璇嗙 
+[C:\antigravity_code\Rocket
+Sim3D\build\RocketSim3D.vcx
+proj]
+
+
