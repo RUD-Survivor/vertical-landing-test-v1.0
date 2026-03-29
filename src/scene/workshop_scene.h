@@ -1,3 +1,24 @@
+#pragma once
+#include "scene.h"
+#include "game_context.h"
+#include "menu_system.h"
+#include "save_system.h"
+#include "simulation/rocket_builder.h"
+
+extern float g_scroll_y;
+
+class WorkshopScene : public IScene {
+public:
+    bool done = false;
+
+    void update(double dt) override {
+        GameContext& ctx = GameContext::getInstance();
+        GLFWwindow* window = ctx.window;
+        Renderer* renderer = ctx.renderer2d;
+        
+        bool load_from_save = ctx.skip_builder;
+        MenuSystem::MenuChoice menu_choice = load_from_save ? MenuSystem::MENU_CONTINUE : MenuSystem::MENU_VAB;
+
 // Transition to Rocket Building/Flight
 load_from_save = (menu_choice == MenuSystem::MENU_CONTINUE);
 bool skip_builder = false; // Default behavior
@@ -384,3 +405,18 @@ while (!build_done && !glfwWindowShouldClose(window)) {
     std::this_thread::sleep_for(std::chrono::milliseconds(16));
     //控制帧率，程序会在每一帧渲染结束后休眠大约16毫秒。
 }
+        // Store models that we don't want to destroy into context or destroy them
+        // FlightScene expects Renderer3D
+        ctx.launch_assembly = builder_state.assembly;
+        ctx.skip_builder = skip_builder;
+        ctx.loaded_rocket_state = loaded_state;
+        ctx.loaded_control_input = loaded_input;
+        ctx.renderer3d = r3d;
+        
+        // Let flight scene destroy Earth and Ring meshes or initialize its own
+        
+        done = true;
+    }
+
+    void render() override {}
+};

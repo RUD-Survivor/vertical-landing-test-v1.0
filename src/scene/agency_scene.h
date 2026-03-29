@@ -1,3 +1,31 @@
+#pragma once
+#include "scene.h"
+#include "game_context.h"
+#include "menu_system.h"
+#include "save_system.h"
+#include "simulation/factory_ui.h"
+#include <thread>
+#include <chrono>
+
+extern float g_scroll_y;
+
+class AgencyScene : public IScene {
+public:
+    int next_scene_flag = 0; // 0=none, 1=workshop
+
+    void onEnter() override {}
+
+    void update(double dt) override {
+        GameContext& ctx = GameContext::getInstance();
+        GLFWwindow* window = ctx.window;
+        auto& agency_state = ctx.agency_state;
+        auto& factory = ctx.factory;
+        Renderer* renderer = ctx.renderer2d;
+
+        MenuSystem::MenuState menu_state;
+        MenuSystem::MenuChoice menu_choice = MenuSystem::MENU_AGENCY_HUB;
+        bool up_pressed = false, down_pressed = false, enter_pressed = false;
+
 // 2. 航天局 / 工厂管理阶段
       // 如果进入了 Hub 或 Factory 模式，会在这里循环处理物资生产和科技树。
 while (menu_choice != MenuSystem::MENU_NONE && !glfwWindowShouldClose(window)) {
@@ -43,3 +71,11 @@ while (menu_choice != MenuSystem::MENU_NONE && !glfwWindowShouldClose(window)) {
         menu_choice = MenuSystem::MENU_AGENCY_HUB;
         while (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) glfwPollEvents();
     }
+        if (menu_choice == MenuSystem::MENU_VAB || menu_choice == MenuSystem::MENU_CONTINUE) {
+            ctx.skip_builder = (menu_choice == MenuSystem::MENU_CONTINUE);
+            next_scene_flag = 1; // ready to switch
+        }
+    }
+
+    void render() override {}
+};

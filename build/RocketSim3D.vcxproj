@@ -388,10 +388,6 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
     <ClCompile Include="C:\antigravity_code\RocketSim3D\src\simulation\center_visualizer.cpp" />
     <ClCompile Include="C:\antigravity_code\RocketSim3D\src\simulation\predictor.cpp" />
     <ClCompile Include="C:\antigravity_code\RocketSim3D\src\render\stb_impl.cpp" />
-    <ClCompile Include="C:\antigravity_code\RocketSim3D\src\scene\menu_scene.cpp" />
-    <ClCompile Include="C:\antigravity_code\RocketSim3D\src\scene\agency_scene.cpp" />
-    <ClCompile Include="C:\antigravity_code\RocketSim3D\src\scene\workshop_scene.cpp" />
-    <ClCompile Include="C:\antigravity_code\RocketSim3D\src\scene\flight_scene.cpp" />
     <ClCompile Include="C:\antigravity_code\RocketSim3D\vendor\glad\glad.c" />
   </ItemGroup>
   <ItemGroup />
