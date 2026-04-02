@@ -150,6 +150,7 @@ int main() {
   GameContext& ctx = GameContext::getInstance();
   ctx.window = window;
   ctx.renderer2d = renderer;
+  ctx.orbit_predictor = &orbit_predictor;
 
   SceneManager::getInstance().changeScene(std::make_unique<MenuScene>());
 

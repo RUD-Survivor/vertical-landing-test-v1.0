@@ -4473,13 +4473,14 @@ R"(
     
     // Front face culling guarantees we draw exactly ONE layer of the bounding sphere per pixel, 
     // eliminating double-drawing artifacts, and it never gets clipped by the near plane.
-    glEnable(GL_CULL_FACE);
-    glCullFace(GL_FRONT);
-    
+    // NOTE: Culling was already set correctly to GL_BACK at the top of the function.
+    // We do NOT override it here.
+
     sphereMesh.draw();
 
     // Revert ALL state
     glCullFace(GL_BACK);
+    glFrontFace(GL_CCW);
     glDisable(GL_BLEND);
     glEnable(GL_DEPTH_TEST);
     glDepthMask(GL_TRUE);

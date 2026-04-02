@@ -670,7 +670,17 @@ public:
 
   void endFrame() {
     if (vertices.empty()) return;
+
+    // VERY IMPORTANT: The 3D renderer disables blending and enables depth tests. 
+    // We MUST restore standard UI rendering state here.
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
+
     glUseProgram(shaderProgram);
+    glUniform1i(glGetUniformLocation(shaderProgram, "ourTexture"), 0);
+    glActiveTexture(GL_TEXTURE0);
     glBindVertexArray(VAO);
     glBindBuffer(GL_ARRAY_BUFFER, VBO);
     glBufferSubData(GL_ARRAY_BUFFER, 0, vertices.size() * sizeof(float), vertices.data());

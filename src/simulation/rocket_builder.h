@@ -505,6 +505,17 @@ inline bool builderHandleInput(BuilderState& bs, const BuilderKeyState& k, const
     
     // (1) 检查目录点击
     bool over_catalog = (k.mx < pl + pw);
+    if (over_catalog && k.lmb && !pk.lmb) {
+        float tab_y = 0.82f;
+        if (k.my > tab_y - 0.035f && k.my < tab_y + 0.035f) {
+            float tab_w = pw / CAT_COUNT;
+            int clicked_cat = (int)((k.mx - pl) / tab_w);
+            if (clicked_cat >= 0 && clicked_cat < CAT_COUNT) {
+                bs.selected_category = clicked_cat;
+                return false;
+            }
+        }
+    }
     for (int i=0;i<(int)cat_p.size();i++) {
         float cx=gx+(i%3)*(cw+0.02f), cy=gy-(i/3)*(ch+0.02f);
         if (builderCheckHit(k.mx,k.my,cx,cy,cw,ch)) {
