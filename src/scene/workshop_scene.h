@@ -15,6 +15,7 @@ public:
         GameContext& ctx = GameContext::getInstance();
         GLFWwindow* window = ctx.window;
         Renderer* renderer = ctx.renderer2d;
+        auto& agency_state = ctx.agency_state;
         
         bool load_from_save = ctx.skip_builder;
         MenuSystem::MenuChoice menu_choice = load_from_save ? MenuSystem::MENU_CONTINUE : MenuSystem::MENU_VAB;

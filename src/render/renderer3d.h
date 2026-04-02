@@ -3846,6 +3846,8 @@ R"(
     invViewProj = currentVP.inverse();
 
     glEnable(GL_DEPTH_TEST);
+    glDepthMask(GL_TRUE);
+    glDisable(GL_BLEND);
     glDisable(GL_CULL_FACE); // Global default for hollow rocket parts
     glFrontFace(GL_CCW);
   }
@@ -4292,6 +4294,12 @@ R"(
             }
             drawVegetation(instances);
         }
+        
+        // CRITICAL FIX: Restore global GL state before returning
+        // If we don't restore glFrontFace(GL_CCW), the subsequent drawAtmosphere 
+        // will cull the wrong faces (culling back instead of front), making it invisible!
+        glFrontFace(GL_CCW);
+        glDisable(GL_CULL_FACE);
         return;
     }
 
@@ -4399,6 +4407,14 @@ R"(
   void drawAtmosphere(const Mesh& sphereMesh, const Mat4& model, 
                       const Vec3& camPos, const Vec3& lightDir, 
                       const Vec3& planetCenter, float surfaceRadius, float outerRadius, double time, int planetIdx, float sunVisibility, bool showClouds) {
+    // Front face culling guarantees we draw exactly ONE layer of the bounding sphere per pixel,
+    // eliminating double-drawing artifacts, and it never gets clipped by the near plane.
+    // NOTE: MeshGen::sphere generates vertices with CW winding on the outside!
+    // Since GL_CCW is the standard front face, the outer shell is considered GL_BACK.
+    // To cull the outer shell and KEEP the inner shell, we must cull GL_BACK.
+    glFrontFace(GL_CCW);
+    glEnable(GL_CULL_FACE);
+    glCullFace(GL_BACK);
     glUseProgram(atmoProg);
 
     Mat4 mvp = proj * view * model;

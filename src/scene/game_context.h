@@ -7,6 +7,7 @@
 #include "simulation/rocket_builder.h"
 #include "simulation/factory_system.h"
 #include "menu_system.h" // For AgencyState etc.
+#include "simulation/predictor.h"
 
 /**
  * 全局共享状态区 (GameContext)
@@ -34,6 +35,7 @@ public:
     AgencyState agency_state;
     // 玩家在 Factory 中打造的产业链
     FactorySystem factory;
+    Simulation::AsyncOrbitPredictor* orbit_predictor = nullptr;
 
     // ==== 场景交接桥梁 (Scene Transition Payloads) ====
     // 玩家在 Builder 组装好的运载火箭装配方案
