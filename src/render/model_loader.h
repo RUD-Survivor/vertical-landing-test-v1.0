@@ -239,8 +239,32 @@ namespace ModelLoader {
             }
         }
 
-        std::cout << ">> [MODEL LOADER] Loaded OBJ: " << filepath 
-                  << " (Verts: " << verticesOut.size() << ", Indices: " << indicesOut.size() << ")" << std::endl;
+        // Calculate bounding box and geometric properties
+        if (!verticesOut.empty()) {
+            finalMesh.minX = finalMesh.maxX = verticesOut[0].px;
+            finalMesh.minY = finalMesh.maxY = verticesOut[0].py;
+            finalMesh.minZ = finalMesh.maxZ = verticesOut[0].pz;
+            
+            for (const auto& v : verticesOut) {
+                if (v.px < finalMesh.minX) finalMesh.minX = v.px;
+                if (v.px > finalMesh.maxX) finalMesh.maxX = v.px;
+                if (v.py < finalMesh.minY) finalMesh.minY = v.py;
+                if (v.py > finalMesh.maxY) finalMesh.maxY = v.py;
+                if (v.pz < finalMesh.minZ) finalMesh.minZ = v.pz;
+                if (v.pz > finalMesh.maxZ) finalMesh.maxZ = v.pz;
+            }
+            finalMesh.width = finalMesh.maxX - finalMesh.minX;
+            finalMesh.height = finalMesh.maxY - finalMesh.minY;
+            finalMesh.depth = finalMesh.maxZ - finalMesh.minZ;
+            finalMesh.centerX = (finalMesh.minX + finalMesh.maxX) * 0.5f;
+            finalMesh.centerY = (finalMesh.minY + finalMesh.maxY) * 0.5f;
+            finalMesh.centerZ = (finalMesh.minZ + finalMesh.maxZ) * 0.5f;
+
+            // Ensure we don't have zero dimensions
+            if (finalMesh.width < 0.001f) finalMesh.width = 1.0f;
+            if (finalMesh.height < 0.001f) finalMesh.height = 1.0f;
+            if (finalMesh.depth < 0.001f) finalMesh.depth = 1.0f;
+        }
 
         finalMesh.upload(verticesOut, indicesOut);
         return finalMesh;

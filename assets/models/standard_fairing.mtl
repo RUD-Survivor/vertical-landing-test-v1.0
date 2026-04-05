@@ -1,0 +1,14 @@
+# Blender 5.1.0 MTL File: 'falcon_9.blend'
+# www.blender.org
+
+newmtl fairing
+Ka 1.000000 1.000000 1.000000
+Ks 1.000000 1.000000 1.000000
+Ke 0.000000 0.000000 0.000000
+Ni 1.500000
+d 1.000000
+illum 2
+map_Kd C:/Users/魏DELL/Downloads/falcon-9-spacex-rocket/textures/falcon_fairing_BaseColor.png
+map_Ns C:/Users/魏DELL/Downloads/falcon-9-spacex-rocket/textures/falcon_fairing_Roughness.png
+map_refl C:/Users/魏DELL/Downloads/falcon-9-spacex-rocket/textures/falcon_fairing_Metallic.png
+map_Bump -bm 1.000000 C:/Users/魏DELL/Downloads/falcon-9-spacex-rocket/textures/falcon_fairing_Normal.png

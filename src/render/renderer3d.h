@@ -40,6 +40,12 @@ struct Vertex3D {
 struct Mesh {
   GLuint vao = 0, vbo = 0, ebo = 0;
   int indexCount = 0;
+  
+  // Geometric properties for automatic scaling
+  float minX = 0, minY = 0, minZ = 0;
+  float maxX = 0, maxY = 0, maxZ = 0;
+  float width = 1.0f, height = 1.0f, depth = 1.0f;
+  float centerX = 0, centerY = 0, centerZ = 0;
 
   // 将顶点与索引数据上传至显存
   void upload(const std::vector<Vertex3D>& verts,

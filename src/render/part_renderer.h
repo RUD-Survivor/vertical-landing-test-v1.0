@@ -30,12 +30,38 @@ namespace PartRenderer {
         Mesh* customMesh = nullptr;
         bool hasTexture = false;
         
+        static std::map<int, std::string> resolvedObjPaths;
+        static std::map<int, bool> pathTested;
+
+        std::string activeModelPath = "";
+        
         if (def.model_path) {
-            std::string mp(def.model_path);
-            if (r3d->meshCache.find(mp) == r3d->meshCache.end()) {
-                r3d->meshCache[mp] = ModelLoader::loadOBJ(mp);
+            activeModelPath = def.model_path;
+        } else {
+            if (!pathTested[def.id]) {
+                pathTested[def.id] = true;
+                std::string tempName = def.name;
+                for (char& c : tempName) {
+                    c = (char)std::tolower((unsigned char)c);
+                    if (c == ' ') c = '_';
+                }
+                std::string autoPath = "assets/models/" + tempName + ".obj";
+                
+                std::ifstream f(autoPath.c_str());
+                if (f.good()) {
+                    resolvedObjPaths[def.id] = autoPath;
+                }
             }
-            customMesh = &r3d->meshCache[mp];
+            if (resolvedObjPaths.find(def.id) != resolvedObjPaths.end()) {
+                activeModelPath = resolvedObjPaths[def.id];
+            }
+        }
+
+        if (!activeModelPath.empty()) {
+            if (r3d->meshCache.find(activeModelPath) == r3d->meshCache.end()) {
+                r3d->meshCache[activeModelPath] = ModelLoader::loadOBJ(activeModelPath);
+            }
+            customMesh = &r3d->meshCache[activeModelPath];
         }
         
         if (def.texture_path) {
@@ -53,8 +79,18 @@ namespace PartRenderer {
         glUniform1i(r3d->u_sampler, 0);
 
         if (customMesh && customMesh->indexCount > 0) {
-            // Use custom model (apply uniform scale if provided)
-            Mat4 partMat = Mat4::translate(pos) * Mat4::fromQuat(rot) * Mat4::scale({scale, scale, scale});
+            // Calculate proportional scales to match physical dimensions
+            float sx = (def.diameter / customMesh->width) * scale;
+            float sy = (def.height / customMesh->height) * scale;
+            float sz = (def.diameter / customMesh->depth) * scale;
+
+            // Apply transforms: World Pos -> World Rot -> Scaling -> Center Offset
+            // We shift the model so its bottom (minY) is at the part's insertion point.
+            Mat4 partMat = Mat4::translate(pos) 
+                         * Mat4::fromQuat(rot) 
+                         * Mat4::scale({sx, sy, sz}) 
+                         * Mat4::translate(Vec3(-customMesh->centerX, -customMesh->minY, -customMesh->centerZ));
+
             r3d->drawMesh(*customMesh, partMat, r, g, b, alpha, 0.2f);
         } else {
             // Procedural fallback
