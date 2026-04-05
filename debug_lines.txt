@@ -1,1 +1,0 @@
-Line 178: while (menu_choice != MenuSystem::MENU_EXIT && !glfwWindowShouldClose(window)) {\nLine 221: }\nLine 223: bool load_from_save = (menu_choice == MenuSystem::MENU_CONTINUE);\nLine 313: }\nLine 343: BuilderState builder_state;\nLine 774: Quat rot = Quat::fromAxisAngle(Vec3(0, 0, 1), (float)theta);\nLine 776: Quat full_rot = tilt * rot;\n

@@ -15,19 +15,63 @@
 
 namespace ModelLoader {
 
+    struct Material {
+        std::string name;
+        float Kd[3] = {1.0f, 1.0f, 1.0f};
+    };
+
+    inline std::map<std::string, Material> loadMTL(const std::string& filepath) {
+        std::map<std::string, Material> materials;
+        std::ifstream file(filepath);
+        if (!file.is_open()) {
+            std::cerr << ">> [MODEL LOADER] Failed to open MTL file: " << filepath << std::endl;
+            return materials;
+        }
+
+        std::string line;
+        Material currentMaterial;
+        bool hasMaterial = false;
+
+        while (std::getline(file, line)) {
+            if (line.empty() || line[0] == '#') continue;
+
+            std::istringstream iss(line);
+            std::string prefix;
+            iss >> prefix;
+
+            if (prefix == "newmtl") {
+                if (hasMaterial) {
+                    materials[currentMaterial.name] = currentMaterial;
+                }
+                iss >> currentMaterial.name;
+                currentMaterial.Kd[0] = 1.0f;
+                currentMaterial.Kd[1] = 1.0f;
+                currentMaterial.Kd[2] = 1.0f;
+                hasMaterial = true;
+            } else if (prefix == "Kd") {
+                iss >> currentMaterial.Kd[0] >> currentMaterial.Kd[1] >> currentMaterial.Kd[2];
+            }
+        }
+        if (hasMaterial) {
+            materials[currentMaterial.name] = currentMaterial;
+        }
+        return materials;
+    }
+
     // Simple hashing for unique vertices in the OBJ file to build an indexed mesh
     struct VertexKey {
-        int v, vt, vn;
+        int v, vt, vn, mtlId;
         bool operator<(const VertexKey& other) const {
             if (v != other.v) return v < other.v;
             if (vt != other.vt) return vt < other.vt;
-            return vn < other.vn;
+            if (vn != other.vn) return vn < other.vn;
+            return mtlId < other.mtlId;
         }
     };
 
     // Helper to parse face indices "v/vt/vn"
-    inline bool parseFaceVertex(const std::string& token, VertexKey& key) {
-        key.v = 0; key.vt = 0; key.vn = 0;
+    inline bool parseFaceVertex(const std::string& token, VertexKey& key, int mtlId) {
+        key.v = 0; key.vt = 0; key.vn = 0; key.mtlId = mtlId;
         std::istringstream stream(token);
         std::string part;
         
@@ -67,6 +111,19 @@ namespace ModelLoader {
         
         std::map<VertexKey, unsigned int> uniqueVertices;
 
+        std::map<std::string, Material> materials;
+        Material currentMaterial;
+        int currentMtlId = 0;
+        int nextMtlId = 1;
+        std::map<std::string, int> mtlIds;
+
+        // Base directory for MTL resolution
+        std::string directory = "";
+        size_t lastSlash = filepath.find_last_of("/\\");
+        if (lastSlash != std::string::npos) {
+            directory = filepath.substr(0, lastSlash + 1);
+        }
+
         std::string line;
         while (std::getline(file, line)) {
             if (line.empty() || line[0] == '#') continue;
@@ -75,7 +132,27 @@ namespace ModelLoader {
             std::string prefix;
             iss >> prefix;
 
-            if (prefix == "v") {
+            if (prefix == "mtllib") {
+                std::string mtlFilename;
+                // If mtllib has spaces in it, this might fail, but usually it doesn't.
+                // Let's get the rest of the line to support spaces just in case:
+                // Actually standard extraction is fine for basic MTLLIB
+                std::getline(iss >> std::ws, mtlFilename);
+                std::string mtlPath = directory + mtlFilename;
+                materials = loadMTL(mtlPath);
+            }
+            else if (prefix == "usemtl") {
+                std::string mtlName;
+                std::getline(iss >> std::ws, mtlName);
+                if (materials.find(mtlName) != materials.end()) {
+                    currentMaterial = materials[mtlName];
+                    if (mtlIds.find(mtlName) == mtlIds.end()) {
+                        mtlIds[mtlName] = nextMtlId++;
+                    }
+                    currentMtlId = mtlIds[mtlName];
+                }
+            }
+            else if (prefix == "v") {
                 Vec3 vertex;
                 iss >> vertex.x >> vertex.y >> vertex.z;
                 temp_vertices.push_back(vertex);
@@ -96,7 +173,7 @@ namespace ModelLoader {
                 
                 while (iss >> vertexStr) {
                     VertexKey key;
-                    if (parseFaceVertex(vertexStr, key)) {
+                    if (parseFaceVertex(vertexStr, key, currentMtlId)) {
                         faceKeys.push_back(key);
                     }
                 }
@@ -142,8 +219,11 @@ namespace ModelLoader {
                                     vertex.nx = 0; vertex.ny = 1; vertex.nz = 0;
                                 }
                                 
-                                // Default color (can be customized via shader uniforms later)
-                                vertex.r = 1.0f; vertex.g = 1.0f; vertex.b = 1.0f; vertex.a = 1.0f;
+                                // Apply color from current material
+                                vertex.r = currentMaterial.Kd[0]; 
+                                vertex.g = currentMaterial.Kd[1]; 
+                                vertex.b = currentMaterial.Kd[2]; 
+                                vertex.a = 1.0f;
 
                                 unsigned int newIndex = (unsigned int)verticesOut.size();
                                 uniqueVertices[currentKey] = newIndex;

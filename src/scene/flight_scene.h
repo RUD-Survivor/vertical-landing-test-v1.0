@@ -1,6 +1,8 @@
 #include "render/HUD_system.h"
 #pragma once
 #include "scene.h"
+#include "save_system.h"
+#include "render/part_renderer.h"
 #include "game_context.h"
 #include "simulation/simulation_controller.h"
 #include "camera/camera_director.h"
@@ -34,6 +36,7 @@ public:
     Mesh rocketNose;
     Mesh rocketBox;
     Mesh launchPadMesh;
+    Texture launchPadTexture;
     bool has_launch_pad;
     SimulationController sim_ctrl;
     double dt = 0.02;
@@ -79,6 +82,7 @@ public:
         rocketNose = MeshGen::cone(32, 1.0f, 1.0f);
         rocketBox = MeshGen::box(1.0f, 1.0f, 1.0f);
         launchPadMesh = ModelLoader::loadOBJ("assets/launch_pad.obj");
+        launchPadTexture = Renderer3D::loadTGA("assets/launch_pad.tga");
         has_launch_pad = (launchPadMesh.indexCount > 0);
         bool skip_builder = ctx.skip_builder;
         auto& builder_state_assembly = ctx.launch_assembly; // Assume this was the passed payload
@@ -1562,36 +1566,9 @@ else {
                         float pd = def.diameter * (float)ws_d;
                         float ph = def.height * (float)ws_d;
                         Vec3 partCenter = partWorldPos + partWorldRot.rotate(Vec3(0, ph * 0.5f, 0));
-                        if (def.category == CAT_NOSE_CONE) {
-                            Mat4 partMat = Mat4::TRS(partWorldPos, partWorldRot, { pd, ph, pd });
-                            r3d->drawMesh(rocketNose, partMat, def.r, def.g, def.b, 1.0f, 0.2f);
-                        }
-                        else if (def.category == CAT_ENGINE) {
-                            float bf = 0.4f; float nf = 1.0f - bf;
-                            Vec3 bodyPos = partWorldPos + partWorldRot.rotate(Vec3(0, ph * (1.0f - bf * 0.5f), 0));
-                            Mat4 bodyMat = Mat4::TRS(bodyPos, partWorldRot, { pd * 0.6f, ph * bf, pd * 0.6f });
-                            r3d->drawMesh(rocketBody, bodyMat, 0.2f, 0.2f, 0.22f, 1.0f, 0.4f);
-                            Mat4 bellMat = Mat4::TRS(partWorldPos, partWorldRot, { pd * 0.85f, ph * nf, pd * 0.85f });
-                            r3d->drawMesh(rocketNose, bellMat, def.r * 0.8f, def.g * 0.8f, def.b * 0.8f, 1.0f, 0.1f);
-                        }
-                        else if (def.category == CAT_STRUCTURAL) {
-                            if (strstr(def.name, "Fin") || strstr(def.name, "Solar")) {
-                                Mat4 finMat = Mat4::TRS(partCenter, partWorldRot, { pd * 0.05f, ph, pd * 0.5f });
-                                r3d->drawMesh(rocketBox, finMat, def.r, def.g, def.b, 1.0f, 0.1f);
-                            }
-                            else if (strstr(def.name, "Leg")) {
-                                Mat4 legMat = Mat4::TRS(partCenter, partWorldRot, { pd * 0.15f, ph, pd * 0.15f });
-                                r3d->drawMesh(rocketBox, legMat, def.r, def.g, def.b, 1.0f, 0.1f);
-                            }
-                            else {
-                                Mat4 partMat = Mat4::TRS(partCenter, partWorldRot, { pd, ph, pd });
-                                r3d->drawMesh(rocketBody, partMat, def.r, def.g, def.b, 1.0f, 0.2f);
-                            }
-                        }
-                        else {
-                            Mat4 partMat = Mat4::TRS(partCenter, partWorldRot, { pd, ph, pd });
-                            r3d->drawMesh(rocketBody, partMat, def.r, def.g, def.b, 1.0f, 0.2f);
-                        }
+                        PartRenderer::drawPartWithSymmetry(r3d, PART_CATALOG[pp.def_id], partWorldPos, partWorldRot, 
+                                                          rocketBody, rocketNose, rocketBox,
+                                                          (float)ws_d, false, false, 1.0f, 1);
                     }
                 }
             }
@@ -1632,11 +1609,22 @@ else {
                 padRot.m[8] = padForward.x; padRot.m[9] = padForward.y; padRot.m[10] = padForward.z; padRot.m[11] = 0;
                 padRot.m[12] = 0;         padRot.m[13] = 0;         padRot.m[14] = 0;         padRot.m[15] = 1;
                 if (has_launch_pad) {
-                    float pad_scale = earth_r * 0.005f;
+                    float pad_scale = (float)ws_d; // 1:1 Physical Scale
                     Mat4 padModel = Mat4::scale(Vec3(pad_scale, pad_scale, pad_scale));
                     padModel = padRot * padModel; // Orient pad
-                    padModel = Mat4::translate(padCenter) * padModel;
-                    r3d->drawMesh(launchPadMesh, padModel, 0.4f, 0.4f, 0.42f, 1.0f, 0.2f);
+                    Vec3 correctedPos = padCenter - padUp * (8.0f * (float)ws_d);
+                    padModel = Mat4::translate(correctedPos) * padModel;
+                    
+                    bool hasTex = (launchPadTexture.id != 0);
+                    if (hasTex) {
+                        launchPadTexture.bind(0);
+                        glUniform1i(r3d->u_hasTexture, 1);
+                        glUniform1i(r3d->u_sampler, 0);
+                    }
+                    
+                    r3d->drawMesh(launchPadMesh, padModel, 1.0f, 1.0f, 1.0f, 1.0f, 0.2f);
+                    
+                    if (hasTex) glUniform1i(r3d->u_hasTexture, 0);
                 }
                 else {
                     float pad_w = rw_3d * 20.0f;

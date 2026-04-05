@@ -3,6 +3,7 @@
 #include "scene/game_context.h"
 #include "scene/scene_manager.h"
 #include "save_system.h"
+#include "render/part_renderer.h"
 
 void WorkshopScene::onEnter() {
     auto& ctx = GameContext::getInstance();
@@ -149,97 +150,14 @@ void WorkshopScene::update(double dt) {
     r3d->drawMesh(rocketBox, pillar1, 0.2f, 0.2f, 0.2f, 1.0f, 0.1f);
     r3d->drawMesh(rocketBox, pillar2, 0.2f, 0.2f, 0.2f, 1.0f, 0.1f);
 
-        // 这是一个 Lambda 函数：用于在 3D 空间里画出一个零件。
-        // 它会考虑对称性 (Symmetry)，比如你装一个侧挂油箱，它会自动在另一侧也画一个。
-        auto drawPartWithSymmetry = [&](const PartDef& def, Vec3 pos, Quat rot, bool highlight, bool selected, float alpha = 1.0f, int sym = 1, float rm = 1.0f, float gm = 1.0f, float bm = 1.0f) {
-        float r = def.r * rm, g = def.g * gm, b = def.b * bm;
-        if (highlight) {
-            float blink = 0.5f + 0.5f * sinf((float)glfwGetTime() * 8.0f);
-            r = std::min(1.0f, r + 0.4f * blink); g = std::min(1.0f, g + 0.6f * blink); b = std::min(1.0f, b + 0.3f * blink);
-        }
-        if (selected) {
-            r = r * 0.4f; g = g * 0.6f; b = std::min(1.0f, b + 0.7f);
-        }
-
-        // --- Custom Model and Texture Loading ---
-        Mesh* customMesh = nullptr;
-        bool hasTexture = false;
-        if (def.model_path) {
-            std::string mp(def.model_path);
-            if (r3d->meshCache.find(mp) == r3d->meshCache.end()) {
-                r3d->meshCache[mp] = ModelLoader::loadOBJ(mp);
-            }
-            customMesh = &r3d->meshCache[mp];
-        }
-        if (def.texture_path) {
-            std::string tp(def.texture_path);
-            if (r3d->textureCache.find(tp) == r3d->textureCache.end()) {
-                r3d->textureCache[tp] = Renderer3D::loadTGA(def.texture_path);
-            }
-            if (r3d->textureCache[tp].id != 0) {
-                r3d->textureCache[tp].bind(0);
-                hasTexture = true;
-            }
-        }
-        glUniform1i(r3d->u_hasTexture, hasTexture ? 1 : 0);
-        glUniform1i(r3d->u_sampler, 0);
-
-        for (int s = 0; s < sym; s++) {
-            float angle = (s * 2.0f * 3.14159f) / sym;
-            Vec3 symPos = pos;
-            if (sym > 1) {
-                float dist = sqrt(pos.x*pos.x + pos.z*pos.z);
-                if (dist > 0.01f) {
-                   float curAngle = atan2(pos.z, pos.x);
-                   symPos.x = cos(curAngle + angle) * dist;
-                   symPos.z = sin(curAngle + angle) * dist;
-                }
-            }
-
-            if (customMesh && customMesh->indexCount > 0) {
-                // Use custom model
-                Mat4 partMat = Mat4::translate(symPos) * Mat4::fromQuat(rot) * Mat4::fromQuat(Quat::fromAxisAngle(Vec3(0, 1, 0), angle));
-                r3d->drawMesh(*customMesh, partMat, r, g, b, alpha, 0.2f);
-            } else {
-                // Procedural fallback
-                float pd = def.diameter;
-                if (def.category == CAT_NOSE_CONE) {
-                    Mat4 partMat = Mat4::translate(symPos) * Mat4::fromQuat(rot) * Mat4::scale({pd, def.height, pd});
-                    r3d->drawMesh(rocketNose, partMat, r, g, b, alpha, 0.2f);
-                } else if (def.category == CAT_ENGINE) {
-                    float bf = 0.4f; float nf = 1.0f - bf;
-                    Mat4 rotMat = Mat4::fromQuat(rot);
-                    Mat4 bodyMat = Mat4::translate(symPos) * rotMat * Mat4::translate(Vec3(0, def.height*(1.0f-bf*0.5f), 0)) * Mat4::scale({pd*0.6f, def.height*bf, pd*0.6f});
-                    r3d->drawMesh(rocketBody, bodyMat, 0.2f*rm, 0.2f*gm, 0.22f*bm, alpha, 0.4f);
-                    Mat4 bellMat = Mat4::translate(symPos) * rotMat * Mat4::scale({pd*0.85f, def.height*nf, pd*0.85f});
-                    r3d->drawMesh(rocketNose, bellMat, r*0.8f, g*0.8f, b*0.8f, alpha, 0.1f);
-                } else if (def.category == CAT_STRUCTURAL) {
-                    if (strstr(def.name, "Fin") || strstr(def.name, "Solar")) {
-                        Mat4 finMat = Mat4::translate(symPos + Vec3(0, def.height*0.5f, 0)) * Mat4::fromQuat(Quat::fromAxisAngle(Vec3(0, 1, 0), angle)) * Mat4::scale({pd*0.05f, def.height, pd*0.5f});
-                        r3d->drawMesh(rocketBox, finMat, r, g, b, alpha, 0.1f);
-                    } else if (strstr(def.name, "Leg")) {
-                        Mat4 legMat = Mat4::translate(symPos + Vec3(0, def.height*0.5f, 0)) * Mat4::fromQuat(Quat::fromAxisAngle(Vec3(0, 1, 0), angle)) * Mat4::scale({pd*0.15f, def.height, pd*0.15f});
-                        r3d->drawMesh(rocketBox, legMat, r, g, b, alpha, 0.1f);
-                    } else {
-                        Mat4 partMat = Mat4::translate(symPos) * Mat4::fromQuat(rot) * Mat4::translate(Vec3(0, def.height*0.5f, 0)) * Mat4::scale({pd, def.height, pd});
-                        r3d->drawMesh(rocketBody, partMat, r, g, b, alpha, 0.2f);
-                    }
-                } else {
-                    Mat4 partMat = Mat4::translate(symPos) * Mat4::fromQuat(rot) * Mat4::translate(Vec3(0, def.height*0.5f, 0)) * Mat4::scale({pd, def.height, pd});
-                    r3d->drawMesh(rocketBody, partMat, r, g, b, alpha, 0.2f);
-                }
-            }
-        }
-        // Cleanup texture binding
-        glUniform1i(r3d->u_hasTexture, 0);
-    };
-
-
     for (int i = 0; i < (int)builder_state.assembly.parts.size(); i++) {
         const PlacedPart& pp = builder_state.assembly.parts[i];
         bool is_selected = builder_state.show_part_menu && (builder_state.r_clicked_part_idx == i);
-        drawPartWithSymmetry(PART_CATALOG[pp.def_id], pp.pos, pp.rot, 
-                            (builder_state.in_assembly_mode && builder_state.assembly_cursor == i), is_selected, 1.0f, pp.symmetry);
+        
+        PartRenderer::drawPartWithSymmetry(r3d, PART_CATALOG[pp.def_id], pp.pos, pp.rot, 
+                                          rocketBody, rocketNose, rocketBox,
+                                          1.0f, (builder_state.in_assembly_mode && builder_state.assembly_cursor == i), 
+                                          is_selected, 1.0f, pp.symmetry);
     }
 
     // Draw Dragging Ghost
@@ -256,9 +174,11 @@ void WorkshopScene::update(double dt) {
         }
         if (over_catalog) { rt = 1.0f; gt = 0.0f; bt = 0.0f; alpha = 0.3f; }
 
-        drawPartWithSymmetry(PART_CATALOG[builder_state.dragging_def_id], 
-                            builder_state.dragging_pos, builder_state.dragging_rot, 
-                            false, false, alpha, builder_state.current_symmetry, rt, gt, bt);
+        PartRenderer::drawPartWithSymmetry(r3d, PART_CATALOG[builder_state.dragging_def_id], 
+                                          builder_state.dragging_pos, builder_state.dragging_rot, 
+                                          rocketBody, rocketNose, rocketBox,
+                                          1.0f, false, false, alpha, builder_state.current_symmetry, 
+                                          rt, gt, bt);
         
         if (over_catalog) {
             renderer->addRect(pl + pw/2.0f, 0.15f, pw, 1.40f, 0.5f, 0.0f, 0.0f, 0.3f);
