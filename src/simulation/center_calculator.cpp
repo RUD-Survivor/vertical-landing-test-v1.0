@@ -20,30 +20,33 @@ bool isEngine(const PartDef& part) {
 
 // Helper: Check if a part is an aerodynamic surface
 bool isAerodynamicSurface(const PartDef& part) {
-    // Nose cones are aerodynamic surfaces
-    if (part.category == CAT_NOSE_CONE) {
-        return true;
-    }
-    // Fin sets (id=16 in structural category) are aerodynamic surfaces
-    if (part.category == CAT_STRUCTURAL && part.id == 16) {
-        return true;
-    }
-    return false;
+    // Include all parts that contribute to side-projected area during flight
+    return (part.category == CAT_NOSE_CONE || 
+            part.category == CAT_FUEL_TANK || 
+            part.category == CAT_ENGINE || 
+            part.category == CAT_BOOSTER ||
+            part.category == CAT_COMMAND_POD ||
+            (part.category == CAT_STRUCTURAL && (part.id == 13 || part.id == 16)));
 }
 
-// Helper: Get effective aerodynamic area for a part
+// Helper: Get effective aerodynamic area for a part (side-projected area)
 float getAerodynamicArea(const PartDef& part) {
+    float area = 0.0f;
+    
     if (part.category == CAT_NOSE_CONE) {
-        // Cross-sectional area based on diameter
-        float radius = part.diameter / 2.0f;
-        return 3.14159f * radius * radius;
+        // Nose cone: side-projected area is roughly 0.5 * h * d (triangle)
+        area = 0.5f * part.height * part.diameter;
+    } else if (part.category == CAT_FUEL_TANK || part.category == CAT_ENGINE || part.category == CAT_BOOSTER || part.category == CAT_COMMAND_POD) {
+        // Cylindrical bodies: side-projected area is h * d
+        // We use a coefficient of 0.4 because smooth cylinders are less aerodynamically active than fins
+        area = part.height * part.diameter * 0.4f;
+    } else if (part.category == CAT_STRUCTURAL && (part.id == 13 || part.id == 16)) {
+        // Fin sets: Small physical area but highly aerodynamically efficient
+        // We give them a large effective area to correctly pull the CoP backwards
+        area = 10.0f; // m^2 effective area
     }
-    if (part.category == CAT_STRUCTURAL && part.id == 16) {
-        // Fin set: use fixed area coefficient
-        // Assuming 4 fins with reasonable surface area
-        return 2.0f; // m^2 effective area
-    }
-    return 0.0f;
+    
+    return area;
 }
 
 // Calculate hash of assembly configuration
