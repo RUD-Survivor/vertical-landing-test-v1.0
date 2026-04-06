@@ -146,13 +146,19 @@ private:
         if (!node.snap_valid && time_to_burn_start < 5.0) {
             int ref_idx = (node.ref_body >= 0) ? node.ref_body : current_soi_index;
             CelestialBody& ref_b = SOLAR_SYSTEM[ref_idx];
-            double rbpx, rbpy, rbpz, rbvx, rbvy, rbvz;
-            PhysicsSystem::GetCelestialStateAt(ref_idx, node.sim_time, rbpx, rbpy, rbpz, rbvx, rbvy, rbvz);
             
+            // Ships current relative state to reference body
+            double ship_rel_vx = rocket_state.vx + SOLAR_SYSTEM[current_soi_index].vx - ref_b.vx;
+            double ship_rel_vy = rocket_state.vy + SOLAR_SYSTEM[current_soi_index].vy - ref_b.vy;
+            double ship_rel_vz = rocket_state.vz + SOLAR_SYSTEM[current_soi_index].vz - ref_b.vz;
+            double ship_rel_px = rocket_state.px + SOLAR_SYSTEM[current_soi_index].px - ref_b.px;
+            double ship_rel_py = rocket_state.py + SOLAR_SYSTEM[current_soi_index].py - ref_b.py;
+            double ship_rel_pz = rocket_state.pz + SOLAR_SYSTEM[current_soi_index].pz - ref_b.pz;
+
             double mu_ref = 6.67430e-11 * ref_b.mass;
             double npx, npy, npz, nvx, nvy, nvz;
-            get3DStateAtTime(rocket_state.px, rocket_state.py, rocket_state.pz, 
-                            rocket_state.vx, rocket_state.vy, rocket_state.vz, 
+            get3DStateAtTime(ship_rel_px, ship_rel_py, ship_rel_pz, 
+                            ship_rel_vx, ship_rel_vy, ship_rel_vz, 
                             mu_ref, node.sim_time - rocket_state.sim_time, 
                             npx, npy, npz, nvx, nvy, nvz);
 
@@ -160,10 +166,20 @@ private:
             Vec3 target_dv_world = (frame.prograde * node.delta_v.x + frame.normal * node.delta_v.y + frame.radial * node.delta_v.z);
             node.locked_burn_dir = target_dv_world.normalized();
             
+            // Capture relative target state for high-precision propagation
+            node.snap_rel_px = npx; node.snap_rel_py = npy; node.snap_rel_pz = npz;
+            node.snap_rel_vx = nvx + target_dv_world.x;
+            node.snap_rel_vy = nvy + target_dv_world.y;
+            node.snap_rel_vz = nvz + target_dv_world.z;
+            
+            // Absolute coordinates for legacy compatibility
+            double rbpx, rbpy, rbpz, rbvx, rbvy, rbvz;
+            PhysicsSystem::GetCelestialStateAt(ref_idx, node.sim_time, rbpx, rbpy, rbpz, rbvx, rbvy, rbvz);
             node.snap_px = rbpx + npx; node.snap_py = rbpy + npy; node.snap_pz = rbpz + npz;
-            node.snap_vx = rbvx + nvx + target_dv_world.x;
-            node.snap_vy = rbvy + nvy + target_dv_world.y;
-            node.snap_vz = rbvz + nvz + target_dv_world.z;
+            node.snap_vx = rbvx + node.snap_rel_vx;
+            node.snap_vy = rbvy + node.snap_rel_vy;
+            node.snap_vz = rbvz + node.snap_rel_vz;
+
             node.snap_time = node.sim_time;
             node.snap_valid = true;
         }
@@ -175,21 +191,18 @@ private:
         if (node.snap_valid) {
             int ref_idx = (node.ref_body >= 0) ? node.ref_body : current_soi_index;
             CelestialBody& ref_b = SOLAR_SYSTEM[ref_idx];
+            
             double cur_rel_vx = rocket_state.vx + SOLAR_SYSTEM[current_soi_index].vx - ref_b.vx;
             double cur_rel_vy = rocket_state.vy + SOLAR_SYSTEM[current_soi_index].vy - ref_b.vy;
             double cur_rel_vz = rocket_state.vz + SOLAR_SYSTEM[current_soi_index].vz - ref_b.vz;
             
             double mu_ref = 6.67430e-11 * ref_b.mass;
-            double snap_rel_px = node.snap_px - ref_b.px;
-            double snap_rel_py = node.snap_py - ref_b.py;
-            double snap_rel_pz = node.snap_pz - ref_b.pz;
-            double snap_rel_vx = node.snap_vx - ref_b.vx;
-            double snap_rel_vy = node.snap_vy - ref_b.vy;
-            double snap_rel_vz = node.snap_vz - ref_b.vz;
-            
             double dt_snap = rocket_state.sim_time - node.snap_time;
             double tpx, tpy, tpz, tvx, tvy, tvz;
-            get3DStateAtTime(snap_rel_px, snap_rel_py, snap_rel_pz, snap_rel_vx, snap_rel_vy, snap_rel_vz, 
+            
+            // Propagate target trajectory forward to current time
+            get3DStateAtTime(node.snap_rel_px, node.snap_rel_py, node.snap_rel_pz, 
+                             node.snap_rel_vx, node.snap_rel_vy, node.snap_rel_vz, 
                              mu_ref, dt_snap, tpx, tpy, tpz, tvx, tvy, tvz);
             
             Vec3 rem_v((float)(tvx - cur_rel_vx), (float)(tvy - cur_rel_vy), (float)(tvz - cur_rel_vz));
