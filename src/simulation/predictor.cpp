@@ -121,12 +121,6 @@ void AsyncOrbitPredictor::WorkerLoop() {
             m_context.vx = req.state.abs_vx; m_context.vy = req.state.abs_vy; m_context.vz = req.state.abs_vz;
             m_context.points.clear();
             m_context.point_times.clear();
-            m_context.apsides.clear();
-            m_context.mnv_apsides.clear();
-            m_context.last_r = -1.0;
-            m_context.last_dr = 0.0;
-            m_context.last_mnv_r = -1.0;
-            m_context.last_mnv_dr = 0.0;
             m_context.crashed = false;
             m_context.mnv_crashed = false;
             
@@ -149,12 +143,6 @@ void AsyncOrbitPredictor::WorkerLoop() {
                 m_context.points.erase(m_context.points.begin(), m_context.points.begin() + idx);
                 m_context.point_times.erase(m_context.point_times.begin(), it);
             }
-            
-            // 移除已过去的近地点/远地点标志 (Prune past apsides)
-            m_context.apsides.erase(std::remove_if(m_context.apsides.begin(), m_context.apsides.end(), 
-                [&](const RocketState::Apsis& ap){ return ap.sim_time < t_start - 30.0; }), m_context.apsides.end());
-            m_context.mnv_apsides.erase(std::remove_if(m_context.mnv_apsides.begin(), m_context.mnv_apsides.end(), 
-                [&](const RocketState::Apsis& ap){ return ap.sim_time < t_start - 30.0; }), m_context.mnv_apsides.end());
         }
 
         // 2. 数值积分 (Numerical Integration)
@@ -424,24 +412,6 @@ void AsyncOrbitPredictor::WorkerLoop() {
                         m_context.mnv_points.push_back(mnv_local);
                         m_context.mnv_point_times.push_back(t_sim);
                     }
-
-                    // 变轨轨道近地点/远地点检测 (Maneuver Apsis Detection)
-                    double double_mnv_r = mnv_inertial.length();
-                    double rbx, rby, rbz, rbvx, rbvy, rbvz;
-                    PhysicsSystem::GetCelestialStateAt(req.ref_body, t_sim, rbx, rby, rbz, rbvx, rbvy, rbvz);
-                    double dmnvx = mnv_h_vx - rbvx, dmnvy = mnv_h_vy - rbvy, dmnvz = mnv_h_vz - rbvz;
-                    double mnv_dr = (mnv_inertial.x * dmnvx + mnv_inertial.y * dmnvy + mnv_inertial.z * dmnvz);
-
-                    if (m_context.last_mnv_r > 0) {
-                        if (m_context.last_mnv_dr < 0 && mnv_dr >= 0) {
-                            if (m_context.mnv_apsides.size() < 10) m_context.mnv_apsides.push_back({ false, mnv_local, t_sim, double_mnv_r - req.celestial_snapshot[req.ref_body].radius });
-                        }
-                        else if (m_context.last_mnv_dr > 0 && mnv_dr <= 0) {
-                            if (m_context.mnv_apsides.size() < 10) m_context.mnv_apsides.push_back({ true, mnv_local, t_sim, double_mnv_r - req.celestial_snapshot[req.ref_body].radius });
-                        }
-                    }
-                    m_context.last_mnv_r = double_mnv_r;
-                    m_context.last_mnv_dr = mnv_dr;
                 }
                 last_record_t = t_sim;
             }

@@ -16,8 +16,8 @@
       "args": [],
       "stopAtEntry": false,
       "externalConsole": true,
-      "cwd": "c:/antigravity_code/vertical-landing-test-v1.0/src",
-      "program": "c:/antigravity_code/vertical-landing-test-v1.0/src/build/Debug/outDebug",
+      "cwd": "c:/antigravity_code/RocketSim3D",
+      "program": "c:/antigravity_code/RocketSim3D/build/Debug/outDebug",
       "MIMode": "gdb",
       "miDebuggerPath": "gdb",
       "setupCommands": [

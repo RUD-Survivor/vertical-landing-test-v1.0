@@ -1,3 +1,0 @@
-C:/antigravity_code/RocketSim3D/build/_deps/glfw-subbuild/CMakeFiles/glfw-populate.dir
-C:/antigravity_code/RocketSim3D/build/_deps/glfw-subbuild/CMakeFiles/ALL_BUILD.dir
-C:/antigravity_code/RocketSim3D/build/_deps/glfw-subbuild/CMakeFiles/ZERO_CHECK.dir

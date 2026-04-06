@@ -20,7 +20,6 @@ public:
     FlightHUD hud;
     InputRouter input;
     double ws_d = 0.001;
-    double ro_x = 0, ro_y = 0, ro_z = 0; // Floating origin (world-space rendering center)
     // Shared between update() and render()
     Mat4 viewMat;
     Mat4 macroProjMat;
@@ -1732,9 +1731,9 @@ else {
             hud_ctx.rocketUp = &rocketUp;
             hud_ctx.localNorth = &localNorth;
             hud_ctx.localRight = &localRight;
-            hud_ctx.ro_x = ro_x;
-            hud_ctx.ro_y = ro_y;
-            hud_ctx.ro_z = ro_z;
+            hud_ctx.ro_x = rocket_state.px;
+            hud_ctx.ro_y = rocket_state.py;
+            hud_ctx.ro_z = rocket_state.pz;
             hud_ctx.viewMat = viewMat;
             hud_ctx.macroProjMat = macroProjMat;
             hud_ctx.camEye_rel = camEye_rel;
