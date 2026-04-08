@@ -11,6 +11,8 @@
 #include "input/input_router.h"
 #include "math/math3d.h"
 #include "render/HUD_system.h"
+#include <entt/entt.hpp>
+
 
 // Any other includes you need
 #include "flight_input_system.h"
@@ -32,9 +34,10 @@ public:
     // Shared between update() and render()
     double mouse_x = 0, mouse_y = 0;
     bool lmb = false, lmb_prev = false, rmb = false;
-    RocketState rocket_state;
-    ControlInput control_input;
-    RocketConfig rocket_config;
+    // ECS World and Entities
+    entt::registry world;
+    entt::entity rocket_entity;
+
     CameraDirector cam;
     Mesh earthMesh;
     Mesh ringMesh;
@@ -62,6 +65,14 @@ public:
     bool show_clouds = true;
     void onEnter() override {
         GameContext& ctx = GameContext::getInstance();
+        
+        // --- 1. Initialize ECS Entity ---
+        rocket_entity = world.create();
+        // Emplace default components
+        auto& rocket_state = world.emplace<RocketState>(rocket_entity);
+        auto& rocket_config = world.emplace<RocketConfig>(rocket_entity);
+        auto& control_input = world.emplace<ControlInput>(rocket_entity);
+
         earthMesh = MeshGen::sphere(256, 512, 1.0f);
         ringMesh = MeshGen::ring(128, 1.11f, 2.35f);
         rocketBody = MeshGen::cylinder(32, 1.0f, 1.0f);
@@ -184,6 +195,10 @@ else {
 
     void update(double dt) override {
         real_dt = dt;
+        auto& rocket_state = world.get<RocketState>(rocket_entity);
+        auto& rocket_config = world.get<RocketConfig>(rocket_entity);
+        auto& control_input = world.get<ControlInput>(rocket_entity);
+
         const RocketAssembly& assembly = GameContext::getInstance().launch_assembly;
         Renderer3D* r3d = GameContext::getInstance().renderer3d;
         // Limit spikes
@@ -255,6 +270,10 @@ else {
         }
     }
     void render() override {
+        auto& rocket_state = world.get<RocketState>(rocket_entity);
+        auto& rocket_config = world.get<RocketConfig>(rocket_entity);
+        auto& control_input = world.get<ControlInput>(rocket_entity);
+
         Renderer* renderer = GameContext::getInstance().renderer2d;
         Renderer3D* r3d = GameContext::getInstance().renderer3d;
         const RocketAssembly& assembly = GameContext::getInstance().launch_assembly;

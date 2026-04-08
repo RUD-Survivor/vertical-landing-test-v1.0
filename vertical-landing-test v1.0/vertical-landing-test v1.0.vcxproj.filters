@@ -18,9 +18,6 @@
     <ClCompile Include="..\vendor\glad\glad.c">
       <Filter>源文件</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\main.cpp">
-      <Filter>源文件</Filter>
-    </ClCompile>
     <ClCompile Include="..\src\physics\physics_system.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
@@ -40,6 +37,12 @@
       <Filter>源文件</Filter>
     </ClCompile>
     <ClCompile Include="..\src\render\stb_impl.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="testECS.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\main.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
   </ItemGroup>

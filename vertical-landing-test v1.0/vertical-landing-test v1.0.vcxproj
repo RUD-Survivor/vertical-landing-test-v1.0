@@ -19,8 +19,8 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="..\vendor\glad\glad.c" />
     <ClCompile Include="..\src\main.cpp" />
+    <ClCompile Include="..\vendor\glad\glad.c" />
     <ClCompile Include="..\src\physics\physics_system.cpp" />
     <ClCompile Include="..\src\control\control_system.cpp" />
     <ClCompile Include="..\src\simulation\stage_manager.cpp" />
@@ -28,6 +28,7 @@
     <ClCompile Include="..\src\simulation\center_visualizer.cpp" />
     <ClCompile Include="..\src\simulation\predictor.cpp" />
     <ClCompile Include="..\src\render\stb_impl.cpp" />
+    <ClCompile Include="testECS.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\src\physics\physics_system.h" />
