@@ -42,8 +42,8 @@ public:
     float zoom_chase   = 1.0f;   // Orbit/Chase 缩放
     float zoom_pan     = 1.0f;   // Panorama 独立缩放
 
-    // Panorama 焦点天体
-    int focus_target = 3; // 默认 Earth
+    // Panorama 焦点目标 (-1 = 火箭, 0+ = SOLAR_SYSTEM 索引)
+    int focus_target = -1; // 默认锁定为火箭焦点
 
     // Free 模式
     double free_px = 0, free_py = 0, free_pz = 0;
@@ -71,8 +71,18 @@ public:
     // ============================================
     void cycleFocusTarget(int delta) {
         int n = (int)SOLAR_SYSTEM.size();
-        if (n == 0) return;
-        focus_target = ((focus_target + delta) % n + n) % n;
+        // 选项范围为 [-1, n-1]，总共有 n+1 个焦点可选
+        int total = n + 1;
+        int current = focus_target + 1; // 映射到 [0, n] 区间进行模运算
+        current = (current + delta % total + total) % total;
+        focus_target = current - 1; // 映射回 [-1, n-1]
+
+        // 打印当前焦点名称到控制台以便调试
+        if (focus_target == -1) {
+            std::cout << ">> Panorama Focus: Rocket (火箭)" << std::endl;
+        } else {
+            std::cout << ">> Panorama Focus: " << SOLAR_SYSTEM[focus_target].name << std::endl;
+        }
     }
 
     // ============================================
@@ -215,11 +225,14 @@ public:
         double r_py = rocket_state.abs_py * ws_d;
         double r_pz = rocket_state.abs_pz * ws_d;
 
-        if (mode == ORBIT || mode == CHASE) {
+        // 确定浮动原点 (Floating Origin)
+        // ORBIT, CHASE 以及 焦点为火箭的全景模式 均以火箭为原点以保证近距离渲染精度
+        if (mode == ORBIT || mode == CHASE || (mode == PANORAMA && focus_target == -1)) {
             result.origin_x = r_px;
             result.origin_y = r_py;
             result.origin_z = r_pz;
         } else if (mode == PANORAMA) {
+            // 焦点为天体时的全景模式，以天体中心为原点（此时火箭在远方可能由于精度抖动而消失，但天体显示极其稳定）
             result.origin_x = SOLAR_SYSTEM[focus_target].px * ws_d;
             result.origin_y = SOLAR_SYSTEM[focus_target].py * ws_d;
             result.origin_z = SOLAR_SYSTEM[focus_target].pz * ws_d;
@@ -289,16 +302,31 @@ public:
             result.up = rocketUp;
 
         } else if (mode == PANORAMA) {
-            float base_pan_radius = (float)SOLAR_SYSTEM[focus_target].radius * (float)ws_d;
+            Vec3 renderFocus;
+            float base_pan_radius;
+
+            if (focus_target == -1) {
+                // 情况 A: 焦点锁定在火箭上
+                renderFocus = renderRocketPos;
+                base_pan_radius = rh * 2.0f; // 以火箭渲染高度为基础参考半径
+            } else {
+                // 情况 B: 焦点锁定在某个星球上
+                base_pan_radius = (float)SOLAR_SYSTEM[focus_target].radius * (float)ws_d;
+                renderFocus = Vec3((float)(SOLAR_SYSTEM[focus_target].px * ws_d - result.origin_x),
+                                   (float)(SOLAR_SYSTEM[focus_target].py * ws_d - result.origin_y),
+                                   (float)(SOLAR_SYSTEM[focus_target].pz * ws_d - result.origin_z));
+            }
+
+            // 环境参考尺寸
             float earth_r = (float)SOLAR_SYSTEM[current_soi_index].radius * (float)ws_d;
             float sun_radius = (float)SOLAR_SYSTEM[0].radius * (float)ws_d;
+            
+            // 计算相机观察距离：统一火箭与星球的基础观察尺度
+            // 采用 [目标物体参考半径*4] 与 [当前所在星球半径*2] 的较大值，以确保全景模式的宏大感
             float pan_dist = fmaxf(base_pan_radius * 4.0f, earth_r * 2.0f) * zoom_pan;
-            if (focus_target == 0) pan_dist = sun_radius * 4.0f * zoom_pan;
 
+            // 计算最终位置
             Vec3 cam_offset = quat.rotate(Vec3(0.0f, 0.0f, pan_dist));
-            Vec3 renderFocus((float)(SOLAR_SYSTEM[focus_target].px * ws_d - result.origin_x),
-                             (float)(SOLAR_SYSTEM[focus_target].py * ws_d - result.origin_y),
-                             (float)(SOLAR_SYSTEM[focus_target].pz * ws_d - result.origin_z));
             result.eye = renderFocus + cam_offset;
             result.target = renderFocus;
             result.up = quat.rotate(Vec3(0.0f, 1.0f, 0.0f));
