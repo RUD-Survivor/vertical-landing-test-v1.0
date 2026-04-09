@@ -219,10 +219,134 @@ struct ControlInput {
     double torque_cmd_roll = 0.0; // Roll torque command
 };
 
+// ==========================================
+// ECS 组件定义 (ECS Components)
+// ------------------------------------------
+// 这些是将要取代原来庞大 RocketState 的细分组件。
+// 它们是纯数据结构（POD），可独立作为实体组装积木。
+// ==========================================
+
+// 1. 位置与变换组件 (Transform Component)
+struct TransformComponent {
+    double px = 0.0, py = EARTH_RADIUS + 0.1, pz = 0.0; // 3D 位置 (m)
+    double abs_px = 0.0, abs_py = 0.0, abs_pz = 0.0;    // 绝对坐标 (以太阳为中心)
+    double surf_px = 0.0, surf_py = EARTH_RADIUS, surf_pz = 0.0; // 地表坐标
+    
+    // 发射场参考
+    double launch_latitude = 28.5;  
+    double launch_longitude = -80.6;
+    double launch_site_px = 0.0, launch_site_py = EARTH_RADIUS, launch_site_pz = 0.0;
+};
+
+// 2. 速度与动力学组件 (Velocity Component)
+struct VelocityComponent {
+    double vx = 0.0, vy = 0.0, vz = 0.0;       // 3D 速度 (m/s)
+    double abs_vx = 0.0, abs_vy = 0.0, abs_vz = 0.0; // 绝对速度
+    double acceleration = 0.0;                 // 当前总加速度 (m/s^2)
+    double vertical_velocity = 0.0;            // 垂直分量
+    double horizontal_velocity = 0.0;          // 水平分量
+};
+
+// 3. 姿态组件 (Attitude Component)
+struct AttitudeComponent {
+    Quat attitude;           // 四元数：描述火箭在 3D 空间里的朝向
+    bool initialized = false;
+    double angle = 0.0;      // 偏航角
+    double ang_vel = 0.0;    // 偏航角速度
+    double angle_z = 0.0;    // 俯仰角
+    double ang_vel_z = 0.0;
+    double angle_roll = 0.0; // 滚转角
+    double ang_vel_roll = 0.0;
+};
+
+// 4. 燃料与发动机状态组件 (Propulsion Component)
+struct PropulsionComponent {
+    double fuel = 0.0;                  // 当前剩余可用燃料 (kg)
+    int current_stage = 0;              // 指向当前活跃的级（0 是底部，越往上越大）
+    int total_stages = 1;               // 火箭总共有几段
+    std::vector<double> stage_fuels;    // 每一级各自还剩多少燃料
+    double jettisoned_mass = 0.0;       // 已经扔掉的空壳总重量 (kg)
+    double fuel_consumption_rate = 0.0; // 实时燃料流速 (kg/s)
+    double thrust_power = 0.0;          // 当前推力百分比或功率 (0~1)
+};
+
+// 5. 遥测与计算环境组件 (Telemetry Component)
+struct TelemetryComponent {
+    double sim_time = 0.0;          // 游戏内的总时间 (s)
+    double altitude = 0.0;          // 海拔高度 (m)
+    double terrain_altitude = 0.0;  // 地形高度 (m)
+    double velocity = 0.0;          // 垂直速度 (m/s)
+    double local_vx = 0.0;          // 水平平移速度 (m/s)
+    double solar_occlusion = 1.0;   // 光照遮挡率 (1.0 = 全阳光，0.0 = 阴影)
+};
+
+// 6. 任务与自动驾驶组件 (Mission & Guidance Component)
+struct GuidanceComponent {
+    MissionState status = PRE_LAUNCH; // 任务大状态
+    std::string mission_msg = "SYSTEM READY";
+    int mission_phase = 0;           // 任务细分阶段
+    double mission_timer = 0.0;      // 阶段计时器
+    bool auto_mode = true;           // 自动驾驶开关
+    bool sas_active = true;          // 姿态稳定开关
+    bool rcs_active = true;          // 姿态发动机 (RCS) 开关
+    SASMode sas_mode = SAS_STABILITY;
+    Vec3 sas_target_vec = {0, 0, 0}; 
+    double leg_deploy_progress = 0.0;
+    bool suicide_burn_locked = false; // 是否已经锁定“自杀点火”逻辑
+    bool show_absolute_time = false;  // 是否显示绝对时间 (UT)
+
+    // Autopilot PID controllers
+    PID pid_vert = {0.5, 0.001, 1.2};       
+    PID pid_pos = {0.001, 0.0, 0.2};        
+    PID pid_att = {40000.0, 0.0, 100000.0}; 
+    PID pid_att_z = {40000.0, 0.0, 100000.0};
+    PID pid_att_roll = {40000.0, 0.0, 100000.0};
+};
+
+// 7. 轨道几何与异步预测组件 (Orbit Component)
+struct OrbitComponent {
+    struct Apsis {
+        bool is_apoapsis;
+        Vec3 local_pos;   
+        double sim_time;
+        double altitude;
+    };
+
+    // 轨迹预测结果 (当前轨道)
+    std::vector<Vec3> predicted_path;
+    std::vector<Apsis> predicted_apsides;
+    std::vector<Vec3> predicted_ground_track;
+
+    // 轨迹预测结果 (变轨后轨道)
+    std::vector<Vec3> predicted_mnv_path;
+    std::vector<Apsis> predicted_mnv_apsides;
+    std::vector<Vec3> predicted_mnv_ground_track;
+    
+    // 异步预测同步锁
+    mutable std::shared_ptr<std::mutex> path_mutex = std::make_shared<std::mutex>();
+    double last_prediction_sim_time = -1.0;
+    bool prediction_in_progress = false;
+};
+
+// 8. 变轨计划组件 (Maneuver Component)
+struct ManeuverComponent {
+    std::vector<ManeuverNode> maneuvers;
+    int selected_maneuver_index = -1;
+};
+
+// 9. 视觉特效组件 (VFX Component)
+struct VFXComponent {
+    static const int MAX_SMOKE = 300;
+    SmokeParticle smoke[MAX_SMOKE];
+    int smoke_idx = 0;
+};
+
 // Dynamic Rocket State (updated by physics)
 // 实时火箭状态 (Rocket State)
 // 这是整个物理模拟中最核心的结构体，记录了火箭在这一秒钟里的所有状态。
+// [ECS 过渡阶段] 这个结构体将作为 legacy 桥接数据长期存在，直到它的内容被完全掏空。
 struct RocketState {
+
     // 1. 燃料与分级状态
     double fuel = 0.0;                  // 当前剩余可用燃料 (kg)
     int current_stage = 0;              // 指向当前活跃的级（0 是底部，越往上越大）

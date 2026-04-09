@@ -1,0 +1,47 @@
+**********************************************************************
+** Visual Studio 2026 Developer Command Prompt v18.2.2
+** Copyright (c) 2025 Microsoft Corporation
+**********************************************************************
+[DEBUG:ext\vcvars.bat] Found potential v145 version file: 'Microsoft.VCToolsVersion.VC.14.50.18.0.txt'
+[DEBUG:ext\vcvars.bat] Testing v145 version file: 'Microsoft.VCToolsVersion.VC.14.50.18.0.txt'
+[vcvarsall.bat] Environment initialized for: 'x64'
+用于 x64 的 Microsoft (R) C/C++ 优化编译器 19.50.35724 版
+版权所有(C) Microsoft Corporation。保留所有权利。
+
+main.cpp
+C:\antigravity_code\RocketSim3D\src\render/HUD_system.h(1472): warning C4838: 从“double”转换到“float”需要收缩转换
+C:\antigravity_code\RocketSim3D\src\render/HUD_system.h(1472): warning C4838: 从“double”转换到“float”需要收缩转换
+C:\antigravity_code\RocketSim3D\src\render/HUD_system.h(1472): warning C4838: 从“double”转换到“float”需要收缩转换
+physics_system.cpp
+control_system.cpp
+stage_manager.cpp
+center_calculator.cpp
+center_visualizer.cpp
+predictor.cpp
+正在生成代码...
+正在编译...
+glad.c
+正在生成代码...
+正在编译...
+stb_impl.cpp
+正在生成代码...
+Microsoft (R) Incremental Linker Version 14.50.35724.0
+Copyright (C) Microsoft Corporation.  All rights reserved.
+
+/out:main.exe 
+/LIBPATH:dependencires/lib 
+glfw3.lib 
+opengl32.lib 
+user32.lib 
+gdi32.lib 
+shell32.lib 
+/OUT:stellar_ascend.exe 
+main.obj 
+physics_system.obj 
+control_system.obj 
+stage_manager.obj 
+center_calculator.obj 
+center_visualizer.obj 
+predictor.obj 
+glad.obj 
+stb_impl.obj 

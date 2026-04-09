@@ -19,11 +19,13 @@
 class RocketVisuals {
 public:
     void render(Renderer3D* r3d, const CameraDirector& cam, float cam_dist, float rh, float aspect,
-                const RocketState& rocket_state, const RocketConfig& rocket_config, const RocketAssembly& assembly,
+                entt::registry& registry, entt::entity entity, const RocketAssembly& assembly,
                 const Vec3& renderRocketBase, const Quat& rocketQuat, double ws_d,
                 Mesh& rocketBody, Mesh& rocketNose, Mesh& rocketBox,
                 const Mat4& viewMat, const Vec3& camEye_rel)
     {
+        auto& rocket_state = registry.get<RocketState>(entity);
+        auto& rocket_config = registry.get<RocketConfig>(entity);
         // 微观近景火箭专用的相机矩阵 (极近裁剪面，用于精确绘制 40米的火箭)
         if (cam.mode != 2) {
             // 在近景模式下，清空深度缓存，将火箭置于绝对顶层，杜绝共用一套深度衰减。这里有点问题，被地形遮挡也能显示

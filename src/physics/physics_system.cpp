@@ -444,23 +444,28 @@ Quat GetFrameRotation(int ref_mode, int ref_body, int sec_body, double t) {
 // 如果飞船飞离了地球太远，进入了月球或太阳的引力场，
 // 我们就需要切换“参照系”，让坐标计算更稳定、更符合直觉。
 // 这个逻辑让模拟器能够支持真正的行星际旅行（Interplanetary Travel）。
-void CheckSOI_Transitions(RocketState& state) {
+void CheckSOI_Transitions(entt::registry& registry, entt::entity entity) {
+
+    auto& trans = registry.get<TransformComponent>(entity);
+    auto& vel = registry.get<VelocityComponent>(entity);
+    auto& tele = registry.get<TelemetryComponent>(entity);
+
     if (SOLAR_SYSTEM.empty()) return;
 
     // 获取当前中心天体
     CelestialBody& current_body = SOLAR_SYSTEM[current_soi_index];
     // 更新飞船在全太阳系（赫利奥西斯坐标系 / 日心系）下的绝对坐标
-    state.abs_px = current_body.px + state.px;
-    state.abs_py = current_body.py + state.py;
-    state.abs_pz = current_body.pz + state.pz;
+    trans.abs_px = current_body.px + trans.px;
+    trans.abs_py = current_body.py + trans.py;
+    trans.abs_pz = current_body.pz + trans.pz;
     
     // 检查我们是否进入了任何星球的 SOI
     int best_soi = 0; // 默认退回到太阳 (太阳是最终的兜底 SOI)
     for (size_t i = 1; i < SOLAR_SYSTEM.size(); i++) {
         CelestialBody& b = SOLAR_SYSTEM[i];
-        double dx = state.abs_px - b.px;
-        double dy = state.abs_py - b.py;
-        double dz = state.abs_pz - b.pz;
+        double dx = trans.abs_px - b.px;
+        double dy = trans.abs_py - b.py;
+        double dz = trans.abs_pz - b.pz;
         double dist = std::sqrt(dx*dx + dy*dy + dz*dz);
         // 如果距离小于该星球的 SOI 半径，说明我们被它成功“俘获”了
         if (dist < b.soi_radius) {
@@ -472,32 +477,37 @@ void CheckSOI_Transitions(RocketState& state) {
     if (best_soi != current_soi_index) {
         CelestialBody& new_body = SOLAR_SYSTEM[best_soi];
         // 计算当前在日心系下的绝对速度
-        double h_vx = current_body.vx + state.vx;
-        double h_vy = current_body.vy + state.vy;
-        double h_vz = current_body.vz + state.vz;
+        double h_vx = current_body.vx + vel.vx;
+        double h_vy = current_body.vy + vel.vy;
+        double h_vz = current_body.vz + vel.vz;
         
         // 关键步骤：重新计算相对于新中心天体的位置和速度
         // px_new = px_abs - px_new_body
-        state.px = state.abs_px - new_body.px;
-        state.py = state.abs_py - new_body.py;
-        state.pz = state.abs_pz - new_body.pz;
+        trans.px = trans.abs_px - new_body.px;
+        trans.py = trans.abs_py - new_body.py;
+        trans.pz = trans.abs_pz - new_body.pz;
         // vx_new = vx_abs - vx_new_body
-        state.vx = h_vx - new_body.vx;
-        state.vy = h_vy - new_body.vy;
-        state.vz = h_vz - new_body.vz;
+        vel.vx = h_vx - new_body.vx;
+        vel.vy = h_vy - new_body.vy;
+        vel.vz = h_vz - new_body.vz;
         
         current_soi_index = best_soi;
         std::cout << ">> [SOI TRANSITION] ENTERED " << new_body.name << " SOI" << std::endl;
     }
 }
 
-double CalculateSolarOcclusion(const RocketState& state) {
+double CalculateSolarOcclusion(entt::registry& registry, entt::entity entity) {
+
+    auto& trans = registry.get<TransformComponent>(entity);
+    auto& vel = registry.get<VelocityComponent>(entity);
+    auto& tele = registry.get<TelemetryComponent>(entity);
+
     if (SOLAR_SYSTEM.empty()) return 1.0;
     
     double min_occlusion = 1.0;
     
     // Ray from rocket to Sun (Sun is at 0,0,0)
-    double dx = -state.abs_px, dy = -state.abs_py, dz = -state.abs_pz;
+    double dx = -trans.abs_px, dy = -trans.abs_py, dz = -trans.abs_pz;
     double dist_to_sun = std::sqrt(dx*dx + dy*dy + dz*dz);
     double dir_x = dx / dist_to_sun;
     double dir_y = dy / dist_to_sun;
@@ -506,9 +516,9 @@ double CalculateSolarOcclusion(const RocketState& state) {
     for (size_t i = 1; i < SOLAR_SYSTEM.size(); i++) {
         CelestialBody& b = SOLAR_SYSTEM[i];
         
-        double bx = b.px - state.abs_px;
-        double by = b.py - state.abs_py;
-        double bz = b.pz - state.abs_pz;
+        double bx = b.px - trans.abs_px;
+        double by = b.py - trans.abs_py;
+        double bz = b.pz - trans.abs_pz;
         
         double proj = bx * dir_x + by * dir_y + bz * dir_z;
         if (proj > 0 && proj < dist_to_sun) {
@@ -557,13 +567,18 @@ double get_air_density(double h) {
 
 // 获取轨道核心参数：远拱点 (AP) 和近拱点 (PE)
 // 这个函数实现了如何从飞船的“状态向量”(位置 r, 速度 v) 提取出“轨道根数”。
-void getOrbitParams(const RocketState& state, double& apoapsis, double& periapsis) {
+void getOrbitParams(entt::registry& registry, entt::entity entity, double& apoapsis, double& periapsis) {
+
+    auto& trans = registry.get<TransformComponent>(entity);
+    auto& vel = registry.get<VelocityComponent>(entity);
+    auto& tele = registry.get<TelemetryComponent>(entity);
+
     if (SOLAR_SYSTEM.empty()) return;
     CelestialBody& current_body = SOLAR_SYSTEM[current_soi_index];
     
     // 1. 获取距离 r 和速度 v 的模长 (Magnitude)
-    double r = std::sqrt(state.px * state.px + state.py * state.py + state.pz * state.pz);
-    double v_sq = state.vx * state.vx + state.vy * state.vy + state.vz * state.vz;
+    double r = std::sqrt(trans.px * trans.px + trans.py * trans.py + trans.pz * trans.pz);
+    double v_sq = vel.vx * vel.vx + vel.vy * vel.vy + vel.vz * vel.vz;
     double mu = G_const * current_body.mass; // 标准引力参数
 
     // 2. 计算比轨道能量 (Specific Orbital Energy)
@@ -574,9 +589,9 @@ void getOrbitParams(const RocketState& state, double& apoapsis, double& periapsi
     double energy = v_sq / 2.0 - mu / r; 
     
     // 3. 计算比角动量向量 (Specific Angular Momentum): h = r x v
-    double hx = state.py * state.vz - state.pz * state.vy;
-    double hy = state.pz * state.vx - state.px * state.vz;
-    double hz = state.px * state.vy - state.py * state.vx;
+    double hx = trans.py * vel.vz - trans.pz * vel.vy;
+    double hy = trans.pz * vel.vx - trans.px * vel.vz;
+    double hz = trans.px * vel.vy - trans.py * vel.vx;
     double h_sq = hx * hx + hy * hy + hz * hz;
 
     // 4. 计算离心率 e (Eccentricity)
@@ -596,24 +611,37 @@ void getOrbitParams(const RocketState& state, double& apoapsis, double& periapsi
 
 // 核心步进更新函数 (Update)
 // 每一帧（通常是 0.02秒）都会进入这个函数，它是模拟器最忙碌的地方。
-void Update(RocketState& state, const RocketConfig& config, const ControlInput& input, double dt) {
+void Update(entt::registry& registry, entt::entity entity, double dt) {
+
+    auto& trans = registry.get<TransformComponent>(entity);
+    auto& vel = registry.get<VelocityComponent>(entity);
+    auto& att = registry.get<AttitudeComponent>(entity);
+    auto& prop = registry.get<PropulsionComponent>(entity);
+    auto& tele = registry.get<TelemetryComponent>(entity);
+    auto& guid = registry.get<GuidanceComponent>(entity);
+    auto& orb = registry.get<OrbitComponent>(entity);
+    auto& mnv = registry.get<ManeuverComponent>(entity);
+    auto& vfx = registry.get<VFXComponent>(entity);
+    const auto& config = registry.get<RocketConfig>(entity);
+    const auto& input = registry.get<ControlInput>(entity);
+
     if (SOLAR_SYSTEM.empty()) return;
     
     // 累加模拟时间。
-    state.sim_time += dt;
+    tele.sim_time += dt;
     // 如果任务已经开始（不是待发射状态），更新任务计时器。
-    if (state.status != PRE_LAUNCH) {
-        state.mission_timer += dt;
+    if (guid.status != PRE_LAUNCH) {
+        guid.mission_timer += dt;
     }
     
     // 1. 同步所有天体的位置
     // 确保我们用于物理计算的星球位置是当前 sim_time 的最新值。
-    UpdateCelestialBodies(state.sim_time);
+    UpdateCelestialBodies(tele.sim_time);
     
     // 2. 检查引力范围转换 (SOI Transition)
     // 非常重要：在每一帧开始前检查 SOI。
     // 这保证了后续所有海拔、引力、阻力计算都基于正确的参考星体。
-    CheckSOI_Transitions(state);
+    CheckSOI_Transitions(registry, entity);
     
     // 获取最新的中心天体引用
     CelestialBody& current_body = SOLAR_SYSTEM[current_soi_index];
@@ -621,91 +649,91 @@ void Update(RocketState& state, const RocketConfig& config, const ControlInput& 
     // 3. 处理地面逻辑 (Ground Handling)
     // 如果飞船在地面上（待发射或已着陆），我们需要让它随星球一起旋转。
     bool on_ground = false;
-    if (state.status == PRE_LAUNCH || state.status == LANDED) {
+    if (guid.status == PRE_LAUNCH || guid.status == LANDED) {
         if (input.throttle > 0.01) {
             // 如果推力足够，切换到上升状态
-            if (state.status == PRE_LAUNCH) state.mission_msg = "LIFTOFF!";
-            else state.mission_msg = "TOUCHDOWN TO LIFTOFF!";
-            state.status = ASCEND;
+            if (guid.status == PRE_LAUNCH) guid.mission_msg = "LIFTOFF!";
+            else guid.mission_msg = "TOUCHDOWN TO LIFTOFF!";
+            guid.status = ASCEND;
         } else {
             on_ground = true;
             // 计算星球当前的旋转角度 (自转 + 轴倾角)
-            double theta = current_body.prime_meridian_epoch + (state.sim_time * 2.0 * PI / current_body.rotation_period);
+            double theta = current_body.prime_meridian_epoch + (tele.sim_time * 2.0 * PI / current_body.rotation_period);
             Quat rot = Quat::fromAxisAngle(Vec3(0, 0, 1), (float)theta);
             Quat tilt = Quat::fromAxisAngle(Vec3(1, 0, 0), (float)current_body.axial_tilt);
             Quat full_rot = tilt * rot;
             
             // 地面坐标同步：将地表相对坐标转换为宇宙绝对惯性坐标
-            Vec3 local_pos((float)state.surf_px, (float)state.surf_py, (float)state.surf_pz);
+            Vec3 local_pos((float)trans.surf_px, (float)trans.surf_py, (float)trans.surf_pz);
             Vec3 world_pos = full_rot.rotate(local_pos);
-            state.px = (double)world_pos.x;
-            state.py = (double)world_pos.y;
-            state.pz = (double)world_pos.z;
+            trans.px = (double)world_pos.x;
+            trans.py = (double)world_pos.y;
+            trans.pz = (double)world_pos.z;
             
             // 计算地面的线速度 (v = omega x r)
             double omega = (2.0 * PI) / current_body.rotation_period;
             Vec3 ang_vel_world = full_rot.rotate(Vec3(0, 0, (float)omega));
             Vec3 world_v = ang_vel_world.cross(world_pos);
-            state.vx = (double)world_v.x;
-            state.vy = (double)world_v.y;
-            state.vz = (double)world_v.z;
+            vel.vx = (double)world_v.x;
+            vel.vy = (double)world_v.y;
+            vel.vz = (double)world_v.z;
             
-            state.altitude = state.terrain_altitude;
-            state.velocity = 0; state.local_vx = 0;
+            tele.altitude = tele.terrain_altitude;
+            tele.velocity = 0; tele.local_vx = 0;
         }
     }
     // 如果已经坠毁，停止物理模拟
-    if (state.status == CRASHED) {
+    if (guid.status == CRASHED) {
         return;
     }
 
     // 4. 基础状态刷新
     // 计算相对于星体中心的高度
-    double r_3d = std::sqrt(state.px * state.px + state.py * state.py + state.pz * state.pz);
-    state.altitude = r_3d - current_body.radius + config.bounds_bottom;
+    double r_3d = std::sqrt(trans.px * trans.px + trans.py * trans.py + trans.pz * trans.pz);
+    tele.altitude = r_3d - current_body.radius + config.bounds_bottom;
     
     // 更新日食/遮挡状态
-    state.solar_occlusion = CalculateSolarOcclusion(state);
+    tele.solar_occlusion = CalculateSolarOcclusion(registry, entity);
 
     // B. Force Analysis
     // 5. 受力分析 (Force Analysis)
     // 飞船的总质量 = 结构质量 + 当前燃料质量 + 后方级段的质量
-    double total_mass = config.dry_mass + state.fuel + config.upper_stages_mass;
+    double total_mass = config.dry_mass + prop.fuel + config.upper_stages_mass;
 
     // 6. 推力计算 (Thrust Calculation)
-    state.thrust_power = 0;
-    if (state.fuel > 0) {
+    prop.thrust_power = 0;
+    if (prop.fuel > 0) {
         // 真空推力 = ISP * g0 * 质量流量 (cosrate)
         double max_thrust = config.specific_impulse * G0 * config.cosrate;
         // 压力损失：在稠密大气中，喷口内外的压力差会降低实际推力。
         // 公式：F_actual = F_vacuum - P_atm * A_nozzle
-        double pressure_loss = get_pressure(state.altitude) * config.nozzle_area;
+        double pressure_loss = get_pressure(tele.altitude) * config.nozzle_area;
         double current_thrust = input.throttle * max_thrust - pressure_loss;
         
         if (current_thrust < 0) current_thrust = 0;
-        state.thrust_power = current_thrust;
+        prop.thrust_power = current_thrust;
 
         // 计算质量流量 (m_dot)：每秒消耗多少燃料
         // m_dot = F / (Isp * g0)
-        double m_dot = state.thrust_power / (config.specific_impulse * std::max(1e-6, G0));
-        state.fuel -= m_dot * dt;
+        double m_dot = prop.thrust_power / (config.specific_impulse * std::max(1e-6, G0));
+        prop.fuel -= m_dot * dt;
         
         // 分级燃料同步
-        if (state.current_stage < (int)state.stage_fuels.size()) {
-            state.stage_fuels[state.current_stage] = state.fuel;
+        if (prop.current_stage < (int)prop.stage_fuels.size()) {
+            prop.stage_fuels[prop.current_stage] = prop.fuel;
         }
-        state.fuel_consumption_rate = m_dot; 
+        prop.fuel_consumption_rate = m_dot; 
     } else {
-        state.thrust_power = 0;
-        state.fuel_consumption_rate = 0;
+        prop.thrust_power = 0;
+        prop.fuel_consumption_rate = 0;
     }
 
     // 7. 3D 几何坐标轴更新 (Geometric Frame)
     // 根据飞船相对于星球中心的当前位置，确定“本地上方向”。
-    double r_mag_geo = std::sqrt(state.px*state.px + state.py*state.py + state.pz*state.pz);
-    double Ux = state.px / r_mag_geo;
-    double Uy = state.py / r_mag_geo;
-    double Uz = state.pz / r_mag_geo;
+    double r_mag_geo = std::sqrt(trans.px*trans.px + trans.py*trans.py + trans.pz*trans.pz);
+    double Ux = trans.px / r_mag_geo;
+    double Uy = trans.py / r_mag_geo;
+    double Uz = trans.pz / r_mag_geo;
 
     // 计算本地坐标轴 (Up, Right, North)，用于后续的姿态控制辅助计算。
     double r_xy_mag_geo = std::sqrt(Ux*Ux + Uy*Uy);
@@ -726,7 +754,7 @@ void Update(RocketState& state, const RocketConfig& config, const ControlInput& 
     // 8. 姿态角更新 (3D 姿态四元数)
     // 飞船的方向不再使用简单的欧拉角（Yaw, Pitch, Roll），
     // 而是使用四元数 (Quaternion)，这可以完全避免“万向节死锁”问题。
-    if (!state.attitude_initialized || state.status == PRE_LAUNCH) {
+    if (!att.initialized || guid.status == PRE_LAUNCH) {
         // 初始对准：让火箭垂直于地面。
         Vec3 initialUp = Vec3((float)Ux, (float)Uy, (float)Uz);
         Vec3 defaultUp(0, 1, 0);
@@ -739,35 +767,35 @@ void Update(RocketState& state, const RocketConfig& config, const ControlInput& 
             // 翻转 180 度的情况
             base = Quat::fromAxisAngle(Vec3(1, 0, 0), (float)PI);
         }
-        Quat q_pitch = Quat::fromAxisAngle(Vec3(1, 0, 0), (float)state.angle); 
-        Quat q_yaw = Quat::fromAxisAngle(Vec3(0, 0, 1), (float)state.angle_z);
-        Quat q_roll = Quat::fromAxisAngle(Vec3(0, 1, 0), (float)state.angle_roll);
-        state.attitude = base * q_yaw * q_pitch * q_roll;
-        state.attitude_initialized = true;
+        Quat q_pitch = Quat::fromAxisAngle(Vec3(1, 0, 0), (float)att.angle); 
+        Quat q_yaw = Quat::fromAxisAngle(Vec3(0, 0, 1), (float)att.angle_z);
+        Quat q_roll = Quat::fromAxisAngle(Vec3(0, 1, 0), (float)att.angle_roll);
+        att.attitude = base * q_yaw * q_pitch * q_roll;
+        att.initialized = true;
     }
 
     // 应用本地角速度：更新四元数
     // 四元数的变化率 dq/dt = 0.5 * q * omega
-    Vec3 local_rot_vel((float)state.ang_vel_z, (float)state.ang_vel_roll, (float)state.ang_vel); 
+    Vec3 local_rot_vel((float)att.ang_vel_z, (float)att.ang_vel_roll, (float)att.ang_vel); 
     if (local_rot_vel.lengthSq() > 1e-12f) {
         float rot_mag = local_rot_vel.length();
         Quat dq = Quat::fromAxisAngle(local_rot_vel / rot_mag, rot_mag * (float)dt);
-        state.attitude = (state.attitude * dq).normalized();
+        att.attitude = (att.attitude * dq).normalized();
     }
 
     // 9. 获取推力向量
     // 根据当前的 3D 姿态（四元数）直接导出推力的 3D 方向。
-    Vec3 thrust_dir = state.attitude.forward();
-    double Ft_x = state.thrust_power * thrust_dir.x;
-    double Ft_y = state.thrust_power * thrust_dir.y;
-    double Ft_z = state.thrust_power * thrust_dir.z;
+    Vec3 thrust_dir = att.attitude.forward();
+    double Ft_x = prop.thrust_power * thrust_dir.x;
+    double Ft_y = prop.thrust_power * thrust_dir.y;
+    double Ft_z = prop.thrust_power * thrust_dir.z;
 
     if (on_ground) return; // 地面状态跳过后续积分步骤
 
     // 3. Aerodynamic Drag & RK4 Integration
-    double v_sq = state.vx * state.vx + state.vy * state.vy + state.vz * state.vz;
+    double v_sq = vel.vx * vel.vx + vel.vy * vel.vy + vel.vz * vel.vz;
     double v_mag = std::sqrt(v_sq);
-    double local_up_angle = std::atan2(state.py, state.px);
+    double local_up_angle = std::atan2(trans.py, trans.px);
 
     // 计算加速度：这是物理模拟中最耗时也最重要的部分。
     // 计算原理：F = m * a -> a = F / m
@@ -837,7 +865,7 @@ void Update(RocketState& state, const RocketConfig& config, const ControlInput& 
             double base_area = 10.0;
             double side_area = config.height * config.diameter;
             // 迎风面积随飞船姿态变化。
-            double effective_area = base_area + side_area * std::abs(std::sin(state.angle_z));
+            double effective_area = base_area + side_area * std::abs(std::sin(att.angle_z));
             double drag_mag = 0.5 * rho * temp_v_sq * 0.5 * effective_area;
             
             Fdx = -drag_mag * (rel_vx / temp_v_mag);
@@ -856,133 +884,133 @@ void Update(RocketState& state, const RocketConfig& config, const ControlInput& 
     // 大大提高了模拟的稳定性，让轨道不会因为数值误差而慢慢“飘走”。
     // (1) 步骤 1：在当前位置采样
     double k1_vx, k1_vy, k1_vz, k1_px, k1_py, k1_pz;
-    calc_accel(state.px, state.py, state.pz, state.vx, state.vy, state.vz, k1_vx, k1_vy, k1_vz);
-    k1_px = state.vx; k1_py = state.vy; k1_pz = state.vz;
+    calc_accel(trans.px, trans.py, trans.pz, vel.vx, vel.vy, vel.vz, k1_vx, k1_vy, k1_vz);
+    k1_px = vel.vx; k1_py = vel.vy; k1_pz = vel.vz;
 
     // (2) 步骤 2：在 1/2 dt 步长处采样（基于步骤 1 的斜率）
     double k2_vx, k2_vy, k2_vz, k2_px, k2_py, k2_pz;
-    calc_accel(state.px + 0.5 * dt * k1_px, state.py + 0.5 * dt * k1_py, state.pz + 0.5 * dt * k1_pz, 
-               state.vx + 0.5 * dt * k1_vx, state.vy + 0.5 * dt * k1_vy, state.vz + 0.5 * dt * k1_vz, 
+    calc_accel(trans.px + 0.5 * dt * k1_px, trans.py + 0.5 * dt * k1_py, trans.pz + 0.5 * dt * k1_pz, 
+               vel.vx + 0.5 * dt * k1_vx, vel.vy + 0.5 * dt * k1_vy, vel.vz + 0.5 * dt * k1_vz, 
                k2_vx, k2_vy, k2_vz);
-    k2_px = state.vx + 0.5 * dt * k1_vx; k2_py = state.vy + 0.5 * dt * k1_vy; k2_pz = state.vz + 0.5 * dt * k1_vz;
+    k2_px = vel.vx + 0.5 * dt * k1_vx; k2_py = vel.vy + 0.5 * dt * k1_vy; k2_pz = vel.vz + 0.5 * dt * k1_vz;
     // (3) 步骤 3：再次在 1/2 dt 步长处采样（基于步骤 2 的斜率）
     double k3_vx, k3_vy, k3_vz, k3_px, k3_py, k3_pz;
-    calc_accel(state.px + 0.5 * dt * k2_px, state.py + 0.5 * dt * k2_py, state.pz + 0.5 * dt * k2_pz, 
-               state.vx + 0.5 * dt * k2_vx, state.vy + 0.5 * dt * k2_vy, state.vz + 0.5 * dt * k2_vz, 
+    calc_accel(trans.px + 0.5 * dt * k2_px, trans.py + 0.5 * dt * k2_py, trans.pz + 0.5 * dt * k2_pz, 
+               vel.vx + 0.5 * dt * k2_vx, vel.vy + 0.5 * dt * k2_vy, vel.vz + 0.5 * dt * k2_vz, 
                k3_vx, k3_vy, k3_vz);
-    k3_px = state.vx + 0.5 * dt * k2_vx; k3_py = state.vy + 0.5 * dt * k2_py; k3_pz = state.vz + 0.5 * dt * k2_vz;
+    k3_px = vel.vx + 0.5 * dt * k2_vx; k3_py = vel.vy + 0.5 * dt * k2_py; k3_pz = vel.vz + 0.5 * dt * k2_vz;
 
     // (4) 步骤 4：在 1.0 dt 步长处采样（基于步骤 3 的斜率）
     double k4_vx, k4_vy, k4_vz, k4_px, k4_py, k4_pz;
-    calc_accel(state.px + dt * k3_px, state.py + dt * k3_py, state.pz + dt * k3_pz, 
-               state.vx + dt * k3_vx, state.vy + dt * k3_vy, state.vz + dt * k3_vz, 
+    calc_accel(trans.px + dt * k3_px, trans.py + dt * k3_py, trans.pz + dt * k3_pz, 
+               vel.vx + dt * k3_vx, vel.vy + dt * k3_vy, vel.vz + dt * k3_vz, 
                k4_vx, k4_vy, k4_vz);
-    k4_px = state.vx + dt * k3_vx; k4_py = state.vy + dt * k3_vy; k4_pz = state.vz + dt * k3_vz;
+    k4_px = vel.vx + dt * k3_vx; k4_py = vel.vy + dt * k3_vy; k4_pz = vel.vz + dt * k3_vz;
 
-    state.vx += (dt / 6.0) * (k1_vx + 2.0 * k2_vx + 2.0 * k3_vx + k4_vx);
-    state.vy += (dt / 6.0) * (k1_vy + 2.0 * k2_vy + 2.0 * k3_vy + k4_vy);
-    state.vz += (dt / 6.0) * (k1_vz + 2.0 * k2_vz + 2.0 * k3_vz + k4_vz);
-    state.px += (dt / 6.0) * (k1_px + 2.0 * k2_px + 2.0 * k3_px + k4_px);
-    state.py += (dt / 6.0) * (k1_py + 2.0 * k2_py + 2.0 * k3_py + k4_py);
-    state.pz += (dt / 6.0) * (k1_pz + 2.0 * k2_pz + 2.0 * k3_pz + k4_pz);
+    vel.vx += (dt / 6.0) * (k1_vx + 2.0 * k2_vx + 2.0 * k3_vx + k4_vx);
+    vel.vy += (dt / 6.0) * (k1_vy + 2.0 * k2_vy + 2.0 * k3_vy + k4_vy);
+    vel.vz += (dt / 6.0) * (k1_vz + 2.0 * k2_vz + 2.0 * k3_vz + k4_vz);
+    trans.px += (dt / 6.0) * (k1_px + 2.0 * k2_px + 2.0 * k3_px + k4_px);
+    trans.py += (dt / 6.0) * (k1_py + 2.0 * k2_py + 2.0 * k3_py + k4_py);
+    trans.pz += (dt / 6.0) * (k1_pz + 2.0 * k2_pz + 2.0 * k3_pz + k4_pz);
     
     // 12. 更新派生物理量
-    state.acceleration = std::sqrt(k4_vx * k4_vx + k4_vy * k4_vy + k4_vz * k4_vz); 
+    vel.acceleration = std::sqrt(k4_vx * k4_vx + k4_vy * k4_vy + k4_vz * k4_vz); 
     // 垂直速度（上升/下降率）
-    state.velocity = state.vx * Ux + state.vy * Uy + state.vz * Uz;
+    tele.velocity = vel.vx * Ux + vel.vy * Uy + vel.vz * Uz;
     // 地表水平速度：考虑到星球自转的相对速度
-    double surface_rotation_speed = (2.0 * PI / current_body.rotation_period) * std::sqrt(state.px * state.px + state.py * state.py);
-    state.local_vx = (-state.vx * std::sin(local_up_angle) + state.vy * std::cos(local_up_angle)) - surface_rotation_speed;
+    double surface_rotation_speed = (2.0 * PI / current_body.rotation_period) * std::sqrt(trans.px * trans.px + trans.py * trans.py);
+    tele.local_vx = (-vel.vx * std::sin(local_up_angle) + vel.vy * std::cos(local_up_angle)) - surface_rotation_speed;
 
     // 13. 碰撞检测与状态同步 (Collision & Final Sync)
     // 计算飞船底部到地形表面的真实高度
-    double com_alt = std::sqrt(state.px*state.px+state.py*state.py+state.pz*state.pz) - current_body.radius;
-    double current_alt_f = com_alt - state.terrain_altitude + config.bounds_bottom;
+    double com_alt = std::sqrt(trans.px*trans.px+trans.py*trans.py+trans.pz*trans.pz) - current_body.radius;
+    double current_alt_f = com_alt - tele.terrain_altitude + config.bounds_bottom;
     
     if (current_alt_f <= 0.0) {
         // 如果垂直速度极小且正在上升，可能是数值抖动，强制贴地
-        if (state.status == ASCEND && state.velocity < 0.01) {
+        if (guid.status == ASCEND && tele.velocity < 0.01) {
             // (坐标同步代码...)
-            double theta = current_body.prime_meridian_epoch + (state.sim_time * 2.0 * PI / current_body.rotation_period);
+            double theta = current_body.prime_meridian_epoch + (tele.sim_time * 2.0 * PI / current_body.rotation_period);
             Quat rot = Quat::fromAxisAngle(Vec3(0, 0, 1), (float)theta);
             Quat tilt = Quat::fromAxisAngle(Vec3(1, 0, 0), (float)current_body.axial_tilt);
             Quat full_rot = tilt * rot;
             
-            Vec3 local_pos((float)state.surf_px, (float)state.surf_py, (float)state.surf_pz);
+            Vec3 local_pos((float)trans.surf_px, (float)trans.surf_py, (float)trans.surf_pz);
             Vec3 world_pos = full_rot.rotate(local_pos);
-            state.px = (double)world_pos.x;
-            state.py = (double)world_pos.y;
-            state.pz = (double)world_pos.z;
+            trans.px = (double)world_pos.x;
+            trans.py = (double)world_pos.y;
+            trans.pz = (double)world_pos.z;
             
             double omega = (2.0 * PI) / current_body.rotation_period;
             Vec3 ang_vel_world = full_rot.rotate(Vec3(0, 0, (float)omega));
             Vec3 world_v = ang_vel_world.cross(world_pos);
-            state.vx = (double)world_v.x; state.vy = (double)world_v.y; state.vz = (double)world_v.z;
-            state.altitude = state.terrain_altitude;
-        } else if (state.velocity < 0.1) {
+            vel.vx = (double)world_v.x; vel.vy = (double)world_v.y; vel.vz = (double)world_v.z;
+            tele.altitude = tele.terrain_altitude;
+        } else if (tele.velocity < 0.1) {
             // 落地判断
-            state.altitude = state.terrain_altitude;
-            if (state.status != PRE_LAUNCH && state.status != LANDED) {
+            tele.altitude = tele.terrain_altitude;
+            if (guid.status != PRE_LAUNCH && guid.status != LANDED) {
                 // 如果入场速度太快 ( > 10m/s)，飞船坠毁
-                if (std::abs(state.velocity) > 10 || std::abs(state.local_vx) > 10) {
-                    state.status = CRASHED;
-                    state.mission_msg = "CRASHED INTO TERRAIN (HIGH IMPACT)!";
-                    state.vx = 0; state.vy = 0; state.vz = 0;
-                    state.ang_vel = 0; state.ang_vel_z = 0; state.ang_vel_roll = 0;
+                if (std::abs(tele.velocity) > 10 || std::abs(tele.local_vx) > 10) {
+                    guid.status = CRASHED;
+                    guid.mission_msg = "CRASHED INTO TERRAIN (HIGH IMPACT)!";
+                    vel.vx = 0; vel.vy = 0; vel.vz = 0;
+                    att.ang_vel = 0; att.ang_vel_z = 0; att.ang_vel_roll = 0;
                 } else {
                     // 安全着陆
-                    state.status = LANDED;
-                    state.mission_msg = "LANDED!";
+                    guid.status = LANDED;
+                    guid.mission_msg = "LANDED!";
                     // 将当前的惯性坐标系坐标“冻结”到地表坐标系中
-                    double theta = current_body.prime_meridian_epoch + (state.sim_time * 2.0 * PI / current_body.rotation_period);
+                    double theta = current_body.prime_meridian_epoch + (tele.sim_time * 2.0 * PI / current_body.rotation_period);
                     Quat rot = Quat::fromAxisAngle(Vec3(0, 0, 1), (float)theta);
                     Quat tilt = Quat::fromAxisAngle(Vec3(1, 0, 0), (float)current_body.axial_tilt);
                     Quat inv_full_rot = (tilt * rot).conjugate();
                     
-                    Vec3 local_rel = inv_full_rot.rotate(Vec3((float)state.px, (float)state.py, (float)state.pz));
-                    state.surf_px = (double)local_rel.x;
-                    state.surf_py = (double)local_rel.y;
-                    state.surf_pz = (double)local_rel.z;
+                    Vec3 local_rel = inv_full_rot.rotate(Vec3((float)trans.px, (float)trans.py, (float)trans.pz));
+                    trans.surf_px = (double)local_rel.x;
+                    trans.surf_py = (double)local_rel.y;
+                    trans.surf_pz = (double)local_rel.z;
 
                     double omega = (2.0 * PI) / current_body.rotation_period;
                     Quat full_rot_l = tilt * rot;
                     Vec3 ang_vel_world = full_rot_l.rotate(Vec3(0, 0, (float)omega));
-                    Vec3 world_v = ang_vel_world.cross(Vec3((float)state.px, (float)state.py, (float)state.pz));
-                    state.vx = (double)world_v.x; state.vy = (double)world_v.y; state.vz = (double)world_v.z;
+                    Vec3 world_v = ang_vel_world.cross(Vec3((float)trans.px, (float)trans.py, (float)trans.pz));
+                    vel.vx = (double)world_v.x; vel.vy = (double)world_v.y; vel.vz = (double)world_v.z;
                 }
-                state.ang_vel = 0; state.ang_vel_z = 0; state.ang_vel_roll = 0;
+                att.ang_vel = 0; att.ang_vel_z = 0; att.ang_vel_roll = 0;
             }
         } else {
             // 高速撞击：如果垂直速度很大 ( >= 0.1) 但已经深入地下
-            state.status = CRASHED;
-            state.mission_msg = "SUDDEN IMPACT: CRASHED!";
-            state.vx = 0; state.vy = 0; state.vz = 0;
-            state.ang_vel = 0; state.ang_vel_z = 0; state.ang_vel_roll = 0;
-            state.altitude = state.terrain_altitude;
+            guid.status = CRASHED;
+            guid.mission_msg = "SUDDEN IMPACT: CRASHED!";
+            vel.vx = 0; vel.vy = 0; vel.vz = 0;
+            att.ang_vel = 0; att.ang_vel_z = 0; att.ang_vel_roll = 0;
+            tele.altitude = tele.terrain_altitude;
             
             // 坐标修正：将飞船强行弹回地面（防止陷进星球中心）
-            double r_surf = current_body.radius + state.terrain_altitude - config.bounds_bottom;
-            double r_current = std::sqrt(state.px*state.px + state.py*state.py + state.pz*state.pz);
+            double r_surf = current_body.radius + tele.terrain_altitude - config.bounds_bottom;
+            double r_current = std::sqrt(trans.px*trans.px + trans.py*trans.py + trans.pz*trans.pz);
             if (r_current > 1e-6) {
-                state.px *= (r_surf / r_current);
-                state.py *= (r_surf / r_current);
-                state.pz *= (r_surf / r_current);
+                trans.px *= (r_surf / r_current);
+                trans.py *= (r_surf / r_current);
+                trans.pz *= (r_surf / r_current);
             }
         }
     } else {
         // 14. 飞行状态的高度与经纬度刷新 (In-Flight Update)
-        state.altitude = current_alt_f;
+        tele.altitude = current_alt_f;
         // 更新旋转参考系下的“星下点”坐标，用于实时计算经纬度
-        double theta = current_body.prime_meridian_epoch + (state.sim_time * 2.0 * PI / current_body.rotation_period);
+        double theta = current_body.prime_meridian_epoch + (tele.sim_time * 2.0 * PI / current_body.rotation_period);
         Quat rot = Quat::fromAxisAngle(Vec3(0, 0, 1), (float)theta);
         Quat tilt = Quat::fromAxisAngle(Vec3(1, 0, 0), (float)current_body.axial_tilt);
         Quat inv_full_rot = (tilt * rot).conjugate();
         
         // 将当前的惯性坐标投影到星球的固定坐标系中
-        Vec3 local_rel = inv_full_rot.rotate(Vec3((float)state.px, (float)state.py, (float)state.pz));
-        state.surf_px = (double)local_rel.x;
-        state.surf_py = (double)local_rel.y;
-        state.surf_pz = (double)local_rel.z;
+        Vec3 local_rel = inv_full_rot.rotate(Vec3((float)trans.px, (float)trans.py, (float)trans.pz));
+        trans.surf_px = (double)local_rel.x;
+        trans.surf_py = (double)local_rel.y;
+        trans.surf_pz = (double)local_rel.z;
     }
 
     // 15. 角速度更新 (Angular Velocity)
@@ -990,64 +1018,77 @@ void Update(RocketState& state, const RocketConfig& config, const ControlInput& 
     double base_moi = 50000.0;
     double moment_of_inertia = base_moi * (total_mass / 50000.0); 
     // 空气力矩：在高空稀薄大气中，空气会产生微弱的稳定力矩。
-    double aero_torque = (v_mag > 0.1 && state.altitude < 80000) ? (-0.1 * v_mag * get_air_density(state.altitude)) : 0;
-    state.ang_vel_z += (input.torque_cmd_z / moment_of_inertia + state.ang_vel_z * aero_torque) * dt;
-    state.ang_vel += (input.torque_cmd / moment_of_inertia + state.ang_vel * aero_torque) * dt;
-    state.ang_vel_roll += (input.torque_cmd_roll / moment_of_inertia + state.ang_vel_roll * aero_torque) * dt;
+    double aero_torque = (v_mag > 0.1 && tele.altitude < 80000) ? (-0.1 * v_mag * get_air_density(tele.altitude)) : 0;
+    att.ang_vel_z += (input.torque_cmd_z / moment_of_inertia + att.ang_vel_z * aero_torque) * dt;
+    att.ang_vel += (input.torque_cmd / moment_of_inertia + att.ang_vel * aero_torque) * dt;
+    att.ang_vel_roll += (input.torque_cmd_roll / moment_of_inertia + att.ang_vel_roll * aero_torque) * dt;
 
     // 如果在真空中且没有操作，角速度会由于数值稳定性而极缓慢衰减
-    if (state.altitude > 80000 && std::abs(input.torque_cmd)<0.1 && std::abs(input.torque_cmd_z)<0.1 && std::abs(input.torque_cmd_roll)<0.1) {
-        state.ang_vel *= std::pow(0.99, dt); state.ang_vel_z *= std::pow(0.99, dt); state.ang_vel_roll *= std::pow(0.99, dt);
+    if (tele.altitude > 80000 && std::abs(input.torque_cmd)<0.1 && std::abs(input.torque_cmd_z)<0.1 && std::abs(input.torque_cmd_roll)<0.1) {
+        att.ang_vel *= std::pow(0.99, dt); att.ang_vel_z *= std::pow(0.99, dt); att.ang_vel_roll *= std::pow(0.99, dt);
     }
 
     // 16. 同步旧版角度数据 (Legacy Sync for HUD)
     // 为了兼容现有的仪表盘 UI，我们需要将四元数转回欧拉角。
-    Vec3 fwd_sync = state.attitude.forward();
-    state.angle = std::atan2(fwd_sync.dot(Vec3((float)Rx,(float)Ry,(float)Rz)), fwd_sync.dot(Vec3((float)Ux,(float)Uy,(float)Uz)));
-    state.angle_z = std::asin(std::fmax(-1.0, std::fmin(1.0, (double)fwd_sync.dot(Vec3((float)Nx,(float)Ny,(float)Nz)))));
-    Vec3 local_up_s = state.attitude.rotate(Vec3(0, 0, 1));
+    Vec3 fwd_sync = att.attitude.forward();
+    att.angle = std::atan2(fwd_sync.dot(Vec3((float)Rx,(float)Ry,(float)Rz)), fwd_sync.dot(Vec3((float)Ux,(float)Uy,(float)Uz)));
+    att.angle_z = std::asin(std::fmax(-1.0, std::fmin(1.0, (double)fwd_sync.dot(Vec3((float)Nx,(float)Ny,(float)Nz)))));
+    Vec3 local_up_s = att.attitude.rotate(Vec3(0, 0, 1));
     Vec3 world_top_s = Vec3((float)Ux,(float)Uy,(float)Uz).cross(fwd_sync).normalized();
-    if (world_top_s.length() > 0.1f) state.angle_roll = std::atan2(local_up_s.dot(world_top_s.cross(fwd_sync).normalized()), local_up_s.dot(world_top_s));
+    if (world_top_s.length() > 0.1f) att.angle_roll = std::atan2(local_up_s.dot(world_top_s.cross(fwd_sync).normalized()), local_up_s.dot(world_top_s));
 }
 
 // 高倍速率引力更新 (FastGravityUpdate)
 // 当用户开启 100x, 1000x 甚至更高倍的时间加速时，
 // 我们不再计算空气阻力、姿态控制或推力，只计算纯粹的引力。
 // 这样可以极大地提高计算效率，防止 CPU 过载导致游戏卡死。
-void FastGravityUpdate(RocketState& state, const RocketConfig& config, double dt_total) {
-    if (state.status == CRASHED) return;
+void FastGravityUpdate(entt::registry& registry, entt::entity entity, double dt_total) {
+
+    auto& trans = registry.get<TransformComponent>(entity);
+    auto& vel = registry.get<VelocityComponent>(entity);
+    auto& att = registry.get<AttitudeComponent>(entity);
+    auto& prop = registry.get<PropulsionComponent>(entity);
+    auto& tele = registry.get<TelemetryComponent>(entity);
+    auto& guid = registry.get<GuidanceComponent>(entity);
+    auto& orb = registry.get<OrbitComponent>(entity);
+    auto& mnv = registry.get<ManeuverComponent>(entity);
+    auto& vfx = registry.get<VFXComponent>(entity);
+    const auto& config = registry.get<RocketConfig>(entity);
+    const auto& input = registry.get<ControlInput>(entity);
+
+    if (guid.status == CRASHED) return;
 
     // 1. 处理高倍率下的地面锁定
     // 如果飞船在地面上，直接根据星球自转同步位置。
-    if (state.status == PRE_LAUNCH || state.status == LANDED) {
-        state.sim_time += dt_total;
-        if (state.status != PRE_LAUNCH) {
-            state.mission_timer += dt_total;
+    if (guid.status == PRE_LAUNCH || guid.status == LANDED) {
+        tele.sim_time += dt_total;
+        if (guid.status != PRE_LAUNCH) {
+            guid.mission_timer += dt_total;
         }
-        UpdateCelestialBodies(state.sim_time);
+        UpdateCelestialBodies(tele.sim_time);
         
         CelestialBody& current_body = SOLAR_SYSTEM[current_soi_index];
         // 维持相对于旋转星球的锁定位置
-        double theta = current_body.prime_meridian_epoch + (state.sim_time * 2.0 * PI / current_body.rotation_period);
+        double theta = current_body.prime_meridian_epoch + (tele.sim_time * 2.0 * PI / current_body.rotation_period);
         Quat rot = Quat::fromAxisAngle(Vec3(0, 0, 1), (float)theta);
         Quat tilt = Quat::fromAxisAngle(Vec3(1, 0, 0), (float)current_body.axial_tilt);
         Quat full_rot = tilt * rot;
         
-        Vec3 local_pos((float)state.surf_px, (float)state.surf_py, (float)state.surf_pz);
+        Vec3 local_pos((float)trans.surf_px, (float)trans.surf_py, (float)trans.surf_pz);
         Vec3 world_pos = full_rot.rotate(local_pos);
-        state.px = (double)world_pos.x;
-        state.py = (double)world_pos.y;
-        state.pz = (double)world_pos.z;
+        trans.px = (double)world_pos.x;
+        trans.py = (double)world_pos.y;
+        trans.pz = (double)world_pos.z;
         
         double omega = (2.0 * PI) / current_body.rotation_period;
         Vec3 ang_vel_world = full_rot.rotate(Vec3(0, 0, (float)omega));
         Vec3 world_v = ang_vel_world.cross(world_pos);
-        state.vx = (double)world_v.x;
-        state.vy = (double)world_v.y;
-        state.vz = (double)world_v.z;
-        state.altitude = state.terrain_altitude;
+        vel.vx = (double)world_v.x;
+        vel.vy = (double)world_v.y;
+        vel.vz = (double)world_v.z;
+        tele.altitude = tele.terrain_altitude;
         
-        CheckSOI_Transitions(state);
+        CheckSOI_Transitions(registry, entity);
         return;
     }
 
@@ -1056,20 +1097,20 @@ void FastGravityUpdate(RocketState& state, const RocketConfig& config, double dt
     double dt_step = std::max(5.0, dt_total / 200.0); 
     double t_remaining = dt_total;
     
-    double total_mass = config.dry_mass + state.fuel + config.upper_stages_mass;
+    double total_mass = config.dry_mass + prop.fuel + config.upper_stages_mass;
 
     // 循环迭代：将大步长拆解为物理上可接受的小步长
     while (t_remaining > 0) {
         double dt = std::min(t_remaining, dt_step);
         t_remaining -= dt;
-        state.sim_time += dt;
-        if (state.status != PRE_LAUNCH) {
-            state.mission_timer += dt;
+        tele.sim_time += dt;
+        if (guid.status != PRE_LAUNCH) {
+            guid.mission_timer += dt;
         }
         
         // 更新天体位置和 SOI
-        UpdateCelestialBodies(state.sim_time);
-        CheckSOI_Transitions(state);
+        UpdateCelestialBodies(tele.sim_time);
+        CheckSOI_Transitions(registry, entity);
       
         // 高速引力计算闭包 (只考虑重力)
         auto calc_accel_fast = [&](double temp_px, double temp_py, double temp_pz, double temp_time, double& out_ax, double& out_ay, double& out_az) {
@@ -1117,35 +1158,35 @@ void FastGravityUpdate(RocketState& state, const RocketConfig& config, double dt
 
         // 在这里同样使用 RK4 积分，保持高速轨道下的高精度
         double k1_vx, k1_vy, k1_vz, k1_px, k1_py, k1_pz;
-        calc_accel_fast(state.px, state.py, state.pz, state.sim_time - dt, k1_vx, k1_vy, k1_vz);
-        k1_px = state.vx; k1_py = state.vy; k1_pz = state.vz;
+        calc_accel_fast(trans.px, trans.py, trans.pz, tele.sim_time - dt, k1_vx, k1_vy, k1_vz);
+        k1_px = vel.vx; k1_py = vel.vy; k1_pz = vel.vz;
 
         double k2_vx, k2_vy, k2_vz, k2_px, k2_py, k2_pz;
-        calc_accel_fast(state.px + 0.5 * dt * k1_px, state.py + 0.5 * dt * k1_py, state.pz + 0.5 * dt * k1_pz, state.sim_time - dt + 0.5 * dt, k2_vx, k2_vy, k2_vz);
-        k2_px = state.vx + 0.5 * dt * k1_vx; k2_py = state.vy + 0.5 * dt * k1_vy; k2_pz = state.vz + 0.5 * dt * k1_vz;
+        calc_accel_fast(trans.px + 0.5 * dt * k1_px, trans.py + 0.5 * dt * k1_py, trans.pz + 0.5 * dt * k1_pz, tele.sim_time - dt + 0.5 * dt, k2_vx, k2_vy, k2_vz);
+        k2_px = vel.vx + 0.5 * dt * k1_vx; k2_py = vel.vy + 0.5 * dt * k1_vy; k2_pz = vel.vz + 0.5 * dt * k1_vz;
 
         double k3_vx, k3_vy, k3_vz, k3_px, k3_py, k3_pz;
-        calc_accel_fast(state.px + 0.5 * dt * k2_px, state.py + 0.5 * dt * k2_py, state.pz + 0.5 * dt * k2_pz, state.sim_time - dt + 0.5 * dt, k3_vx, k3_vy, k3_vz);
-        k3_px = state.vx + 0.5 * dt * k2_vx; k3_py = state.vy + 0.5 * dt * k2_vy; k3_pz = state.vz + 0.5 * dt * k2_vz;
+        calc_accel_fast(trans.px + 0.5 * dt * k2_px, trans.py + 0.5 * dt * k2_py, trans.pz + 0.5 * dt * k2_pz, tele.sim_time - dt + 0.5 * dt, k3_vx, k3_vy, k3_vz);
+        k3_px = vel.vx + 0.5 * dt * k2_vx; k3_py = vel.vy + 0.5 * dt * k2_vy; k3_pz = vel.vz + 0.5 * dt * k2_vz;
 
         double k4_vx, k4_vy, k4_vz, k4_px, k4_py, k4_pz;
-        calc_accel_fast(state.px + dt * k3_px, state.py + dt * k3_py, state.pz + dt * k3_pz, state.sim_time, k4_vx, k4_vy, k4_vz);
-        k4_px = state.vx + dt * k3_vx; k4_py = state.vy + dt * k3_vy; k4_pz = state.vz + dt * k3_vz;
+        calc_accel_fast(trans.px + dt * k3_px, trans.py + dt * k3_py, trans.pz + dt * k3_pz, tele.sim_time, k4_vx, k4_vy, k4_vz);
+        k4_px = vel.vx + dt * k3_vx; k4_py = vel.vy + dt * k3_vy; k4_pz = vel.vz + dt * k3_vz;
 
-        state.vx += (dt / 6.0) * (k1_vx + 2.0 * k2_vx + 2.0 * k3_vx + k4_vx);
-        state.vy += (dt / 6.0) * (k1_vy + 2.0 * k2_vy + 2.0 * k3_vy + k4_vy);
-        state.vz += (dt / 6.0) * (k1_vz + 2.0 * k2_vz + 2.0 * k3_vz + k4_vz);
-        state.px += (dt / 6.0) * (k1_px + 2.0 * k2_px + 2.0 * k3_px + k4_px);
-        state.py += (dt / 6.0) * (k1_py + 2.0 * k2_py + 2.0 * k3_py + k4_py);
-        state.pz += (dt / 6.0) * (k1_pz + 2.0 * k2_pz + 2.0 * k3_pz + k4_pz);
+        vel.vx += (dt / 6.0) * (k1_vx + 2.0 * k2_vx + 2.0 * k3_vx + k4_vx);
+        vel.vy += (dt / 6.0) * (k1_vy + 2.0 * k2_vy + 2.0 * k3_vy + k4_vy);
+        vel.vz += (dt / 6.0) * (k1_vz + 2.0 * k2_vz + 2.0 * k3_vz + k4_vz);
+        trans.px += (dt / 6.0) * (k1_px + 2.0 * k2_px + 2.0 * k3_px + k4_px);
+        trans.py += (dt / 6.0) * (k1_py + 2.0 * k2_py + 2.0 * k3_py + k4_py);
+        trans.pz += (dt / 6.0) * (k1_pz + 2.0 * k2_pz + 2.0 * k3_pz + k4_pz);
         
         // 3. 高倍率碰撞检测
-        double current_com_alt = std::sqrt(state.px*state.px + state.py*state.py + state.pz*state.pz) - SOLAR_SYSTEM[current_soi_index].radius;
-        if (current_com_alt + config.bounds_bottom <= state.terrain_altitude) {
-            state.altitude = state.terrain_altitude;
-            state.status = CRASHED;
-            state.mission_msg = "CRASHED (WARP IMPACT)!";
-            state.vx = 0; state.vy = 0; state.vz = 0;
+        double current_com_alt = std::sqrt(trans.px*trans.px + trans.py*trans.py + trans.pz*trans.pz) - SOLAR_SYSTEM[current_soi_index].radius;
+        if (current_com_alt + config.bounds_bottom <= tele.terrain_altitude) {
+            tele.altitude = tele.terrain_altitude;
+            guid.status = CRASHED;
+            guid.mission_msg = "CRASHED (WARP IMPACT)!";
+            vel.vx = 0; vel.vy = 0; vel.vz = 0;
             break;
         }
     }
@@ -1153,41 +1194,57 @@ void FastGravityUpdate(RocketState& state, const RocketConfig& config, double dt
 
 // 产生烟雾粒子 (EmitSmoke)
 // 当引擎开启时，在喷管处生成粒子，增强视觉效果。
-void EmitSmoke(RocketState& state, const RocketConfig& config, double dt) {
-    if (state.thrust_power < 1000.0) return;
+void EmitSmoke(entt::registry& registry, entt::entity entity, double dt) {
+
+    auto& trans = registry.get<TransformComponent>(entity);
+    auto& vel = registry.get<VelocityComponent>(entity);
+    auto& att = registry.get<AttitudeComponent>(entity);
+    auto& prop = registry.get<PropulsionComponent>(entity);
+    auto& tele = registry.get<TelemetryComponent>(entity);
+    auto& guid = registry.get<GuidanceComponent>(entity);
+    auto& orb = registry.get<OrbitComponent>(entity);
+    auto& mnv = registry.get<ManeuverComponent>(entity);
+    auto& vfx = registry.get<VFXComponent>(entity);
+    const auto& config = registry.get<RocketConfig>(entity);
+    const auto& input = registry.get<ControlInput>(entity);
+
+    if (prop.thrust_power < 1000.0) return;
     
     // 计算喷口在世界坐标系下的位置
-    double local_up = std::atan2(state.py, state.px);
-    double nozzle_dir = local_up + state.angle + PI;
-    double nozzle_wx = state.px + std::cos(nozzle_dir) * 20.0;
-    double nozzle_wy = state.py + std::sin(nozzle_dir) * 20.0;
+    double local_up = std::atan2(trans.py, trans.px);
+    double nozzle_dir = local_up + att.angle + PI;
+    double nozzle_wx = trans.px + std::cos(nozzle_dir) * 20.0;
+    double nozzle_wy = trans.py + std::sin(nozzle_dir) * 20.0;
     
     // 一次产生 3 个粒子
     for (int k = 0; k < 3; k++) {
-        SmokeParticle& p = state.smoke[state.smoke_idx % RocketState::MAX_SMOKE];
+        SmokeParticle& p = vfx.smoke[vfx.smoke_idx % RocketState::MAX_SMOKE];
         // 使用哈希函数产生伪随机偏移，让烟雾看起来更自然
-        float rnd1 = hash11(state.smoke_idx * 1337 + k * 997) - 0.5f;
-        float rnd2 = hash11(state.smoke_idx * 7919 + k * 773) - 0.5f;
+        float rnd1 = hash11(vfx.smoke_idx * 1337 + k * 997) - 0.5f;
+        float rnd2 = hash11(vfx.smoke_idx * 7919 + k * 773) - 0.5f;
         p.wx = nozzle_wx + rnd1 * 15.0;
         p.wy = nozzle_wy + rnd2 * 15.0;
         
         // 粒子的初始速度 (喷出速度)
-        double exhaust_speed = 30.0 + hash11(state.smoke_idx * 3571 + k) * 20.0;
+        double exhaust_speed = 30.0 + hash11(vfx.smoke_idx * 3571 + k) * 20.0;
         p.vwx = std::cos(nozzle_dir) * exhaust_speed + rnd1 * 10.0;
         p.vwy = std::sin(nozzle_dir) * exhaust_speed + rnd2 * 10.0;
         p.alpha = 0.6f;
-        p.size = 10.0f + hash11(state.smoke_idx * 4567 + k) * 8.0f;
+        p.size = 10.0f + hash11(vfx.smoke_idx * 4567 + k) * 8.0f;
         p.life = 1.0f;
         p.active = true;
-        state.smoke_idx++;
+        vfx.smoke_idx++;
     }
 }
 
 // 更新烟雾粒子 (UpdateSmoke)
 // 让粒子随时间漂移、膨胀并逐渐消失。
-void UpdateSmoke(RocketState& state, double dt) {
+void UpdateSmoke(entt::registry& registry, entt::entity entity, double dt) {
+    auto& vfx = registry.get<VFXComponent>(entity);
+    auto& trans = registry.get<TransformComponent>(entity);
+    auto& vel = registry.get<VelocityComponent>(entity);
     for (int i = 0; i < RocketState::MAX_SMOKE; i++) {
-        SmokeParticle& p = state.smoke[i];
+        SmokeParticle& p = vfx.smoke[i];
         if (!p.active) continue;
         
         // 寿命缩减，透明度降低

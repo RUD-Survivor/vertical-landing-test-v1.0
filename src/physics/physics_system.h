@@ -13,6 +13,7 @@
 #define PHYSICS_SYSTEM_H
 
 #include "core/rocket_state.h"
+#include <entt/entt.hpp>
 #include "math/math3d.h"
 
 /**
@@ -56,7 +57,7 @@ namespace PhysicsSystem {
      * @param apoapsis [输出] 远拱点高度 (单位：米)。
      * @param periapsis [输出] 近拱点高度 (单位：米)。
      */
-    void getOrbitParams(const RocketState& state, double& apoapsis, double& periapsis);
+    void getOrbitParams(entt::registry& registry, entt::entity entity, double& apoapsis, double& periapsis);
 
     // --- 行星历表与坐标转换 (Planetary Ephemeris & Coordinates) ---
 
@@ -104,7 +105,7 @@ namespace PhysicsSystem {
      * 比如当你离开地球飞向月球，这个函数会自动检测你是否进入了月球的引力统治区。
      * 切换 SOI 是为了防止在大尺度下出现坐标抖动和数值计算误差。
      */
-    void CheckSOI_Transitions(RocketState& state);
+    void CheckSOI_Transitions(entt::registry& registry, entt::entity entity);
 
     /**
      * @brief 计算太阳遮挡率 (Solar Occlusion)。
@@ -112,7 +113,7 @@ namespace PhysicsSystem {
      * 用于渲染光影、电池板充电逻辑或是大气散射效果。
      * @return 遮挡百分比 (0 到 1)。
      */
-    double CalculateSolarOcclusion(const RocketState& state);
+    double CalculateSolarOcclusion(entt::registry& registry, entt::entity entity);
     
     // --- 核心仿真更新逻辑 (Core Simulation Update) ---
 
@@ -124,12 +125,12 @@ namespace PhysicsSystem {
      * @param input 控制输入（油门、旋转等）。
      * @param dt 步进时间 (Delta Time)，通常为固定的 0.02s，以保证数值稳定性。
      */
-    void Update(RocketState& state, const RocketConfig& config, const ControlInput& input, double dt);
+    void Update(entt::registry& registry, entt::entity entity, double dt);
 
     /**
      * @brief 精简版的快速引力更新，常用于预测未来的轨迹（轨迹预测线）。
      */
-    void FastGravityUpdate(RocketState& state, const RocketConfig& config, double dt_total);
+    void FastGravityUpdate(entt::registry& registry, entt::entity entity, double dt_total);
     
     // --- 视觉效果集成 (Visual Effects) ---
 
@@ -137,12 +138,12 @@ namespace PhysicsSystem {
      * @brief 尾迹/烟雾发射逻辑。
      * 根据引擎推力的大小，在喷口处产生视觉粒子。
      */
-    void EmitSmoke(RocketState& state, const RocketConfig& config, double dt);
+    void EmitSmoke(entt::registry& registry, entt::entity entity, double dt);
 
     /**
      * @brief 更新现有的烟雾粒子。
      */
-    void UpdateSmoke(RocketState& state, double dt);
+    void UpdateSmoke(entt::registry& registry, entt::entity entity, double dt);
 }
 
 #endif // PHYSICS_SYSTEM_H

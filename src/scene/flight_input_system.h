@@ -15,7 +15,8 @@ struct FlightInputSystem {
     int svo_op_cooldown = 0;
 
     void setup(InputRouter& router, RocketState& rocket_state, RocketConfig& rocket_config, 
-               ControlInput& control_input, FlightHUD& hud, CameraDirector& cam, bool& show_clouds) {
+               ControlInput& control_input, FlightHUD& hud, CameraDirector& cam, bool& show_clouds,
+               entt::registry& world, entt::entity rocket_entity) {
         
         router.on_ignition = [&rocket_state]() {
             if (rocket_state.status == PRE_LAUNCH) {
@@ -24,9 +25,9 @@ struct FlightInputSystem {
             }
         };
 
-        router.registerKey(GLFW_KEY_G, [&rocket_state, &rocket_config]() {
+        router.registerKey(GLFW_KEY_G, [&rocket_state, &world, &rocket_entity]() {
             if (rocket_state.status == ASCEND || rocket_state.status == DESCEND) {
-                StageManager::SeparateStage(rocket_state, rocket_config);
+                StageManager::SeparateStage(world, rocket_entity);
             }
         });
 

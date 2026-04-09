@@ -266,7 +266,22 @@ public:
         if (mode == ORBIT) {
             // 优化型 Orbit 视角 (带平滑过渡)
             double apo_tmp = 0, peri_tmp = 0;
-            PhysicsSystem::getOrbitParams(rocket_state, apo_tmp, peri_tmp);
+            // NOTE: getOrbitParams now needs registry & entity which CameraDirector does not have.
+// For now, compute orbit params inline:
+{
+    double r_cam = std::sqrt(rocket_state.px*rocket_state.px + rocket_state.py*rocket_state.py + rocket_state.pz*rocket_state.pz);
+    double v_sq_cam = rocket_state.vx*rocket_state.vx + rocket_state.vy*rocket_state.vy + rocket_state.vz*rocket_state.vz;
+    double mu_cam = 6.67430e-11 * SOLAR_SYSTEM[current_soi_index].mass;
+    double energy_cam = v_sq_cam / 2.0 - mu_cam / r_cam;
+    double hx_cam = rocket_state.py*rocket_state.vz - rocket_state.pz*rocket_state.vy;
+    double hy_cam = rocket_state.pz*rocket_state.vx - rocket_state.px*rocket_state.vz;
+    double hz_cam = rocket_state.px*rocket_state.vy - rocket_state.py*rocket_state.vx;
+    double h_sq_cam = hx_cam*hx_cam + hy_cam*hy_cam + hz_cam*hz_cam;
+    double e_sq_cam = 1.0 + 2.0 * energy_cam * h_sq_cam / (mu_cam * mu_cam);
+    double e_cam = (e_sq_cam > 0) ? std::sqrt(e_sq_cam) : 0;
+    if (energy_cam >= 0) { apo_tmp = 999999999; peri_tmp = (h_sq_cam/mu_cam)/(1.0+e_cam) - SOLAR_SYSTEM[current_soi_index].radius; }
+    else { double a_cam = -mu_cam/(2.0*energy_cam); apo_tmp = a_cam*(1.0+e_cam) - SOLAR_SYSTEM[current_soi_index].radius; peri_tmp = a_cam*(1.0-e_cam) - SOLAR_SYSTEM[current_soi_index].radius; }
+}
 
             float peri_min = 80000.0f;
             float peri_max = 160000.0f;

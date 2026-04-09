@@ -1,3 +1,4 @@
+#include <entt/entt.hpp>
 #include "stage_manager.h"
 #include "render/renderer_2d.h"
 #include "simulation/rocket_builder.h"
@@ -103,7 +104,9 @@ void SyncActiveConfig(RocketConfig& config, int stage_index) {
 
 // 执行级间分离 (SeparateStage)
 // 抛弃已经烧完燃料的底层结构，并将系统的重点转移到下一级发动机。
-bool SeparateStage(RocketState& state, RocketConfig& config) {
+bool SeparateStage(entt::registry& registry, entt::entity entity) {
+    auto& state = registry.get<RocketState>(entity);
+    auto& config = registry.get<RocketConfig>(entity);
     // 检查是否已经是最后一级（无法再分离）
     if (state.current_stage >= state.total_stages - 1) {
         std::cout << ">> [STAGING] CANNOT SEPARATE: Already on final stage!" << std::endl;
@@ -172,5 +175,10 @@ double GetTotalMassFromStage(const RocketConfig& config, const RocketState& stat
     return total;
 }
 
-} // namespace StageManager
+// ECS overload for PropulsionComponent
+bool IsCurrentStageEmpty(const PropulsionComponent& prop) {
+    if (prop.current_stage < 0 || prop.current_stage >= (int)prop.stage_fuels.size()) return false;
+    return prop.stage_fuels[prop.current_stage] <= 0.0;
+}
 
+} // namespace StageManager

@@ -42,12 +42,15 @@ public:
      * @param rw_3d             渲染用火箭半径 (Fallback 缩放用)
      * @param rh                渲染用火箭高度 (Fallback 缩放用)
      */
-    void render(Renderer3D* r3d, const RocketState& rocket_state, int current_soi_index,
+    void render(Renderer3D* r3d, entt::registry& registry, entt::entity entity, int current_soi_index,
                 double ws_d, double ro_x, double ro_y, double ro_z,
                 const Mesh& rocketBox, float rw_3d, float rh)
     {
+        auto& rocket_state = registry.get<RocketState>(entity);
+        auto& tele = registry.get<TelemetryComponent>(entity);
+        auto& trans = registry.get<TransformComponent>(entity);
         // 高度大于12000米则从视野中剔除发射台
-        if (rocket_state.altitude >= 12000.0) return;
+        if (tele.altitude >= 12000.0) return;
 
         CelestialBody& body = SOLAR_SYSTEM[current_soi_index];
         // Launch pad should rotate with the body (Axial Tilt + Rotation)

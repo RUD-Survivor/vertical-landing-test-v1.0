@@ -7,6 +7,7 @@
 // ==========================================================
 
 #include "core/rocket_state.h"
+#include <entt/entt.hpp>
 
 namespace ControlSystem {
 
@@ -14,7 +15,7 @@ namespace ControlSystem {
     // UpdateAutoPilot — 自动驾驶逻辑更新
     // 根据设定的导航目标（如：保持姿态、自动入轨）来计算推力和扭矩。
     // -------------------------------------------------------
-    void UpdateAutoPilot(RocketState& state, const RocketConfig& config, ControlInput& input, double dt);
+    void UpdateAutoPilot(entt::registry& registry, entt::entity entity, double dt);
     
     // -------------------------------------------------------
     // ManualInputs — 手动输入状态结构
@@ -39,7 +40,7 @@ namespace ControlSystem {
     // UpdateManualControl — 手动控制逻辑更新
     // 将玩家的按键输入实时转换为火箭的推力百分比和姿态扭矩。
     // -------------------------------------------------------
-    void UpdateManualControl(RocketState& state, const RocketConfig& config, ControlInput& input, const ManualInputs& manual, double dt);
+    void UpdateManualControl(entt::registry& registry, entt::entity entity, const ManualInputs& manual, double dt);
 }
 
 #endif // CONTROL_SYSTEM_H

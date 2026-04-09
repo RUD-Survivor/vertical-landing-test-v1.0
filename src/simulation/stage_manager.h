@@ -5,6 +5,7 @@
 // ==========================================================
 
 #include "core/rocket_state.h"
+#include <entt/entt.hpp>
 #include <vector>
 
 struct RocketAssembly; // 前向声明：指向组装体数据
@@ -28,12 +29,13 @@ void SyncActiveConfig(RocketConfig& config, int stage_index);
 // 这通常对应于玩家按下“空格键”或自动分离逻辑。
 // 返回值：是否成功分离。
 // -------------------------------------------------------
-bool SeparateStage(RocketState& state, RocketConfig& config);
+bool SeparateStage(entt::registry& registry, entt::entity entity);
 
 // -------------------------------------------------------
 // IsCurrentStageEmpty — 检查当前活动级的燃料是否已耗尽。
 // -------------------------------------------------------
 bool IsCurrentStageEmpty(const RocketState& state);
+bool IsCurrentStageEmpty(const PropulsionComponent& prop);
 
 // -------------------------------------------------------
 // GetActiveStage — 获取指定索引级的详细配置数据。

@@ -8,6 +8,7 @@
 #include <thread>
 
 #include "core/rocket_state.h"
+#include <entt/entt.hpp>
 #include "physics/physics_system.h"
 #include "control/control_system.h"
 #include "simulation/maneuver_system.h"
@@ -22,11 +23,14 @@ public:
     double accumulator = 0.0;
     bool mnv_autopilot_active = false;
 
-    void handleInput(GLFWwindow* window, const RocketState& rocket_state) {
+    void handleInput(GLFWwindow* window, entt::registry& registry, entt::entity entity) {
+        auto& tele = registry.get<TelemetryComponent>(entity);
+        auto& guid = registry.get<GuidanceComponent>(entity);
+        auto& prop = registry.get<PropulsionComponent>(entity);
         // --- 时间加速逻辑 ---
-        double surface_speed = std::sqrt(rocket_state.velocity * rocket_state.velocity + rocket_state.local_vx * rocket_state.local_vx);
-        bool is_parked = (rocket_state.status == PRE_LAUNCH || rocket_state.status == LANDED) && surface_speed < 0.1;
-        bool can_super_warp = (!rocket_state.auto_mode && (rocket_state.thrust_power <= 0.01 || rocket_state.fuel <= 0) && (rocket_state.altitude > 100000.0 || is_parked));
+        double surface_speed = std::sqrt(tele.velocity * tele.velocity + tele.local_vx * tele.local_vx);
+        bool is_parked = (guid.status == PRE_LAUNCH || guid.status == LANDED) && surface_speed < 0.1;
+        bool can_super_warp = (!guid.auto_mode && (prop.thrust_power <= 0.01 || prop.fuel <= 0) && (tele.altitude > 100000.0 || is_parked));
 
         // Basic Warp (1-4)
         if (glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_KP_1) == GLFW_PRESS) time_warp = 1;
@@ -35,10 +39,10 @@ public:
         if (glfwGetKey(window, GLFW_KEY_4) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_KP_4) == GLFW_PRESS) time_warp = 1000;
 
         // Auto-mode downgrades warp
-        if (rocket_state.auto_mode && time_warp > 1000) time_warp = 1;
+        if (guid.auto_mode && time_warp > 1000) time_warp = 1;
 
         // Super Warp (5-8)
-        if (!rocket_state.auto_mode) {
+        if (!guid.auto_mode) {
             if (can_super_warp) {
                 if (glfwGetKey(window, GLFW_KEY_5) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_KP_5) == GLFW_PRESS) { time_warp = 10000; std::cout << "WARP: 10K SPEED ENGAGED!" << std::endl; }
                 if (glfwGetKey(window, GLFW_KEY_6) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_KP_6) == GLFW_PRESS) { time_warp = 100000; std::cout << "WARP: 100K SPEED ENGAGED!" << std::endl; }
@@ -52,7 +56,19 @@ public:
         }
     }
 
-    void update(double real_dt, RocketState& rocket_state, RocketConfig& rocket_config, ControlInput& control_input, FlightHUD& hud, GLFWwindow* window, int cam_mode) {
+    void update(double real_dt, entt::registry& registry, entt::entity entity, FlightHUD& hud, GLFWwindow* window, int cam_mode) {
+        auto& rocket_state = registry.get<RocketState>(entity);
+        auto& rocket_config = registry.get<RocketConfig>(entity);
+        auto& control_input = registry.get<ControlInput>(entity);
+        
+        auto& trans = registry.get<TransformComponent>(entity);
+        auto& vel = registry.get<VelocityComponent>(entity);
+        auto& prop = registry.get<PropulsionComponent>(entity);
+        auto& tele = registry.get<TelemetryComponent>(entity);
+        auto& guid = registry.get<GuidanceComponent>(entity);
+        auto& vfx = registry.get<VFXComponent>(entity);
+        auto& att = registry.get<AttitudeComponent>(entity);
+
         // Accumulate time scaled by warp
         accumulator += real_dt * time_warp;
 
@@ -61,50 +77,49 @@ public:
 
         // Super acceleration (Physically inaccurate positions, skips integration)
         if (time_warp > 1000) {
-            double surface_speed = std::sqrt(rocket_state.velocity * rocket_state.velocity + rocket_state.local_vx * rocket_state.local_vx);
-            bool is_parked = (rocket_state.status == PRE_LAUNCH || rocket_state.status == LANDED) && surface_speed < 0.1;
+            double surface_speed = std::sqrt(tele.velocity * tele.velocity + tele.local_vx * tele.local_vx);
+            bool is_parked = (guid.status == PRE_LAUNCH || guid.status == LANDED) && surface_speed < 0.1;
             
             if (is_parked) {
-                if (rocket_state.status != PRE_LAUNCH && rocket_state.status != LANDED) {
-                    rocket_state.status = LANDED;
+                if (guid.status != PRE_LAUNCH && guid.status != LANDED) {
+                    guid.status = LANDED;
                     CelestialBody& cur_b = SOLAR_SYSTEM[current_soi_index];
-                    double theta = cur_b.prime_meridian_epoch + (rocket_state.sim_time * 2.0 * PI / cur_b.rotation_period);
-                    rocket_state.surf_px = rocket_state.px * std::cos(-theta) - rocket_state.py * std::sin(-theta);
-                    rocket_state.surf_py = rocket_state.px * std::sin(-theta) + rocket_state.py * std::cos(-theta);
-                    rocket_state.surf_pz = rocket_state.pz;
+                    double theta = cur_b.prime_meridian_epoch + (tele.sim_time * 2.0 * PI / cur_b.rotation_period);
+                    trans.surf_px = trans.px * std::cos(-theta) - trans.py * std::sin(-theta);
+                    trans.surf_py = trans.px * std::sin(-theta) + trans.py * std::cos(-theta);
+                    trans.surf_pz = trans.pz;
                 }
-                rocket_state.vx = 0; rocket_state.vy = 0; rocket_state.vz = 0;
-                rocket_state.velocity = 0; rocket_state.local_vx = 0;
-                rocket_state.ang_vel = 0; rocket_state.ang_vel_z = 0;
+                vel.vx = 0; vel.vy = 0; vel.vz = 0;
+                tele.velocity = 0; tele.local_vx = 0;
+                att.ang_vel = 0; att.ang_vel_z = 0; // Notice: this logic should refer to appropriate component
             }
             
             // Advance simulation in big jump
-            PhysicsSystem::FastGravityUpdate(rocket_state, rocket_config, accumulator);
+            PhysicsSystem::FastGravityUpdate(registry, entity, accumulator);
             accumulator = 0;
             mnv_autopilot_active = false;
         } else {
             // Standard integration loop
             while (accumulator >= dt) {
-                executeManeuvers(rocket_state, rocket_config, control_input, hud);
+                executeManeuvers(registry, entity, hud); 
 
                 if (!mnv_autopilot_active) {
-                    // Manual inputs mapping (moved from main)
                     ControlSystem::ManualInputs manual = getManualInputs(window, cam_mode); 
-                    if (rocket_state.auto_mode) ControlSystem::UpdateAutoPilot(rocket_state, rocket_config, control_input, dt);
-                    else ControlSystem::UpdateManualControl(rocket_state, rocket_config, control_input, manual, dt);
+                    if (guid.auto_mode) ControlSystem::UpdateAutoPilot(registry, entity, dt);
+                    else ControlSystem::UpdateManualControl(registry, entity, manual, dt);
                 }
 
-                PhysicsSystem::Update(rocket_state, rocket_config, control_input, dt);
+                PhysicsSystem::Update(registry, entity, dt);
 
                 // Auto-staging
-                if (StageManager::IsCurrentStageEmpty(rocket_state) 
-                    && rocket_state.current_stage < rocket_state.total_stages - 1
-                    && (rocket_state.status == ASCEND || rocket_state.status == DESCEND)) {
-                    StageManager::SeparateStage(rocket_state, rocket_config);
+                if (StageManager::IsCurrentStageEmpty(prop) 
+                    && prop.current_stage < prop.total_stages - 1
+                    && (guid.status == ASCEND || guid.status == DESCEND)) {
+                    StageManager::SeparateStage(registry, entity);
                 }
 
                 accumulator -= dt;
-                if (rocket_state.status == LANDED || rocket_state.status == CRASHED) {
+                if (guid.status == LANDED || guid.status == CRASHED) {
                     accumulator = 0;
                     break;
                 }
@@ -112,26 +127,36 @@ public:
 
             // Visual smoke updates (only at real time)
             if (time_warp == 1) {
-                PhysicsSystem::EmitSmoke(rocket_state, rocket_config, real_dt);
-                PhysicsSystem::UpdateSmoke(rocket_state, real_dt);
+                PhysicsSystem::EmitSmoke(registry, entity, real_dt);
+                PhysicsSystem::UpdateSmoke(registry, entity, real_dt);
             }
         }
     }
 
 private:
-    void executeManeuvers(RocketState& rocket_state, const RocketConfig& rocket_config, ControlInput& control_input, FlightHUD& hud) {
+    void executeManeuvers(entt::registry& registry, entt::entity entity, FlightHUD& hud) {
+    auto& rocket_state = registry.get<RocketState>(entity);
+    auto& rocket_config = registry.get<RocketConfig>(entity);
+    auto& control_input = registry.get<ControlInput>(entity);
+    auto& prop = registry.get<PropulsionComponent>(entity);
+    auto& tele = registry.get<TelemetryComponent>(entity);
+    auto& guid = registry.get<GuidanceComponent>(entity);
+    auto& mnv = registry.get<ManeuverComponent>(entity);
+    auto& trans = registry.get<TransformComponent>(entity);
+    auto& vel = registry.get<VelocityComponent>(entity);
+    auto& att = registry.get<AttitudeComponent>(entity);
         mnv_autopilot_active = false;
-        if (rocket_state.maneuvers.empty()) return;
-        if (!(rocket_state.status == ASCEND || rocket_state.status == DESCEND)) return;
+        if (mnv.maneuvers.empty()) return;
+        if (!(guid.status == ASCEND || guid.status == DESCEND)) return;
 
-        auto& node = rocket_state.maneuvers[0];
+        auto& node = mnv.maneuvers[0];
         
         // 1. Estimate burn
         double total_dv_mag = node.delta_v.length();
-        double current_mass = rocket_state.fuel + rocket_config.dry_mass + rocket_config.upper_stages_mass;
+        double current_mass = prop.fuel + rocket_config.dry_mass + rocket_config.upper_stages_mass;
         double max_thrust = 0;
-        if (rocket_state.current_stage < (int)rocket_config.stage_configs.size())
-            max_thrust = rocket_config.stage_configs[rocket_state.current_stage].thrust;
+        if (prop.current_stage < (int)rocket_config.stage_configs.size())
+            max_thrust = rocket_config.stage_configs[prop.current_stage].thrust;
         double ve = rocket_config.specific_impulse * 9.80665;
         
         if (max_thrust > 0 && ve > 0 && total_dv_mag > 0) {
@@ -140,7 +165,7 @@ private:
             node.burn_duration = (m_0 - m_f) / (max_thrust / ve);
         }
         
-        double time_to_burn_start = node.sim_time - rocket_state.sim_time;
+        double time_to_burn_start = node.sim_time - tele.sim_time;
         
         // 2. Snapshot target state
         if (!node.snap_valid && time_to_burn_start < 5.0) {
@@ -148,18 +173,18 @@ private:
             CelestialBody& ref_b = SOLAR_SYSTEM[ref_idx];
             
             // Ships current relative state to reference body
-            double ship_rel_vx = rocket_state.vx + SOLAR_SYSTEM[current_soi_index].vx - ref_b.vx;
-            double ship_rel_vy = rocket_state.vy + SOLAR_SYSTEM[current_soi_index].vy - ref_b.vy;
-            double ship_rel_vz = rocket_state.vz + SOLAR_SYSTEM[current_soi_index].vz - ref_b.vz;
-            double ship_rel_px = rocket_state.px + SOLAR_SYSTEM[current_soi_index].px - ref_b.px;
-            double ship_rel_py = rocket_state.py + SOLAR_SYSTEM[current_soi_index].py - ref_b.py;
-            double ship_rel_pz = rocket_state.pz + SOLAR_SYSTEM[current_soi_index].pz - ref_b.pz;
+            double ship_rel_vx = vel.vx + SOLAR_SYSTEM[current_soi_index].vx - ref_b.vx;
+            double ship_rel_vy = vel.vy + SOLAR_SYSTEM[current_soi_index].vy - ref_b.vy;
+            double ship_rel_vz = vel.vz + SOLAR_SYSTEM[current_soi_index].vz - ref_b.vz;
+            double ship_rel_px = trans.px + SOLAR_SYSTEM[current_soi_index].px - ref_b.px;
+            double ship_rel_py = trans.py + SOLAR_SYSTEM[current_soi_index].py - ref_b.py;
+            double ship_rel_pz = trans.pz + SOLAR_SYSTEM[current_soi_index].pz - ref_b.pz;
 
             double mu_ref = 6.67430e-11 * ref_b.mass;
             double npx, npy, npz, nvx, nvy, nvz;
             get3DStateAtTime(ship_rel_px, ship_rel_py, ship_rel_pz, 
                             ship_rel_vx, ship_rel_vy, ship_rel_vz, 
-                            mu_ref, node.sim_time - rocket_state.sim_time, 
+                            mu_ref, node.sim_time - tele.sim_time, 
                             npx, npy, npz, nvx, nvy, nvz);
 
             ManeuverFrame frame = ManeuverSystem::getFrame(Vec3((float)npx, (float)npy, (float)npz), Vec3((float)nvx, (float)nvy, (float)nvz));
@@ -192,12 +217,12 @@ private:
             int ref_idx = (node.ref_body >= 0) ? node.ref_body : current_soi_index;
             CelestialBody& ref_b = SOLAR_SYSTEM[ref_idx];
             
-            double cur_rel_vx = rocket_state.vx + SOLAR_SYSTEM[current_soi_index].vx - ref_b.vx;
-            double cur_rel_vy = rocket_state.vy + SOLAR_SYSTEM[current_soi_index].vy - ref_b.vy;
-            double cur_rel_vz = rocket_state.vz + SOLAR_SYSTEM[current_soi_index].vz - ref_b.vz;
+            double cur_rel_vx = vel.vx + SOLAR_SYSTEM[current_soi_index].vx - ref_b.vx;
+            double cur_rel_vy = vel.vy + SOLAR_SYSTEM[current_soi_index].vy - ref_b.vy;
+            double cur_rel_vz = vel.vz + SOLAR_SYSTEM[current_soi_index].vz - ref_b.vz;
             
             double mu_ref = 6.67430e-11 * ref_b.mass;
-            double dt_snap = rocket_state.sim_time - node.snap_time;
+            double dt_snap = tele.sim_time - node.snap_time;
             double tpx, tpy, tpz, tvx, tvy, tvz;
             
             // Propagate target trajectory forward to current time
@@ -218,19 +243,19 @@ private:
             if (burn_dir.length() < 0.1f) {
                 double mu = 6.67430e-11 * SOLAR_SYSTEM[current_soi_index].mass;
                 double npx, npy, npz, nvx, nvy, nvz;
-                get3DStateAtTime(rocket_state.px, rocket_state.py, rocket_state.pz, rocket_state.vx, rocket_state.vy, rocket_state.vz, mu, node.sim_time - rocket_state.sim_time, npx, npy, npz, nvx, nvy, nvz);
+                get3DStateAtTime(trans.px, trans.py, trans.pz, vel.vx, vel.vy, vel.vz, mu, node.sim_time - tele.sim_time, npx, npy, npz, nvx, nvy, nvz);
                 ManeuverFrame frame = ManeuverSystem::getFrame(Vec3((float)npx, (float)npy, (float)npz), Vec3((float)nvx, (float)nvy, (float)nvz));
                 burn_dir = (frame.prograde * node.delta_v.x + frame.normal * node.delta_v.y + frame.radial * node.delta_v.z).normalized();
             }
 
-            Vec3 fwd = rocket_state.attitude.forward();
+            Vec3 fwd = att.attitude.forward();
             float dot_prod = fwd.dot(burn_dir);
             Vec3 error_axis = fwd.cross(burn_dir);
             float error_mag = error_axis.length();
 
-            if (dot_prod < -0.999f && error_mag < 0.01f) { error_axis = rocket_state.attitude.right(); error_mag = 1.0f; }
+            if (dot_prod < -0.999f && error_mag < 0.01f) { error_axis = att.attitude.right(); error_mag = 1.0f; }
 
-            double total_mass = rocket_config.dry_mass + rocket_state.fuel + rocket_config.upper_stages_mass;
+            double total_mass = rocket_config.dry_mass + prop.fuel + rocket_config.upper_stages_mass;
             float moi = (float)(50000.0 * (total_mass / 50000.0));
 
             if (error_mag > 0.001f) {
@@ -239,15 +264,15 @@ private:
                 if (dot_prod < 0) error_angle = (float)PI - error_angle; 
                 
                 float kp = moi * 32.0f; float kd = moi * 12.0f;
-                Vec3 right_axis = rocket_state.attitude.right();
-                Vec3 up_axis = rocket_state.attitude.up();
-                control_input.torque_cmd = kp * error_axis.dot(up_axis) * error_angle - kd * (float)rocket_state.ang_vel;
-                control_input.torque_cmd_z = kp * error_axis.dot(right_axis) * error_angle - kd * (float)rocket_state.ang_vel_z;
+                Vec3 right_axis = att.attitude.right();
+                Vec3 up_axis = att.attitude.up();
+                control_input.torque_cmd = kp * error_axis.dot(up_axis) * error_angle - kd * (float)att.ang_vel;
+                control_input.torque_cmd_z = kp * error_axis.dot(right_axis) * error_angle - kd * (float)att.ang_vel_z;
             } else {
-                control_input.torque_cmd = -moi * 8.0f * (float)rocket_state.ang_vel;
-                control_input.torque_cmd_z = -moi * 8.0f * (float)rocket_state.ang_vel_z;
+                control_input.torque_cmd = -moi * 8.0f * (float)att.ang_vel;
+                control_input.torque_cmd_z = -moi * 8.0f * (float)att.ang_vel_z;
             }
-            control_input.torque_cmd_roll = -moi * 8.0f * (float)rocket_state.ang_vel_roll;
+            control_input.torque_cmd_roll = -moi * 8.0f * (float)att.ang_vel_roll;
         }
 
         // 5. Throttle
@@ -256,10 +281,10 @@ private:
             mnv_autopilot_active = true;
         } else if (node.snap_valid && remaining_dv <= 0.5) {
             control_input.throttle = 0;
-            rocket_state.mission_msg = "MNV COMPLETE";
-            rocket_state.maneuvers.erase(rocket_state.maneuvers.begin());
-            if (rocket_state.selected_maneuver_index >= 0) rocket_state.selected_maneuver_index--;
-            if (rocket_state.maneuvers.empty()) hud.auto_exec_mnv = false;
+            guid.mission_msg = "MNV COMPLETE";
+            mnv.maneuvers.erase(mnv.maneuvers.begin());
+            if (mnv.selected_maneuver_index >= 0) mnv.selected_maneuver_index--;
+            if (mnv.maneuvers.empty()) hud.auto_exec_mnv = false;
         } else if (!mnv_autopilot_active) {
             control_input.throttle = 0;
         }
