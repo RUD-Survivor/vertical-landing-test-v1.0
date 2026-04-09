@@ -34,19 +34,24 @@ public:
      * @param renderRocketBase 火箭相对渲染坐标
      * @param ws_d           世界缩放因子 (km -> 渲染单位)
      */
-    void render(RocketState& rocket_state, RocketConfig& rocket_config, ControlInput& control_input,
+    void render(entt::registry& registry, entt::entity entity, 
                 const RocketAssembly& assembly, Renderer3D* r3d, const Mesh& rocketBox,
                 const Quat& rocketQuat, const Vec3& renderRocketBase, double ws_d)
     {
-        if (rocket_state.thrust_power < 0.01) return;
+        auto& prop = registry.get<PropulsionComponent>(entity);
+        auto& tele = registry.get<TelemetryComponent>(entity);
+        auto& config = registry.get<RocketConfig>(entity);
+        auto& input = registry.get<ControlInput>(entity);
 
-        float thrust = (float)control_input.throttle;
-        float expansion = (float)fmax(0.0, 1.0 - PhysicsSystem::get_air_density(rocket_state.altitude) / 1.225);
+        if (prop.thrust_power < 0.01) return;
+
+        float thrust = (float)input.throttle;
+        float expansion = (float)fmax(0.0, 1.0 - PhysicsSystem::get_air_density(tele.altitude) / 1.225);
         float thrust_scale = 0.25f + 0.75f * powf(thrust, 1.5f);
 
         int render_start = 0;
-        if (rocket_state.current_stage < (int)rocket_config.stage_configs.size()) {
-            render_start = rocket_config.stage_configs[rocket_state.current_stage].part_start_index;
+        if (prop.current_stage < (int)config.stage_configs.size()) {
+            render_start = config.stage_configs[prop.current_stage].part_start_index;
         }
 
         // 遍历所有活跃引擎渲染羽流
@@ -71,7 +76,7 @@ public:
                     float engine_ph = def.height * (float)ws_d;
                     float plume_len = engine_ph * 4.2f * thrust_scale * (1.0f + expansion * 1.0f);
                     float plume_dia = def.diameter * (float)ws_d * 2.0f * (1.1f + expansion * 4.2f);
-                    float groundDist = (float)rocket_state.altitude * (float)ws_d;
+                    float groundDist = (float)tele.altitude * (float)ws_d;
                     float ground_contact_depth = fmaxf(0.0f, plume_len - groundDist);
                     float splash_factor = ground_contact_depth / fmaxf(0.001f, plume_len);
                     plume_dia *= (1.0f + splash_factor * 8.0f);

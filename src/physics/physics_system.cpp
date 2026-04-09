@@ -1218,7 +1218,7 @@ void EmitSmoke(entt::registry& registry, entt::entity entity, double dt) {
     
     // 一次产生 3 个粒子
     for (int k = 0; k < 3; k++) {
-        SmokeParticle& p = vfx.smoke[vfx.smoke_idx % RocketState::MAX_SMOKE];
+        SmokeParticle& p = vfx.smoke[vfx.smoke_idx % VFXComponent::MAX_SMOKE];
         // 使用哈希函数产生伪随机偏移，让烟雾看起来更自然
         float rnd1 = hash11(vfx.smoke_idx * 1337 + k * 997) - 0.5f;
         float rnd2 = hash11(vfx.smoke_idx * 7919 + k * 773) - 0.5f;
@@ -1243,7 +1243,7 @@ void UpdateSmoke(entt::registry& registry, entt::entity entity, double dt) {
     auto& vfx = registry.get<VFXComponent>(entity);
     auto& trans = registry.get<TransformComponent>(entity);
     auto& vel = registry.get<VelocityComponent>(entity);
-    for (int i = 0; i < RocketState::MAX_SMOKE; i++) {
+    for (int i = 0; i < VFXComponent::MAX_SMOKE; i++) {
         SmokeParticle& p = vfx.smoke[i];
         if (!p.active) continue;
         

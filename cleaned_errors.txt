@@ -1,0 +1,11 @@
+main.cpp
+C:\antigravity_code\RocketSim3D\src\render/HUD_system.h(155): error C2374: “control_input”: 重定义；多次初始化
+C:\antigravity_code\RocketSim3D\src\render/HUD_system.h(155): error C2086: “ControlInput &control_input”: 重定义
+C:\antigravity_code\RocketSim3D\src\render/HUD_system.h(155): error C2371: “control_input”: 重定义；不同的基类型
+physics_system.cpp
+control_system.cpp
+stage_manager.cpp
+center_calculator.cpp
+center_visualizer.cpp
+predictor.cpp
+stb_impl.cpp

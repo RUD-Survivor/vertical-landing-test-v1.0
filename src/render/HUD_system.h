@@ -18,7 +18,8 @@ std::string formatTime(double seconds, bool absolute = false);
 
 struct HUDContext {
     Renderer* renderer;
-    RocketState* rocket_state;
+    entt::registry* registry;
+    entt::entity entity;
     RocketConfig* rocket_config;
     ControlInput* control_input;
     CameraDirector* cam;
@@ -102,7 +103,17 @@ public:
     void render(HUDContext& ctx) {
         // Unpack references to avoid changing the hud code too much
         Renderer* renderer = ctx.renderer;
-        RocketState& rocket_state = *ctx.rocket_state;
+        // ECS components accessed via registry
+        // --- ECS Component References (replacing rocket_state access) ---
+        auto& trans = ctx.registry->get<TransformComponent>(ctx.entity);
+        auto& vel   = ctx.registry->get<VelocityComponent>(ctx.entity);
+        auto& att   = ctx.registry->get<AttitudeComponent>(ctx.entity);
+        auto& prop  = ctx.registry->get<PropulsionComponent>(ctx.entity);
+        auto& tele  = ctx.registry->get<TelemetryComponent>(ctx.entity);
+        auto& guid  = ctx.registry->get<GuidanceComponent>(ctx.entity);
+        auto& mnv   = ctx.registry->get<ManeuverComponent>(ctx.entity);
+        auto& orb   = ctx.registry->get<OrbitComponent>(ctx.entity);
+
         RocketConfig& rocket_config = *ctx.rocket_config;
         ControlInput& control_input = *ctx.control_input;
         CameraDirector& cam = *ctx.cam;
@@ -141,11 +152,11 @@ public:
     renderer->beginFrame();
 
     // 坐标转换变量（HUD也需要）
-    double scale = 1.0 / (rocket_state.altitude * 1.5 + 200.0);
+    double scale = 1.0 / (tele.altitude * 1.5 + 200.0);
     float cx = 0.0f;
     float cy = 0.0f;
-    double rocket_r = sqrt(rocket_state.px * rocket_state.px + rocket_state.py * rocket_state.py);
-    double rocket_theta = atan2(rocket_state.py, rocket_state.px);
+    double rocket_r = sqrt(trans.px * trans.px + trans.py * trans.py);
+    double rocket_theta = atan2(trans.py, trans.px);
     double cam_angle = PI / 2.0 - rocket_theta;
     double sin_c = sin(cam_angle);
     double cos_c = cos(cam_angle);
@@ -192,9 +203,9 @@ public:
         float gauge_alt_x = -0.84f;
         float gauge_fuel_x = -0.76f;
 
-    double current_vel = sqrt(rocket_state.vx*rocket_state.vx + rocket_state.vy*rocket_state.vy + rocket_state.vz*rocket_state.vz);
-    double current_alt = rocket_state.altitude;
-    int current_vvel = (int)rocket_state.velocity;
+    double current_vel = sqrt(vel.vx*vel.vx + vel.vy*vel.vy + vel.vz*vel.vz);
+    double current_alt = tele.altitude;
+    int current_vvel = (int)tele.velocity;
 
     if (orbit_reference_sun) {
         double G_const = 6.67430e-11;
@@ -202,18 +213,18 @@ public:
         double GM_sun = G_const * M_sun;
         double au = 149597870700.0;
         double sun_angular_vel = sqrt(GM_sun / (au * au * au));
-        double sun_angle = -1.2 + sun_angular_vel * rocket_state.sim_time;
+        double sun_angle = -1.2 + sun_angular_vel * tele.sim_time;
         double current_sun_px = cos(sun_angle) * au;
         double current_sun_py = sin(sun_angle) * au;
         double current_sun_vx = -sin(sun_angle) * au * sun_angular_vel;
         double current_sun_vy = cos(sun_angle) * au * sun_angular_vel;
 
-        double rel_vx = rocket_state.vx - current_sun_vx;
-        double rel_vy = rocket_state.vy - current_sun_vy;
-        double rel_vz = rocket_state.vz;
-        double rel_px = rocket_state.px - current_sun_px;
-        double rel_py = rocket_state.py - current_sun_py;
-        double rel_pz = rocket_state.pz;
+        double rel_vx = vel.vx - current_sun_vx;
+        double rel_vy = vel.vy - current_sun_vy;
+        double rel_vz = vel.vz;
+        double rel_px = trans.px - current_sun_px;
+        double rel_py = trans.py - current_sun_py;
+        double rel_pz = trans.pz;
         
         current_vel = sqrt(rel_vx * rel_vx + rel_vy * rel_vy + rel_vz * rel_vz);
         double dist_to_sun = sqrt(rel_px * rel_px + rel_py * rel_py + rel_pz * rel_pz);
@@ -229,7 +240,7 @@ public:
     float label_x = num_x + 0.065f; 
     float bg_w = 0.22f;
     float bg_h = 0.05f;
-    double current_fuel = rocket_state.fuel;
+    double current_fuel = prop.fuel;
 
     // --- New Detailed Telemetry HUD (Bottom-Left) ---
     float tl_x = -0.98f;
@@ -246,8 +257,8 @@ public:
 
     // 1. Latitude and Longitude
     double planet_r = SOLAR_SYSTEM[current_soi_index].radius;
-    double lat = asin(fmax(-1.0, fmin(1.0, rocket_state.surf_pz / planet_r))) * 180.0 / PI;
-    double lon = atan2(rocket_state.surf_py, rocket_state.surf_px) * 180.0 / PI;
+    double lat = asin(fmax(-1.0, fmin(1.0, trans.surf_pz / planet_r))) * 180.0 / PI;
+    double lon = atan2(trans.surf_py, trans.surf_px) * 180.0 / PI;
     snprintf(tl_buf, sizeof(tl_buf), "%.4f, %.4f", lat, lon);
     draw_tl_line("LAT/LON:", tl_buf, 0.4f, 0.8f, 1.0f);
 
@@ -261,15 +272,15 @@ public:
     draw_tl_line("ALTITUDE:", tl_buf, 0.4f, 1.0f, 0.8f);
 
     // 2. Thrust and TWR
-    double current_thrust = rocket_state.thrust_power;
+    double current_thrust = prop.thrust_power;
     double g_local = 9.80665 * pow(6371000.0 / (6371000.0 + current_alt), 2);
-    double total_mass = assembly.total_dry_mass + rocket_state.fuel;
+    double total_mass = assembly.total_dry_mass + prop.fuel;
     double twr = (total_mass > 0) ? current_thrust / (total_mass * g_local) : 0;
     snprintf(tl_buf, sizeof(tl_buf), "%.2f kN (TWR: %.2f)", current_thrust / 1000.0, twr);
     draw_tl_line("THRUST:", tl_buf, 1.0f, 0.6f, 0.2f);
 
     // 3. Mass and Fuel
-    snprintf(tl_buf, sizeof(tl_buf), "%.1f t (Fuel: %.1f t)", total_mass / 1000.0, rocket_state.fuel / 1000.0);
+    snprintf(tl_buf, sizeof(tl_buf), "%.1f t (Fuel: %.1f t)", total_mass / 1000.0, prop.fuel / 1000.0);
     draw_tl_line("MASS:", tl_buf, 0.8f, 0.8f, 0.8f);
 
     // 4. Remaining Delta-V
@@ -281,7 +292,7 @@ public:
     draw_tl_line("REMAIN DV:", tl_buf, 0.3f, 0.9f, 0.4f);
 
     // 5. Gravity and Drag
-    double drag_mag = fabs(rocket_state.acceleration) * total_mass - current_thrust; // Rough estimate
+    double drag_mag = fabs(vel.acceleration) * total_mass - current_thrust; // Rough estimate
     if (drag_mag < 0) drag_mag = 0;
     snprintf(tl_buf, sizeof(tl_buf), "%.3f m/s2 (Drag: %.1f N)", g_local, drag_mag);
     draw_tl_line("GRAVITY:", tl_buf, 0.6f, 0.7f, 1.0f);
@@ -293,13 +304,13 @@ public:
 
     // Calculate elements (Simple 2D/3D approximation for HUD)
     double mu = 3.986e14;
-    double r_mag = sqrt(rocket_state.px*rocket_state.px + rocket_state.py*rocket_state.py + rocket_state.pz*rocket_state.pz);
-    double v_sq = rocket_state.vx*rocket_state.vx + rocket_state.vy*rocket_state.vy + rocket_state.vz*rocket_state.vz;
+    double r_mag = sqrt(trans.px*trans.px + trans.py*trans.py + trans.pz*trans.pz);
+    double v_sq = vel.vx*vel.vx + vel.vy*vel.vy + vel.vz*vel.vz;
     double specific_energy = v_sq / 2.0 - mu / r_mag;
     double a_val = -mu / (2.0 * specific_energy);
     
-    Vec3 r_vec(rocket_state.px, rocket_state.py, rocket_state.pz);
-    Vec3 v_vec(rocket_state.vx, rocket_state.vy, rocket_state.vz);
+    Vec3 r_vec(trans.px, trans.py, trans.pz);
+    Vec3 v_vec(vel.vx, vel.vy, vel.vz);
     Vec3 h_vec = r_vec.cross(v_vec);
     double h_mag = h_vec.length();
     double e_val = sqrt(1.0 + (2.0 * specific_energy * h_mag * h_mag) / (mu * mu));
@@ -322,7 +333,7 @@ public:
 
     // 俯仰读数 (Pitch) + 度数
     renderer->addRect(num_x, 0.10f, bg_w * 0.8f, bg_h * 0.8f, 0.0f, 0.0f, 0.0f, 0.5f);
-    int pitch_deg = (int)(abs(rocket_state.angle_z) * 180.0 / PI);
+    int pitch_deg = (int)(abs(att.angle_z) * 180.0 / PI);
     float pr = 0.8f, pg = 0.8f, pb = 0.8f;
     if (pitch_deg > 20 && current_vel > 200.0) {
         pr = 1.0f; pg = 0.2f; pb = 0.2f; // Red Warning (high Q area)
@@ -360,21 +371,21 @@ public:
                           hmouse_y >= mode_y - mode_h/2.0f && hmouse_y <= mode_y + mode_h/2.0f);
     
     if (is_hover_mode && hlmb && !hlmb_prev) {
-        rocket_state.auto_mode = !rocket_state.auto_mode;
-        if (rocket_state.auto_mode) {
-           rocket_state.pid_vert.reset();
-           rocket_state.pid_pos.reset();
-           rocket_state.pid_att.reset();
-           rocket_state.pid_att_z.reset();
-           rocket_state.mission_msg = ">> AUTOPILOT ENGAGED (MOUSE)";
+        guid.auto_mode = !guid.auto_mode;
+        if (guid.auto_mode) {
+           guid.pid_vert.reset();
+           guid.pid_pos.reset();
+           guid.pid_att.reset();
+           guid.pid_att_z.reset();
+           guid.mission_msg = ">> AUTOPILOT ENGAGED (MOUSE)";
         } else {
-           rocket_state.mission_msg = ">> MANUAL CONTROL ACTIVE (MOUSE)";
+           guid.mission_msg = ">> MANUAL CONTROL ACTIVE (MOUSE)";
         }
     }
     // hlmb_prev updated after all HUD interactions
 
     renderer->addRect(mode_x, mode_y, mode_w, mode_h, 0.05f, 0.05f, 0.05f, 0.7f);
-    if (rocket_state.auto_mode) {
+    if (guid.auto_mode) {
       float pulse = is_hover_mode ? 1.0f : 0.8f;
       renderer->addRect(mode_x, mode_y, mode_w - 0.02f, mode_h - 0.15f, 0.1f * pulse, 0.8f * pulse, 0.2f * pulse, 0.9f);
       renderer->drawText(mode_x, mode_y, "AUTO", 0.020f, 0.1f, 0.1f, 0.1f, 0.9f, false, Renderer::CENTER);
@@ -386,7 +397,7 @@ public:
 
     // --- 7. Mission Status & Time (Top Center) ---
     renderer->drawText(0.0f, 0.85f, "[MISSION CONTROL]", 0.016f, 0.4f, 1.0f, 0.4f, hud_opacity, true, Renderer::CENTER);
-    renderer->drawText(0.0f, 0.80f, rocket_state.mission_msg.c_str(), 0.015f, 0.8f, 0.8f, 1.0f, hud_opacity, true, Renderer::CENTER);
+    renderer->drawText(0.0f, 0.80f, guid.mission_msg.c_str(), 0.015f, 0.8f, 0.8f, 1.0f, hud_opacity, true, Renderer::CENTER);
 
     // Free Camera Speed Display
     if (cam.mode == 3) {
@@ -406,11 +417,11 @@ public:
                           hmouse_y >= time_y - time_h/2.0f && hmouse_y <= time_y + time_h/2.0f);
     
     if (is_hover_time && hlmb && !hlmb_prev) {
-        rocket_state.show_absolute_time = !rocket_state.show_absolute_time;
+        guid.show_absolute_time = !guid.show_absolute_time;
     }
 
     renderer->addRect(0.0f, time_y, time_w, time_h, 0.05f, 0.05f, 0.05f, 0.7f);
-    string time_str = formatTime(rocket_state.show_absolute_time ? rocket_state.sim_time : rocket_state.mission_timer, rocket_state.show_absolute_time);
+    string time_str = formatTime(guid.show_absolute_time ? tele.sim_time : guid.mission_timer, guid.show_absolute_time);
     renderer->drawText(0.0f, time_y, time_str.c_str(), 0.018f, 1.0f, 1.0f, 1.0f, 0.9f, true, Renderer::CENTER);
 
     // Time Warp Display
@@ -421,7 +432,7 @@ public:
     }
 
     // --- 8. Stage Indicator (Below mode indicator) ---
-    if (rocket_state.total_stages > 1) {
+    if (prop.total_stages > 1) {
         float stage_x = 0.88f;
         float stage_y = mode_y - 0.06f;
         float stage_w = 0.15f;
@@ -430,10 +441,10 @@ public:
         
         // Stage number display
         char stage_str[32];
-        snprintf(stage_str, sizeof(stage_str), "STG %d/%d", rocket_state.current_stage + 1, rocket_state.total_stages);
+        snprintf(stage_str, sizeof(stage_str), "STG %d/%d", prop.current_stage + 1, prop.total_stages);
         
         float sr = 0.3f, sg = 0.8f, sb = 1.0f;
-        if (rocket_state.fuel < 1000 && rocket_state.current_stage < rocket_state.total_stages - 1) {
+        if (prop.fuel < 1000 && prop.current_stage < prop.total_stages - 1) {
             // Blink warning when fuel low and can still stage
             float blink = 0.5f + 0.5f * sinf((float)glfwGetTime() * 6.0f);
             sr = 1.0f * blink; sg = 0.5f * blink; sb = 0.1f;
@@ -444,21 +455,21 @@ public:
         float bar_y_start = stage_y - 0.04f;
         float bar_w = stage_w * 0.8f;
         float bar_h = 0.012f;
-        for (int si = 0; si < rocket_state.total_stages; si++) {
+        for (int si = 0; si < prop.total_stages; si++) {
             float by = bar_y_start - si * (bar_h + 0.005f);
             // Background
             renderer->addRect(stage_x, by, bar_w, bar_h, 0.15f, 0.15f, 0.15f, 0.5f);
             // Fill
-            if (si < (int)rocket_state.stage_fuels.size() && si < (int)rocket_config.stage_configs.size()) {
+            if (si < (int)prop.stage_fuels.size() && si < (int)rocket_config.stage_configs.size()) {
                 float cap = (float)rocket_config.stage_configs[si].fuel_capacity;
-                float ratio = (cap > 0) ? (float)(rocket_state.stage_fuels[si] / cap) : 0.0f;
+                float ratio = (cap > 0) ? (float)(prop.stage_fuels[si] / cap) : 0.0f;
                 ratio = fmaxf(0.0f, fminf(1.0f, ratio));
                 float fill = bar_w * ratio;
                 float fx = stage_x - bar_w / 2.0f + fill / 2.0f;
-                float fr = (si == rocket_state.current_stage) ? 0.2f : 0.4f;
-                float fg = (si == rocket_state.current_stage) ? 1.0f : 0.5f;
-                float fb = (si == rocket_state.current_stage) ? 0.4f : 0.3f;
-                if (si < rocket_state.current_stage) { fr = 0.3f; fg = 0.3f; fb = 0.3f; } // jettisoned
+                float fr = (si == prop.current_stage) ? 0.2f : 0.4f;
+                float fg = (si == prop.current_stage) ? 1.0f : 0.5f;
+                float fb = (si == prop.current_stage) ? 0.4f : 0.3f;
+                if (si < prop.current_stage) { fr = 0.3f; fg = 0.3f; fb = 0.3f; } // jettisoned
                 renderer->addRect(fx, by, fill, bar_h * 0.7f, fr, fg, fb, 0.8f);
             }
         }
@@ -466,9 +477,9 @@ public:
     
     // 保存指示器 (每次保存后闪烁3秒)
     static int last_save_frame = -1000;
-    if (frame % 300 == 0 && rocket_state.status != PRE_LAUNCH) {
+    if (frame % 300 == 0 && guid.status != PRE_LAUNCH) {
         last_save_frame = frame;
-        SaveSystem::SaveGame(assembly, rocket_state, control_input);
+        SaveSystem::SaveGame(*ctx.assembly, *ctx.registry, ctx.entity, *ctx.control_input);
     }
     int frames_since_save = frame - last_save_frame;
     if (frames_since_save < 180) { // 3秒 = 180帧
@@ -506,8 +517,8 @@ public:
     // 计算轨道向量 (相对于当前 SOI)
     Vec3 vPrograde(0, 0, 0), vNormal(0, 0, 0), vRadial(0, 0, 0);
     {
-        double rel_vx = rocket_state.vx, rel_vy = rocket_state.vy, rel_vz = rocket_state.vz;
-        double rel_px = rocket_state.px, rel_py = rocket_state.py, rel_pz = rocket_state.pz;
+        double rel_vx = vel.vx, rel_vy = vel.vy, rel_vz = vel.vz;
+        double rel_px = trans.px, rel_py = trans.py, rel_pz = trans.pz;
         
         if (orbit_reference_sun && current_soi_index != 0) {
             CelestialBody& cb = SOLAR_SYSTEM[current_soi_index];
@@ -528,12 +539,12 @@ public:
     // Maneuver target calculation (3D & Real-time)
     Vec3 vManeuver(0,0,0);
     double dv_remaining = 0;
-    if (rocket_state.selected_maneuver_index != -1 && (size_t)rocket_state.selected_maneuver_index < rocket_state.maneuvers.size()) {
-        ManeuverNode& node = rocket_state.maneuvers[rocket_state.selected_maneuver_index];
+    if (mnv.selected_maneuver_index != -1 && (size_t)mnv.selected_maneuver_index < mnv.maneuvers.size()) {
+        ManeuverNode& node = mnv.maneuvers[mnv.selected_maneuver_index];
         
         if (node.snap_valid) {
             // High-Precision Target Orbit Tracking (Principia Style)
-            Vec3 rem_v = ManeuverSystem::calculateRemainingDV(rocket_state, node);
+            Vec3 rem_v = ManeuverSystem::calculateRemainingDV(vel, tele, node);
             dv_remaining = (double)rem_v.length();
             vManeuver = rem_v.normalized();
         } else {
@@ -541,7 +552,7 @@ public:
             int ref_idx = (node.ref_body >= 0) ? node.ref_body : current_soi_index;
             double mu = G_const * SOLAR_SYSTEM[ref_idx].mass;
             double npx, npy, npz, nvx, nvy, nvz;
-            get3DStateAtTime(rocket_state.px, rocket_state.py, rocket_state.pz, rocket_state.vx, rocket_state.vy, rocket_state.vz, mu, node.sim_time - rocket_state.sim_time, npx, npy, npz, nvx, nvy, nvz);
+            get3DStateAtTime(trans.px, trans.py, trans.pz, vel.vx, vel.vy, vel.vz, mu, node.sim_time - tele.sim_time, npx, npy, npz, nvx, nvy, nvz);
             ManeuverFrame frame = ManeuverSystem::getFrame(Vec3((float)npx, (float)npy, (float)npz), Vec3((float)nvx, (float)nvy, (float)nvz));
             vManeuver = (frame.prograde * node.delta_v.x + frame.normal * node.delta_v.y + frame.radial * node.delta_v.z).normalized();
             dv_remaining = (double)node.delta_v.length();
@@ -549,7 +560,7 @@ public:
     }
 
     // 直接使用四元数投影，彻底解决万向锁和翻转问题
-    renderer->drawAttitudeSphere(nav_x, nav_y, nav_rad, rocketQuat, localRight, rocketUp, localNorth, rocket_state.sas_active, rocket_state.rcs_active, vPrograde, vNormal, vRadial, vManeuver);
+    renderer->drawAttitudeSphere(nav_x, nav_y, nav_rad, rocketQuat, localRight, rocketUp, localNorth, guid.sas_active, guid.rcs_active, vPrograde, vNormal, vRadial, vManeuver);
 
     // --- Maneuver Info (Next to Navball) ---
     if (dv_remaining > 0.1) {
@@ -582,13 +593,13 @@ public:
         
         bool hover = (hmouse_x >= bx - btn_w/2 && hmouse_x <= bx + btn_w/2 && hmouse_y >= by - btn_h/2 && hmouse_y <= by + btn_h/2);
         if (hover && hlmb && !hlmb_prev) {
-            rocket_state.sas_mode = sas_btns[i].mode;
-            rocket_state.sas_active = true;
-            rocket_state.auto_mode = false; // Override autopilot
+            guid.sas_mode = sas_btns[i].mode;
+            guid.sas_active = true;
+            guid.auto_mode = false; // Override autopilot
             cout << ">> SAS MODE: " << sas_btns[i].label << " (Active)" << endl;
         }
         
-        float alpha = (rocket_state.sas_mode == sas_btns[i].mode) ? 0.9f : 0.4f;
+        float alpha = (guid.sas_mode == sas_btns[i].mode) ? 0.9f : 0.4f;
         if (hover) alpha += 0.1f;
         renderer->addRect(bx, by, btn_w, btn_h, sas_btns[i].r, sas_btns[i].g, sas_btns[i].b, alpha);
         renderer->drawText(bx, by, sas_btns[i].label, 0.012f, 1, 1, 1, 0.9f, true, Renderer::CENTER);
@@ -794,21 +805,21 @@ public:
 
             draw_toggle(0.05f, "AUTO EXECUTE MNV", auto_exec_mnv, auto_exec_mnv);
             
-            bool is_ascent = (rocket_state.status == ASCEND);
+            bool is_ascent = (guid.status == ASCEND);
             bool temp_ascent = is_ascent;
             draw_toggle(0.10f, "AUTO ORBIT", is_ascent, temp_ascent, [&](){
-                rocket_state.status = ASCEND;
-                rocket_state.mission_phase = 0;
-                rocket_state.auto_mode = true;
-                rocket_state.mission_msg = "AUTOPILOT: INITIATING ASCENT...";
+                guid.status = ASCEND;
+                guid.mission_phase = 0;
+                guid.auto_mode = true;
+                guid.mission_msg = "AUTOPILOT: INITIATING ASCENT...";
             });
 
-            bool is_descent = (rocket_state.status == DESCEND);
+            bool is_descent = (guid.status == DESCEND);
             bool temp_descent = is_descent;
             draw_toggle(0.15f, "AUTO LANDING", is_descent, temp_descent, [&](){
-                rocket_state.status = DESCEND;
-                rocket_state.auto_mode = true;
-                rocket_state.mission_msg = "AUTOPILOT: INITIATING LANDING...";
+                guid.status = DESCEND;
+                guid.auto_mode = true;
+                guid.mission_msg = "AUTOPILOT: INITIATING LANDING...";
             });
 
             // Transfer Window button
@@ -885,7 +896,7 @@ public:
 
             if (hover_calc && hlmb && !hlmb_prev) {
                 int origin = TransferCalculator::getTransferOriginBody();
-                transfer_result = TransferCalculator::computePorkchop(origin, transfer_target_body, rocket_state.sim_time, 40);
+                transfer_result = TransferCalculator::computePorkchop(origin, transfer_target_body, tele.sim_time, 40);
                 transfer_result_valid = transfer_result.computed;
                 transfer_hover_dep = -1;
                 transfer_hover_tof = -1;
@@ -967,7 +978,7 @@ public:
                 // Axis tick labels (departure days)
                 for (int ti = 0; ti <= 4; ti++) {
                     float fx = (float)ti / 4.0f;
-                    double dep_day = (transfer_result.dep_start + fx * (transfer_result.dep_end - transfer_result.dep_start) - rocket_state.sim_time) / 86400.0;
+                    double dep_day = (transfer_result.dep_start + fx * (transfer_result.dep_end - transfer_result.dep_start) - tele.sim_time) / 86400.0;
                     char tick[32]; snprintf(tick, sizeof(tick), "%.0f", dep_day);
                     renderer->drawText(plot_lx + fx * plot_w, plot_by - 0.015f, tick, 0.007f, 0.5f, 0.5f, 0.5f, 0.8f, true, Renderer::CENTER);
                 }
@@ -991,7 +1002,7 @@ public:
                              best.dv_total / 1000.0, best.dv_departure / 1000.0, best.dv_arrival / 1000.0);
                     renderer->drawText(info_lx, info_y, buf, 0.009f, 0.2f, 1.0f, 0.4f, 1.0f, true, Renderer::LEFT);
 
-                    double dep_days = (best.departure_time - rocket_state.sim_time) / 86400.0;
+                    double dep_days = (best.departure_time - tele.sim_time) / 86400.0;
                     double tof_days = best.tof / 86400.0;
                     snprintf(buf, sizeof(buf), "Depart: T+%.1f days | Travel: %.1f days", dep_days, tof_days);
                     renderer->drawText(info_lx, info_y - 0.018f, buf, 0.008f, 0.7f, 0.7f, 0.7f, 0.9f, true, Renderer::LEFT);
@@ -1012,7 +1023,7 @@ public:
                             char tb[64];
                             snprintf(tb, sizeof(tb), "Dv: %.2f km/s", hpt.dv_total / 1000.0);
                             renderer->drawText(tt_x, tt_y + 0.012f, tb, 0.009f, 1,1,1, 1.0f, true, Renderer::CENTER);
-                            double d_day = (hpt.departure_time - rocket_state.sim_time) / 86400.0;
+                            double d_day = (hpt.departure_time - tele.sim_time) / 86400.0;
                             double t_day = hpt.tof / 86400.0;
                             snprintf(tb, sizeof(tb), "T+%.0fd / %.0fd flight", d_day, t_day);
                             renderer->drawText(tt_x, tt_y - 0.012f, tb, 0.008f, 0.7f, 0.7f, 0.7f, 1.0f, true, Renderer::CENTER);
@@ -1048,9 +1059,9 @@ public:
                     // Get rocket state projected to departure time
                     double mu_soi = G_const * SOLAR_SYSTEM[current_soi_index].mass;
                     double npx, npy, npz, nvx, nvy, nvz;
-                    get3DStateAtTime(rocket_state.px, rocket_state.py, rocket_state.pz,
-                                    rocket_state.vx, rocket_state.vy, rocket_state.vz,
-                                    mu_soi, best.departure_time - rocket_state.sim_time,
+                    get3DStateAtTime(trans.px, trans.py, trans.pz,
+                                    vel.vx, vel.vy, vel.vz,
+                                    mu_soi, best.departure_time - tele.sim_time,
                                     npx, npy, npz, nvx, nvy, nvz);
 
                     ManeuverFrame frame = ManeuverSystem::getFrame(
@@ -1066,15 +1077,21 @@ public:
                     float rad_comp = dv_world.dot(frame.radial);
                     node.delta_v = Vec3(pro_comp, nrm_comp, rad_comp);
 
-                    rocket_state.maneuvers.clear();
-                    rocket_state.maneuvers.push_back(node);
-                    rocket_state.selected_maneuver_index = 0;
+                    {
+                        auto& mnv_c = ctx.registry->get<ManeuverComponent>(ctx.entity);
+                        mnv_c.maneuvers.clear();
+                        mnv_c.maneuvers.push_back(node);
+                        mnv_c.selected_maneuver_index = 0;
+                    }
+                    mnv.maneuvers.clear();
+                    mnv.maneuvers.push_back(node);
+                    mnv.selected_maneuver_index = 0;
                     global_best_ang = 0;
                     mnv_popup_index = 0;
                     mnv_popup_visible = true;
                     adv_embed_mnv = true;
 
-                    rocket_state.mission_msg = "TRANSFER NODE CREATED";
+                    guid.mission_msg = "TRANSFER NODE CREATED";
                     cout << ">> Transfer maneuver created: dv=" << best.dv_total/1000.0 << " km/s" << endl;
                 }
             } else {
@@ -1208,13 +1225,19 @@ public:
             
             if (hover_cr && hlmb && !hlmb_prev) {
                 ManeuverNode node;
-                node.sim_time = rocket_state.sim_time + 600.0; // 10 minutes ahead
+                node.sim_time = tele.sim_time + 600.0; // 10 minutes ahead
                 node.delta_v = Vec3(0, 0, 0);
                 node.active = true;
                 node.ref_body = current_soi_index;
-                rocket_state.maneuvers.clear();
-                rocket_state.maneuvers.push_back(node);
-                rocket_state.selected_maneuver_index = 0;
+                {
+                    auto& mnv_c = ctx.registry->get<ManeuverComponent>(ctx.entity);
+                    mnv_c.maneuvers.clear();
+                    mnv_c.maneuvers.push_back(node);
+                    mnv_c.selected_maneuver_index = 0;
+                }
+                mnv.maneuvers.clear();
+                mnv.maneuvers.push_back(node);
+                mnv.selected_maneuver_index = 0;
                 global_best_ang = 0; // Disable keplerian hit-testing state
                 mnv_popup_index = 0;
                 mnv_popup_visible = true;
@@ -1223,7 +1246,7 @@ public:
             
             // Warp to Maneuver Node Button
             float warp_btn_y = cr_btn_y - 0.05f;
-            bool has_mnv_btn = !rocket_state.maneuvers.empty();
+            bool has_mnv_btn = !mnv.maneuvers.empty();
             float warp_r = has_mnv_btn ? 1.0f : 0.4f, warp_g = has_mnv_btn ? 0.7f : 0.4f, warp_b = has_mnv_btn ? 0.2f : 0.4f;
             bool hover_warp = has_mnv_btn && (hmouse_x >= menu_x - menu_w/2 + 0.02f && hmouse_x <= menu_x + menu_w/2 - 0.02f && hmouse_y >= warp_btn_y - 0.015f && hmouse_y <= warp_btn_y + 0.015f);
             renderer->addRectOutline(menu_x, warp_btn_y, menu_w - 0.04f, 0.03f, warp_r, warp_g, warp_b, has_mnv_btn ? 0.8f : 0.3f);
@@ -1240,8 +1263,8 @@ public:
             
             // Process warp-to-node: set time_warp to max safe level until near the node
             if (adv_warp_to_node && has_mnv_btn) {
-                double target_t = rocket_state.maneuvers[0].sim_time;
-                double time_to_start = target_t - rocket_state.sim_time;
+                double target_t = mnv.maneuvers[0].sim_time;
+                double time_to_start = target_t - tele.sim_time;
                 if (time_to_start <= 60.0) {
                     // Arrived at start window! Stop warping
                     time_warp = 1;
@@ -1297,17 +1320,17 @@ public:
         float mouse_x = (float)(mx_raw / ww * 2.0 - 1.0);
         float mouse_y = (float)(1.0 - my_raw / wh * 2.0);
 
-        std::vector<RocketState::Apsis> hud_apsides, hud_mnv_apsides;
+        std::vector<OrbitComponent::Apsis> hud_apsides, hud_mnv_apsides;
         {
-            std::lock_guard<std::mutex> lock(*rocket_state.path_mutex);
-            hud_apsides = rocket_state.predicted_apsides;
-            hud_mnv_apsides = rocket_state.predicted_mnv_apsides;
+            std::lock_guard<std::mutex> lock(*orb.path_mutex);
+            hud_apsides = orb.predicted_apsides;
+            hud_mnv_apsides = orb.predicted_mnv_apsides;
         }
 
-        auto draw_apsis_hud = [&](const std::vector<RocketState::Apsis>& list, bool is_mnv) {
+        auto draw_apsis_hud = [&](const std::vector<OrbitComponent::Apsis>& list, bool is_mnv) {
             double rb_px, rb_py, rb_pz;
-            PhysicsSystem::GetCelestialPositionAt(adv_orbit_ref_body, rocket_state.sim_time, rb_px, rb_py, rb_pz);
-            Quat q_inv = PhysicsSystem::GetFrameRotation(adv_orbit_ref_mode, adv_orbit_ref_body, adv_orbit_secondary_ref_body, rocket_state.sim_time);
+            PhysicsSystem::GetCelestialPositionAt(adv_orbit_ref_body, tele.sim_time, rb_px, rb_py, rb_pz);
+            Quat q_inv = PhysicsSystem::GetFrameRotation(adv_orbit_ref_mode, adv_orbit_ref_body, adv_orbit_secondary_ref_body, tele.sim_time);
             
             for (const auto& ap : list) {
                 Vec3 p_rot = q_inv.rotate(ap.local_pos);
@@ -1339,7 +1362,7 @@ public:
                 if (d_mouse < 0.035f) {
                     char tooltip[128];
                     char tooltip2[128];
-                    double dt_val = ap.sim_time - rocket_state.sim_time;
+                    double dt_val = ap.sim_time - tele.sim_time;
                     int t_hr = (int)(std::fabs(dt_val) / 3600.0);
                     int t_min = (int)fmod(std::fabs(dt_val) / 60.0, 60.0);
                     int t_sec = (int)fmod(std::fabs(dt_val), 60.0);

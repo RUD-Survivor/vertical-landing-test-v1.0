@@ -20,7 +20,7 @@ public:
 
     // 请求一次新的轨道预测更新
     // 参数包含：预测时长 (pred_days)、采样迭代次数 (iters)、参考系模式 (ref_mode) 等。
-    void RequestUpdate(RocketState* target, const RocketState& state, const RocketConfig& config, double pred_days, int iters, int ref_mode, int ref_body, int secondary_ref_body, bool force_reset = false);
+    void RequestUpdate(OrbitComponent* target_orb, ManeuverComponent* target_mnv, const RocketState& state, const RocketConfig& config, double pred_days, int iters, int ref_mode, int ref_body, int secondary_ref_body, bool force_reset = false);
 
     // 检查预测器是否正在忙碌（后台计算中）
     bool IsBusy() const { return m_busy; }
@@ -31,7 +31,8 @@ private:
     // 预测请求结构 (Prediction Request)
     // 包含了启动一次物理积分所需的所有初始条件
     struct PredictionRequest {
-        RocketState* target = nullptr; // 预测结果最终要写入的目标状态对象
+        OrbitComponent* target_orb = nullptr;
+        ManeuverComponent* target_mnv = nullptr; // 预测结果最终要写入的目标状态对象
         RocketState state;             // 初始状态（位置、速度、燃料等）
         RocketConfig config;           // 火箭配置（质量、推力、比冲）
         double pred_days;              // 需要预测的时间跨度（天）
@@ -74,8 +75,8 @@ private:
         
         // 轨道特征点追踪 (Apsis Tracking)
         // 记录近地点 (Periapsis) 和远地点 (Apoapsis)
-        std::vector<RocketState::Apsis> apsides;
-        std::vector<RocketState::Apsis> mnv_apsides;
+        std::vector<OrbitComponent::Apsis> apsides;
+        std::vector<OrbitComponent::Apsis> mnv_apsides;
         double last_r = -1.0;
         double last_dr = 0.0;
         double last_mnv_r = -1.0;

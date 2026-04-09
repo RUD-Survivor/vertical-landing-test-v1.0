@@ -42,14 +42,14 @@ public:
     
     float rh = 0.0f, rw_3d = 0.0f;
 
-    void update(RocketState& rocket_state, const RocketConfig& rocket_config, int current_soi_index, 
+    void update(TransformComponent& trans, VelocityComponent& vel, AttitudeComponent& att, TelemetryComponent& tele, GuidanceComponent& guid, const RocketConfig& rocket_config, int current_soi_index, 
                 int& last_soi, bool& comma_prev, bool& period_prev, CameraDirector& cam, 
                 double ws_d, double dt) 
     {
         earth_r = (float)EARTH_RADIUS * (float)ws_d;
-        r_px = rocket_state.abs_px * ws_d;
-        r_py = rocket_state.abs_py * ws_d;
-        r_pz = rocket_state.abs_pz * ws_d;
+        r_px = trans.abs_px * ws_d;
+        r_py = trans.abs_py * ws_d;
+        r_pz = trans.abs_pz * ws_d;
         
         CelestialBody& sun_body = SOLAR_SYSTEM[0];
         sun_px = sun_body.px * ws_d;
@@ -66,23 +66,23 @@ public:
         comma_prev = comma_now; period_prev = period_now;
 
         // 【深空姿态锁定】
-        double local_dist_sq = rocket_state.px * rocket_state.px + rocket_state.py * rocket_state.py + rocket_state.pz * rocket_state.pz;
+        double local_dist_sq = trans.px * trans.px + trans.py * trans.py + trans.pz * trans.pz;
         double local_dist = sqrt(local_dist_sq);
-        rocketUp = Vec3((float)(rocket_state.px / local_dist), (float)(rocket_state.py / local_dist), (float)(rocket_state.pz / local_dist));
-        if (rocket_state.altitude > 2000000.0) {
+        rocketUp = Vec3((float)(trans.px / local_dist), (float)(trans.py / local_dist), (float)(trans.pz / local_dist));
+        if (tele.altitude > 2000000.0) {
             rocketUp = Vec3(0.0f, 1.0f, 0.0f);
         }
 
         // ===== BUILD ROCKET ATTITUDE =====
         if (last_soi != current_soi_index) {
-            rocket_state.attitude_initialized = false;
+            att.initialized = false;
             last_soi = current_soi_index;
         }
-        if (!rocket_state.attitude_initialized) {
-            rocket_state.attitude = Quat::fromEuler((float)rocket_state.angle, (float)rocket_state.angle_z, (float)rocket_state.angle_roll);
-            rocket_state.attitude_initialized = true;
+        if (!att.initialized) {
+            att.attitude = Quat::fromEuler((float)att.angle, (float)att.angle_z, (float)att.angle_roll);
+            att.initialized = true;
         }
-        rocketQuat = rocket_state.attitude;
+        rocketQuat = att.attitude;
         Vec3 rocketDir = rocketQuat.rotate(Vec3(0.0f, 1.0f, 0.0f));
 
         // --- 轨道参考系 ---
@@ -94,8 +94,8 @@ public:
             localRight = Vec3(1.0f, 0.0f, 0.0f);
         }
         localNorth = rocketUp.cross(localRight).normalized();
-        Vec3 v_vec_rel((float)rocket_state.vx, (float)rocket_state.vy, (float)rocket_state.vz);
-        Vec3 p_vec_rel((float)rocket_state.px, (float)rocket_state.py, (float)rocket_state.pz);
+        Vec3 v_vec_rel((float)vel.vx, (float)vel.vy, (float)vel.vz);
+        Vec3 p_vec_rel((float)trans.px, (float)trans.py, (float)trans.pz);
         Vec3 h_vec_rel = p_vec_rel.cross(v_vec_rel);
         orbit_normal_rel = h_vec_rel.normalized();
         if (orbit_normal_rel.length() < 0.01f) orbit_normal_rel = Vec3(0, 0, 1);
@@ -119,7 +119,7 @@ public:
         bool cam_key_d = glfwGetKey(GameContext::getInstance().window, GLFW_KEY_D) == GLFW_PRESS;
         
         CameraResult camResult = cam.computeFlightCamera(
-            rocket_state, ws_d, rh, renderRocketPos, rocketDir, rocketUp,
+            trans, vel, ws_d, rh, renderRocketPos, rocketDir, rocketUp,
             localNorth, localRight, prograde_rel, radial_rel, orbit_normal_rel,
             dt, cam_key_w, cam_key_a, cam_key_s, cam_key_d);
         
@@ -130,7 +130,7 @@ public:
         // 用最终浮动原点计算相对坐标 (renderEarth 未被保留在外层，不需要作为成员)
         renderSun = Vec3((float)(sun_px - ro_x), (float)(sun_py - ro_y), (float)(sun_pz - ro_z));
         renderRocketBase = Vec3((float)(r_px - ro_x), (float)(r_py - ro_y), (float)(r_pz - ro_z));
-        renderRocketPos = (rocket_state.status == PRE_LAUNCH || rocket_state.status == LANDED)
+        renderRocketPos = (guid.status == PRE_LAUNCH || guid.status == LANDED)
             ? (renderRocketBase + rocketUp * (rh * 0.425f))
             : renderRocketBase;
             
@@ -139,7 +139,7 @@ public:
         
         // 第二遍: 用最终的 renderRocketPos 计算视图矩阵 (Orbit/Chase 模式依赖它)
         camResult = cam.computeFlightCamera(
-            rocket_state, ws_d, rh, renderRocketPos, rocketDir, rocketUp,
+            trans, vel, ws_d, rh, renderRocketPos, rocketDir, rocketUp,
             localNorth, localRight, prograde_rel, radial_rel, orbit_normal_rel,
             0.0, false, false, false, false); // dt=0 避免重复移动 Free 相机
             

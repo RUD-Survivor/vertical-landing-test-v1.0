@@ -64,12 +64,13 @@ public:
     int last_soi = -1;
     bool show_clouds = true;
     void onEnter() override {
+
+
         GameContext& ctx = GameContext::getInstance();
         
         // --- 1. Initialize ECS Entity ---
         rocket_entity = world.create();
         // Emplace legacy bridging components
-        auto& rocket_state = world.emplace<RocketState>(rocket_entity);
         auto& rocket_config = world.emplace<RocketConfig>(rocket_entity);
         auto& control_input = world.emplace<ControlInput>(rocket_entity);
         // Emplace new ECS data components
@@ -83,6 +84,14 @@ public:
         world.emplace<ManeuverComponent>(rocket_entity);
         world.emplace<VFXComponent>(rocket_entity);
 
+        auto& trans = world.get<TransformComponent>(rocket_entity);
+        auto& vel   = world.get<VelocityComponent>(rocket_entity);
+        auto& att   = world.get<AttitudeComponent>(rocket_entity);
+        auto& prop  = world.get<PropulsionComponent>(rocket_entity);
+        auto& tele  = world.get<TelemetryComponent>(rocket_entity);
+        auto& guid  = world.get<GuidanceComponent>(rocket_entity);
+        auto& mnv   = world.get<ManeuverComponent>(rocket_entity);
+        auto& orb   = world.get<OrbitComponent>(rocket_entity);
         earthMesh = MeshGen::sphere(256, 512, 1.0f);
         ringMesh = MeshGen::ring(128, 1.11f, 2.35f);
         rocketBody = MeshGen::cylinder(32, 1.0f, 1.0f);
@@ -125,31 +134,43 @@ for (const auto& p : builder_state_assembly.parts) {
     }
 }
 if (skip_builder) {
-    // 使用加载的状态
-    rocket_state = loaded_state;
+    // 使用加载的状态 — copy loaded RocketState fields into ECS components
+    auto& ls = loaded_state;
+    trans.px = ls.px; trans.py = ls.py; trans.pz = ls.pz;
+    trans.abs_px = ls.abs_px; trans.abs_py = ls.abs_py; trans.abs_pz = ls.abs_pz;
+    trans.surf_px = ls.surf_px; trans.surf_py = ls.surf_py; trans.surf_pz = ls.surf_pz;
+    trans.launch_site_px = ls.launch_site_px; trans.launch_site_py = ls.launch_site_py; trans.launch_site_pz = ls.launch_site_pz;
+    vel.vx = ls.vx; vel.vy = ls.vy; vel.vz = ls.vz;
+    att.angle = ls.angle; att.ang_vel = ls.ang_vel;
+    att.angle_z = ls.angle_z; att.ang_vel_z = ls.ang_vel_z;
+    prop.fuel = ls.fuel; prop.current_stage = ls.current_stage;
+    prop.total_stages = ls.total_stages; prop.stage_fuels = ls.stage_fuels;
+    prop.jettisoned_mass = ls.jettisoned_mass;
+    tele.sim_time = ls.sim_time; tele.altitude = ls.altitude;
+    guid.status = ls.status; guid.auto_mode = ls.auto_mode;
     control_input = loaded_input;
     // Sync config to loaded stage
-    StageManager::SyncActiveConfig(rocket_config, rocket_state.current_stage);
+    StageManager::SyncActiveConfig(rocket_config, prop.current_stage);
 }
 else {
     // 新游戏初始化
-    rocket_state.fuel = builder_state_assembly.total_fuel;
-    rocket_state.status = PRE_LAUNCH;
-    rocket_state.mission_msg = "READY ON PAD - PRESS SPACE TO LAUNCH";
+    prop.fuel = builder_state_assembly.total_fuel;
+    guid.status = PRE_LAUNCH;
+    guid.mission_msg = "READY ON PAD - PRESS SPACE TO LAUNCH";
     // Initialize multi-stage fuel distribution
-    rocket_state.total_stages = rocket_config.stages;
-    rocket_state.current_stage = 0;
-    rocket_state.stage_fuels.clear();
+    prop.total_stages = rocket_config.stages;
+    prop.current_stage = 0;
+    prop.stage_fuels.clear();
     for (int i = 0; i < (int)rocket_config.stage_configs.size(); i++) {
-        rocket_state.stage_fuels.push_back(rocket_config.stage_configs[i].fuel_capacity);
+        prop.stage_fuels.push_back(rocket_config.stage_configs[i].fuel_capacity);
     }
     // Set initial fuel to stage 0’s capacity
-    if (!rocket_state.stage_fuels.empty()) {
-        rocket_state.fuel = rocket_state.stage_fuels[0];
+    if (!prop.stage_fuels.empty()) {
+        prop.fuel = prop.stage_fuels[0];
     }
     // Calculate initial surface coordinates from launch latitude/longitude
-    double lat_rad = rocket_state.launch_latitude * PI / 180.0;
-    double lon_rad = rocket_state.launch_longitude * PI / 180.0;
+    double lat_rad = trans.launch_latitude * PI / 180.0;
+    double lon_rad = trans.launch_longitude * PI / 180.0;
     float lowest_y = 0.0f;
     if (!builder_state_assembly.parts.empty()) {
         lowest_y = 1e10f;
@@ -160,27 +181,27 @@ else {
     // Distance from planet center to CoM
     double R = SOLAR_SYSTEM[current_soi_index].radius - (double)lowest_y;
     // Z is the North-South axis, XY is the equatorial plane
-    rocket_state.surf_px = R * cos(lat_rad) * cos(lon_rad);
-    rocket_state.surf_py = R * cos(lat_rad) * sin(lon_rad);
-    rocket_state.surf_pz = R * sin(lat_rad);
+    trans.surf_px = R * cos(lat_rad) * cos(lon_rad);
+    trans.surf_py = R * cos(lat_rad) * sin(lon_rad);
+    trans.surf_pz = R * sin(lat_rad);
     // Store fixed launch site for pad rendering
-    rocket_state.launch_site_px = rocket_state.surf_px;
-    rocket_state.launch_site_py = rocket_state.surf_py;
-    rocket_state.launch_site_pz = rocket_state.surf_pz;
+    trans.launch_site_px = trans.surf_px;
+    trans.launch_site_py = trans.surf_py;
+    trans.launch_site_pz = trans.surf_pz;
     // Initialize inertial coordinates immediately for the first frame
     CelestialBody& body = SOLAR_SYSTEM[current_soi_index];
     double theta = body.prime_meridian_epoch; // sim_time = 0
     Quat rot = Quat::fromAxisAngle(Vec3(0, 0, 1), (float)theta);
     Quat tilt = Quat::fromAxisAngle(Vec3(1, 0, 0), (float)body.axial_tilt);
     Quat full_rot = tilt * rot;
-    Vec3 world_pos = full_rot.rotate(Vec3((float)rocket_state.surf_px, (float)rocket_state.surf_py, (float)rocket_state.surf_pz));
-    rocket_state.px = (double)world_pos.x;
-    rocket_state.py = (double)world_pos.y;
-    rocket_state.pz = (double)world_pos.z;
+    Vec3 world_pos = full_rot.rotate(Vec3((float)trans.surf_px, (float)trans.surf_py, (float)trans.surf_pz));
+    trans.px = (double)world_pos.x;
+    trans.py = (double)world_pos.y;
+    trans.pz = (double)world_pos.z;
     }
     
     // ======== INPUT ROUTER INITIALIZATION ========
-    inputSystem.setup(input, rocket_state, rocket_config, control_input, hudManager.hud, cam, show_clouds, world, rocket_entity);
+    inputSystem.setup(input, rocket_config, control_input, hudManager.hud, cam, show_clouds, world, rocket_entity);
     // Keep a reference to the assembly for rendering
     const RocketAssembly& assembly = builder_state_assembly;
      // 飞行模式相机控制器
@@ -197,51 +218,7 @@ else {
     cout << ">> [Z] Full Throttle | [X] Kill Throttle | [1-4] Time Warp" << endl;
     cout << ">> [O] Toggle Orbit Display" << endl;
 
-    // --- 5. ECS Data Synchronization (Legacy -> Components) ---
-    auto& trans = world.get<TransformComponent>(rocket_entity);
-    trans.px = rocket_state.px; trans.py = rocket_state.py; trans.pz = rocket_state.pz;
-    trans.abs_px = rocket_state.abs_px; trans.abs_py = rocket_state.abs_py; trans.abs_pz = rocket_state.abs_pz;
-    trans.surf_px = rocket_state.surf_px; trans.surf_py = rocket_state.surf_py; trans.surf_pz = rocket_state.surf_pz;
-    trans.launch_latitude = rocket_state.launch_latitude; trans.launch_longitude = rocket_state.launch_longitude;
-    trans.launch_site_px = rocket_state.launch_site_px; trans.launch_site_py = rocket_state.launch_site_py; trans.launch_site_pz = rocket_state.launch_site_pz;
 
-    auto& vel = world.get<VelocityComponent>(rocket_entity);
-    vel.vx = rocket_state.vx; vel.vy = rocket_state.vy; vel.vz = rocket_state.vz;
-    vel.abs_vx = rocket_state.abs_vx; vel.abs_vy = rocket_state.abs_vy; vel.abs_vz = rocket_state.abs_vz;
-    vel.acceleration = rocket_state.acceleration;
-
-    auto& att = world.get<AttitudeComponent>(rocket_entity);
-    att.attitude = rocket_state.attitude; att.initialized = rocket_state.attitude_initialized;
-    att.angle = rocket_state.angle; att.ang_vel = rocket_state.ang_vel;
-    att.angle_z = rocket_state.angle_z; att.ang_vel_z = rocket_state.ang_vel_z;
-    att.angle_roll = rocket_state.angle_roll; att.ang_vel_roll = rocket_state.ang_vel_roll;
-
-    auto& prop = world.get<PropulsionComponent>(rocket_entity);
-    prop.fuel = rocket_state.fuel; prop.current_stage = rocket_state.current_stage;
-    prop.total_stages = rocket_state.total_stages; prop.stage_fuels = rocket_state.stage_fuels;
-    prop.jettisoned_mass = rocket_state.jettisoned_mass; prop.fuel_consumption_rate = rocket_state.fuel_consumption_rate;
-    prop.thrust_power = rocket_state.thrust_power;
-
-    auto& tele = world.get<TelemetryComponent>(rocket_entity);
-    tele.sim_time = rocket_state.sim_time; tele.altitude = rocket_state.altitude;
-    tele.terrain_altitude = rocket_state.terrain_altitude; tele.solar_occlusion = rocket_state.solar_occlusion;
-
-    auto& guid = world.get<GuidanceComponent>(rocket_entity);
-    guid.status = rocket_state.status; guid.mission_msg = rocket_state.mission_msg;
-    guid.mission_phase = rocket_state.mission_phase; guid.mission_timer = rocket_state.mission_timer;
-    guid.auto_mode = rocket_state.auto_mode; guid.sas_active = rocket_state.sas_active;
-    guid.rcs_active = rocket_state.rcs_active; guid.sas_mode = rocket_state.sas_mode;
-    guid.sas_target_vec = rocket_state.sas_target_vec; guid.leg_deploy_progress = rocket_state.leg_deploy_progress;
-    guid.suicide_burn_locked = rocket_state.suicide_burn_locked; guid.show_absolute_time = rocket_state.show_absolute_time;
-    guid.pid_vert = rocket_state.pid_vert; guid.pid_pos = rocket_state.pid_pos;
-    guid.pid_att = rocket_state.pid_att; guid.pid_att_z = rocket_state.pid_att_z; guid.pid_att_roll = rocket_state.pid_att_roll;
-
-    auto& orb = world.get<OrbitComponent>(rocket_entity);
-    orb.predicted_path = rocket_state.predicted_path; orb.predicted_ground_track = rocket_state.predicted_ground_track;
-    orb.last_prediction_sim_time = rocket_state.last_prediction_sim_time; orb.prediction_in_progress = rocket_state.prediction_in_progress;
-    
-    auto& mnv = world.get<ManeuverComponent>(rocket_entity);
-    mnv.maneuvers = rocket_state.maneuvers; mnv.selected_maneuver_index = rocket_state.selected_maneuver_index;
 
      // 50Hz 物理步长
      // Tab 防抖
@@ -251,113 +228,24 @@ else {
     }
 
 
-    // ===================================================================
-    // ECS Bridge: Bidirectional Synchronization
-    // -------------------------------------------------------------------
-    // During the transition period, some systems write to RocketState
-    // (e.g., input lambdas) while others write to ECS components
-    // (e.g., PhysicsSystem). These two functions keep them in sync.
-    // ===================================================================
-    
-    void syncLegacyToECS() {
-        auto& rs = world.get<RocketState>(rocket_entity);
-        auto& trans = world.get<TransformComponent>(rocket_entity);
-        auto& vel   = world.get<VelocityComponent>(rocket_entity);
-        auto& att   = world.get<AttitudeComponent>(rocket_entity);
-        auto& prop  = world.get<PropulsionComponent>(rocket_entity);
-        auto& tele  = world.get<TelemetryComponent>(rocket_entity);
-        auto& guid  = world.get<GuidanceComponent>(rocket_entity);
-        auto& mnv   = world.get<ManeuverComponent>(rocket_entity);
 
-        trans.px = rs.px; trans.py = rs.py; trans.pz = rs.pz;
-        trans.abs_px = rs.abs_px; trans.abs_py = rs.abs_py; trans.abs_pz = rs.abs_pz;
-        trans.surf_px = rs.surf_px; trans.surf_py = rs.surf_py; trans.surf_pz = rs.surf_pz;
-        trans.launch_site_px = rs.launch_site_px; trans.launch_site_py = rs.launch_site_py; trans.launch_site_pz = rs.launch_site_pz;
-        trans.launch_latitude = rs.launch_latitude; trans.launch_longitude = rs.launch_longitude;
-
-        vel.vx = rs.vx; vel.vy = rs.vy; vel.vz = rs.vz;
-        vel.abs_vx = rs.abs_vx; vel.abs_vy = rs.abs_vy; vel.abs_vz = rs.abs_vz;
-        vel.acceleration = rs.acceleration;
-
-        att.attitude = rs.attitude; att.initialized = rs.attitude_initialized;
-        att.angle = rs.angle; att.ang_vel = rs.ang_vel;
-        att.angle_z = rs.angle_z; att.ang_vel_z = rs.ang_vel_z;
-        att.angle_roll = rs.angle_roll; att.ang_vel_roll = rs.ang_vel_roll;
-
-        prop.fuel = rs.fuel; prop.current_stage = rs.current_stage;
-        prop.total_stages = rs.total_stages; prop.stage_fuels = rs.stage_fuels;
-        prop.jettisoned_mass = rs.jettisoned_mass; prop.fuel_consumption_rate = rs.fuel_consumption_rate;
-        prop.thrust_power = rs.thrust_power;
-
-        tele.sim_time = rs.sim_time; tele.altitude = rs.altitude;
-        tele.velocity = rs.velocity; tele.local_vx = rs.local_vx;
-        tele.terrain_altitude = rs.terrain_altitude; tele.solar_occlusion = rs.solar_occlusion;
-
-        guid.status = rs.status; guid.mission_msg = rs.mission_msg;
-        guid.mission_phase = rs.mission_phase; guid.mission_timer = rs.mission_timer;
-        guid.auto_mode = rs.auto_mode; guid.sas_active = rs.sas_active;
-        guid.rcs_active = rs.rcs_active; guid.sas_mode = rs.sas_mode;
-        guid.sas_target_vec = rs.sas_target_vec; guid.leg_deploy_progress = rs.leg_deploy_progress;
-        guid.suicide_burn_locked = rs.suicide_burn_locked; guid.show_absolute_time = rs.show_absolute_time;
-        guid.pid_vert = rs.pid_vert; guid.pid_pos = rs.pid_pos;
-        guid.pid_att = rs.pid_att; guid.pid_att_z = rs.pid_att_z; guid.pid_att_roll = rs.pid_att_roll;
-
-        mnv.maneuvers = rs.maneuvers; mnv.selected_maneuver_index = rs.selected_maneuver_index;
-    }
-
-    void syncECSToLegacy() {
-        auto& rs = world.get<RocketState>(rocket_entity);
-        auto& trans = world.get<TransformComponent>(rocket_entity);
-        auto& vel   = world.get<VelocityComponent>(rocket_entity);
-        auto& att   = world.get<AttitudeComponent>(rocket_entity);
-        auto& prop  = world.get<PropulsionComponent>(rocket_entity);
-        auto& tele  = world.get<TelemetryComponent>(rocket_entity);
-        auto& guid  = world.get<GuidanceComponent>(rocket_entity);
-        auto& mnv   = world.get<ManeuverComponent>(rocket_entity);
-        auto& vfx   = world.get<VFXComponent>(rocket_entity);
-
-        rs.px = trans.px; rs.py = trans.py; rs.pz = trans.pz;
-        rs.abs_px = trans.abs_px; rs.abs_py = trans.abs_py; rs.abs_pz = trans.abs_pz;
-        rs.surf_px = trans.surf_px; rs.surf_py = trans.surf_py; rs.surf_pz = trans.surf_pz;
-        rs.launch_site_px = trans.launch_site_px; rs.launch_site_py = trans.launch_site_py; rs.launch_site_pz = trans.launch_site_pz;
-        rs.launch_latitude = trans.launch_latitude; rs.launch_longitude = trans.launch_longitude;
-
-        rs.vx = vel.vx; rs.vy = vel.vy; rs.vz = vel.vz;
-        rs.abs_vx = vel.abs_vx; rs.abs_vy = vel.abs_vy; rs.abs_vz = vel.abs_vz;
-        rs.acceleration = vel.acceleration;
-
-        rs.attitude = att.attitude; rs.attitude_initialized = att.initialized;
-        rs.angle = att.angle; rs.ang_vel = att.ang_vel;
-        rs.angle_z = att.angle_z; rs.ang_vel_z = att.ang_vel_z;
-        rs.angle_roll = att.angle_roll; rs.ang_vel_roll = att.ang_vel_roll;
-
-        rs.fuel = prop.fuel; rs.current_stage = prop.current_stage;
-        rs.total_stages = prop.total_stages; rs.stage_fuels = prop.stage_fuels;
-        rs.jettisoned_mass = prop.jettisoned_mass; rs.fuel_consumption_rate = prop.fuel_consumption_rate;
-        rs.thrust_power = prop.thrust_power;
-
-        rs.sim_time = tele.sim_time; rs.altitude = tele.altitude;
-        rs.velocity = tele.velocity; rs.local_vx = tele.local_vx;
-        rs.terrain_altitude = tele.terrain_altitude; rs.solar_occlusion = tele.solar_occlusion;
-
-        rs.status = guid.status; rs.mission_msg = guid.mission_msg;
-        rs.mission_phase = guid.mission_phase; rs.mission_timer = guid.mission_timer;
-        rs.auto_mode = guid.auto_mode; rs.sas_active = guid.sas_active;
-        rs.rcs_active = guid.rcs_active; rs.sas_mode = guid.sas_mode;
-        rs.sas_target_vec = guid.sas_target_vec; rs.leg_deploy_progress = guid.leg_deploy_progress;
-        rs.suicide_burn_locked = guid.suicide_burn_locked; rs.show_absolute_time = guid.show_absolute_time;
-        rs.pid_vert = guid.pid_vert; rs.pid_pos = guid.pid_pos;
-        rs.pid_att = guid.pid_att; rs.pid_att_z = guid.pid_att_z; rs.pid_att_roll = guid.pid_att_roll;
-
-        rs.maneuvers = mnv.maneuvers; rs.selected_maneuver_index = mnv.selected_maneuver_index;
-
-    }
 
     void update(double dt) override {
+        auto& trans = world.get<TransformComponent>(rocket_entity);
+        auto& vel   = world.get<VelocityComponent>(rocket_entity);
+        auto& att   = world.get<AttitudeComponent>(rocket_entity);
+        auto& prop  = world.get<PropulsionComponent>(rocket_entity);
+        auto& tele  = world.get<TelemetryComponent>(rocket_entity);
+        auto& guid  = world.get<GuidanceComponent>(rocket_entity);
+        auto& mnv   = world.get<ManeuverComponent>(rocket_entity);
+        auto& orb   = world.get<OrbitComponent>(rocket_entity);
+
+
         real_dt = dt;
-        auto& rocket_state = world.get<RocketState>(rocket_entity);
+
         auto& rocket_config = world.get<RocketConfig>(rocket_entity);
         auto& control_input = world.get<ControlInput>(rocket_entity);
+
 
         const RocketAssembly& assembly = GameContext::getInstance().launch_assembly;
         Renderer3D* r3d = GameContext::getInstance().renderer3d;
@@ -392,33 +280,31 @@ else {
         }
         // --- Maneuver Node Input Handling (Delegated to ManeuverManager) ---
         if (cam.mode == 2) {
-            mnvManager.update(GameContext::getInstance().window, rocket_state, hudManager.hud, cam, dt, ww, wh);
+            mnvManager.update(GameContext::getInstance().window, world, rocket_entity, hudManager.hud, cam, dt, ww, wh);
         }
         // --- Ensure Rocket starts perfectly on the Terrain/SVO surface ---
         if (r3d->terrain) {
-            Vec3 localUp(rocket_state.surf_px, rocket_state.surf_py, rocket_state.surf_pz);
+            Vec3 localUp(trans.surf_px, trans.surf_py, trans.surf_pz);
             localUp = localUp.normalized();
             Quat unalign_from_z = Quat::fromAxisAngle(Vec3(1.0f, 0.0f, 0.0f), (float)(PI / 2.0));
             Vec3 qLocal = unalign_from_z.rotate(localUp);
             float terrH = r3d->terrain->getHeight(qLocal);
-            rocket_state.terrain_altitude = (double)terrH * 1000.0; // km to meters
-            if (rocket_state.status == PRE_LAUNCH && !terrain_adjusted) {
+            tele.terrain_altitude = (double)terrH * 1000.0; // km to meters
+            if (guid.status == PRE_LAUNCH && !terrain_adjusted) {
                 double platform_height = 8.5; // Thickness of the visual launch platform
-                double new_R = EARTH_RADIUS + rocket_state.terrain_altitude - rocket_config.bounds_bottom + platform_height;
-                rocket_state.surf_px = localUp.x * new_R;
-                rocket_state.surf_py = localUp.y * new_R;
-                rocket_state.surf_pz = localUp.z * new_R;
+                double new_R = EARTH_RADIUS + tele.terrain_altitude - rocket_config.bounds_bottom + platform_height;
+                trans.surf_px = localUp.x * new_R;
+                trans.surf_py = localUp.y * new_R;
+                trans.surf_pz = localUp.z * new_R;
                 terrain_adjusted = true;
-                cout << "[TERRAIN] Adjusted launchpad altitude by " << rocket_state.terrain_altitude << " meters to match SVO bounds." << endl;
+                cout << "[TERRAIN] Adjusted launchpad altitude by " << tele.terrain_altitude << " meters to match SVO bounds." << endl;
             }
         }
         // SVO Automation and Input Polling
-        inputSystem.poll(GameContext::getInstance().window, input, rocket_state, r3d);
+        inputSystem.poll(GameContext::getInstance().window, input, world, rocket_entity, r3d);
         // --- Simulation & Physics Update ---
-        syncLegacyToECS(); // Bridge: input changes -> ECS
         sim_ctrl.handleInput(GameContext::getInstance().window, world, rocket_entity);
         sim_ctrl.update(real_dt, world, rocket_entity, hudManager.hud, GameContext::getInstance().window, cam.mode);
-        syncECSToLegacy(); // Bridge: physics results -> legacy rendering
         // Update mouse state for HUD
         {
             double mx_raw, my_raw;
@@ -432,9 +318,19 @@ else {
         }
     }
     void render() override {
-        auto& rocket_state = world.get<RocketState>(rocket_entity);
+        auto& trans = world.get<TransformComponent>(rocket_entity);
+        auto& vel   = world.get<VelocityComponent>(rocket_entity);
+        auto& att   = world.get<AttitudeComponent>(rocket_entity);
+        auto& prop  = world.get<PropulsionComponent>(rocket_entity);
+        auto& tele  = world.get<TelemetryComponent>(rocket_entity);
+        auto& guid  = world.get<GuidanceComponent>(rocket_entity);
+        auto& mnv   = world.get<ManeuverComponent>(rocket_entity);
+        auto& orb   = world.get<OrbitComponent>(rocket_entity);
+
+
         auto& rocket_config = world.get<RocketConfig>(rocket_entity);
         auto& control_input = world.get<ControlInput>(rocket_entity);
+
 
         Renderer* renderer = GameContext::getInstance().renderer2d;
         Renderer3D* r3d = GameContext::getInstance().renderer3d;
@@ -442,7 +338,7 @@ else {
         // ================= 3D 渲染通道 =================
         {
             // === 1. 构建本帧渲染参考系上下文 (浮动原点、物理变换、投影矩阵) ===
-            ctx.update(rocket_state, rocket_config, current_soi_index, last_soi, comma_prev, period_prev, cam, ws_d, dt);
+            ctx.update(trans, vel, att, tele, guid, rocket_config, current_soi_index, last_soi, comma_prev, period_prev, cam, ws_d, dt);
 
             // 相机设置 (TAA 与 GL 状态清理)
             int ww, wh;
@@ -467,16 +363,16 @@ else {
             
             // =========== PASS 1: MACRO BACKGROUND (天体渲染已转移至 CelestialRenderer) ===========
             celestialRenderer.renderMacroPass(
-                r3d, rocket_state, current_soi_index, cam, ctx.camEye_rel, ctx.cam_dist,
+                r3d, tele, current_soi_index, cam, ctx.camEye_rel, ctx.cam_dist,
                 ws_d, ctx.ro_x, ctx.ro_y, ctx.ro_z, ctx.aspect, (float)day_blend, alt_factor, 
                 show_clouds, frame, ww, wh, ctx.renderRocketBase, ctx.renderSun, ctx.sun_radius, ctx.earth_r,
                 earthMesh, ringMesh, ctx.viewMat, ctx.macroProjMat, ctx.lightVec
             );
             if (cam.mode == 2) {
                 // ===== 历史轨迹线与轨道预测线 (已转移至 OrbitSystem) =====
-                orbitSystem.render(rocket_state, rocket_config, hudManager.hud, mnvManager, r3d, cam, control_input, ctx.viewMat, ctx.macroProjMat, ctx.aspect, ws_d, ctx.ro_x, ctx.ro_y, ctx.ro_z, ww, wh, dt, current_soi_index, ctx.earth_r, ctx.cam_dist, ctx.renderRocketBase, ctx.camEye_rel);
+                orbitSystem.render(world, rocket_entity, hudManager.hud, mnvManager, r3d, cam, ctx.viewMat, ctx.macroProjMat, ctx.aspect, ws_d, ctx.ro_x, ctx.ro_y, ctx.ro_z, ww, wh, dt, current_soi_index, ctx.earth_r, ctx.cam_dist, ctx.renderRocketBase, ctx.camEye_rel);
                 // --- Maneuver Nodes & Interaction ---
-                mnvManager.render(rocket_state, hudManager.hud, r3d, ctx.viewMat, ctx.macroProjMat, ctx.aspect, ctx.earth_r, ctx.cam_dist, ws_d, ctx.ro_x, ctx.ro_y, ctx.ro_z, dt);
+                mnvManager.render(world, rocket_entity, hudManager.hud, r3d, ctx.viewMat, ctx.macroProjMat, ctx.aspect, ctx.earth_r, ctx.cam_dist, ws_d, ctx.ro_x, ctx.ro_y, ctx.ro_z, dt);
             }
      
             // Dynamic TAA blend: reduce temporal accumulation during fast changes
@@ -500,12 +396,12 @@ else {
             // ===== 发射台渲染 (已转移至 SpaceportManager) =====
             spaceportManager.render(r3d, world, rocket_entity, current_soi_index, ws_d, ctx.ro_x, ctx.ro_y, ctx.ro_z, rocketBox, ctx.rw_3d, ctx.rh);
 
-            // ===== 体积尾焰渲染 (已转移至 PlumeManager) =====
-            plumeManager.render(rocket_state, rocket_config, control_input, assembly, r3d, rocketBox, ctx.rocketQuat, ctx.renderRocketBase, ws_d);
+            // ===== 体积尾焰渲染 (ECS 化) =====
+            plumeManager.render(world, rocket_entity, assembly, r3d, rocketBox, ctx.rocketQuat, ctx.renderRocketBase, ws_d);
             r3d->endFrame();
         }
         // ================= 2D HUD 渲染通道 (已转移至 HUDManager) =================
-        hudManager.render(renderer, r3d, rocket_state, rocket_config, control_input, cam, sim_ctrl, mnvManager, 
+        hudManager.render(renderer, r3d, world, rocket_entity, cam, sim_ctrl, mnvManager, 
                           ctx.rocketQuat, ctx.rocketUp, ctx.localNorth, ctx.localRight, ctx.viewMat, ctx.macroProjMat, ctx.camEye_rel, dt, 
                           frame, ws_d, mouse_x, mouse_y, lmb, lmb_prev, rmb);
         // Update state for next frame ONLY at the very end

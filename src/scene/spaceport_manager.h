@@ -46,7 +46,6 @@ public:
                 double ws_d, double ro_x, double ro_y, double ro_z,
                 const Mesh& rocketBox, float rw_3d, float rh)
     {
-        auto& rocket_state = registry.get<RocketState>(entity);
         auto& tele = registry.get<TelemetryComponent>(entity);
         auto& trans = registry.get<TransformComponent>(entity);
         // 高度大于12000米则从视野中剔除发射台
@@ -54,13 +53,13 @@ public:
 
         CelestialBody& body = SOLAR_SYSTEM[current_soi_index];
         // Launch pad should rotate with the body (Axial Tilt + Rotation)
-        double theta = body.prime_meridian_epoch + (rocket_state.sim_time * 2.0 * PI / body.rotation_period);
+        double theta = body.prime_meridian_epoch + (tele.sim_time * 2.0 * PI / body.rotation_period);
         Quat rot = Quat::fromAxisAngle(Vec3(0, 0, 1), (float)theta);
         Quat tilt = Quat::fromAxisAngle(Vec3(1, 0, 0), (float)body.axial_tilt);
         Quat full_rot = tilt * rot;
         
         // Use FIXED launch site coordinates instead of dynamic ground track
-        Vec3 s_pos((float)rocket_state.launch_site_px, (float)rocket_state.launch_site_py, (float)rocket_state.launch_site_pz);
+        Vec3 s_pos((float)trans.launch_site_px, (float)trans.launch_site_py, (float)trans.launch_site_pz);
         
         // Normalized local up vector
         Vec3 localUp = s_pos.normalized();

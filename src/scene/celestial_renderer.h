@@ -23,7 +23,7 @@ using namespace std;
  */
 class CelestialRenderer {
 public:
-    void renderMacroPass(Renderer3D* r3d, const RocketState& rocket_state, 
+    void renderMacroPass(Renderer3D* r3d, const TelemetryComponent& tele, 
                          int current_soi_index, const CameraDirector& cam, 
                          const Vec3& camEye_rel, float cam_dist,
                          double ws_d, double ro_x, double ro_y, double ro_z, 
@@ -109,7 +109,7 @@ public:
             
             // 应用主体的自转与极轴倾斜
             Quat align_to_z = Quat::fromAxisAngle(Vec3(1.0f, 0.0f, 0.0f), -PI / 2.0f);
-            Quat spin = Quat::fromAxisAngle(Vec3(0.0f, 0.0f, 1.0f), b.prime_meridian_epoch + (rocket_state.sim_time * 2.0 * PI / b.rotation_period));
+            Quat spin = Quat::fromAxisAngle(Vec3(0.0f, 0.0f, 1.0f), b.prime_meridian_epoch + (tele.sim_time * 2.0 * PI / b.rotation_period));
             Quat tilt = Quat::fromAxisAngle(Vec3(1.0f, 0.0f, 0.0f), b.axial_tilt);
             Quat rotation_quat = tilt * spin * align_to_z;
             
@@ -128,13 +128,13 @@ public:
                 }
             }
             
-            r3d->drawPlanet(earthMesh, planetModel, b.type, b.r, b.g, b.b, 1.0f, r, (float)rocket_state.sim_time, (int)i);
+            r3d->drawPlanet(earthMesh, planetModel, b.type, b.r, b.g, b.b, 1.0f, r, (float)tele.sim_time, (int)i);
             
             if ((b.type == TERRESTRIAL || b.type == GAS_GIANT) && i != 1 && i != 4) {
                 float atmo_radius = r + 160.0f;
                 Mat4 atmoModel = Mat4::scale(Vec3(atmo_radius, atmo_radius, atmo_radius));
                 atmoModel = Mat4::translate(renderPlanet) * atmoModel;
-                r3d->drawAtmosphere(earthMesh, atmoModel, camEye_rel, r3d->lightDir, renderPlanet, r, atmo_radius, (float)rocket_state.sim_time, (int)i, (float)day_blend, show_clouds);
+                r3d->drawAtmosphere(earthMesh, atmoModel, camEye_rel, r3d->lightDir, renderPlanet, r, atmo_radius, (float)tele.sim_time, (int)i, (float)day_blend, show_clouds);
                 
                 if (frame <= 2) cout << "[Atmo] body=" << i << " r=" << r << " atmo_r=" << atmo_radius << " day=" << day_blend << " clouds=" << show_clouds << " planet=(" << renderPlanet.x << "," << renderPlanet.y << "," << renderPlanet.z << ")" << endl;
             }

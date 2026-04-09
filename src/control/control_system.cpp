@@ -11,7 +11,6 @@ namespace ControlSystem {
 // 自动驾驶逻辑 (Autopilot Logic)
 // 负责控制火箭在任务各个阶段的自动操作，如：起飞、重力转向、圆化轨道、重返大气层和软着陆。
 void UpdateAutoPilot(entt::registry& registry, entt::entity entity, double dt) {
-    auto& state = registry.get<RocketState>(entity);
     auto& config = registry.get<RocketConfig>(entity);
     auto& input = registry.get<ControlInput>(entity);
     auto& trans = registry.get<TransformComponent>(entity);
@@ -192,7 +191,6 @@ void UpdateAutoPilot(entt::registry& registry, entt::entity entity, double dt) {
 // 手动控制更新 (Manual Control)
 // 如果玩家在操作 WASD，我们在这里把玩家的输入转换为发动机推力和 RCS 姿态力矩。
 void UpdateManualControl(entt::registry& registry, entt::entity entity, const ManualInputs& manual, double dt) {
-    auto& state = registry.get<RocketState>(entity);
     auto& config = registry.get<RocketConfig>(entity);
     auto& input = registry.get<ControlInput>(entity);
     auto& att = registry.get<AttitudeComponent>(entity);
@@ -265,7 +263,7 @@ void UpdateManualControl(entt::registry& registry, entt::entity entity, const Ma
                         
                         // If we are close to or during the burn, steer towards the remaining delta-v vector (more stable)
                         if (node.snap_valid) {
-                           Vec3 rem_v = ManeuverSystem::calculateRemainingDV(state, node);
+                           Vec3 rem_v = ManeuverSystem::calculateRemainingDV(vel, tele, node);
                            if (rem_v.length() > 0.01f) guid.sas_target_vec = rem_v.normalized();
                            else guid.sas_target_vec = Vec3(0,0,0);
                         } else {

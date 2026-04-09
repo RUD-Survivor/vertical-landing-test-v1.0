@@ -1,0 +1,32 @@
+**********************************************************************
+** Visual Studio 2026 Developer Command Prompt v18.2.2
+** Copyright (c) 2025 Microsoft Corporation
+**********************************************************************
+[DEBUG:ext\vcvars.bat] Found potential v145 version file: 'Microsoft.VCToolsVersion.VC.14.50.18.0.txt'
+[DEBUG:ext\vcvars.bat] Testing v145 version file: 'Microsoft.VCToolsVersion.VC.14.50.18.0.txt'
+[vcvarsall.bat] Environment initialized for: 'x64'
+用于 x64 的 Microsoft (R) C/C++ 优化编译器 19.50.35724 版
+版权所有(C) Microsoft Corporation。保留所有权利。
+
+main.cpp
+C:\antigravity_code\RocketSim3D\src\render/HUD_system.h(155): error C2374: “control_input”: 重定义；多次初始化
+C:\antigravity_code\RocketSim3D\src\render/HUD_system.h(111): note: 参见“control_input”的声明
+C:\antigravity_code\RocketSim3D\src\render/HUD_system.h(155): error C2086: “ControlInput &control_input”: 重定义
+C:\antigravity_code\RocketSim3D\src\render/HUD_system.h(111): note: 参见“control_input”的声明
+C:\antigravity_code\RocketSim3D\src\render/HUD_system.h(155): error C2371: “control_input”: 重定义；不同的基类型
+C:\antigravity_code\RocketSim3D\src\render/HUD_system.h(1490): warning C4838: 从“double”转换到“float”需要收缩转换
+C:\antigravity_code\RocketSim3D\src\render/HUD_system.h(1490): warning C4838: 从“double”转换到“float”需要收缩转换
+C:\antigravity_code\RocketSim3D\src\render/HUD_system.h(1490): warning C4838: 从“double”转换到“float”需要收缩转换
+physics_system.cpp
+control_system.cpp
+stage_manager.cpp
+center_calculator.cpp
+center_visualizer.cpp
+predictor.cpp
+正在生成代码...
+正在编译...
+glad.c
+正在生成代码...
+正在编译...
+stb_impl.cpp
+正在生成代码...

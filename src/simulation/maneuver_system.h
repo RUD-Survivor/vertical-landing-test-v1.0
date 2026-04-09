@@ -71,7 +71,7 @@ public:
     }
 
     // High-Precision Remaining Delta-V calculation (Shared by HUD and Autopilot)
-    static Vec3 calculateRemainingDV(const RocketState& state, const ManeuverNode& node) {
+    static Vec3 calculateRemainingDV(const VelocityComponent& vel, const TelemetryComponent& tele, const ManeuverNode& node) {
         if (!node.snap_valid) return Vec3(0, 0, 0);
 
         int ref_idx = (node.ref_body >= 0) ? node.ref_body : current_soi_index;
@@ -80,12 +80,12 @@ public:
         // Current relative velocity in the reference body's frame
         // abs_v = rocket_rel_v + soi_v
         // target_rel_v = abs_v - ref_b_v
-        double cur_rel_vx = state.vx + SOLAR_SYSTEM[current_soi_index].vx - ref_b.vx;
-        double cur_rel_vy = state.vy + SOLAR_SYSTEM[current_soi_index].vy - ref_b.vy;
-        double cur_rel_vz = state.vz + SOLAR_SYSTEM[current_soi_index].vz - ref_b.vz;
+        double cur_rel_vx = vel.vx + SOLAR_SYSTEM[current_soi_index].vx - ref_b.vx;
+        double cur_rel_vy = vel.vy + SOLAR_SYSTEM[current_soi_index].vy - ref_b.vy;
+        double cur_rel_vz = vel.vz + SOLAR_SYSTEM[current_soi_index].vz - ref_b.vz;
         
         double mu_ref = 6.67430e-11 * ref_b.mass;
-        double dt_snap = state.sim_time - node.snap_time;
+        double dt_snap = tele.sim_time - node.snap_time;
         double tpx, tpy, tpz, tvx, tvy, tvz;
         
         // Use Keplerian propagation to project the target state to the current time

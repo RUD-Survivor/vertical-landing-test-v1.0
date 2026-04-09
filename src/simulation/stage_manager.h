@@ -34,7 +34,7 @@ bool SeparateStage(entt::registry& registry, entt::entity entity);
 // -------------------------------------------------------
 // IsCurrentStageEmpty — 检查当前活动级的燃料是否已耗尽。
 // -------------------------------------------------------
-bool IsCurrentStageEmpty(const RocketState& state);
+// bool IsCurrentStageEmpty(const RocketState& state); // LEGACY
 bool IsCurrentStageEmpty(const PropulsionComponent& prop);
 
 // -------------------------------------------------------
@@ -46,7 +46,7 @@ const StageConfig& GetActiveStage(const RocketConfig& config, int stage_index);
 // GetTotalMassFromStage — 计算从给定级别向上（包含燃料）的总质量。
 // 用于精确计算加速度和 Delta-V。
 // -------------------------------------------------------
-double GetTotalMassFromStage(const RocketConfig& config, const RocketState& state, int from_stage);
+double GetTotalMassFromStage(const RocketConfig& config, const PropulsionComponent& prop, int from_stage);
 
 } // namespace StageManager
 

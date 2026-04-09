@@ -55,8 +55,14 @@ struct SaveData {
 };
 
 // 简单的序列化函数(使用文本格式便于调试)
-bool SaveGame(const RocketAssembly& assembly, const RocketState& state, 
-              const ControlInput& input) {
+bool SaveGame(const RocketAssembly& assembly, entt::registry& world, entt::entity rocket_entity, const ControlInput& input) {
+    auto& trans = world.get<TransformComponent>(rocket_entity);
+    auto& vel   = world.get<VelocityComponent>(rocket_entity);
+    auto& att   = world.get<AttitudeComponent>(rocket_entity);
+    auto& prop  = world.get<PropulsionComponent>(rocket_entity);
+    auto& tele  = world.get<TelemetryComponent>(rocket_entity);
+    auto& guid  = world.get<GuidanceComponent>(rocket_entity);
+    auto& orb   = world.get<OrbitComponent>(rocket_entity);
     std::ofstream file(SAVE_FILE_PATH);
     if (!file.is_open()) {
         return false;
@@ -73,29 +79,29 @@ bool SaveGame(const RocketAssembly& assembly, const RocketState& state,
     
     // 保存火箭状态
     file << "STATE\n";
-    file << state.fuel << "\n";
-    file << state.px << " " << state.py << " " << state.pz << "\n";
-    file << state.vx << " " << state.vy << " " << state.vz << "\n";
-    file << state.surf_px << " " << state.surf_py << " " << state.surf_pz << " " 
-         << state.launch_site_px << " " << state.launch_site_py << " " << state.launch_site_pz << "\n";
-    file << state.abs_px << " " << state.abs_py << " " << state.abs_pz << "\n";
-    file << state.angle << " " << state.ang_vel << "\n";
-    file << state.angle_z << " " << state.ang_vel_z << "\n";
-    file << state.sim_time << "\n";
-    file << state.altitude << "\n";
-    file << state.velocity << "\n";
-    file << state.local_vx << "\n";
-    file << (int)state.status << "\n";
+    file << prop.fuel << "\n";
+    file << trans.px << " " << trans.py << " " << trans.pz << "\n";
+    file << vel.vx << " " << vel.vy << " " << vel.vz << "\n";
+    file << trans.surf_px << " " << trans.surf_py << " " << trans.surf_pz << " " 
+         << trans.launch_site_px << " " << trans.launch_site_py << " " << trans.launch_site_pz << "\n";
+    file << trans.abs_px << " " << trans.abs_py << " " << trans.abs_pz << "\n";
+    file << att.angle << " " << att.ang_vel << "\n";
+    file << att.angle_z << " " << att.ang_vel_z << "\n";
+    file << tele.sim_time << "\n";
+    file << tele.altitude << "\n";
+    file << 0.0 << "\n";
+    file << vel.vx << "\n";
+    file << (int)guid.status << "\n";
     file << current_soi_index << "\n";
-    file << (state.auto_mode ? 1 : 0) << "\n";
+    file << (guid.auto_mode ? 1 : 0) << "\n";
     
     // 保存多级状态
     file << "STAGES\n";
-    file << state.current_stage << " " << state.total_stages << "\n";
-    file << state.jettisoned_mass << "\n";
-    file << (int)state.stage_fuels.size() << "\n";
-    for (int i = 0; i < (int)state.stage_fuels.size(); i++) {
-        file << state.stage_fuels[i] << "\n";
+    file << prop.current_stage << " " << prop.total_stages << "\n";
+    file << prop.jettisoned_mass << "\n";
+    file << (int)prop.stage_fuels.size() << "\n";
+    for (int i = 0; i < (int)prop.stage_fuels.size(); i++) {
+        file << prop.stage_fuels[i] << "\n";
     }
     
     // 保存控制输入
@@ -106,15 +112,20 @@ bool SaveGame(const RocketAssembly& assembly, const RocketState& state,
     
     // 保存时间戳
     file << "TIMESTAMP\n";
-    file << state.sim_time << "\n";
+    file << tele.sim_time << "\n";
     
     file.close();
     return true;
 }
 
 // 加载游戏
-bool LoadGame(RocketAssembly& assembly, RocketState& state, 
-              ControlInput& input) {
+bool LoadGame(RocketAssembly& assembly, entt::registry& world, entt::entity rocket_entity, ControlInput& input) {
+    auto& trans = world.get<TransformComponent>(rocket_entity);
+    auto& vel   = world.get<VelocityComponent>(rocket_entity);
+    auto& att   = world.get<AttitudeComponent>(rocket_entity);
+    auto& prop  = world.get<PropulsionComponent>(rocket_entity);
+    auto& tele  = world.get<TelemetryComponent>(rocket_entity);
+    auto& guid  = world.get<GuidanceComponent>(rocket_entity);
     std::ifstream file(SAVE_FILE_PATH);
     if (!file.is_open()) {
         return false;
@@ -153,25 +164,26 @@ bool LoadGame(RocketAssembly& assembly, RocketState& state,
     // 读取火箭状态
     std::getline(file, line);
     if (line.find("STATE") != std::string::npos) {
-        file >> state.fuel;
-        file >> state.px >> state.py >> state.pz;
-        file >> state.vx >> state.vy >> state.vz;
-        file >> state.surf_px >> state.surf_py >> state.surf_pz 
-             >> state.launch_site_px >> state.launch_site_py >> state.launch_site_pz;
-        file >> state.abs_px >> state.abs_py >> state.abs_pz;
-        file >> state.angle >> state.ang_vel;
-        file >> state.angle_z >> state.ang_vel_z;
-        file >> state.sim_time;
-        file >> state.altitude;
-        file >> state.velocity;
-        file >> state.local_vx;
+        file >> prop.fuel;
+        file >> trans.px >> trans.py >> trans.pz;
+        file >> vel.vx >> vel.vy >> vel.vz;
+        file >> trans.surf_px >> trans.surf_py >> trans.surf_pz 
+             >> trans.launch_site_px >> trans.launch_site_py >> trans.launch_site_pz;
+        file >> trans.abs_px >> trans.abs_py >> trans.abs_pz;
+        file >> att.angle >> att.ang_vel;
+        file >> att.angle_z >> att.ang_vel_z;
+        file >> tele.sim_time;
+        file >> tele.altitude;
+        double dummy = 0;
+        file >> dummy;
+        file >> dummy;
         int status_int;
         file >> status_int;
-        state.status = (MissionState)status_int;
+        guid.status = (MissionState)status_int;
         file >> current_soi_index;
         int auto_mode_int;
         file >> auto_mode_int;
-        state.auto_mode = (auto_mode_int != 0);
+        guid.auto_mode = (auto_mode_int != 0);
         std::getline(file, line); // 消耗换行符
     }
     
@@ -179,15 +191,15 @@ bool LoadGame(RocketAssembly& assembly, RocketState& state,
     std::streampos pos = file.tellg();
     std::getline(file, line);
     if (line.find("STAGES") != std::string::npos) {
-        file >> state.current_stage >> state.total_stages;
-        file >> state.jettisoned_mass;
+        file >> prop.current_stage >> prop.total_stages;
+        file >> prop.jettisoned_mass;
         int num_stage_fuels;
         file >> num_stage_fuels;
-        state.stage_fuels.clear();
+        prop.stage_fuels.clear();
         for (int i = 0; i < num_stage_fuels; i++) {
             double sf;
             file >> sf;
-            state.stage_fuels.push_back(sf);
+            prop.stage_fuels.push_back(sf);
         }
         std::getline(file, line); // consume newline
         
@@ -195,11 +207,11 @@ bool LoadGame(RocketAssembly& assembly, RocketState& state,
         std::getline(file, line);
     } else if (line.find("CONTROL") != std::string::npos) {
         // Version 1.0: no stages section, this IS the CONTROL line
-        state.current_stage = 0;
-        state.total_stages = 1;
-        state.jettisoned_mass = 0;
-        state.stage_fuels.clear();
-        state.stage_fuels.push_back(state.fuel);
+        prop.current_stage = 0;
+        prop.total_stages = 1;
+        prop.jettisoned_mass = 0;
+        prop.stage_fuels.clear();
+        prop.stage_fuels.push_back(prop.fuel);
     }
     
     // Read control values (CONTROL header already consumed above)

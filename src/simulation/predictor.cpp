@@ -30,14 +30,15 @@ void AsyncOrbitPredictor::Stop() {
 
 // 请求轨道预测更新 (RequestUpdate)
 // 此函数由主线程调用，用于提交一个新的初始状态供后台预测。
-void AsyncOrbitPredictor::RequestUpdate(RocketState* target, const RocketState& state, const RocketConfig& config, double pred_days, int iters, int ref_mode, int ref_body, int secondary_ref_body, bool force_reset) {
-    if (!target) return;
+void AsyncOrbitPredictor::RequestUpdate(OrbitComponent* target_orb, ManeuverComponent* target_mnv, const RocketState& state, const RocketConfig& config, double pred_days, int iters, int ref_mode, int ref_body, int secondary_ref_body, bool force_reset) {
+    if (!target_orb || !target_mnv) return;
     std::lock_guard<std::mutex> lock(m_request_mutex);
     
     // 自动重置判断：如果参考系（目标天体）发生了变化，之前的预测点就完全失效了。
     if (m_request.ref_body != ref_body || m_request.ref_mode != ref_mode || m_request.secondary_ref_body != secondary_ref_body) force_reset = true;
     
-    m_request.target = target;
+    m_request.target_orb = target_orb;
+    m_request.target_mnv = target_mnv;
     m_request.state = state;
     m_request.config = config;
     m_request.pred_days = pred_days;
@@ -294,9 +295,9 @@ void AsyncOrbitPredictor::WorkerLoop() {
                     }
                     
                     // 将积分出来的关键点位反馈回主线程，用于导航引导。
-                    if (!req.target->maneuvers.empty()) {
-                        auto& node = req.target->maneuvers[0];
-                        std::lock_guard<std::mutex> lock(*req.target->path_mutex);
+                    if (!req.target_mnv->maneuvers.empty()) {
+                        auto& node = req.target_mnv->maneuvers[0];
+                        std::lock_guard<std::mutex> lock(*req.target_orb->path_mutex);
                         
                         // Capture Absolute state
                         node.snap_px = mnv_h_px; node.snap_py = mnv_h_py; node.snap_pz = mnv_h_pz;
@@ -423,14 +424,14 @@ void AsyncOrbitPredictor::WorkerLoop() {
         m_context.mnv_px = mnv_h_px; m_context.mnv_py = mnv_h_py; m_context.mnv_pz = mnv_h_pz;
         m_context.mnv_vx = mnv_h_vx; m_context.mnv_vy = mnv_h_vy; m_context.mnv_vz = mnv_h_vz;
 
-        if (req.target && !m_request.pending) {
-            std::lock_guard<std::mutex> lock(*req.target->path_mutex);
-            req.target->predicted_path = m_context.points;
-            req.target->predicted_mnv_path = m_context.mnv_points;
-            req.target->predicted_apsides = m_context.apsides;
-            req.target->predicted_mnv_apsides = m_context.mnv_apsides;
-            req.target->prediction_in_progress = false;
-            req.target->last_prediction_sim_time = req.state.sim_time;
+        if (req.target_orb && !m_request.pending) {
+            std::lock_guard<std::mutex> lock(*req.target_orb->path_mutex);
+            req.target_orb->predicted_path = m_context.points;
+            req.target_orb->predicted_mnv_path = m_context.mnv_points;
+            req.target_orb->predicted_apsides = m_context.apsides;
+            req.target_orb->predicted_mnv_apsides = m_context.mnv_apsides;
+            req.target_orb->prediction_in_progress = false;
+            req.target_orb->last_prediction_sim_time = req.state.sim_time;
         }
 
         m_busy = false;

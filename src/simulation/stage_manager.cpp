@@ -105,55 +105,53 @@ void SyncActiveConfig(RocketConfig& config, int stage_index) {
 // 执行级间分离 (SeparateStage)
 // 抛弃已经烧完燃料的底层结构，并将系统的重点转移到下一级发动机。
 bool SeparateStage(entt::registry& registry, entt::entity entity) {
-    auto& state = registry.get<RocketState>(entity);
+    auto& prop = registry.get<PropulsionComponent>(entity);
+    auto& guid = registry.get<GuidanceComponent>(entity);
     auto& config = registry.get<RocketConfig>(entity);
     // 检查是否已经是最后一级（无法再分离）
-    if (state.current_stage >= state.total_stages - 1) {
+    if (prop.current_stage >= prop.total_stages - 1) {
         std::cout << ">> [STAGING] CANNOT SEPARATE: Already on final stage!" << std::endl;
         return false;
     }
 
     // 1. 计算被抛弃部分的质量
-    const StageConfig& old_stage = config.stage_configs[state.current_stage];
+    const StageConfig& old_stage = config.stage_configs[prop.current_stage];
     // 抛弃质量 = 该级的干重 + 剩下的残余燃料
-    double jettison = old_stage.dry_mass + state.stage_fuels[state.current_stage];
-    state.jettisoned_mass += jettison; // 累加到已抛弃的总质量中
+    double jettison = old_stage.dry_mass + prop.stage_fuels[prop.current_stage];
+    prop.jettisoned_mass += jettison; // 累加到已抛弃的总质量中
 
-    std::cout << ">> [STAGING] === STAGE " << (state.current_stage + 1)
+    std::cout << ">> [STAGING] === STAGE " << (prop.current_stage + 1)
               << " SEPARATION! === Jettisoned " << (int)jettison << " kg" << std::endl;
 
     // 2. 推进到下一级
-    state.current_stage++;
+    prop.current_stage++;
 
     // 3. 将全局燃料引用重定向到新级别的油箱
-    state.fuel = state.stage_fuels[state.current_stage];
+    prop.fuel = prop.stage_fuels[prop.current_stage];
 
     // 4. 同步新的物理参数（推力、质量属性等）
-    SyncActiveConfig(config, state.current_stage);
+    SyncActiveConfig(config, prop.current_stage);
 
     // 5. 再次精确更新上方级的剩余总质量
     double upper = 0;
-    for (int i = state.current_stage + 1; i < state.total_stages; i++) {
-        upper += config.stage_configs[i].dry_mass + state.stage_fuels[i];
+    for (int i = prop.current_stage + 1; i < prop.total_stages; i++) {
+        upper += config.stage_configs[i].dry_mass + prop.stage_fuels[i];
     }
     config.upper_stages_mass = upper;
 
     // UI 提示信息
-    std::cout << ">> [STAGING] Now on Stage " << (state.current_stage + 1)
-              << "/" << state.total_stages
-              << " | Thrust: " << (int)(config.stage_configs[state.current_stage].thrust / 1000) << " kN"
-              << " | Fuel: " << (int)state.fuel << " kg" << std::endl;
+    std::cout << ">> [STAGING] Now on Stage " << (prop.current_stage + 1)
+              << "/" << prop.total_stages
+              << " | Thrust: " << (int)(config.stage_configs[prop.current_stage].thrust / 1000) << " kN"
+              << " | Fuel: " << (int)prop.fuel << " kg" << std::endl;
 
-    state.mission_msg = ">> STAGE " + std::to_string(state.current_stage + 1) + " IGNITION!";
+    guid.mission_msg = ">> STAGE " + std::to_string(prop.current_stage + 1) + " IGNITION!";
 
     return true;
 }
 
 // 检查当前级燃料是否耗尽
-bool IsCurrentStageEmpty(const RocketState& state) {
-    if (state.current_stage < 0 || state.current_stage >= (int)state.stage_fuels.size()) return true;
-    return state.stage_fuels[state.current_stage] <= 0.0;
-}
+// Legacy RocketState overload removed — use PropulsionComponent overload below
 
 const StageConfig& GetActiveStage(const RocketConfig& config, int stage_index) {
     return config.stage_configs[stage_index];
@@ -162,7 +160,7 @@ const StageConfig& GetActiveStage(const RocketConfig& config, int stage_index) {
 // 获取全箭动态总质量 (GetTotalMassFromStage)
 // 实时计算当前级以及上方所有级的（干重 + 实时燃料）总和。
 // 这是牛顿第二定律 (F=ma) 中 'm' 的实时取值。
-double GetTotalMassFromStage(const RocketConfig& config, const RocketState& state, int from_stage) {
+double GetTotalMassFromStage(const RocketConfig& config, const PropulsionComponent& state, int from_stage) {
     double total = 0; 
     for (int i = from_stage; i < (int)config.stage_configs.size(); i++) {
         // 累加该级的结构重量

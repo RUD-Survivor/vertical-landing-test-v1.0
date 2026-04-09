@@ -18,8 +18,7 @@ class HUDManager {
 public:
     FlightHUD hud;
 
-    void render(Renderer* renderer, Renderer3D* r3d, RocketState& rocket_state, 
-        RocketConfig& rocket_config, ControlInput& control_input, CameraDirector& cam, 
+    void render(Renderer* renderer, Renderer3D* r3d, entt::registry& registry, entt::entity entity, CameraDirector& cam, 
         SimulationController& sim_ctrl, ManeuverManager& mnvManager, 
         const Quat& rocketQuat, const Vec3& rocketUp, const Vec3& localNorth, const Vec3& localRight, 
         const Mat4& viewMat, const Mat4& macroProjMat, const Vec3& camEye_rel, 
@@ -31,10 +30,25 @@ public:
 
         HUDContext hud_ctx;
         hud_ctx.renderer = renderer;
-        hud_ctx.rocket_state = &rocket_state;
+        hud_ctx.registry = &registry;
+        hud_ctx.entity = entity;
+        
+        auto& trans = registry.get<TransformComponent>(entity);
+        auto& vel   = registry.get<VelocityComponent>(entity);
+        auto& att   = registry.get<AttitudeComponent>(entity);
+        auto& prop  = registry.get<PropulsionComponent>(entity);
+        auto& tele  = registry.get<TelemetryComponent>(entity);
+        auto& guid  = registry.get<GuidanceComponent>(entity);
+        auto& mnv   = registry.get<ManeuverComponent>(entity);
+        auto& orb   = registry.get<OrbitComponent>(entity);
+        auto& rocket_config = registry.get<RocketConfig>(entity);
+
+        auto& control_input = registry.get<ControlInput>(entity);
+        // rocket_state removed from HUDContext — ECS components accessed directly
         hud_ctx.rocket_config = &rocket_config;
         hud_ctx.control_input = &control_input;
         hud_ctx.cam = &cam;
+
 
         int ww, wh;
         glfwGetWindowSize(GameContext::getInstance().window, &ww, &wh);
@@ -51,9 +65,9 @@ public:
         hud_ctx.rocketUp = const_cast<Vec3*>(&rocketUp);
         hud_ctx.localNorth = const_cast<Vec3*>(&localNorth);
         hud_ctx.localRight = const_cast<Vec3*>(&localRight);
-        hud_ctx.ro_x = rocket_state.px;
-        hud_ctx.ro_y = rocket_state.py;
-        hud_ctx.ro_z = rocket_state.pz;
+        hud_ctx.ro_x = trans.px;
+        hud_ctx.ro_y = trans.py;
+        hud_ctx.ro_z = trans.pz;
         hud_ctx.viewMat = viewMat;
         hud_ctx.macroProjMat = macroProjMat;
         hud_ctx.camEye_rel = camEye_rel;

@@ -4,10 +4,14 @@
 #include <cmath>
 #include <iostream>
 #include "core/rocket_state.h"
+#include "physics/physics_system.h"
 #include "math/math3d.h"
 #include "simulation/maneuver_system.h"
 #include "render/renderer3d.h"
-#include "render/HUD_system.h"
+
+struct FlightHUD;
+struct HUDContext;
+extern std::vector<CelestialBody> SOLAR_SYSTEM;
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -31,8 +35,30 @@ struct ManeuverManager {
     // --- Popup Visual Cache ---
     float cached_popup_x = 0, cached_popup_y = 0, cached_popup_w = 0, cached_popup_h = 0;
 
-    void update(GLFWwindow* window, RocketState& rocket_state, FlightHUD& hud, 
+    void update(GLFWwindow* window, entt::registry& registry, entt::entity entity, FlightHUD& hud, const CameraDirector& cam, double dt, int ww, int wh);
+    void render(entt::registry& registry, entt::entity entity, FlightHUD& hud, Renderer3D* r3d, const Mat4& view, const Mat4& proj, float aspect, float earth_r, float cam_dist, double ws_d, double ro_x, double ro_y, double ro_z, double dt);
+
+private:
+    void handleHandleDragging(ManeuverNode& node, float mouse_x, float mouse_y, const Vec2& n_scr, const Vec2& h_scr, const Vec2& axis2D, double dt);
+    void updatePopupState(ManeuverNode& node, entt::registry& registry, entt::entity entity, FlightHUD& hud, const Mat4& view, const Mat4& proj, float aspect, double ws_d, double ro_x, double ro_y, double ro_z, float mouse_x, float mouse_y, bool lmb, double dt);
+};
+
+
+
+// Forward decls
+struct FlightHUD;
+struct HUDContext;
+
+
+
+
+
+#include "render/HUD_system.h"
+
+void ManeuverManager::update(GLFWwindow* window, entt::registry& registry, entt::entity entity, FlightHUD& hud, 
                 const CameraDirector& cam, double dt, int ww, int wh) {
+        auto& mnv = registry.get<ManeuverComponent>(entity);
+        auto& tele = registry.get<TelemetryComponent>(entity);
         
         double mx_raw, my_raw;
         glfwGetCursorPos(window, &mx_raw, &my_raw);
@@ -49,16 +75,21 @@ struct ManeuverManager {
         }
 
         // --- Handle Node Creation Click ---
-        if (lmb && !lmb_prev && !popup_clicked_frame && dragging_handle == -1 && hud.mnv_popup_index == -1 && 
-            rocket_state.selected_maneuver_index == -1 && global_best_ang >= 0) {
+        // UI Block Check: Prevent interaction if mouse is on sidebar or top menus
+        bool mouse_on_ui = (mouse_x > 0.7f) || (mouse_y > 0.7f) || (mouse_y < -0.85f);
+        if (lmb && !lmb_prev && !popup_clicked_frame && !mouse_on_ui && dragging_handle == -1 && hud.mnv_popup_index == -1 && 
+            mnv.selected_maneuver_index == -1 && global_best_ang >= 0) {
             
-            double M_click = global_best_ang - global_best_ecc * std::sin(global_best_ang);
-            double dM = M_click - global_current_M0;
-            while (dM < 0) dM += 2.0 * M_PI;
-            while (dM > 2.0 * M_PI) dM -= 2.0 * M_PI;
-
             ManeuverNode newNode;
-            newNode.sim_time = rocket_state.sim_time + (dM / global_current_n);
+            if (global_current_n > 0.0001) { // Normal Keplerian creation
+                double M_click = global_best_ang - global_best_ecc * std::sin(global_best_ang);
+                double dM = M_click - global_current_M0;
+                while (dM < 0) dM += 2.0 * M_PI;
+                while (dM > 2.0 * M_PI) dM -= 2.0 * M_PI;
+                newNode.sim_time = tele.sim_time + (dM / global_current_n);
+            } else { // Numerical / Advance Mode fallback: Node at current time
+                newNode.sim_time = tele.sim_time + 300.0; // Place it 5 mins ahead by default in adv mode 
+            }
             newNode.delta_v = Vec3(0, 0, 0);
             newNode.active = true;
             newNode.ref_a = global_best_a;
@@ -70,20 +101,23 @@ struct ManeuverManager {
             newNode.ref_M0 = global_best_ang; // Eccentric anomaly
             newNode.ref_body = hud.global_best_ref_node;
             
-            rocket_state.maneuvers.push_back(newNode);
-            rocket_state.selected_maneuver_index = (int)rocket_state.maneuvers.size() - 1;
-            hud.mnv_popup_index = rocket_state.selected_maneuver_index;
+            mnv.maneuvers.push_back(newNode);
+            mnv.selected_maneuver_index = (int)mnv.maneuvers.size() - 1;
+            hud.mnv_popup_index = mnv.selected_maneuver_index;
+            hud.mnv_popup_visible = true;
+            hud.mnv_popup_burn_mode = 0; // Relative mode
+            return; // EXIT update to prevent same-frame deletion!
         }
 
         // Handle Time-Slider Dragging (Dragging the node itself along the orbit)
-        if (lmb && dragging_handle == -2 && rocket_state.selected_maneuver_index != -1) {
+        if (lmb && dragging_handle == -2 && mnv.selected_maneuver_index != -1) {
             if (global_best_ang >= 0) {
-                ManeuverNode& node = rocket_state.maneuvers[rocket_state.selected_maneuver_index];
+                ManeuverNode& node = mnv.maneuvers[mnv.selected_maneuver_index];
                 double M_click = global_best_ang - global_best_ecc * std::sin(global_best_ang);
                 double dM = M_click - global_current_M0;
                 while (dM < 0) dM += 2.0 * M_PI;
                 while (dM > 2.0 * M_PI) dM -= 2.0 * M_PI;
-                node.sim_time = rocket_state.sim_time + (dM / global_current_n);
+                node.sim_time = tele.sim_time + (dM / global_current_n);
                 // Also update the anchor ECC anomaly so it doesn't jump back when released
                 node.ref_M0 = global_best_ang;
             }
@@ -91,7 +125,7 @@ struct ManeuverManager {
 
         // Deselection (Click empty space)
         if (lmb && !lmb_prev && !popup_clicked_frame && hud.mnv_popup_index == -1 && dragging_handle == -1 && global_best_ang < 0) {
-            rocket_state.selected_maneuver_index = -1;
+            mnv.selected_maneuver_index = -1;
         }
 
         if (!lmb) dragging_handle = -1;
@@ -99,9 +133,11 @@ struct ManeuverManager {
         // DO NOT update lmb_prev here! It must be updated after render() can see the click.
     }
 
-    void render(RocketState& rocket_state, FlightHUD& hud, Renderer3D* r3d, 
+    void ManeuverManager::render(entt::registry& registry, entt::entity entity, FlightHUD& hud, Renderer3D* r3d, 
                 const Mat4& view, const Mat4& proj, float aspect, float earth_r, float cam_dist,
                 double ws_d, double ro_x, double ro_y, double ro_z, double dt) {
+        auto& mnv = registry.get<ManeuverComponent>(entity);
+        auto& tele = registry.get<TelemetryComponent>(entity);
         
         GLFWwindow* window = GameContext::getInstance().window;
         int ww, wh; glfwGetWindowSize(window, &ww, &wh);
@@ -112,8 +148,8 @@ struct ManeuverManager {
 
         hit_maneuver_icon = false;
 
-        for (int i = 0; i < (int)rocket_state.maneuvers.size(); i++) {
-            ManeuverNode& node = rocket_state.maneuvers[i];
+        for (int i = 0; i < (int)mnv.maneuvers.size(); i++) {
+            ManeuverNode& node = mnv.maneuvers[i];
             
             // 1. Reconstruct 3D Position
             double ref_px = SOLAR_SYSTEM[node.ref_body].px;
@@ -132,7 +168,7 @@ struct ManeuverManager {
             // 2. Interaction: Node Icon Click
             if (lmb && !lmb_prev && dragging_handle == -1 && !popup_clicked_frame) {
                 if (d_mouse < 0.045f) {
-                    rocket_state.selected_maneuver_index = i;
+                    mnv.selected_maneuver_index = i;
                     hud.mnv_popup_index = i;
                     dragging_handle = -2; // Start dragging node along orbit
                     hit_maneuver_icon = true;
@@ -141,11 +177,11 @@ struct ManeuverManager {
 
             // 3. Draw Icon
             float icon_size = earth_r * (d_mouse < 0.04f || dragging_handle == -2 ? 0.1f : 0.08f);
-            Vec3 icon_col = (rocket_state.selected_maneuver_index == i) ? Vec3(0.4f, 0.8f, 1.0f) : Vec3(0.2f, 0.6f, 1.0f);
+            Vec3 icon_col = (mnv.selected_maneuver_index == i) ? Vec3(0.4f, 0.8f, 1.0f) : Vec3(0.2f, 0.6f, 1.0f);
             r3d->drawBillboard(node_world, icon_size, icon_col.x, icon_col.y, icon_col.z, 0.9f);
 
             // 4. Draw Handles & Process Dragging
-            if (rocket_state.selected_maneuver_index == i) {
+            if (mnv.selected_maneuver_index == i) {
                 double E_dot = node.ref_n / (1.0 - node.ref_ecc * std::cos(E_node));
                 Vec3 v_node_rel = node.ref_e_dir * (-(float)node.ref_a * std::sin((float)E_node) * (float)E_dot) + node.ref_p_dir * (node_b * std::cos((float)E_node) * (float)E_dot);
                 ManeuverFrame m_frame = ManeuverSystem::getFrame(pt_node_rel, v_node_rel);
@@ -210,21 +246,20 @@ struct ManeuverManager {
         }
 
         // 6. Manage Popup Positioning & Common Logic
-        hud.mnv_popup_visible = false;
-        if (hud.mnv_popup_index != -1 && (size_t)hud.mnv_popup_index < rocket_state.maneuvers.size()) {
-            ManeuverNode& node = rocket_state.maneuvers[hud.mnv_popup_index];
-            updatePopupState(node, rocket_state, hud, view, proj, aspect, ws_d, ro_x, ro_y, ro_z, mouse_x, mouse_y, lmb, dt);
+        if (hud.mnv_popup_index != -1 && (size_t)hud.mnv_popup_index < mnv.maneuvers.size()) {
+            ManeuverNode& node = mnv.maneuvers[hud.mnv_popup_index];
+            updatePopupState(node, registry, entity, hud, view, proj, aspect, ws_d, ro_x, ro_y, ro_z, mouse_x, mouse_y, lmb, dt);
+        } else {
+            hud.mnv_popup_visible = false;
         }
 
         // UPDATE state for next frame
         lmb_prev = lmb;
         last_pass_mx = mouse_x;
         last_pass_my = mouse_y;
-        global_best_ang = -1.0f; 
     }
 
-private:
-   void handleHandleDragging(ManeuverNode& node, float mouse_x, float mouse_y, 
+void ManeuverManager::handleHandleDragging(ManeuverNode& node, float mouse_x, float mouse_y, 
                               const Vec2& n_scr, const Vec2& h_scr, const Vec2& axis2D, double dt) {
         float screen_len_sq = axis2D.lengthSq();
         if (screen_len_sq < 1e-8f) return;
@@ -254,10 +289,12 @@ private:
         node.active = true;
     }
 
-    void updatePopupState(ManeuverNode& node, RocketState& rocket_state, FlightHUD& hud, 
+    void ManeuverManager::updatePopupState(ManeuverNode& node, entt::registry& registry, entt::entity entity, FlightHUD& hud, 
                          const Mat4& view, const Mat4& proj, float aspect, 
                          double ws_d, double ro_x, double ro_y, double ro_z, 
                          float mouse_x, float mouse_y, bool lmb, double dt) {
+        auto& tele = registry.get<TelemetryComponent>(entity);
+        auto& mnv = registry.get<ManeuverComponent>(entity);
         
         float node_b = (float)node.ref_a * std::sqrt(std::max(0.0f, 1.0f - (float)node.ref_ecc * (float)node.ref_ecc));
         Vec3 pt_node_rel = node.ref_center + node.ref_e_dir * ((float)node.ref_a * std::cos((float)node.ref_M0)) + node.ref_p_dir * (node_b * std::sin((float)node.ref_M0));
@@ -287,7 +324,7 @@ private:
         hud.mnv_popup_node_scr_x = n_scr.x; hud.mnv_popup_node_scr_y = n_scr.y;
         
         hud.mnv_popup_ref_body = node.ref_body;
-        hud.mnv_popup_time_to_node = node.sim_time - rocket_state.sim_time;
+        hud.mnv_popup_time_to_node = node.sim_time - tele.sim_time;
 
         // --- MANEUVER POPUP INTERACTION LOGIC ---
         float title_y = pop_y + ph/2 - (hud.adv_embed_mnv ? 0.015f : 0.025f);
@@ -368,11 +405,14 @@ private:
         hud.mnv_popup_del_hover = (mouse_x >= pop_x - del_btn_w/2 && mouse_x <= pop_x + del_btn_w/2 && 
                                    mouse_y >= del_btn_y - del_btn_h/2 && mouse_y <= del_btn_y + del_btn_h/2);
         if (hud.mnv_popup_del_hover && lmb && !lmb_prev) {
-            rocket_state.maneuvers.erase(rocket_state.maneuvers.begin() + hud.mnv_popup_index);
-            if (rocket_state.selected_maneuver_index == hud.mnv_popup_index) rocket_state.selected_maneuver_index = -1;
+            mnv.maneuvers.erase(mnv.maneuvers.begin() + hud.mnv_popup_index);
+            if (mnv.selected_maneuver_index == hud.mnv_popup_index) mnv.selected_maneuver_index = -1;
             hud.mnv_popup_index = -1;
             hud.mnv_popup_visible = false;
             cached_popup_w = 0;
         }
     }
-};
+
+
+
+

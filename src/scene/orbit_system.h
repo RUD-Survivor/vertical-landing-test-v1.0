@@ -25,12 +25,24 @@ public:
     /**
      * 执行轨道预测和渲染的主方法
      */
-    void render(RocketState& rocket_state, RocketConfig& rocket_config, FlightHUD& hud, ManeuverManager& mnvManager,
-        Renderer3D* r3d, CameraDirector& cam, ControlInput& control_input,
+    void render(entt::registry& registry, entt::entity entity, FlightHUD& hud, ManeuverManager& mnvManager,
+        Renderer3D* r3d, CameraDirector& cam,
         const Mat4& viewMat, const Mat4& macroProjMat,
         float aspect, double ws_d, double ro_x, double ro_y, double ro_z,
         int ww, int wh, double dt, int current_soi_index, float earth_r, float cam_dist, Vec3 renderRocketBase, Vec3 camEye_rel)
     {
+        auto& rocket_config = registry.get<RocketConfig>(entity);
+        auto& control_input = registry.get<ControlInput>(entity);
+        auto& mnv = registry.get<ManeuverComponent>(entity);
+        auto& trans = registry.get<TransformComponent>(entity);
+        auto& vel   = registry.get<VelocityComponent>(entity);
+        auto& att   = registry.get<AttitudeComponent>(entity);
+        auto& prop  = registry.get<PropulsionComponent>(entity);
+        auto& tele  = registry.get<TelemetryComponent>(entity);
+        auto& guid  = registry.get<GuidanceComponent>(entity);
+        auto& orb   = registry.get<OrbitComponent>(entity);
+
+
         // 这里将放置从 FlightScene 移入的庞大渲染逻辑
         // 包括：
         // 1. 高级数值轨道 (Advanced Orbit) 的样条插值绘制
@@ -39,7 +51,7 @@ public:
         // 4. 计算并写回 mnvManager.global_best_ang 以支持右键点击轨道创建节点
 
         {
-            double r_px = rocket_state.px, r_py = rocket_state.py, r_pz = rocket_state.pz;
+            double r_px = trans.px, r_py = trans.py, r_pz = trans.pz;
             double sun_px = SOLAR_SYSTEM[0].px, sun_py = SOLAR_SYSTEM[0].py, sun_pz = SOLAR_SYSTEM[0].pz;
             DVec3 curPos = { r_px, r_py, r_pz };
             if (traj_history.empty()) {
@@ -99,38 +111,51 @@ public:
         if (cam.mode == 2) {
             if (hud.adv_orbit_enabled) {
                 // Perform asynchronous numerical orbit prediction
-                if (!rocket_state.prediction_in_progress) {
+                if (!orb.prediction_in_progress) {
                     // Throttle requests: update every 0.1s of real time if not busy (provides "100x efficiency" at all warp rates)
                     auto now = std::chrono::steady_clock::now();
                     float elapsed_real = std::chrono::duration<float>(now - last_req_time).count();
-                    if (elapsed_real > 0.1f || rocket_state.predicted_path.empty()) {
-                        rocket_state.prediction_in_progress = true;
+                    if (elapsed_real > 0.1f || orb.predicted_path.empty()) {
+                        orb.prediction_in_progress = true;
                         last_req_time = now;
                         // Populate heliocentric state for the background predictor
                         CelestialBody& soi = SOLAR_SYSTEM[current_soi_index];
-                        rocket_state.abs_px = rocket_state.px + soi.px;
-                        rocket_state.abs_py = rocket_state.py + soi.py;
-                        rocket_state.abs_pz = rocket_state.pz + soi.pz;
-                        rocket_state.abs_vx = rocket_state.vx + soi.vx;
-                        rocket_state.abs_vy = rocket_state.vy + soi.vy;
-                        rocket_state.abs_vz = rocket_state.vz + soi.vz;
+                        trans.abs_px = trans.px + soi.px;
+                        trans.abs_py = trans.py + soi.py;
+                        trans.abs_pz = trans.pz + soi.pz;
+                        vel.abs_vx = vel.vx + soi.vx;
+                        vel.abs_vy = vel.vy + soi.vy;
+                        vel.abs_vz = vel.vz + soi.vz;
                         // Reset only if engines are active or large drift (1 hour of sim time)
-                        bool force_reset = (control_input.throttle > 0.01) || (std::abs(rocket_state.sim_time - rocket_state.last_prediction_sim_time) > 3600.0);
-                        GameContext::getInstance().orbit_predictor->RequestUpdate(&rocket_state, rocket_state, rocket_config, hud.adv_orbit_pred_days, hud.adv_orbit_iters, hud.adv_orbit_ref_mode, hud.adv_orbit_ref_body, hud.adv_orbit_secondary_ref_body, force_reset);
+                        bool force_reset = (control_input.throttle > 0.01) || (std::abs(tele.sim_time - orb.last_prediction_sim_time) > 3600.0);
+                        // Build temporary RocketState for predictor (still uses legacy struct internally)
+                        RocketState pred_state;
+                        pred_state.px = trans.px; pred_state.py = trans.py; pred_state.pz = trans.pz;
+                        pred_state.vx = vel.vx; pred_state.vy = vel.vy; pred_state.vz = vel.vz;
+                        pred_state.abs_px = trans.abs_px; pred_state.abs_py = trans.abs_py; pred_state.abs_pz = trans.abs_pz;
+                        pred_state.abs_vx = vel.abs_vx; pred_state.abs_vy = vel.abs_vy; pred_state.abs_vz = vel.abs_vz;
+                        pred_state.fuel = prop.fuel; pred_state.current_stage = prop.current_stage;
+                        pred_state.total_stages = prop.total_stages; pred_state.stage_fuels = prop.stage_fuels;
+                        pred_state.sim_time = tele.sim_time; pred_state.altitude = tele.altitude;
+                        pred_state.status = guid.status; pred_state.auto_mode = guid.auto_mode;
+                        pred_state.angle = att.angle; pred_state.ang_vel = att.ang_vel;
+                        pred_state.jettisoned_mass = prop.jettisoned_mass;
+                        pred_state.maneuvers = mnv.maneuvers;
+                        GameContext::getInstance().orbit_predictor->RequestUpdate(&orb, &mnv, pred_state, rocket_config, hud.adv_orbit_pred_days, hud.adv_orbit_iters, hud.adv_orbit_ref_mode, hud.adv_orbit_ref_body, hud.adv_orbit_secondary_ref_body, force_reset);
                     }
                 }
                 {
-                    std::lock_guard<std::mutex> lock(*rocket_state.path_mutex);
-                    draw_points = rocket_state.predicted_path;
-                    draw_mnv_points = rocket_state.predicted_mnv_path;
+                    std::lock_guard<std::mutex> lock(*orb.path_mutex);
+                    draw_points = orb.predicted_path;
+                    draw_mnv_points = orb.predicted_mnv_path;
                 }
                 // Render predicted paths from async buffers
                 float ribbon_w = fmaxf(earth_r * 0.006f, cam_dist * 0.001f);
                 // Get current reference body position for world reconstruction
                 double rb_px, rb_py, rb_pz;
-                PhysicsSystem::GetCelestialPositionAt(hud.adv_orbit_ref_body, rocket_state.sim_time, rb_px, rb_py, rb_pz);
+                PhysicsSystem::GetCelestialPositionAt(hud.adv_orbit_ref_body, tele.sim_time, rb_px, rb_py, rb_pz);
                 // Get transformation from local to inertial (world)
-                Quat q_local_to_inertial = PhysicsSystem::GetFrameRotation(hud.adv_orbit_ref_mode, hud.adv_orbit_ref_body, hud.adv_orbit_secondary_ref_body, rocket_state.sim_time);
+                Quat q_local_to_inertial = PhysicsSystem::GetFrameRotation(hud.adv_orbit_ref_mode, hud.adv_orbit_ref_body, hud.adv_orbit_secondary_ref_body, tele.sim_time);
                 if (!draw_points.empty()) {
                     bool needs_update = (draw_points.size() != last_draw_points_size) || (draw_points[0].x != last_first_pt.x);
                     if (needs_update) {
@@ -144,10 +169,23 @@ public:
                         double wx = (rb_px + p_rot.x) * ws_d - ro_x;
                         double wy = (rb_py + p_rot.y) * ws_d - ro_y;
                         double wz = (rb_pz + p_rot.z) * ws_d - ro_z;
-                        world_pts.push_back(Vec3((float)wx, (float)wy, (float)wz));
+                        Vec3 pt = Vec3((float)wx, (float)wy, (float)wz);
+                        world_pts.push_back(pt);
+
+                        // --- Advanced Maneuver Click Hit-test ---
+                        // Only check if we are in the primary orbit reference frame
+                        Vec2 scr = ManeuverSystem::projectToScreen(pt, viewMat, macroProjMat, aspect);
+                        float mx_f = (float)mnvManager.last_pass_mx, my_f = (float)mnvManager.last_pass_my;
+                        float d = sqrtf(powf(scr.x - mx_f, 2) + powf(scr.y - my_f, 2));
+                        if (d < 0.05f) { // Interaction threshold
+                             // We don't have Keplerian 'ang', but we can use this point for UI feedback if needed
+                             // For now, let's just make it 'clickable' enough
+                             mnvManager.global_best_ang = 0.0f; // Simplified flag: on-path
+                        }
                     }
                     r3d->drawRibbon(world_pts, ribbon_w, 0.4f, 0.8f, 1.0f, 0.85f);
                 }
+                if (mnv.maneuvers.empty()) draw_mnv_points.clear(); 
                 if (!draw_mnv_points.empty()) {
                     bool needs_update = (draw_mnv_points.size() != last_draw_mnv_points_size) || (draw_mnv_points[0].x != last_mnv_first_pt.x);
                     if (needs_update) {
@@ -173,7 +211,7 @@ public:
                     }
                 }
                 // Restore current sim state
-                PhysicsSystem::UpdateCelestialBodies(rocket_state.sim_time);
+                PhysicsSystem::UpdateCelestialBodies(tele.sim_time);
             }
             else
             {
@@ -187,8 +225,8 @@ public:
                     double G_const = 6.67430e-11;
                     double mu_body = is_sun_ref ? (G_const * SOLAR_SYSTEM[0].mass) : (G_const * SOLAR_SYSTEM[current_soi_index].mass);
                     // 全物理量双精度计算 (标准米)
-                    double abs_px = rocket_state.px, abs_py = rocket_state.py, abs_pz = rocket_state.pz;
-                    double abs_vx = rocket_state.vx, abs_vy = rocket_state.vy, abs_vz = rocket_state.vz;
+                    double abs_px = trans.px, abs_py = trans.py, abs_pz = trans.pz;
+                    double abs_vx = vel.vx, abs_vy = vel.vy, abs_vz = vel.vz;
                     if (is_sun_ref && current_soi_index != 0) {
                         CelestialBody& cb = SOLAR_SYSTEM[current_soi_index];
                         abs_px += cb.px; abs_py += cb.py; abs_pz += cb.pz;

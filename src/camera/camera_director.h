@@ -203,7 +203,8 @@ public:
     //   w/a/s/d: Free 模式 WASD 按键状态
     // ============================================
     CameraResult computeFlightCamera(
-        const RocketState& rocket_state,
+        const TransformComponent& trans,
+        const VelocityComponent& vel,
         double ws_d,
         float rocket_height,
         const Vec3& renderRocketPos,
@@ -221,9 +222,9 @@ public:
         float rh = rocket_height;
 
         // --- 计算浮动原点 (Floating Origin) ---
-        double r_px = rocket_state.abs_px * ws_d;
-        double r_py = rocket_state.abs_py * ws_d;
-        double r_pz = rocket_state.abs_pz * ws_d;
+        double r_px = trans.abs_px * ws_d;
+        double r_py = trans.abs_py * ws_d;
+        double r_pz = trans.abs_pz * ws_d;
 
         // 确定浮动原点 (Floating Origin)
         // ORBIT, CHASE 以及 焦点为火箭的全景模式 均以火箭为原点以保证近距离渲染精度
@@ -238,9 +239,9 @@ public:
             result.origin_z = SOLAR_SYSTEM[focus_target].pz * ws_d;
         } else { // FREE
             if (!free_init_) {
-                free_px = rocket_state.px;
-                free_py = rocket_state.py;
-                free_pz = rocket_state.pz;
+                free_px = trans.px;
+                free_py = trans.py;
+                free_pz = trans.pz;
                 free_init_ = true;
             }
             // WASD 移动
@@ -269,13 +270,13 @@ public:
             // NOTE: getOrbitParams now needs registry & entity which CameraDirector does not have.
 // For now, compute orbit params inline:
 {
-    double r_cam = std::sqrt(rocket_state.px*rocket_state.px + rocket_state.py*rocket_state.py + rocket_state.pz*rocket_state.pz);
-    double v_sq_cam = rocket_state.vx*rocket_state.vx + rocket_state.vy*rocket_state.vy + rocket_state.vz*rocket_state.vz;
+    double r_cam = std::sqrt(trans.px*trans.px + trans.py*trans.py + trans.pz*trans.pz);
+    double v_sq_cam = vel.vx*vel.vx + vel.vy*vel.vy + vel.vz*vel.vz;
     double mu_cam = 6.67430e-11 * SOLAR_SYSTEM[current_soi_index].mass;
     double energy_cam = v_sq_cam / 2.0 - mu_cam / r_cam;
-    double hx_cam = rocket_state.py*rocket_state.vz - rocket_state.pz*rocket_state.vy;
-    double hy_cam = rocket_state.pz*rocket_state.vx - rocket_state.px*rocket_state.vz;
-    double hz_cam = rocket_state.px*rocket_state.vy - rocket_state.py*rocket_state.vx;
+    double hx_cam = trans.py*vel.vz - trans.pz*vel.vy;
+    double hy_cam = trans.pz*vel.vx - trans.px*vel.vz;
+    double hz_cam = trans.px*vel.vy - trans.py*vel.vx;
     double h_sq_cam = hx_cam*hx_cam + hy_cam*hy_cam + hz_cam*hz_cam;
     double e_sq_cam = 1.0 + 2.0 * energy_cam * h_sq_cam / (mu_cam * mu_cam);
     double e_cam = (e_sq_cam > 0) ? std::sqrt(e_sq_cam) : 0;

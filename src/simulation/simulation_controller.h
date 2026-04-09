@@ -57,7 +57,6 @@ public:
     }
 
     void update(double real_dt, entt::registry& registry, entt::entity entity, FlightHUD& hud, GLFWwindow* window, int cam_mode) {
-        auto& rocket_state = registry.get<RocketState>(entity);
         auto& rocket_config = registry.get<RocketConfig>(entity);
         auto& control_input = registry.get<ControlInput>(entity);
         
@@ -135,7 +134,6 @@ public:
 
 private:
     void executeManeuvers(entt::registry& registry, entt::entity entity, FlightHUD& hud) {
-    auto& rocket_state = registry.get<RocketState>(entity);
     auto& rocket_config = registry.get<RocketConfig>(entity);
     auto& control_input = registry.get<ControlInput>(entity);
     auto& prop = registry.get<PropulsionComponent>(entity);
