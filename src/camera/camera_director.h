@@ -6,9 +6,10 @@
 // Header-only 设计，无需额外的 .cpp 文件。
 // ==========================================================
 #pragma once
+#include "core/universe_model.h"
 
 #include "math/math3d.h"
-#include "core/rocket_state.h"  // SOLAR_SYSTEM, current_soi_index
+#include "core/rocket_state.h"  // UniverseModel::getInstance().solar_system, UniverseModel::getInstance().current_soi_index
 #include "physics/physics_system.h"
 #include <cmath>
 #include <algorithm>
@@ -42,7 +43,7 @@ public:
     float zoom_chase   = 1.0f;   // Orbit/Chase 缩放
     float zoom_pan     = 1.0f;   // Panorama 独立缩放
 
-    // Panorama 焦点目标 (-1 = 火箭, 0+ = SOLAR_SYSTEM 索引)
+    // Panorama 焦点目标 (-1 = 火箭, 0+ = UniverseModel::getInstance().solar_system 索引)
     int focus_target = -1; // 默认锁定为火箭焦点
 
     // Free 模式
@@ -70,7 +71,7 @@ public:
     //   delta: -1 = 上一个, +1 = 下一个
     // ============================================
     void cycleFocusTarget(int delta) {
-        int n = (int)SOLAR_SYSTEM.size();
+        int n = (int)UniverseModel::getInstance().solar_system.size();
         // 选项范围为 [-1, n-1]，总共有 n+1 个焦点可选
         int total = n + 1;
         int current = focus_target + 1; // 映射到 [0, n] 区间进行模运算
@@ -81,7 +82,7 @@ public:
         if (focus_target == -1) {
             std::cout << ">> Panorama Focus: Rocket (火箭)" << std::endl;
         } else {
-            std::cout << ">> Panorama Focus: " << SOLAR_SYSTEM[focus_target].name << std::endl;
+            std::cout << ">> Panorama Focus: " << UniverseModel::getInstance().solar_system[focus_target].name << std::endl;
         }
     }
 
@@ -234,9 +235,9 @@ public:
             result.origin_z = r_pz;
         } else if (mode == PANORAMA) {
             // 焦点为天体时的全景模式，以天体中心为原点（此时火箭在远方可能由于精度抖动而消失，但天体显示极其稳定）
-            result.origin_x = SOLAR_SYSTEM[focus_target].px * ws_d;
-            result.origin_y = SOLAR_SYSTEM[focus_target].py * ws_d;
-            result.origin_z = SOLAR_SYSTEM[focus_target].pz * ws_d;
+            result.origin_x = UniverseModel::getInstance().solar_system[focus_target].px * ws_d;
+            result.origin_y = UniverseModel::getInstance().solar_system[focus_target].py * ws_d;
+            result.origin_z = UniverseModel::getInstance().solar_system[focus_target].pz * ws_d;
         } else { // FREE
             if (!free_init_) {
                 free_px = trans.px;
@@ -258,9 +259,9 @@ public:
             free_py += (double)(gaze_dir.y * fwd_move + side_dir.y * side_move) * (double)free_move_speed * dt;
             free_pz += (double)(gaze_dir.z * fwd_move + side_dir.z * side_move) * (double)free_move_speed * dt;
 
-            result.origin_x = (free_px + SOLAR_SYSTEM[current_soi_index].px) * ws_d;
-            result.origin_y = (free_py + SOLAR_SYSTEM[current_soi_index].py) * ws_d;
-            result.origin_z = (free_pz + SOLAR_SYSTEM[current_soi_index].pz) * ws_d;
+            result.origin_x = (free_px + UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].px) * ws_d;
+            result.origin_y = (free_py + UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].py) * ws_d;
+            result.origin_z = (free_pz + UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].pz) * ws_d;
         }
 
         // --- 计算视图矩阵 ---
@@ -272,7 +273,7 @@ public:
 {
     double r_cam = std::sqrt(trans.px*trans.px + trans.py*trans.py + trans.pz*trans.pz);
     double v_sq_cam = vel.vx*vel.vx + vel.vy*vel.vy + vel.vz*vel.vz;
-    double mu_cam = 6.67430e-11 * SOLAR_SYSTEM[current_soi_index].mass;
+    double mu_cam = 6.67430e-11 * UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].mass;
     double energy_cam = v_sq_cam / 2.0 - mu_cam / r_cam;
     double hx_cam = trans.py*vel.vz - trans.pz*vel.vy;
     double hy_cam = trans.pz*vel.vx - trans.px*vel.vz;
@@ -280,8 +281,8 @@ public:
     double h_sq_cam = hx_cam*hx_cam + hy_cam*hy_cam + hz_cam*hz_cam;
     double e_sq_cam = 1.0 + 2.0 * energy_cam * h_sq_cam / (mu_cam * mu_cam);
     double e_cam = (e_sq_cam > 0) ? std::sqrt(e_sq_cam) : 0;
-    if (energy_cam >= 0) { apo_tmp = 999999999; peri_tmp = (h_sq_cam/mu_cam)/(1.0+e_cam) - SOLAR_SYSTEM[current_soi_index].radius; }
-    else { double a_cam = -mu_cam/(2.0*energy_cam); apo_tmp = a_cam*(1.0+e_cam) - SOLAR_SYSTEM[current_soi_index].radius; peri_tmp = a_cam*(1.0-e_cam) - SOLAR_SYSTEM[current_soi_index].radius; }
+    if (energy_cam >= 0) { apo_tmp = 999999999; peri_tmp = (h_sq_cam/mu_cam)/(1.0+e_cam) - UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].radius; }
+    else { double a_cam = -mu_cam/(2.0*energy_cam); apo_tmp = a_cam*(1.0+e_cam) - UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].radius; peri_tmp = a_cam*(1.0-e_cam) - UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].radius; }
 }
 
             float peri_min = 80000.0f;
@@ -327,15 +328,15 @@ public:
                 base_pan_radius = rh * 2.0f; // 以火箭渲染高度为基础参考半径
             } else {
                 // 情况 B: 焦点锁定在某个星球上
-                base_pan_radius = (float)SOLAR_SYSTEM[focus_target].radius * (float)ws_d;
-                renderFocus = Vec3((float)(SOLAR_SYSTEM[focus_target].px * ws_d - result.origin_x),
-                                   (float)(SOLAR_SYSTEM[focus_target].py * ws_d - result.origin_y),
-                                   (float)(SOLAR_SYSTEM[focus_target].pz * ws_d - result.origin_z));
+                base_pan_radius = (float)UniverseModel::getInstance().solar_system[focus_target].radius * (float)ws_d;
+                renderFocus = Vec3((float)(UniverseModel::getInstance().solar_system[focus_target].px * ws_d - result.origin_x),
+                                   (float)(UniverseModel::getInstance().solar_system[focus_target].py * ws_d - result.origin_y),
+                                   (float)(UniverseModel::getInstance().solar_system[focus_target].pz * ws_d - result.origin_z));
             }
 
             // 环境参考尺寸
-            float earth_r = (float)SOLAR_SYSTEM[current_soi_index].radius * (float)ws_d;
-            float sun_radius = (float)SOLAR_SYSTEM[0].radius * (float)ws_d;
+            float earth_r = (float)UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].radius * (float)ws_d;
+            float sun_radius = (float)UniverseModel::getInstance().solar_system[0].radius * (float)ws_d;
             
             // 计算相机观察距离：统一火箭与星球的基础观察尺度
             // 采用 [目标物体参考半径*4] 与 [当前所在星球半径*2] 的较大值，以确保全景模式的宏大感

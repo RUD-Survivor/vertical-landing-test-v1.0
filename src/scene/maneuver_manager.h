@@ -1,4 +1,5 @@
 #pragma once
+#include "core/universe_model.h"
 #include <GLFW/glfw3.h>
 #include <vector>
 #include <cmath>
@@ -11,7 +12,7 @@
 
 struct FlightHUD;
 struct HUDContext;
-extern std::vector<CelestialBody> SOLAR_SYSTEM;
+extern std::vector<CelestialBody> solar_system;
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -152,9 +153,9 @@ void ManeuverManager::update(GLFWwindow* window, entt::registry& registry, entt:
             ManeuverNode& node = mnv.maneuvers[i];
             
             // 1. Reconstruct 3D Position
-            double ref_px = SOLAR_SYSTEM[node.ref_body].px;
-            double ref_py = SOLAR_SYSTEM[node.ref_body].py;
-            double ref_pz = SOLAR_SYSTEM[node.ref_body].pz;
+            double ref_px = UniverseModel::getInstance().solar_system[node.ref_body].px;
+            double ref_py = UniverseModel::getInstance().solar_system[node.ref_body].py;
+            double ref_pz = UniverseModel::getInstance().solar_system[node.ref_body].pz;
             double E_node = node.ref_M0;
             float node_b = (float)node.ref_a * std::sqrt(std::max(0.0f, 1.0f - (float)node.ref_ecc * (float)node.ref_ecc));
             Vec3 pt_node_rel = node.ref_center + node.ref_e_dir * ((float)node.ref_a * std::cos((float)E_node)) + node.ref_p_dir * (node_b * std::sin((float)E_node));
@@ -214,7 +215,7 @@ void ManeuverManager::update(GLFWwindow* window, entt::registry& registry, entt:
                 if (node.active) {
                     Vec3 p_pos = pt_node_rel;
                     Vec3 p_vel = v_node_rel + m_frame.prograde * node.delta_v.x + m_frame.normal * node.delta_v.y + m_frame.radial * node.delta_v.z;
-                    double mu_ref = 6.67430e-11 * SOLAR_SYSTEM[node.ref_body].mass;
+                    double mu_ref = 6.67430e-11 * UniverseModel::getInstance().solar_system[node.ref_body].mass;
                     double p_energy = 0.5 * (double)p_vel.lengthSq() - mu_ref / (double)p_pos.length();
                     double p_a = -mu_ref / (2.0 * p_energy);
                     if (p_a > 0) {
@@ -298,9 +299,9 @@ void ManeuverManager::handleHandleDragging(ManeuverNode& node, float mouse_x, fl
         
         float node_b = (float)node.ref_a * std::sqrt(std::max(0.0f, 1.0f - (float)node.ref_ecc * (float)node.ref_ecc));
         Vec3 pt_node_rel = node.ref_center + node.ref_e_dir * ((float)node.ref_a * std::cos((float)node.ref_M0)) + node.ref_p_dir * (node_b * std::sin((float)node.ref_M0));
-        Vec3 node_world = Vec3((float)(SOLAR_SYSTEM[node.ref_body].px * ws_d + pt_node_rel.x * ws_d - ro_x),
-                               (float)(SOLAR_SYSTEM[node.ref_body].py * ws_d + pt_node_rel.y * ws_d - ro_y),
-                               (float)(SOLAR_SYSTEM[node.ref_body].pz * ws_d + pt_node_rel.z * ws_d - ro_z));
+        Vec3 node_world = Vec3((float)(UniverseModel::getInstance().solar_system[node.ref_body].px * ws_d + pt_node_rel.x * ws_d - ro_x),
+                               (float)(UniverseModel::getInstance().solar_system[node.ref_body].py * ws_d + pt_node_rel.y * ws_d - ro_y),
+                               (float)(UniverseModel::getInstance().solar_system[node.ref_body].pz * ws_d + pt_node_rel.z * ws_d - ro_z));
         Vec2 n_scr = ManeuverSystem::projectToScreen(node_world, view, proj, aspect);
 
         float pop_x, pop_y, pw, ph;

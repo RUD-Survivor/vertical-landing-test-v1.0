@@ -1,4 +1,5 @@
 #pragma once
+#include "core/universe_model.h"
 // ==========================================================
 // save_system.h — 游戏保存/加载系统
 // ==========================================================
@@ -92,7 +93,7 @@ bool SaveGame(const RocketAssembly& assembly, entt::registry& world, entt::entit
     file << 0.0 << "\n";
     file << vel.vx << "\n";
     file << (int)guid.status << "\n";
-    file << current_soi_index << "\n";
+    file << UniverseModel::getInstance().current_soi_index << "\n";
     file << (guid.auto_mode ? 1 : 0) << "\n";
     
     // 保存多级状态
@@ -180,7 +181,7 @@ bool LoadGame(RocketAssembly& assembly, entt::registry& world, entt::entity rock
         int status_int;
         file >> status_int;
         guid.status = (MissionState)status_int;
-        file >> current_soi_index;
+        file >> UniverseModel::getInstance().current_soi_index;
         int auto_mode_int;
         file >> auto_mode_int;
         guid.auto_mode = (auto_mode_int != 0);

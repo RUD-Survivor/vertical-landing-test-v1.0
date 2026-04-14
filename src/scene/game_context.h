@@ -19,9 +19,6 @@ struct GameContext {
 public:
     static GameContext& getInstance() {
         static GameContext instance;
-        BuilderState builder_state;
-        RocketState loaded_state;
-        ControlInput loaded_input;
         return instance;
     }
 

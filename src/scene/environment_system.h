@@ -1,6 +1,7 @@
 #pragma once
+#include "core/universe_model.h"
 #include "core/rocket_state.h"
-#include "simulation/orbit_physics.h" // For SOLAR_SYSTEM
+#include "simulation/orbit_physics.h" // For UniverseModel::getInstance().solar_system
 #include <glad/glad.h>
 #include <math.h>
 
@@ -31,14 +32,14 @@ public:
         // Find closest celestial body to the camera to determine local environment
         int closest_idx = 0;
         double min_dist_sq = 1e30;
-        for (int i = 1; i < (int)SOLAR_SYSTEM.size(); i++) {
-            double dx = SOLAR_SYSTEM[i].px * ws_d - cam_abs_x;
-            double dy = SOLAR_SYSTEM[i].py * ws_d - cam_abs_y;
-            double dz = SOLAR_SYSTEM[i].pz * ws_d - cam_abs_z;
+        for (int i = 1; i < (int)UniverseModel::getInstance().solar_system.size(); i++) {
+            double dx = UniverseModel::getInstance().solar_system[i].px * ws_d - cam_abs_x;
+            double dy = UniverseModel::getInstance().solar_system[i].py * ws_d - cam_abs_y;
+            double dz = UniverseModel::getInstance().solar_system[i].pz * ws_d - cam_abs_z;
             double d2 = dx * dx + dy * dy + dz * dz;
             if (d2 < min_dist_sq) { min_dist_sq = d2; closest_idx = i; }
         }
-        CelestialBody& near_body = SOLAR_SYSTEM[closest_idx];
+        CelestialBody& near_body = UniverseModel::getInstance().solar_system[closest_idx];
         double dist_to_center = sqrt(min_dist_sq);
         double body_r_km = near_body.radius * ws_d;
         double cam_alt_km = dist_to_center - body_r_km;

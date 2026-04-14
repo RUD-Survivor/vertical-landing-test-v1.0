@@ -1,3 +1,4 @@
+#include "core/universe_model.h"
 #include "scene/workshop_scene.h"
 #include "scene/flight_scene.h"
 #include "scene/game_context.h"
@@ -332,7 +333,7 @@ void WorkshopScene::update(double dt) {
           }
       }
       // Distance from planet center to CoM
-      double R = SOLAR_SYSTEM[current_soi_index].radius - (double)lowest_y;
+      double R = UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].radius - (double)lowest_y;
 
       // Z is the North-South axis, XY is the equatorial plane
       rocket_state.surf_px = R * cos(lat_rad) * cos(lon_rad);
@@ -345,7 +346,7 @@ void WorkshopScene::update(double dt) {
       rocket_state.launch_site_pz = rocket_state.surf_pz;
 
       // Initialize inertial coordinates immediately for the first frame
-      CelestialBody& body = SOLAR_SYSTEM[current_soi_index];
+      CelestialBody& body = UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index];
       double theta = body.prime_meridian_epoch; // sim_time = 0
       Quat rot = Quat::fromAxisAngle(Vec3(0, 0, 1), (float)theta);
 

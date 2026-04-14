@@ -1,7 +1,8 @@
 #pragma once
+#include "core/universe_model.h"
 #include "core/rocket_state.h"
 #include "render/renderer3d.h"
-#include "simulation/orbit_physics.h" // For SOLAR_SYSTEM
+#include "simulation/orbit_physics.h" // For UniverseModel::getInstance().solar_system
 #include "camera/camera_director.h"
 #include <iostream>
 
@@ -44,12 +45,12 @@ public:
         // ~1e6 to avoid z-fighting on planet surfaces. Find the closest planet surface
         // distance from the camera and use a fraction of that as the near plane.
         float closest_planet_dist = far_plane;
-        for (size_t i = 1; i < SOLAR_SYSTEM.size(); i++) {
-            Vec3 rp((float)(SOLAR_SYSTEM[i].px * ws_d - ro_x),
-                (float)(SOLAR_SYSTEM[i].py * ws_d - ro_y),
-                (float)(SOLAR_SYSTEM[i].pz * ws_d - ro_z));
-            float body_r = (float)SOLAR_SYSTEM[i].radius * (float)ws_d;
-            float atmo_thickness = (SOLAR_SYSTEM[i].type == GAS_GIANT || SOLAR_SYSTEM[i].type == RINGED_GAS_GIANT) ? body_r * 0.05f : 160.0f;
+        for (size_t i = 1; i < UniverseModel::getInstance().solar_system.size(); i++) {
+            Vec3 rp((float)(UniverseModel::getInstance().solar_system[i].px * ws_d - ro_x),
+                (float)(UniverseModel::getInstance().solar_system[i].py * ws_d - ro_y),
+                (float)(UniverseModel::getInstance().solar_system[i].pz * ws_d - ro_z));
+            float body_r = (float)UniverseModel::getInstance().solar_system[i].radius * (float)ws_d;
+            float atmo_thickness = (UniverseModel::getInstance().solar_system[i].type == GAS_GIANT || UniverseModel::getInstance().solar_system[i].type == RINGED_GAS_GIANT) ? body_r * 0.05f : 160.0f;
             float dist_to_center = (camEye_rel - rp).length();
             float true_surf_dist = dist_to_center - body_r;
             // Consider terrain displacement (max 25km for Earth)
@@ -101,9 +102,9 @@ public:
         }
         
         // 渲染整个太阳系
-        CelestialBody& sun_body = SOLAR_SYSTEM[0];
-        for (size_t i = 1; i < SOLAR_SYSTEM.size(); i++) {
-            CelestialBody& b = SOLAR_SYSTEM[i];
+        CelestialBody& sun_body = UniverseModel::getInstance().solar_system[0];
+        for (size_t i = 1; i < UniverseModel::getInstance().solar_system.size(); i++) {
+            CelestialBody& b = UniverseModel::getInstance().solar_system[i];
             float r = (float)b.radius * ws_d;
             Vec3 renderPlanet((float)(b.px * ws_d - ro_x), (float)(b.py * ws_d - ro_y), (float)(b.pz * ws_d - ro_z));
             
@@ -155,7 +156,7 @@ public:
                 double arg_p = b.arg_peri_base;
                 
                 double planet_px = b.px; double planet_py = b.py; double planet_pz = b.pz;
-                if (i == 4) { planet_px -= SOLAR_SYSTEM[3].px; planet_py -= SOLAR_SYSTEM[3].py; planet_pz -= SOLAR_SYSTEM[3].pz; }
+                if (i == 4) { planet_px -= UniverseModel::getInstance().solar_system[3].px; planet_py -= UniverseModel::getInstance().solar_system[3].py; planet_pz -= UniverseModel::getInstance().solar_system[3].pz; }
                 
                 int segs = 181;
                 float orbit_center_dist = renderPlanet.length();
@@ -190,9 +191,9 @@ public:
                     double wz = (s_w * s_i) * o_xk + (c_w * s_i) * o_yk;
                     
                     if (i == 4) { // Moon orbits Earth
-                        wx += SOLAR_SYSTEM[3].px;
-                        wy += SOLAR_SYSTEM[3].py;
-                        wz += SOLAR_SYSTEM[3].pz;
+                        wx += UniverseModel::getInstance().solar_system[3].px;
+                        wy += UniverseModel::getInstance().solar_system[3].py;
+                        wz += UniverseModel::getInstance().solar_system[3].pz;
                     }
                     orbit_pts.push_back(Vec3(
                         (float)(wx * ws_d - ro_x),
@@ -215,8 +216,8 @@ public:
         
         // ===== 太阳与镜头光晕 (所有模式可见) =====
         std::vector<Vec4> sun_occluders;
-        for (size_t i = 1; i < SOLAR_SYSTEM.size(); i++) {
-            CelestialBody& b = SOLAR_SYSTEM[i];
+        for (size_t i = 1; i < UniverseModel::getInstance().solar_system.size(); i++) {
+            CelestialBody& b = UniverseModel::getInstance().solar_system[i];
             sun_occluders.push_back(Vec4(
                 (float)(b.px * ws_d - ro_x),
                 (float)(b.py * ws_d - ro_y),

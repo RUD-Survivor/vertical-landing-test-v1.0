@@ -1,4 +1,5 @@
 #pragma once
+#include "core/universe_model.h"
 #include <vector>
 #include <string>
 #include <cmath>
@@ -6,6 +7,10 @@
 #include <GLFW/glfw3.h>
 #include "render/renderer_2d.h"
 #include "core/rocket_state.h"
+#include "scene/render_context.h"
+class SimulationController;
+class ManeuverManager;
+
 #include "camera/camera_director.h"
 #include "math/math3d.h"
 #include "physics/physics_system.h" 
@@ -16,43 +21,6 @@
 // Forward declare formatTime from main.cpp
 std::string formatTime(double seconds, bool absolute = false);
 
-struct HUDContext {
-    Renderer* renderer;
-    entt::registry* registry;
-    entt::entity entity;
-    RocketConfig* rocket_config;
-    ControlInput* control_input;
-    CameraDirector* cam;
-    GLFWwindow* window;
-    const RocketAssembly* assembly;
-    Renderer3D* r3d;
-    int frame;
-    const Quat* rocketQuat;
-    const Vec3* localRight;
-    const Vec3* rocketUp;
-    const Vec3* localNorth;
-    double ws_d;
-    const float* global_best_ang;
-
-    int ww;
-    int wh;
-    double ro_x;
-    double ro_y;
-    double ro_z;
-    Mat4 viewMat;
-    Mat4 macroProjMat;
-    Vec3 camEye_rel;
-    float aspect;
-
-    int time_warp;
-    double dt;
-
-    double mouse_x;
-    double mouse_y;
-    bool lmb;
-    bool lmb_prev;
-    bool rmb;
-};
 
 class FlightHUD {
 public:
@@ -100,37 +68,31 @@ public:
 
 
 
-    void render(HUDContext& ctx) {
-        // Unpack references to avoid changing the hud code too much
-        Renderer* renderer = ctx.renderer;
-        // ECS components accessed via registry
-        // --- ECS Component References (replacing rocket_state access) ---
-        auto& trans = ctx.registry->get<TransformComponent>(ctx.entity);
-        auto& vel   = ctx.registry->get<VelocityComponent>(ctx.entity);
-        auto& att   = ctx.registry->get<AttitudeComponent>(ctx.entity);
-        auto& prop  = ctx.registry->get<PropulsionComponent>(ctx.entity);
-        auto& tele  = ctx.registry->get<TelemetryComponent>(ctx.entity);
-        auto& guid  = ctx.registry->get<GuidanceComponent>(ctx.entity);
-        auto& mnv   = ctx.registry->get<ManeuverComponent>(ctx.entity);
-        auto& orb   = ctx.registry->get<OrbitComponent>(ctx.entity);
+    void render(entt::registry& registry, entt::entity entity, Renderer* renderer, Renderer3D* r3d, 
+                CameraDirector& cam, const RocketAssembly& assembly,
+                const RenderContext& ctx, double dt, int frame, double ws_d, float global_best_ang, int time_warp,
+                float mouse_x, float mouse_y, bool lmb, bool lmb_prev, bool rmb) {
+        
+        auto& trans = registry.get<TransformComponent>(entity);
+        auto& vel   = registry.get<VelocityComponent>(entity);
+        auto& att   = registry.get<AttitudeComponent>(entity);
+        auto& prop  = registry.get<PropulsionComponent>(entity);
+        auto& tele  = registry.get<TelemetryComponent>(entity);
+        auto& guid  = registry.get<GuidanceComponent>(entity);
+        auto& mnv   = registry.get<ManeuverComponent>(entity);
+        auto& orb   = registry.get<OrbitComponent>(entity);
+        auto& rocket_config = registry.get<RocketConfig>(entity);
+        auto& control_input = registry.get<ControlInput>(entity);
+        
+        GLFWwindow* window = GameContext::getInstance().window;
+        int ww, wh;
+        glfwGetWindowSize(window, &ww, &wh);
+        
+        const Quat& rocketQuat = ctx.rocketQuat;
+        const Vec3& localRight = ctx.localRight;
+        const Vec3& rocketUp = ctx.rocketUp;
+        const Vec3& localNorth = ctx.localNorth;
 
-        RocketConfig& rocket_config = *ctx.rocket_config;
-        ControlInput& control_input = *ctx.control_input;
-        CameraDirector& cam = *ctx.cam;
-        GLFWwindow* window = ctx.window;
-        const RocketAssembly& assembly = *ctx.assembly;
-        Renderer3D* r3d = ctx.r3d;
-        int frame = ctx.frame;
-        const Quat& rocketQuat = *ctx.rocketQuat;
-        const Vec3& localRight = *ctx.localRight;
-        const Vec3& rocketUp = *ctx.rocketUp;
-        const Vec3& localNorth = *ctx.localNorth;
-        double ws_d = ctx.ws_d;
-        float global_best_ang = *ctx.global_best_ang;
-
-
-        int ww = ctx.ww;
-        int wh = ctx.wh;
         double ro_x = ctx.ro_x;
         double ro_y = ctx.ro_y;
         double ro_z = ctx.ro_z;
@@ -138,17 +100,7 @@ public:
         Mat4 macroProjMat = ctx.macroProjMat;
         Vec3 camEye_rel = ctx.camEye_rel;
         float aspect = ctx.aspect;
-
-        int time_warp = ctx.time_warp;
-        double dt = ctx.dt;
-
-        float mouse_x = (float)ctx.mouse_x;
-        float mouse_y = (float)ctx.mouse_y;
-        bool lmb = ctx.lmb;
-        bool lmb_prev = ctx.lmb_prev;
-        bool rmb = ctx.rmb;
-
-    glDisable(GL_DEPTH_TEST);
+glDisable(GL_DEPTH_TEST);
     renderer->beginFrame();
 
     // 坐标转换变量（HUD也需要）
@@ -256,7 +208,7 @@ public:
     };
 
     // 1. Latitude and Longitude
-    double planet_r = SOLAR_SYSTEM[current_soi_index].radius;
+    double planet_r = UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].radius;
     double lat = asin(fmax(-1.0, fmin(1.0, trans.surf_pz / planet_r))) * 180.0 / PI;
     double lon = atan2(trans.surf_py, trans.surf_px) * 180.0 / PI;
     snprintf(tl_buf, sizeof(tl_buf), "%.4f, %.4f", lat, lon);
@@ -479,7 +431,7 @@ public:
     static int last_save_frame = -1000;
     if (frame % 300 == 0 && guid.status != PRE_LAUNCH) {
         last_save_frame = frame;
-        SaveSystem::SaveGame(*ctx.assembly, *ctx.registry, ctx.entity, *ctx.control_input);
+        SaveSystem::SaveGame(assembly, registry, entity, control_input);
     }
     int frames_since_save = frame - last_save_frame;
     if (frames_since_save < 180) { // 3秒 = 180帧
@@ -520,8 +472,8 @@ public:
         double rel_vx = vel.vx, rel_vy = vel.vy, rel_vz = vel.vz;
         double rel_px = trans.px, rel_py = trans.py, rel_pz = trans.pz;
         
-        if (orbit_reference_sun && current_soi_index != 0) {
-            CelestialBody& cb = SOLAR_SYSTEM[current_soi_index];
+        if (orbit_reference_sun && UniverseModel::getInstance().current_soi_index != 0) {
+            CelestialBody& cb = UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index];
             rel_vx += cb.vx; rel_vy += cb.vy; rel_vz += cb.vz;
             rel_px += cb.px; rel_py += cb.py; rel_pz += cb.pz;
         }
@@ -549,8 +501,8 @@ public:
             vManeuver = rem_v.normalized();
         } else {
             // Pre-ignition: Use projected state at node
-            int ref_idx = (node.ref_body >= 0) ? node.ref_body : current_soi_index;
-            double mu = G_const * SOLAR_SYSTEM[ref_idx].mass;
+            int ref_idx = (node.ref_body >= 0) ? node.ref_body : UniverseModel::getInstance().current_soi_index;
+            double mu = G_const * UniverseModel::getInstance().solar_system[ref_idx].mass;
             double npx, npy, npz, nvx, nvy, nvz;
             get3DStateAtTime(trans.px, trans.py, trans.pz, vel.vx, vel.vy, vel.vz, mu, node.sim_time - tele.sim_time, npx, npy, npz, nvx, nvy, nvz);
             ManeuverFrame frame = ManeuverSystem::getFrame(Vec3((float)npx, (float)npy, (float)npz), Vec3((float)nvx, (float)nvy, (float)nvz));
@@ -606,7 +558,7 @@ public:
     }
     
     // --- 9. Advanced Orbit UI (Right Edge) ---
-    if (cam.mode == 2 && !SOLAR_SYSTEM.empty()) {
+    if (cam.mode == 2 && !UniverseModel::getInstance().solar_system.empty()) {
         float adv_btn_w = 0.15f;
         float adv_btn_h = 0.05f;
         float adv_btn_x = 0.88f;
@@ -658,8 +610,8 @@ public:
             
             // 1. Draw Suns and Planets (parent_index == -1)
             int main_count = 0;
-            for (int i = 0; i < (int)SOLAR_SYSTEM.size(); i++) {
-                if (SOLAR_SYSTEM[i].parent_index != -1) continue;
+            for (int i = 0; i < (int)UniverseModel::getInstance().solar_system.size(); i++) {
+                if (UniverseModel::getInstance().solar_system[i].parent_index != -1) continue;
                 
                 float ix = icon_start_x + main_count * icon_spacing;
                 bool hover_icon = (hmouse_x >= ix - icon_r && hmouse_x <= ix + icon_r && hmouse_y >= bar_y - icon_r && hmouse_y <= bar_y + icon_r);
@@ -668,7 +620,7 @@ public:
                     selected_body_idx = i;
                     // Logic: Planet click expands/collapses moons
                     bool has_moons = false;
-                    for(int m=0; m<(int)SOLAR_SYSTEM.size(); m++) if(SOLAR_SYSTEM[m].parent_index == i) has_moons = true;
+                    for(int m=0; m<(int)UniverseModel::getInstance().solar_system.size(); m++) if(UniverseModel::getInstance().solar_system[m].parent_index == i) has_moons = true;
                     
                     if (has_moons) {
                         if (expanded_planet_idx == i) expanded_planet_idx = -1;
@@ -676,11 +628,11 @@ public:
                     }
                 }
                 
-                renderer->drawPlanetIcon(ix, bar_y, icon_r, SOLAR_SYSTEM[i], (float)glfwGetTime());
+                renderer->drawPlanetIcon(ix, bar_y, icon_r, UniverseModel::getInstance().solar_system[i], (float)glfwGetTime());
                 if (hover_icon || selected_body_idx == i) 
                     renderer->addCircleOutline(ix, bar_y, icon_r * 1.1f, 0.003f, 0.4f, 0.8f, 1.0f, 1.0f);
                 
-                renderer->drawText(ix, bar_y - icon_r - 0.015f, SOLAR_SYSTEM[i].name.c_str(), 0.008f, 1, 1, 1, 1.0f, true, Renderer::CENTER);
+                renderer->drawText(ix, bar_y - icon_r - 0.015f, UniverseModel::getInstance().solar_system[i].name.c_str(), 0.008f, 1, 1, 1, 1.0f, true, Renderer::CENTER);
                 main_count++;
             }
             
@@ -694,8 +646,8 @@ public:
                 renderer->addRect(0, moon_bar_y, 2.0f, moon_bar_h, 0.04f, 0.04f, 0.06f, 0.85f);
                 
                 int moon_count = 0;
-                for (int i = 0; i < (int)SOLAR_SYSTEM.size(); i++) {
-                    if (SOLAR_SYSTEM[i].parent_index == expanded_planet_idx) {
+                for (int i = 0; i < (int)UniverseModel::getInstance().solar_system.size(); i++) {
+                    if (UniverseModel::getInstance().solar_system[i].parent_index == expanded_planet_idx) {
                         float mix = icon_start_x + moon_count * icon_spacing;
                         float mr = 0.03f;
                         bool hover_moon = (hmouse_x >= mix - mr && hmouse_x <= mix + mr && hmouse_y >= moon_bar_y - mr && hmouse_y <= moon_bar_y + mr);
@@ -704,11 +656,11 @@ public:
                             selected_body_idx = i;
                         }
                         
-                        renderer->drawPlanetIcon(mix, moon_bar_y, mr, SOLAR_SYSTEM[i], (float)glfwGetTime());
+                        renderer->drawPlanetIcon(mix, moon_bar_y, mr, UniverseModel::getInstance().solar_system[i], (float)glfwGetTime());
                         if (hover_moon || selected_body_idx == i)
                              renderer->addCircleOutline(mix, moon_bar_y, mr * 1.1f, 0.002f, 0.4f, 1.0f, 0.6f, 1.0f);
                         
-                        renderer->drawText(mix, moon_bar_y - mr - 0.012f, SOLAR_SYSTEM[i].name.c_str(), 0.007f, 0.8f, 1.0f, 0.8f, 1.0f, true, Renderer::CENTER);
+                        renderer->drawText(mix, moon_bar_y - mr - 0.012f, UniverseModel::getInstance().solar_system[i].name.c_str(), 0.007f, 0.8f, 1.0f, 0.8f, 1.0f, true, Renderer::CENTER);
                         moon_count++;
                     }
                 }
@@ -716,8 +668,8 @@ public:
         }
 
         // --- Detailed Info Panel (Top Left) ---
-        if (selected_body_idx != -1 && selected_body_idx < (int)SOLAR_SYSTEM.size()) {
-            const CelestialBody& b = SOLAR_SYSTEM[selected_body_idx];
+        if (selected_body_idx != -1 && selected_body_idx < (int)UniverseModel::getInstance().solar_system.size()) {
+            const CelestialBody& b = UniverseModel::getInstance().solar_system[selected_body_idx];
             float panel_w = 0.35f;
             float panel_h = 0.45f;
             float panel_x = -1.0f + panel_w/2.0f + 0.02f;
@@ -775,7 +727,7 @@ public:
             renderer->drawText(tx, ty, buf, 0.009f, 1, 1, 1); ty -= line_h;
             
             int moon_count = 0;
-            for(int m=0; m<(int)SOLAR_SYSTEM.size(); m++) if(SOLAR_SYSTEM[m].parent_index == selected_body_idx) moon_count++;
+            for(int m=0; m<(int)UniverseModel::getInstance().solar_system.size(); m++) if(UniverseModel::getInstance().solar_system[m].parent_index == selected_body_idx) moon_count++;
             snprintf(buf, sizeof(buf), "MOONS: %d", moon_count);
             renderer->drawText(tx, ty, buf, 0.009f, 1, 1, 1); ty -= line_h;
             
@@ -865,14 +817,14 @@ public:
             renderer->drawText(arr_lx, sel_y, "<", 0.014f, 1,1,1, hover_tgt_l ? 1.0f : 0.5f, true, Renderer::CENTER);
             if (hover_tgt_l && hlmb && !hlmb_prev) {
                 int origin = TransferCalculator::getTransferOriginBody();
-                do { transfer_target_body--; if (transfer_target_body < 1) transfer_target_body = (int)SOLAR_SYSTEM.size()-1; }
+                do { transfer_target_body--; if (transfer_target_body < 1) transfer_target_body = (int)UniverseModel::getInstance().solar_system.size()-1; }
                 while (transfer_target_body == origin || transfer_target_body == 4 || transfer_target_body == 0);
                 transfer_result_valid = false;
             }
 
             // Body name
-            if (transfer_target_body >= 0 && transfer_target_body < (int)SOLAR_SYSTEM.size())
-                renderer->drawText(tw_x + 0.06f, sel_y, SOLAR_SYSTEM[transfer_target_body].name.c_str(), 0.012f, 1.0f, 0.9f, 0.3f, 1.0f, true, Renderer::CENTER);
+            if (transfer_target_body >= 0 && transfer_target_body < (int)UniverseModel::getInstance().solar_system.size())
+                renderer->drawText(tw_x + 0.06f, sel_y, UniverseModel::getInstance().solar_system[transfer_target_body].name.c_str(), 0.012f, 1.0f, 0.9f, 0.3f, 1.0f, true, Renderer::CENTER);
 
             // Right arrow
             float arr_rx = tw_x + 0.14f;
@@ -880,7 +832,7 @@ public:
             renderer->drawText(arr_rx, sel_y, ">", 0.014f, 1,1,1, hover_tgt_r ? 1.0f : 0.5f, true, Renderer::CENTER);
             if (hover_tgt_r && hlmb && !hlmb_prev) {
                 int origin = TransferCalculator::getTransferOriginBody();
-                do { transfer_target_body++; if (transfer_target_body >= (int)SOLAR_SYSTEM.size()) transfer_target_body = 1; }
+                do { transfer_target_body++; if (transfer_target_body >= (int)UniverseModel::getInstance().solar_system.size()) transfer_target_body = 1; }
                 while (transfer_target_body == origin || transfer_target_body == 4 || transfer_target_body == 0);
                 transfer_result_valid = false;
             }
@@ -1053,11 +1005,11 @@ public:
                     ManeuverNode node;
                     node.sim_time = best.departure_time;
                     node.active = true;
-                    node.ref_body = current_soi_index;
+                    node.ref_body = UniverseModel::getInstance().current_soi_index;
 
                     // Convert heliocentric Δv to prograde/normal/radial frame
                     // Get rocket state projected to departure time
-                    double mu_soi = G_const * SOLAR_SYSTEM[current_soi_index].mass;
+                    double mu_soi = G_const * UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].mass;
                     double npx, npy, npz, nvx, nvy, nvz;
                     get3DStateAtTime(trans.px, trans.py, trans.pz,
                                     vel.vx, vel.vy, vel.vz,
@@ -1078,7 +1030,7 @@ public:
                     node.delta_v = Vec3(pro_comp, nrm_comp, rad_comp);
 
                     {
-                        auto& mnv_c = ctx.registry->get<ManeuverComponent>(ctx.entity);
+                        auto& mnv_c = registry.get<ManeuverComponent>(entity);
                         mnv_c.maneuvers.clear();
                         mnv_c.maneuvers.push_back(node);
                         mnv_c.selected_maneuver_index = 0;
@@ -1102,7 +1054,7 @@ public:
                 // Origin info
                 int origin = TransferCalculator::getTransferOriginBody();
                 char orig_buf[64];
-                snprintf(orig_buf, sizeof(orig_buf), "Origin: %s", SOLAR_SYSTEM[origin].name.c_str());
+                snprintf(orig_buf, sizeof(orig_buf), "Origin: %s", UniverseModel::getInstance().solar_system[origin].name.c_str());
                 renderer->drawText(tw_x, tw_y - 0.12f, orig_buf, 0.010f, 0.4f, 0.7f, 0.9f, 0.8f, true, Renderer::CENTER);
             }
         }
@@ -1136,11 +1088,11 @@ public:
             renderer->drawText(menu_x - 0.12f, bd_y, "Primary:", 0.012f, 1, 1, 1, 1.0f);
             bool hover_bd_l = (hmouse_x >= menu_x - 0.01f && hmouse_x <= menu_x + 0.03f && hmouse_y >= bd_y - 0.02f && hmouse_y <= bd_y + 0.02f);
             bool hover_bd_r = (hmouse_x >= menu_x + 0.11f && hmouse_x <= menu_x + 0.15f && hmouse_y >= bd_y - 0.02f && hmouse_y <= bd_y + 0.02f);
-            if (hover_bd_l && hlmb && !hlmb_prev) adv_orbit_ref_body = (adv_orbit_ref_body-1 < 0) ? (int)SOLAR_SYSTEM.size()-1 : adv_orbit_ref_body-1;
-            if (hover_bd_r && hlmb && !hlmb_prev) adv_orbit_ref_body = (adv_orbit_ref_body+1) % (int)SOLAR_SYSTEM.size();
+            if (hover_bd_l && hlmb && !hlmb_prev) adv_orbit_ref_body = (adv_orbit_ref_body-1 < 0) ? (int)UniverseModel::getInstance().solar_system.size()-1 : adv_orbit_ref_body-1;
+            if (hover_bd_r && hlmb && !hlmb_prev) adv_orbit_ref_body = (adv_orbit_ref_body+1) % (int)UniverseModel::getInstance().solar_system.size();
             renderer->drawText(menu_x + 0.01f, bd_y, "<", 0.012f, 1,1,1, hover_bd_l?1.0f:0.5f, true, Renderer::CENTER);
-            if (!SOLAR_SYSTEM.empty()) {
-                renderer->drawText(menu_x + 0.07f, bd_y, SOLAR_SYSTEM[adv_orbit_ref_body].name.c_str(), 0.010f, 1,1,1,1, true, Renderer::CENTER);
+            if (!UniverseModel::getInstance().solar_system.empty()) {
+                renderer->drawText(menu_x + 0.07f, bd_y, UniverseModel::getInstance().solar_system[adv_orbit_ref_body].name.c_str(), 0.010f, 1,1,1,1, true, Renderer::CENTER);
             }
             renderer->drawText(menu_x + 0.13f, bd_y, ">", 0.012f, 1,1,1, hover_bd_r?1.0f:0.5f, true, Renderer::CENTER);
             
@@ -1150,11 +1102,11 @@ public:
                 renderer->drawText(menu_x - 0.12f, next_y, "Second:", 0.012f, 1, 1, 1, 1.0f);
                 bool hover_sbd_l = (hmouse_x >= menu_x - 0.01f && hmouse_x <= menu_x + 0.03f && hmouse_y >= next_y - 0.02f && hmouse_y <= next_y + 0.02f);
                 bool hover_sbd_r = (hmouse_x >= menu_x + 0.11f && hmouse_x <= menu_x + 0.15f && hmouse_y >= next_y - 0.02f && hmouse_y <= next_y + 0.02f);
-                if (hover_sbd_l && hlmb && !hlmb_prev) adv_orbit_secondary_ref_body = (adv_orbit_secondary_ref_body-1 < 0) ? (int)SOLAR_SYSTEM.size()-1 : adv_orbit_secondary_ref_body-1;
-                if (hover_sbd_r && hlmb && !hlmb_prev) adv_orbit_secondary_ref_body = (adv_orbit_secondary_ref_body+1) % (int)SOLAR_SYSTEM.size();
+                if (hover_sbd_l && hlmb && !hlmb_prev) adv_orbit_secondary_ref_body = (adv_orbit_secondary_ref_body-1 < 0) ? (int)UniverseModel::getInstance().solar_system.size()-1 : adv_orbit_secondary_ref_body-1;
+                if (hover_sbd_r && hlmb && !hlmb_prev) adv_orbit_secondary_ref_body = (adv_orbit_secondary_ref_body+1) % (int)UniverseModel::getInstance().solar_system.size();
                 renderer->drawText(menu_x + 0.01f, next_y, "<", 0.012f, 1,1,1, hover_sbd_l?1.0f:0.5f, true, Renderer::CENTER);
-                if (!SOLAR_SYSTEM.empty()) {
-                    renderer->drawText(menu_x + 0.07f, next_y, SOLAR_SYSTEM[adv_orbit_secondary_ref_body].name.c_str(), 0.010f, 1,1,1,1, true, Renderer::CENTER);
+                if (!UniverseModel::getInstance().solar_system.empty()) {
+                    renderer->drawText(menu_x + 0.07f, next_y, UniverseModel::getInstance().solar_system[adv_orbit_secondary_ref_body].name.c_str(), 0.010f, 1,1,1,1, true, Renderer::CENTER);
                 }
                 renderer->drawText(menu_x + 0.13f, next_y, ">", 0.012f, 1,1,1, hover_sbd_r?1.0f:0.5f, true, Renderer::CENTER);
                 next_y -= 0.06f;
@@ -1228,9 +1180,9 @@ public:
                 node.sim_time = tele.sim_time + 600.0; // 10 minutes ahead
                 node.delta_v = Vec3(0, 0, 0);
                 node.active = true;
-                node.ref_body = current_soi_index;
+                node.ref_body = UniverseModel::getInstance().current_soi_index;
                 {
-                    auto& mnv_c = ctx.registry->get<ManeuverComponent>(ctx.entity);
+                    auto& mnv_c = registry.get<ManeuverComponent>(entity);
                     mnv_c.maneuvers.clear();
                     mnv_c.maneuvers.push_back(node);
                     mnv_c.selected_maneuver_index = 0;
@@ -1472,8 +1424,8 @@ public:
             
             // Reference body
             char ref_buf[64];
-            if (mnv_popup_ref_body >= 0 && mnv_popup_ref_body < (int)SOLAR_SYSTEM.size()) {
-                snprintf(ref_buf, sizeof(ref_buf), "REF: %s", SOLAR_SYSTEM[mnv_popup_ref_body].name.c_str());
+            if (mnv_popup_ref_body >= 0 && mnv_popup_ref_body < (int)UniverseModel::getInstance().solar_system.size()) {
+                snprintf(ref_buf, sizeof(ref_buf), "REF: %s", UniverseModel::getInstance().solar_system[mnv_popup_ref_body].name.c_str());
             } else {
                 snprintf(ref_buf, sizeof(ref_buf), "REF: ---");
             }

@@ -1,4 +1,5 @@
 #pragma once
+#include "core/universe_model.h"
 #include <vector>
 #include <mutex>
 #include "core/rocket_state.h"
@@ -52,7 +53,7 @@ public:
 
         {
             double r_px = trans.px, r_py = trans.py, r_pz = trans.pz;
-            double sun_px = SOLAR_SYSTEM[0].px, sun_py = SOLAR_SYSTEM[0].py, sun_pz = SOLAR_SYSTEM[0].pz;
+            double sun_px = UniverseModel::getInstance().solar_system[0].px, sun_py = UniverseModel::getInstance().solar_system[0].py, sun_pz = UniverseModel::getInstance().solar_system[0].pz;
             DVec3 curPos = { r_px, r_py, r_pz };
             if (traj_history.empty()) {
                 traj_history.push_back({ curPos, {r_px - sun_px, r_py - sun_py, r_pz - sun_pz} });
@@ -119,7 +120,7 @@ public:
                         orb.prediction_in_progress = true;
                         last_req_time = now;
                         // Populate heliocentric state for the background predictor
-                        CelestialBody& soi = SOLAR_SYSTEM[current_soi_index];
+                        CelestialBody& soi = UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index];
                         trans.abs_px = trans.px + soi.px;
                         trans.abs_py = trans.py + soi.py;
                         trans.abs_pz = trans.pz + soi.pz;
@@ -223,18 +224,18 @@ public:
                     bool is_sun_ref = (ref_idx == 1);
                     // 选择参考系
                     double G_const = 6.67430e-11;
-                    double mu_body = is_sun_ref ? (G_const * SOLAR_SYSTEM[0].mass) : (G_const * SOLAR_SYSTEM[current_soi_index].mass);
+                    double mu_body = is_sun_ref ? (G_const * UniverseModel::getInstance().solar_system[0].mass) : (G_const * UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].mass);
                     // 全物理量双精度计算 (标准米)
                     double abs_px = trans.px, abs_py = trans.py, abs_pz = trans.pz;
                     double abs_vx = vel.vx, abs_vy = vel.vy, abs_vz = vel.vz;
-                    if (is_sun_ref && current_soi_index != 0) {
-                        CelestialBody& cb = SOLAR_SYSTEM[current_soi_index];
+                    if (is_sun_ref && UniverseModel::getInstance().current_soi_index != 0) {
+                        CelestialBody& cb = UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index];
                         abs_px += cb.px; abs_py += cb.py; abs_pz += cb.pz;
                         abs_vx += cb.vx; abs_vy += cb.vy; abs_vz += cb.vz;
                     }
                     double r_len = sqrt(abs_px * abs_px + abs_py * abs_py + abs_pz * abs_pz);
                     double v_len = sqrt(abs_vx * abs_vx + abs_vy * abs_vy + abs_vz * abs_vz);
-                    if (v_len > 0.001 && r_len > SOLAR_SYSTEM[is_sun_ref ? 0 : current_soi_index].radius * 0.5) {
+                    if (v_len > 0.001 && r_len > UniverseModel::getInstance().solar_system[is_sun_ref ? 0 : UniverseModel::getInstance().current_soi_index].radius * 0.5) {
                         double energy = 0.5 * v_len * v_len - mu_body / r_len;
                         Vec3 h_vec((float)(abs_py * abs_vz - abs_pz * abs_vy),
                             (float)(abs_pz * abs_vx - abs_px * abs_vz),
@@ -253,7 +254,7 @@ public:
                             Vec3 perp_dir = h_vec.normalized().cross(e_dir);
                             float periapsis = (float)a * (1.0f - ecc);
                             float apoapsis = (float)a * (1.0f + ecc);
-                            bool will_reenter = periapsis < SOLAR_SYSTEM[is_sun_ref ? 0 : current_soi_index].radius && !is_sun_ref;
+                            bool will_reenter = periapsis < UniverseModel::getInstance().solar_system[is_sun_ref ? 0 : UniverseModel::getInstance().current_soi_index].radius && !is_sun_ref;
                             Vec3 center_off = e_dir * (-(float)a * ecc);
                             // 生成预测轨迹点集
                             std::vector<Vec3> orbit_points;
@@ -271,9 +272,9 @@ public:
                                 Vec3 pt_rel = center_off + e_dir * ((float)a * cosf(ang)) + perp_dir * (b * sinf(ang));
                                 double px = pt_rel.x, py = pt_rel.y, pz = pt_rel.z;
                                 if (!is_sun_ref) {
-                                    px += SOLAR_SYSTEM[current_soi_index].px;
-                                    py += SOLAR_SYSTEM[current_soi_index].py;
-                                    pz += SOLAR_SYSTEM[current_soi_index].pz;
+                                    px += UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].px;
+                                    py += UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].py;
+                                    pz += UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].pz;
                                 }
                                 Vec3 pt = Vec3((float)(px * ws_d - ro_x), (float)(py * ws_d - ro_y), (float)(pz * ws_d - ro_z));
                                 // Do not clip orbit points beneath the surface so users can see where they crash
@@ -299,7 +300,7 @@ public:
                                 mnvManager.global_best_center = center_off;
                                 mnvManager.global_best_e_dir = e_dir;
                                 mnvManager.global_best_perp_dir = perp_dir;
-                                hud.global_best_ref_node = is_sun_ref ? 0 : current_soi_index;
+                                hud.global_best_ref_node = is_sun_ref ? 0 : UniverseModel::getInstance().current_soi_index;
                                 double n = sqrt(mu_body / (a * a * a));
                                 double cos_E = (a - r_len) / (a * ecc);
                                 double sin_E = (abs_px * abs_vx + abs_py * abs_vy + abs_pz * abs_vz) / (ecc * sqrt(mu_body * a));
@@ -329,9 +330,9 @@ public:
                             Vec3 apoPos = e_dir * (-apoapsis);
                             double ax = apoPos.x, ay = apoPos.y, az = apoPos.z;
                             if (!is_sun_ref) {
-                                ax += SOLAR_SYSTEM[current_soi_index].px;
-                                ay += SOLAR_SYSTEM[current_soi_index].py;
-                                az += SOLAR_SYSTEM[current_soi_index].pz;
+                                ax += UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].px;
+                                ay += UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].py;
+                                az += UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].pz;
                             }
                             Vec3 w_apoPos((float)(ax * ws_d - ro_x), (float)(ay * ws_d - ro_y), (float)(az * ws_d - ro_z));
                             r3d->drawBillboard(w_apoPos, apsis_size, 0.2f, 0.4f, 1.0f, opacity);
@@ -339,9 +340,9 @@ public:
                             Vec3 periPos = e_dir * periapsis;
                             double px = periPos.x, py = periPos.y, pz = periPos.z;
                             if (!is_sun_ref) {
-                                px += SOLAR_SYSTEM[current_soi_index].px;
-                                py += SOLAR_SYSTEM[current_soi_index].py;
-                                pz += SOLAR_SYSTEM[current_soi_index].pz;
+                                px += UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].px;
+                                py += UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].py;
+                                pz += UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].pz;
                             }
                             Vec3 w_periPos((float)(px * ws_d - ro_x), (float)(py * ws_d - ro_y), (float)(pz * ws_d - ro_z));
                             r3d->drawBillboard(w_periPos, apsis_size, 1.0f, 0.5f, 0.1f, opacity);
@@ -361,9 +362,9 @@ public:
                                 Vec3 pt_rel = center_off - e_dir * (a_hyp * coshf(t)) + perp_dir * (b_hyp * sinhf(t));
                                 double dpx = pt_rel.x, dpy = pt_rel.y, dpz = pt_rel.z;
                                 if (!is_sun_ref) {
-                                    dpx += SOLAR_SYSTEM[current_soi_index].px;
-                                    dpy += SOLAR_SYSTEM[current_soi_index].py;
-                                    dpz += SOLAR_SYSTEM[current_soi_index].pz;
+                                    dpx += UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].px;
+                                    dpy += UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].py;
+                                    dpz += UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].pz;
                                 }
                                 Vec3 pt((float)(dpx * ws_d - ro_x), (float)(dpy * ws_d - ro_y), (float)(dpz * ws_d - ro_z));
                                 if (escape_points.empty() || (pt - escape_points.back()).length() > earth_r * 0.05f) {
@@ -380,9 +381,9 @@ public:
                             // 近地点标记
                             float apsis_size = fminf(earth_r * 0.12f, earth_r * 0.025f * fmaxf(1.0f, cam.zoom_pan * 0.8f));
                             apsis_size *= (is_sun_ref ? 10.0f : 1.0f);
-                            Vec3 w_periPos((float)((center_off.x - e_dir.x * a_hyp + (is_sun_ref ? 0 : SOLAR_SYSTEM[current_soi_index].px)) * ws_d - ro_x),
-                                (float)((center_off.y - e_dir.y * a_hyp + (is_sun_ref ? 0 : SOLAR_SYSTEM[current_soi_index].py)) * ws_d - ro_y),
-                                (float)((center_off.z - e_dir.z * a_hyp + (is_sun_ref ? 0 : SOLAR_SYSTEM[current_soi_index].pz)) * ws_d - ro_z));
+                            Vec3 w_periPos((float)((center_off.x - e_dir.x * a_hyp + (is_sun_ref ? 0 : UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].px)) * ws_d - ro_x),
+                                (float)((center_off.y - e_dir.y * a_hyp + (is_sun_ref ? 0 : UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].py)) * ws_d - ro_y),
+                                (float)((center_off.z - e_dir.z * a_hyp + (is_sun_ref ? 0 : UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].pz)) * ws_d - ro_z));
                             r3d->drawBillboard(w_periPos, apsis_size, 1.0f, 0.5f, 0.1f, opacity);
                         }
                     }

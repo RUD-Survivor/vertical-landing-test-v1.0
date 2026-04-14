@@ -1,4 +1,5 @@
 #pragma once
+#include "core/universe_model.h"
 
 #include <GLFW/glfw3.h>
 #include <iostream>
@@ -82,7 +83,7 @@ public:
             if (is_parked) {
                 if (guid.status != PRE_LAUNCH && guid.status != LANDED) {
                     guid.status = LANDED;
-                    CelestialBody& cur_b = SOLAR_SYSTEM[current_soi_index];
+                    CelestialBody& cur_b = UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index];
                     double theta = cur_b.prime_meridian_epoch + (tele.sim_time * 2.0 * PI / cur_b.rotation_period);
                     trans.surf_px = trans.px * std::cos(-theta) - trans.py * std::sin(-theta);
                     trans.surf_py = trans.px * std::sin(-theta) + trans.py * std::cos(-theta);
@@ -167,16 +168,16 @@ private:
         
         // 2. Snapshot target state
         if (!node.snap_valid && time_to_burn_start < 5.0) {
-            int ref_idx = (node.ref_body >= 0) ? node.ref_body : current_soi_index;
-            CelestialBody& ref_b = SOLAR_SYSTEM[ref_idx];
+            int ref_idx = (node.ref_body >= 0) ? node.ref_body : UniverseModel::getInstance().current_soi_index;
+            CelestialBody& ref_b = UniverseModel::getInstance().solar_system[ref_idx];
             
             // Ships current relative state to reference body
-            double ship_rel_vx = vel.vx + SOLAR_SYSTEM[current_soi_index].vx - ref_b.vx;
-            double ship_rel_vy = vel.vy + SOLAR_SYSTEM[current_soi_index].vy - ref_b.vy;
-            double ship_rel_vz = vel.vz + SOLAR_SYSTEM[current_soi_index].vz - ref_b.vz;
-            double ship_rel_px = trans.px + SOLAR_SYSTEM[current_soi_index].px - ref_b.px;
-            double ship_rel_py = trans.py + SOLAR_SYSTEM[current_soi_index].py - ref_b.py;
-            double ship_rel_pz = trans.pz + SOLAR_SYSTEM[current_soi_index].pz - ref_b.pz;
+            double ship_rel_vx = vel.vx + UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].vx - ref_b.vx;
+            double ship_rel_vy = vel.vy + UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].vy - ref_b.vy;
+            double ship_rel_vz = vel.vz + UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].vz - ref_b.vz;
+            double ship_rel_px = trans.px + UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].px - ref_b.px;
+            double ship_rel_py = trans.py + UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].py - ref_b.py;
+            double ship_rel_pz = trans.pz + UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].pz - ref_b.pz;
 
             double mu_ref = 6.67430e-11 * ref_b.mass;
             double npx, npy, npz, nvx, nvy, nvz;
@@ -212,12 +213,12 @@ private:
         // 3. Guidance calculation
         double remaining_dv = total_dv_mag;
         if (node.snap_valid) {
-            int ref_idx = (node.ref_body >= 0) ? node.ref_body : current_soi_index;
-            CelestialBody& ref_b = SOLAR_SYSTEM[ref_idx];
+            int ref_idx = (node.ref_body >= 0) ? node.ref_body : UniverseModel::getInstance().current_soi_index;
+            CelestialBody& ref_b = UniverseModel::getInstance().solar_system[ref_idx];
             
-            double cur_rel_vx = vel.vx + SOLAR_SYSTEM[current_soi_index].vx - ref_b.vx;
-            double cur_rel_vy = vel.vy + SOLAR_SYSTEM[current_soi_index].vy - ref_b.vy;
-            double cur_rel_vz = vel.vz + SOLAR_SYSTEM[current_soi_index].vz - ref_b.vz;
+            double cur_rel_vx = vel.vx + UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].vx - ref_b.vx;
+            double cur_rel_vy = vel.vy + UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].vy - ref_b.vy;
+            double cur_rel_vz = vel.vz + UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].vz - ref_b.vz;
             
             double mu_ref = 6.67430e-11 * ref_b.mass;
             double dt_snap = tele.sim_time - node.snap_time;
@@ -239,7 +240,7 @@ private:
             Vec3 burn_dir = node.snap_valid ? node.locked_burn_dir : Vec3(0,0,0);
             
             if (burn_dir.length() < 0.1f) {
-                double mu = 6.67430e-11 * SOLAR_SYSTEM[current_soi_index].mass;
+                double mu = 6.67430e-11 * UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].mass;
                 double npx, npy, npz, nvx, nvy, nvz;
                 get3DStateAtTime(trans.px, trans.py, trans.pz, vel.vx, vel.vy, vel.vz, mu, node.sim_time - tele.sim_time, npx, npy, npz, nvx, nvy, nvz);
                 ManeuverFrame frame = ManeuverSystem::getFrame(Vec3((float)npx, (float)npy, (float)npz), Vec3((float)nvx, (float)nvy, (float)nvz));

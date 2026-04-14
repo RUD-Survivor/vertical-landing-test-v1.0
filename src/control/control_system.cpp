@@ -1,3 +1,4 @@
+#include "core/universe_model.h"
 #include <entt/entt.hpp>
 #include "control_system.h"
 #include "physics/physics_system.h"
@@ -259,7 +260,7 @@ void UpdateManualControl(entt::registry& registry, entt::entity entity, const Ma
                     else if (guid.sas_mode == SAS_MANEUVER && mnv.selected_maneuver_index != -1 && (size_t)mnv.selected_maneuver_index < mnv.maneuvers.size()) {
                         ManeuverNode& node = mnv.maneuvers[mnv.selected_maneuver_index];
                         double dt_node = node.sim_time - tele.sim_time;
-                        double mu = 6.67430e-11 * SOLAR_SYSTEM[current_soi_index].mass;
+                        double mu = 6.67430e-11 * UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].mass;
                         
                         // If we are close to or during the burn, steer towards the remaining delta-v vector (more stable)
                         if (node.snap_valid) {

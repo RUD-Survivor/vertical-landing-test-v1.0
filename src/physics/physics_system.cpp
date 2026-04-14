@@ -1,3 +1,4 @@
+#include "core/universe_model.h"
 #include "physics_system.h"
 #include "simulation/stage_manager.h"
 #include "math/math3d.h"
@@ -12,12 +13,8 @@
  */
 
 // 太阳系天体容器：存储太阳、行星、卫星等所有大型天体。
-std::vector<CelestialBody> SOLAR_SYSTEM;
-
 // 当前引力范围 (SOI) 的索引。
-// 游戏开始时默认在地球 (Earth) 的 SOI 内。在 SOLAR_SYSTEM 向量中，地球的索引是 3。
-int current_soi_index = 3; 
-
+// 游戏开始时默认在地球 (Earth) 的 SOI 内。在 UniverseModel::getInstance().solar_system 向量中，地球的索引是 3。
 namespace PhysicsSystem {
 
 // 历元常数：J2000 历元是天文学中常用的基准时间（2000年1月1日正午）。
@@ -41,7 +38,7 @@ constexpr double SECONDS_PER_JULIAN_CENTURY = 36525.0 * 24.0 * 3600.0;
  * _rate 就是每世纪的变化率。
  */
 void InitSolarSystem() {
-    SOLAR_SYSTEM.clear();
+    UniverseModel::getInstance().solar_system.clear();
     
     double R_earth = 6371000.0;
     
@@ -64,7 +61,7 @@ void InitSolarSystem() {
     sun.mean_anom_base = 0.0; sun.mean_anom_rate = 0.0;
     sun.surface_pressure = 0.0; sun.average_temp = 5778.0; sun.scattering_coef = 1.0;
     sun.eccentricity = 0.0; sun.inclination = 0.0; sun.orbital_period = 0.0;
-    SOLAR_SYSTEM.push_back(sun);
+    UniverseModel::getInstance().solar_system.push_back(sun);
 
     // --- 1: 水星 (Mercury) ---
     // 离太阳最近，公转速度最快。
@@ -87,7 +84,7 @@ void InitSolarSystem() {
     mercury.surface_pressure = 1.0e-12; // 几乎没有大气
     mercury.average_temp = 440.0; mercury.scattering_coef = 0.106;
     mercury.eccentricity = 0.2056; mercury.inclination = 7.0 * PI / 180.0; mercury.orbital_period = 87.969 * 24.0 * 3600.0;
-    SOLAR_SYSTEM.push_back(mercury);
+    UniverseModel::getInstance().solar_system.push_back(mercury);
     
     // --- 2: 金星 (Venus) ---
     // 拥有极其浓厚的大气层，表面压力很大。
@@ -109,7 +106,7 @@ void InitSolarSystem() {
     venus.surface_pressure = 92000.0; // 表面压力是地球的 92 倍
     venus.average_temp = 737.0; venus.scattering_coef = 0.689;
     venus.eccentricity = 0.0067; venus.inclination = 3.39 * PI / 180.0; venus.orbital_period = 224.7 * 24.0 * 3600.0;
-    SOLAR_SYSTEM.push_back(venus);
+    UniverseModel::getInstance().solar_system.push_back(venus);
 
     // --- 3: 地球 (Earth) ---
     // 我们最熟悉的家园，也是大多数任务的起点。
@@ -132,7 +129,7 @@ void InitSolarSystem() {
     earth.average_temp = 288.0; // 15 摄氏度
     earth.scattering_coef = 0.306; // 反照率/散射系数
     earth.eccentricity = 0.0167; earth.inclination = 0.0; earth.orbital_period = 365.256 * 24.0 * 3600.0;
-    SOLAR_SYSTEM.push_back(earth);
+    UniverseModel::getInstance().solar_system.push_back(earth);
     
     // 4: MOON (Luna)
     // Note: The moon's orbit is geocentric, but for VSOP87-like ephemeris in our N-body 
@@ -162,7 +159,7 @@ void InitSolarSystem() {
     moon.surface_pressure = 1.0e-11; // 真空
     moon.average_temp = 250.0; moon.scattering_coef = 0.11;
     moon.eccentricity = 0.0549; moon.inclination = 5.145 * PI / 180.0; moon.orbital_period = 27.321 * 24.0 * 3600.0;
-    SOLAR_SYSTEM.push_back(moon);
+    UniverseModel::getInstance().solar_system.push_back(moon);
     
     // 5: MARS
     CelestialBody mars;
@@ -182,7 +179,7 @@ void InitSolarSystem() {
     mars.mean_anom_base = 19.387 * PI / 180.0; mars.mean_anom_rate = (360.0 / 686.980) * PI / 180.0 / (24.0 * 3600.0);
     mars.surface_pressure = 6.36; mars.average_temp = 210.0; mars.scattering_coef = 0.25;
     mars.eccentricity = 0.0934; mars.inclination = 1.85 * PI / 180.0; mars.orbital_period = 686.98 * 24.0 * 3600.0;
-    SOLAR_SYSTEM.push_back(mars);
+    UniverseModel::getInstance().solar_system.push_back(mars);
     
     // 6: JUPITER
     CelestialBody jupiter;
@@ -202,7 +199,7 @@ void InitSolarSystem() {
     jupiter.mean_anom_base = 20.02 * PI / 180.0; jupiter.mean_anom_rate = (360.0 / 4332.589) * PI / 180.0 / (24.0 * 3600.0);
     jupiter.surface_pressure = 1.0e6; jupiter.average_temp = 165.0; jupiter.scattering_coef = 0.343;
     jupiter.eccentricity = 0.0485; jupiter.inclination = 1.3 * PI / 180.0; jupiter.orbital_period = 4332.59 * 24.0 * 3600.0;
-    SOLAR_SYSTEM.push_back(jupiter);
+    UniverseModel::getInstance().solar_system.push_back(jupiter);
     
     // 7: SATURN
     CelestialBody saturn;
@@ -222,7 +219,7 @@ void InitSolarSystem() {
     saturn.mean_anom_base = 317.02 * PI / 180.0; saturn.mean_anom_rate = (360.0 / 10759.22) * PI / 180.0 / (24.0 * 3600.0);
     saturn.surface_pressure = 1.0e6; saturn.average_temp = 134.0; saturn.scattering_coef = 0.342;
     saturn.eccentricity = 0.0556; saturn.inclination = 2.48 * PI / 180.0; saturn.orbital_period = 10759.22 * 24.0 * 3600.0;
-    SOLAR_SYSTEM.push_back(saturn);
+    UniverseModel::getInstance().solar_system.push_back(saturn);
     
     // 8: URANUS
     CelestialBody uranus;
@@ -242,7 +239,7 @@ void InitSolarSystem() {
     uranus.mean_anom_base = 142.59 * PI / 180.0; uranus.mean_anom_rate = (360.0 / 30685.4) * PI / 180.0 / (24.0 * 3600.0);
     uranus.surface_pressure = 1.0e6; uranus.average_temp = 76.0; uranus.scattering_coef = 0.3;
     uranus.eccentricity = 0.0464; uranus.inclination = 0.77 * PI / 180.0; uranus.orbital_period = 30685.4 * 24.0 * 3600.0;
-    SOLAR_SYSTEM.push_back(uranus);
+    UniverseModel::getInstance().solar_system.push_back(uranus);
     
     // 9: NEPTUNE
     CelestialBody neptune;
@@ -262,20 +259,20 @@ void InitSolarSystem() {
     neptune.mean_anom_base = 256.228 * PI / 180.0; neptune.mean_anom_rate = (360.0 / 60189.0) * PI / 180.0 / (24.0 * 3600.0);
     neptune.surface_pressure = 1.0e6; neptune.average_temp = 72.0; neptune.scattering_coef = 0.29;
     neptune.eccentricity = 0.0095; neptune.inclination = 1.77 * PI / 180.0; neptune.orbital_period = 60189.0 * 24.0 * 3600.0;
-    SOLAR_SYSTEM.push_back(neptune);
+    UniverseModel::getInstance().solar_system.push_back(neptune);
 
     // 计算所有天体的引力范围 (SOI - Sphere of Influence)
     // SOI 是一个概念：在这个范围内，该天体的引力占据主导地位。
     // 我们使用拉普拉斯半径公式：r_soi = a * (m/M)^(2/5)
     // 其中 a 是半长轴，m 是行星质量，M 是太阳质量。
-    for (size_t i = 1; i < SOLAR_SYSTEM.size(); i++) {
+    for (size_t i = 1; i < UniverseModel::getInstance().solar_system.size(); i++) {
         if (i == 4) { // 月球特殊情况：它是绕着地球转的
-            SOLAR_SYSTEM[i].soi_radius = SOLAR_SYSTEM[i].sma_base * std::pow(SOLAR_SYSTEM[i].mass / SOLAR_SYSTEM[3].mass, 2.0/5.0);
+            UniverseModel::getInstance().solar_system[i].soi_radius = UniverseModel::getInstance().solar_system[i].sma_base * std::pow(UniverseModel::getInstance().solar_system[i].mass / UniverseModel::getInstance().solar_system[3].mass, 2.0/5.0);
         } else {
-            SOLAR_SYSTEM[i].soi_radius = SOLAR_SYSTEM[i].sma_base * std::pow(SOLAR_SYSTEM[i].mass / SOLAR_SYSTEM[0].mass, 2.0/5.0);
+            UniverseModel::getInstance().solar_system[i].soi_radius = UniverseModel::getInstance().solar_system[i].sma_base * std::pow(UniverseModel::getInstance().solar_system[i].mass / UniverseModel::getInstance().solar_system[0].mass, 2.0/5.0);
         }
     }
-    SOLAR_SYSTEM[0].soi_radius = INFINITY; // 太阳是最终的主宰
+    UniverseModel::getInstance().solar_system[0].soi_radius = INFINITY; // 太阳是最终的主宰
     
     UpdateCelestialBodies(0.0);
 }
@@ -285,10 +282,10 @@ void InitSolarSystem() {
 // 即使在没有进行 1 步 0.02s 的物理迭代时，我们也能算出它在 100 年后的位置，这就是“解析解”的威力。
 // 参数：i (星球索引), current_time_sec (游戏时间), px/py/pz (输出位置), vx/vy/vz (输出速度)
 void GetCelestialStateAt(int i, double current_time_sec, double& px, double& py, double& pz, double& vx, double& vy, double& vz) {
-    if (i < 0 || i >= (int)SOLAR_SYSTEM.size()) return;
+    if (i < 0 || i >= (int)UniverseModel::getInstance().solar_system.size()) return;
     if (i == 0) { px=0; py=0; pz=0; vx=0; vy=0; vz=0; return; } // 太阳固定在原点
 
-    const CelestialBody& b = SOLAR_SYSTEM[i];
+    const CelestialBody& b = UniverseModel::getInstance().solar_system[i];
     double T = current_time_sec / SECONDS_PER_JULIAN_CENTURY; // 转换为相对于 J2000 的世纪数
     
     // 1. 计算当前时刻的轨道根数 (考虑到长期的摄动变化)
@@ -323,7 +320,7 @@ void GetCelestialStateAt(int i, double current_time_sec, double& px, double& py,
     
     // 计算速度向量
     // 使用活力公式 (Vis-Viva Equation) 的变形来求速度。
-    double mu = (i == 4) ? (G_const * SOLAR_SYSTEM[3].mass) : (G_const * SOLAR_SYSTEM[0].mass);
+    double mu = (i == 4) ? (G_const * UniverseModel::getInstance().solar_system[3].mass) : (G_const * UniverseModel::getInstance().solar_system[0].mass);
     double p = a * (1.0 - e*e);
     double h_ang = std::sqrt(mu * p);
     double o_vx = -(mu / h_ang) * std::sin(nu);
@@ -367,8 +364,8 @@ void GetCelestialPositionAt(int i, double t, double& px, double& py, double& pz)
 }
 
 void UpdateCelestialBodies(double current_time_sec) {
-    for (size_t i = 0; i < SOLAR_SYSTEM.size(); i++) {
-        GetCelestialStateAt((int)i, current_time_sec, SOLAR_SYSTEM[i].px, SOLAR_SYSTEM[i].py, SOLAR_SYSTEM[i].pz, SOLAR_SYSTEM[i].vx, SOLAR_SYSTEM[i].vy, SOLAR_SYSTEM[i].vz);
+    for (size_t i = 0; i < UniverseModel::getInstance().solar_system.size(); i++) {
+        GetCelestialStateAt((int)i, current_time_sec, UniverseModel::getInstance().solar_system[i].px, UniverseModel::getInstance().solar_system[i].py, UniverseModel::getInstance().solar_system[i].pz, UniverseModel::getInstance().solar_system[i].vx, UniverseModel::getInstance().solar_system[i].vy, UniverseModel::getInstance().solar_system[i].vz);
     }
 }
 
@@ -379,7 +376,7 @@ Quat GetFrameRotation(int ref_mode, int ref_body, int sec_body, double t) {
     if (ref_mode == 0) return Quat(1, 0, 0, 0); // 1. 惯性系 (Inertial)：背景星空不动，坐标轴固定。
     
     if (ref_mode == 2) { // 2. 地表系 (Surface)：坐标轴随着星球一起转。
-        CelestialBody& body = SOLAR_SYSTEM[ref_body];
+        CelestialBody& body = UniverseModel::getInstance().solar_system[ref_body];
         // 计算当前时刻的自转角度
         double theta = body.prime_meridian_epoch + (t * 2.0 * PI / body.rotation_period);
         Quat rot = Quat::fromAxisAngle(Vec3(0, 0, 1), (float)theta); // 绕自转轴旋转
@@ -389,7 +386,7 @@ Quat GetFrameRotation(int ref_mode, int ref_body, int sec_body, double t) {
     
     if (ref_mode == 1) { // 3. 共同旋转系 (Co-rotating)：坐标轴始终指向目标星球。
         // 常用于对接或者是行星际航行，比如让 X 轴永远指向地球。
-        if (sec_body < 0 || sec_body >= (int)SOLAR_SYSTEM.size() || sec_body == ref_body) return Quat(1, 0, 0, 0);
+        if (sec_body < 0 || sec_body >= (int)UniverseModel::getInstance().solar_system.size() || sec_body == ref_body) return Quat(1, 0, 0, 0);
         double p1x, p1y, p1z, v1x, v1y, v1z;
         GetCelestialStateAt(ref_body, t, p1x, p1y, p1z, v1x, v1y, v1z);
         double p2x, p2y, p2z, v2x, v2y, v2z;
@@ -450,10 +447,10 @@ void CheckSOI_Transitions(entt::registry& registry, entt::entity entity) {
     auto& vel = registry.get<VelocityComponent>(entity);
     auto& tele = registry.get<TelemetryComponent>(entity);
 
-    if (SOLAR_SYSTEM.empty()) return;
+    if (UniverseModel::getInstance().solar_system.empty()) return;
 
     // 获取当前中心天体
-    CelestialBody& current_body = SOLAR_SYSTEM[current_soi_index];
+    CelestialBody& current_body = UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index];
     // 更新飞船在全太阳系（赫利奥西斯坐标系 / 日心系）下的绝对坐标
     trans.abs_px = current_body.px + trans.px;
     trans.abs_py = current_body.py + trans.py;
@@ -461,8 +458,8 @@ void CheckSOI_Transitions(entt::registry& registry, entt::entity entity) {
     
     // 检查我们是否进入了任何星球的 SOI
     int best_soi = 0; // 默认退回到太阳 (太阳是最终的兜底 SOI)
-    for (size_t i = 1; i < SOLAR_SYSTEM.size(); i++) {
-        CelestialBody& b = SOLAR_SYSTEM[i];
+    for (size_t i = 1; i < UniverseModel::getInstance().solar_system.size(); i++) {
+        CelestialBody& b = UniverseModel::getInstance().solar_system[i];
         double dx = trans.abs_px - b.px;
         double dy = trans.abs_py - b.py;
         double dz = trans.abs_pz - b.pz;
@@ -474,8 +471,8 @@ void CheckSOI_Transitions(entt::registry& registry, entt::entity entity) {
     }
     
     // 如果 SOI 发生了变化，我们需要进行坐标原点的平滑切换
-    if (best_soi != current_soi_index) {
-        CelestialBody& new_body = SOLAR_SYSTEM[best_soi];
+    if (best_soi != UniverseModel::getInstance().current_soi_index) {
+        CelestialBody& new_body = UniverseModel::getInstance().solar_system[best_soi];
         // 计算当前在日心系下的绝对速度
         double h_vx = current_body.vx + vel.vx;
         double h_vy = current_body.vy + vel.vy;
@@ -491,7 +488,7 @@ void CheckSOI_Transitions(entt::registry& registry, entt::entity entity) {
         vel.vy = h_vy - new_body.vy;
         vel.vz = h_vz - new_body.vz;
         
-        current_soi_index = best_soi;
+        UniverseModel::getInstance().current_soi_index = best_soi;
         std::cout << ">> [SOI TRANSITION] ENTERED " << new_body.name << " SOI" << std::endl;
     }
 }
@@ -502,7 +499,7 @@ double CalculateSolarOcclusion(entt::registry& registry, entt::entity entity) {
     auto& vel = registry.get<VelocityComponent>(entity);
     auto& tele = registry.get<TelemetryComponent>(entity);
 
-    if (SOLAR_SYSTEM.empty()) return 1.0;
+    if (UniverseModel::getInstance().solar_system.empty()) return 1.0;
     
     double min_occlusion = 1.0;
     
@@ -513,8 +510,8 @@ double CalculateSolarOcclusion(entt::registry& registry, entt::entity entity) {
     double dir_y = dy / dist_to_sun;
     double dir_z = dz / dist_to_sun;
     
-    for (size_t i = 1; i < SOLAR_SYSTEM.size(); i++) {
-        CelestialBody& b = SOLAR_SYSTEM[i];
+    for (size_t i = 1; i < UniverseModel::getInstance().solar_system.size(); i++) {
+        CelestialBody& b = UniverseModel::getInstance().solar_system[i];
         
         double bx = b.px - trans.abs_px;
         double by = b.py - trans.abs_py;
@@ -543,7 +540,7 @@ double CalculateSolarOcclusion(entt::registry& registry, entt::entity entity) {
 // 这里的 r 是飞船到星球中心的距离。
 // 注意：该函数返回标量加速度，用于计算受力大小。
 double get_gravity(double r) { 
-    CelestialBody& current_body = SOLAR_SYSTEM[current_soi_index];
+    CelestialBody& current_body = UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index];
     double GM = G_const * current_body.mass;
     return GM / (r * r);
 }
@@ -573,8 +570,8 @@ void getOrbitParams(entt::registry& registry, entt::entity entity, double& apoap
     auto& vel = registry.get<VelocityComponent>(entity);
     auto& tele = registry.get<TelemetryComponent>(entity);
 
-    if (SOLAR_SYSTEM.empty()) return;
-    CelestialBody& current_body = SOLAR_SYSTEM[current_soi_index];
+    if (UniverseModel::getInstance().solar_system.empty()) return;
+    CelestialBody& current_body = UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index];
     
     // 1. 获取距离 r 和速度 v 的模长 (Magnitude)
     double r = std::sqrt(trans.px * trans.px + trans.py * trans.py + trans.pz * trans.pz);
@@ -625,7 +622,7 @@ void Update(entt::registry& registry, entt::entity entity, double dt) {
     const auto& config = registry.get<RocketConfig>(entity);
     const auto& input = registry.get<ControlInput>(entity);
 
-    if (SOLAR_SYSTEM.empty()) return;
+    if (UniverseModel::getInstance().solar_system.empty()) return;
     
     // 累加模拟时间。
     tele.sim_time += dt;
@@ -644,7 +641,7 @@ void Update(entt::registry& registry, entt::entity entity, double dt) {
     CheckSOI_Transitions(registry, entity);
     
     // 获取最新的中心天体引用
-    CelestialBody& current_body = SOLAR_SYSTEM[current_soi_index];
+    CelestialBody& current_body = UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index];
 
     // 3. 处理地面逻辑 (Ground Handling)
     // 如果飞船在地面上（待发射或已着陆），我们需要让它随星球一起旋转。
@@ -817,9 +814,9 @@ void Update(entt::registry& registry, entt::entity entity, double dt) {
         // (2) 其它天体的微扰引力 (N-body Perturbation)
         // 虽然我们在某行星的 SOI 内，但远方的恒星和其它行星依然会有微弱影响。
         // 这让轨道更真实，支持复杂的引力助推（Gravity Assist）计算。
-        for (size_t i = 0; i < SOLAR_SYSTEM.size(); i++) {
-            if (i == (size_t)current_soi_index) continue;
-            CelestialBody& body = SOLAR_SYSTEM[i];
+        for (size_t i = 0; i < UniverseModel::getInstance().solar_system.size(); i++) {
+            if (i == (size_t)UniverseModel::getInstance().current_soi_index) continue;
+            CelestialBody& body = UniverseModel::getInstance().solar_system[i];
             
             // 计算其它天体到飞船的相对位置
             double dx = body.px - (current_body.px + temp_px);
@@ -1067,7 +1064,7 @@ void FastGravityUpdate(entt::registry& registry, entt::entity entity, double dt_
         }
         UpdateCelestialBodies(tele.sim_time);
         
-        CelestialBody& current_body = SOLAR_SYSTEM[current_soi_index];
+        CelestialBody& current_body = UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index];
         // 维持相对于旋转星球的锁定位置
         double theta = current_body.prime_meridian_epoch + (tele.sim_time * 2.0 * PI / current_body.rotation_period);
         Quat rot = Quat::fromAxisAngle(Vec3(0, 0, 1), (float)theta);
@@ -1114,7 +1111,7 @@ void FastGravityUpdate(entt::registry& registry, entt::entity entity, double dt_
       
         // 高速引力计算闭包 (只考虑重力)
         auto calc_accel_fast = [&](double temp_px, double temp_py, double temp_pz, double temp_time, double& out_ax, double& out_ay, double& out_az) {
-            CelestialBody& current_body = SOLAR_SYSTEM[current_soi_index];
+            CelestialBody& current_body = UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index];
             double r_inner_sq = temp_px * temp_px + temp_py * temp_py + temp_pz * temp_pz;
             double r_inner = std::sqrt(r_inner_sq);
             double r3_inner = r_inner_sq * r_inner;
@@ -1128,9 +1125,9 @@ void FastGravityUpdate(entt::registry& registry, entt::entity entity, double dt_
             }
             
             // N-body 叠加
-            for (size_t i = 0; i < SOLAR_SYSTEM.size(); i++) {
-                if (i == (size_t)current_soi_index) continue;
-                CelestialBody& body = SOLAR_SYSTEM[i];
+            for (size_t i = 0; i < UniverseModel::getInstance().solar_system.size(); i++) {
+                if (i == (size_t)UniverseModel::getInstance().current_soi_index) continue;
+                CelestialBody& body = UniverseModel::getInstance().solar_system[i];
                 
                 double dx_body = body.px - current_body.px;
                 double dy_body = body.py - current_body.py;
@@ -1181,7 +1178,7 @@ void FastGravityUpdate(entt::registry& registry, entt::entity entity, double dt_
         trans.pz += (dt / 6.0) * (k1_pz + 2.0 * k2_pz + 2.0 * k3_pz + k4_pz);
         
         // 3. 高倍率碰撞检测
-        double current_com_alt = std::sqrt(trans.px*trans.px + trans.py*trans.py + trans.pz*trans.pz) - SOLAR_SYSTEM[current_soi_index].radius;
+        double current_com_alt = std::sqrt(trans.px*trans.px + trans.py*trans.py + trans.pz*trans.pz) - UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].radius;
         if (current_com_alt + config.bounds_bottom <= tele.terrain_altitude) {
             tele.altitude = tele.terrain_altitude;
             guid.status = CRASHED;
@@ -1259,7 +1256,7 @@ void UpdateSmoke(entt::registry& registry, entt::entity entity, double dt) {
 
         // 地面碰撞：如果烟雾撞到地表，发生反弹扩散
         double r = std::sqrt(p.wx * p.wx + p.wy * p.wy);
-        double planet_r = SOLAR_SYSTEM[current_soi_index].radius;
+        double planet_r = UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].radius;
         if (r < planet_r && r > 0) {
             p.wx = p.wx / r * planet_r;
             p.wy = p.wy / r * planet_r;

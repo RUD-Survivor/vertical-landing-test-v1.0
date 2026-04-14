@@ -1,4 +1,5 @@
 #pragma once
+#include "core/universe_model.h"
 #include "core/rocket_state.h"
 #include "math/math3d.h"
 #include "render/renderer_2d.h"
@@ -74,15 +75,15 @@ public:
     static Vec3 calculateRemainingDV(const VelocityComponent& vel, const TelemetryComponent& tele, const ManeuverNode& node) {
         if (!node.snap_valid) return Vec3(0, 0, 0);
 
-        int ref_idx = (node.ref_body >= 0) ? node.ref_body : current_soi_index;
-        const CelestialBody& ref_b = SOLAR_SYSTEM[ref_idx];
+        int ref_idx = (node.ref_body >= 0) ? node.ref_body : UniverseModel::getInstance().current_soi_index;
+        const CelestialBody& ref_b = UniverseModel::getInstance().solar_system[ref_idx];
         
         // Current relative velocity in the reference body's frame
         // abs_v = rocket_rel_v + soi_v
         // target_rel_v = abs_v - ref_b_v
-        double cur_rel_vx = vel.vx + SOLAR_SYSTEM[current_soi_index].vx - ref_b.vx;
-        double cur_rel_vy = vel.vy + SOLAR_SYSTEM[current_soi_index].vy - ref_b.vy;
-        double cur_rel_vz = vel.vz + SOLAR_SYSTEM[current_soi_index].vz - ref_b.vz;
+        double cur_rel_vx = vel.vx + UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].vx - ref_b.vx;
+        double cur_rel_vy = vel.vy + UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].vy - ref_b.vy;
+        double cur_rel_vz = vel.vz + UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].vz - ref_b.vz;
         
         double mu_ref = 6.67430e-11 * ref_b.mass;
         double dt_snap = tele.sim_time - node.snap_time;

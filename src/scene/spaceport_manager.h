@@ -1,7 +1,8 @@
 #pragma once
+#include "core/universe_model.h"
 #include "core/rocket_state.h"
 #include "render/renderer3d.h"
-#include "simulation/orbit_physics.h" // For SOLAR_SYSTEM celestial bodies
+#include "simulation/orbit_physics.h" // For UniverseModel::getInstance().solar_system celestial bodies
 #include "render/part_renderer.h"     // For ModelLoader (if needed)
 
 /**
@@ -35,7 +36,7 @@ public:
      *
      * @param r3d               3D渲染器指针
      * @param rocket_state      火箭物理状态 (读取高度与起飞发射场坐标)
-     * @param current_soi_index 当前所属星球SOI索引
+     * @param UniverseModel::getInstance().current_soi_index 当前所属星球SOI索引
      * @param ws_d              世界缩放因子
      * @param ro_x, ro_y, ro_z  相对渲染原点偏移
      * @param rocketBox         用于回退(Fallback)渲染的堆叠方形Mesh
@@ -51,7 +52,7 @@ public:
         // 高度大于12000米则从视野中剔除发射台
         if (tele.altitude >= 12000.0) return;
 
-        CelestialBody& body = SOLAR_SYSTEM[current_soi_index];
+        CelestialBody& body = UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index];
         // Launch pad should rotate with the body (Axial Tilt + Rotation)
         double theta = body.prime_meridian_epoch + (tele.sim_time * 2.0 * PI / body.rotation_period);
         Quat rot = Quat::fromAxisAngle(Vec3(0, 0, 1), (float)theta);

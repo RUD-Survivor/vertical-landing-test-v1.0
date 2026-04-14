@@ -1,4 +1,5 @@
 #pragma once
+#include "core/universe_model.h"
 #include "core/rocket_state.h"
 #include "physics/physics_system.h"
 #include "math/math3d.h"
@@ -194,10 +195,10 @@ inline bool solveLambert(
 // Compute approximate synodic period between two bodies orbiting the Sun
 inline double getSynodicPeriod(int origin_idx, int target_idx) {
     if (origin_idx <= 0 || target_idx <= 0) return 365.25 * 86400.0;
-    if (origin_idx >= (int)SOLAR_SYSTEM.size() || target_idx >= (int)SOLAR_SYSTEM.size()) return 365.25 * 86400.0;
+    if (origin_idx >= (int)UniverseModel::getInstance().solar_system.size() || target_idx >= (int)UniverseModel::getInstance().solar_system.size()) return 365.25 * 86400.0;
     
-    double n1 = SOLAR_SYSTEM[origin_idx].mean_anom_rate; // rad/sec
-    double n2 = SOLAR_SYSTEM[target_idx].mean_anom_rate;
+    double n1 = UniverseModel::getInstance().solar_system[origin_idx].mean_anom_rate; // rad/sec
+    double n2 = UniverseModel::getInstance().solar_system[target_idx].mean_anom_rate;
     
     if (std::abs(n1 - n2) < 1e-20) return 365.25 * 86400.0 * 10.0;
     
@@ -206,8 +207,8 @@ inline double getSynodicPeriod(int origin_idx, int target_idx) {
 
 // Compute Hohmann-like approximate TOF between two bodies
 inline double getApproxTransferTOF(int origin_idx, int target_idx) {
-    double a1 = SOLAR_SYSTEM[origin_idx].sma_base;
-    double a2 = SOLAR_SYSTEM[target_idx].sma_base;
+    double a1 = UniverseModel::getInstance().solar_system[origin_idx].sma_base;
+    double a2 = UniverseModel::getInstance().solar_system[target_idx].sma_base;
     double a_transfer = (a1 + a2) / 2.0;
     double T_transfer = 2.0 * PI * std::sqrt(a_transfer * a_transfer * a_transfer / GM_sun);
     return T_transfer / 2.0; // Half the transfer orbit period
@@ -223,7 +224,7 @@ inline int getParentBody(int body_idx) {
 // For the rocket: if in Earth SOI, the departure body is Earth (3)
 // For Moon SOI, departure body is also Earth (3) for interplanetary transfers
 inline int getTransferOriginBody() {
-    int soi = current_soi_index;
+    int soi = UniverseModel::getInstance().current_soi_index;
     if (soi == 4) return 3; // Moon -> treat as departing from Earth
     if (soi == 0) return 3; // Sun SOI -> default to Earth
     return soi;

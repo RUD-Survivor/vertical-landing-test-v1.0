@@ -1,3 +1,4 @@
+#include "core/universe_model.h"
 #include "predictor.h"
 #include "physics/physics_system.h"
 #include "simulation/maneuver_system.h"
@@ -46,7 +47,7 @@ void AsyncOrbitPredictor::RequestUpdate(OrbitComponent* target_orb, ManeuverComp
     m_request.ref_mode = ref_mode;
     m_request.ref_body = ref_body;
     m_request.secondary_ref_body = secondary_ref_body;
-    m_request.celestial_snapshot = SOLAR_SYSTEM;
+    m_request.celestial_snapshot = UniverseModel::getInstance().solar_system;
     m_request.force_reset = force_reset;
     m_request.pending = true;
     

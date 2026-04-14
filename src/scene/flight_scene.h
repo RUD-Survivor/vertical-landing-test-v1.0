@@ -1,4 +1,5 @@
 #pragma once
+#include "core/universe_model.h"
 #include "scene.h"
 #include "save_system.h"
 #include "render/part_renderer.h"
@@ -179,7 +180,7 @@ else {
         }
     }
     // Distance from planet center to CoM
-    double R = SOLAR_SYSTEM[current_soi_index].radius - (double)lowest_y;
+    double R = UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].radius - (double)lowest_y;
     // Z is the North-South axis, XY is the equatorial plane
     trans.surf_px = R * cos(lat_rad) * cos(lon_rad);
     trans.surf_py = R * cos(lat_rad) * sin(lon_rad);
@@ -189,7 +190,7 @@ else {
     trans.launch_site_py = trans.surf_py;
     trans.launch_site_pz = trans.surf_pz;
     // Initialize inertial coordinates immediately for the first frame
-    CelestialBody& body = SOLAR_SYSTEM[current_soi_index];
+    CelestialBody& body = UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index];
     double theta = body.prime_meridian_epoch; // sim_time = 0
     Quat rot = Quat::fromAxisAngle(Vec3(0, 0, 1), (float)theta);
     Quat tilt = Quat::fromAxisAngle(Vec3(1, 0, 0), (float)body.axial_tilt);
@@ -338,7 +339,7 @@ else {
         // ================= 3D 渲染通道 =================
         {
             // === 1. 构建本帧渲染参考系上下文 (浮动原点、物理变换、投影矩阵) ===
-            ctx.update(trans, vel, att, tele, guid, rocket_config, current_soi_index, last_soi, comma_prev, period_prev, cam, ws_d, dt);
+            ctx.update(trans, vel, att, tele, guid, rocket_config, UniverseModel::getInstance().current_soi_index, last_soi, comma_prev, period_prev, cam, ws_d, dt);
 
             // 相机设置 (TAA 与 GL 状态清理)
             int ww, wh;
@@ -363,14 +364,14 @@ else {
             
             // =========== PASS 1: MACRO BACKGROUND (天体渲染已转移至 CelestialRenderer) ===========
             celestialRenderer.renderMacroPass(
-                r3d, tele, current_soi_index, cam, ctx.camEye_rel, ctx.cam_dist,
+                r3d, tele, UniverseModel::getInstance().current_soi_index, cam, ctx.camEye_rel, ctx.cam_dist,
                 ws_d, ctx.ro_x, ctx.ro_y, ctx.ro_z, ctx.aspect, (float)day_blend, alt_factor, 
                 show_clouds, frame, ww, wh, ctx.renderRocketBase, ctx.renderSun, ctx.sun_radius, ctx.earth_r,
                 earthMesh, ringMesh, ctx.viewMat, ctx.macroProjMat, ctx.lightVec
             );
             if (cam.mode == 2) {
                 // ===== 历史轨迹线与轨道预测线 (已转移至 OrbitSystem) =====
-                orbitSystem.render(world, rocket_entity, hudManager.hud, mnvManager, r3d, cam, ctx.viewMat, ctx.macroProjMat, ctx.aspect, ws_d, ctx.ro_x, ctx.ro_y, ctx.ro_z, ww, wh, dt, current_soi_index, ctx.earth_r, ctx.cam_dist, ctx.renderRocketBase, ctx.camEye_rel);
+                orbitSystem.render(world, rocket_entity, hudManager.hud, mnvManager, r3d, cam, ctx.viewMat, ctx.macroProjMat, ctx.aspect, ws_d, ctx.ro_x, ctx.ro_y, ctx.ro_z, ww, wh, dt, UniverseModel::getInstance().current_soi_index, ctx.earth_r, ctx.cam_dist, ctx.renderRocketBase, ctx.camEye_rel);
                 // --- Maneuver Nodes & Interaction ---
                 mnvManager.render(world, rocket_entity, hudManager.hud, r3d, ctx.viewMat, ctx.macroProjMat, ctx.aspect, ctx.earth_r, ctx.cam_dist, ws_d, ctx.ro_x, ctx.ro_y, ctx.ro_z, dt);
             }
@@ -394,16 +395,15 @@ else {
             //=============火箭涂装==========================
             
             // ===== 发射台渲染 (已转移至 SpaceportManager) =====
-            spaceportManager.render(r3d, world, rocket_entity, current_soi_index, ws_d, ctx.ro_x, ctx.ro_y, ctx.ro_z, rocketBox, ctx.rw_3d, ctx.rh);
+            spaceportManager.render(r3d, world, rocket_entity, UniverseModel::getInstance().current_soi_index, ws_d, ctx.ro_x, ctx.ro_y, ctx.ro_z, rocketBox, ctx.rw_3d, ctx.rh);
 
             // ===== 体积尾焰渲染 (ECS 化) =====
             plumeManager.render(world, rocket_entity, assembly, r3d, rocketBox, ctx.rocketQuat, ctx.renderRocketBase, ws_d);
             r3d->endFrame();
         }
         // ================= 2D HUD 渲染通道 (已转移至 HUDManager) =================
-        hudManager.render(renderer, r3d, world, rocket_entity, cam, sim_ctrl, mnvManager, 
-                          ctx.rocketQuat, ctx.rocketUp, ctx.localNorth, ctx.localRight, ctx.viewMat, ctx.macroProjMat, ctx.camEye_rel, dt, 
-                          frame, ws_d, mouse_x, mouse_y, lmb, lmb_prev, rmb);
+        hudManager.render(renderer, r3d, world, rocket_entity, cam, sim_ctrl, mnvManager, assembly, ctx, 
+                          dt, frame, ws_d, (float)mouse_x, (float)mouse_y, lmb, lmb_prev, rmb);
         // Update state for next frame ONLY at the very end
         lmb_prev = lmb;
     }

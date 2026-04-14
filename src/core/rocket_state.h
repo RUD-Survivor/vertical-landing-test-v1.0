@@ -78,10 +78,6 @@ struct CelestialBody {
     double orbital_period = 0.0;       // (seconds)
 };
 
-extern std::vector<CelestialBody> SOLAR_SYSTEM;
-extern int current_soi_index;
-
-
 enum MissionState {
     PRE_LAUNCH,
     ASCEND,

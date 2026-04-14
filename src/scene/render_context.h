@@ -1,4 +1,5 @@
 #pragma once
+#include "core/universe_model.h"
 #include "core/rocket_state.h"
 #include "camera/camera_director.h"
 #include "simulation/orbit_physics.h"
@@ -51,7 +52,7 @@ public:
         r_py = trans.abs_py * ws_d;
         r_pz = trans.abs_pz * ws_d;
         
-        CelestialBody& sun_body = SOLAR_SYSTEM[0];
+        CelestialBody& sun_body = UniverseModel::getInstance().solar_system[0];
         sun_px = sun_body.px * ws_d;
         sun_py = sun_body.py * ws_d;
         sun_pz = sun_body.pz * ws_d;
@@ -74,9 +75,9 @@ public:
         }
 
         // ===== BUILD ROCKET ATTITUDE =====
-        if (last_soi != current_soi_index) {
+        if (last_soi != UniverseModel::getInstance().current_soi_index) {
             att.initialized = false;
-            last_soi = current_soi_index;
+            last_soi = UniverseModel::getInstance().current_soi_index;
         }
         if (!att.initialized) {
             att.attitude = Quat::fromEuler((float)att.angle, (float)att.angle_z, (float)att.angle_roll);
