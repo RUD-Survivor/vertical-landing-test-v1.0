@@ -457,6 +457,8 @@ public:
   GLint ua_tuneCovLo=-1, ua_tuneCovHi=-1, ua_tuneThreshLo=-1, ua_tuneThreshHi=-1;
   GLint ua_tuneErosion=-1, ua_tuneDensity=-1, ua_tuneExtinction=-1, ua_tuneMinAlt=-1, ua_tuneMaxAlt=-1;
   GLint ua_debugCoverage=-1;
+  GLint ua_noiseTex3D=-1;
+  GLuint cloudNoiseTex3D = 0;
   // Skybox uniforms
   GLint us_invViewProj = -1, us_skyVibrancy = -1;
 
@@ -1930,6 +1932,7 @@ public:
       uniform float uTuneMinAlt;
       uniform float uTuneMaxAlt;
       uniform float uDebugCoverage;  // 1.0 = output raw coverage as grayscale (F3 toggle)
+      uniform sampler3D uNoiseTex3D; // Precomputed 3D FBM: R=shape(6oct) G=erosion(4oct) B=warp(3oct)
 
       out vec4 FragColor;
 
@@ -2314,10 +2317,13 @@ R"(
                   vec3 tc = windSph1 * (80.0 + h * 0.45) + vec3(t * 0.6, t * 0.4, t * 0.15);
                   float n = 0.0;
                   if (highDetail) {
-                      float warp = fbm(tc * 0.3, 3);
-                      n = fbm(tc + vec3(warp * 0.4, warp * 0.4, warp * 0.2) + vec3(t * 0.02), 6);
-                      // Erosion at 2.3× scale (non-integer, avoids FBM octave alignment)
-                      float ero = fbm(tc * 2.3 + vec3(-t * 0.04, t * 0.03, 0.0), 4);
+                      // Texture for warp(3oct) + erosion(4oct) only — saves 56 hash calls vs original 104.
+                      // Shape stays software FBM(4oct): aperiodic, no tiling artifact.
+                      // Warp tile=2133km / erosion tile=278km: both indirect effects, not directly visible.
+                      float warp = texture(uNoiseTex3D, tc * 0.0375).b;   // replaces fbm(tc*0.3, 3)
+                      vec3 warpedTc = tc + vec3(warp * 0.4, warp * 0.4, warp * 0.2) + vec3(t * 0.02);
+                      n = fbm(warpedTc, 4);                                // software: aperiodic, no grid artifact
+                      float ero = texture(uNoiseTex3D, tc * 0.2875 + vec3(-t * 0.04, t * 0.03, 0.0)).g; // replaces fbm(tc*2.3, 4)
                       n -= ero * uTuneErosion;
                       // Proximity LOD: modulate n BEFORE smoothstep for visible cloud sub-structure
                       float viewDist = length(uCamPos - p);
@@ -2819,6 +2825,8 @@ R"(
     ua_tuneMinAlt    = glGetUniformLocation(atmoProg, "uTuneMinAlt");
     ua_tuneMaxAlt    = glGetUniformLocation(atmoProg, "uTuneMaxAlt");
     ua_debugCoverage = glGetUniformLocation(atmoProg, "uDebugCoverage");
+    ua_noiseTex3D    = glGetUniformLocation(atmoProg, "uNoiseTex3D");
+    bakeCloudNoise();
 
     // --- Ribbon Shader (Trajectory Trails) ---
     const char* ribbonVertSrc = R"(
@@ -4771,8 +4779,85 @@ R"(
     glUseProgram(0);
   }
 
-  void drawAtmosphere(const Mesh& sphereMesh, const Mat4& model, 
-                      const Vec3& camPos, const Vec3& lightDir, 
+  void bakeCloudNoise() {
+    // CPU implementations matching the GLSL hash/noise3d/fbm exactly.
+    // Bakes three FBM channels into a 128^3 RGBA8 3D texture at startup.
+    // R = fbm(p, 6) [cloud shape], G = fbm(p, 4) [erosion], B = fbm(p, 3) [warp]
+    const int N = 128;
+
+    auto cpu_fract = [](float x) -> float { return x - floorf(x); };
+
+    // Matches GLSL: p = fract(p * vec3(443.897, 441.423, 437.195));
+    //              p += dot(p, p.yzx + 19.19);  return fract((p.x+p.y)*p.z);
+    auto cpu_hash = [&cpu_fract](float px, float py, float pz) -> float {
+        px = cpu_fract(px * 443.897f);
+        py = cpu_fract(py * 441.423f);
+        pz = cpu_fract(pz * 437.195f);
+        float d = px*(py+19.19f) + py*(pz+19.19f) + pz*(px+19.19f);
+        px += d; py += d; pz += d;
+        return cpu_fract((px + py) * pz);
+    };
+
+    auto cpu_noise3d = [&cpu_hash](float px, float py, float pz) -> float {
+        float ix=floorf(px), iy=floorf(py), iz=floorf(pz);
+        float fx=px-ix, fy=py-iy, fz=pz-iz;
+        fx = fx*fx*fx*(fx*(fx*6.0f-15.0f)+10.0f);
+        fy = fy*fy*fy*(fy*(fy*6.0f-15.0f)+10.0f);
+        fz = fz*fz*fz*(fz*(fz*6.0f-15.0f)+10.0f);
+        float n000=cpu_hash(ix,  iy,  iz  ), n100=cpu_hash(ix+1,iy,  iz  );
+        float n010=cpu_hash(ix,  iy+1,iz  ), n110=cpu_hash(ix+1,iy+1,iz  );
+        float n001=cpu_hash(ix,  iy,  iz+1), n101=cpu_hash(ix+1,iy,  iz+1);
+        float n011=cpu_hash(ix,  iy+1,iz+1), n111=cpu_hash(ix+1,iy+1,iz+1);
+        float nx00=n000+fx*(n100-n000), nx10=n010+fx*(n110-n010);
+        float nx01=n001+fx*(n101-n001), nx11=n011+fx*(n111-n011);
+        float nxy0=nx00+fy*(nx10-nx00), nxy1=nx01+fy*(nx11-nx01);
+        return nxy0+fz*(nxy1-nxy0);
+    };
+
+    auto cpu_fbm = [&cpu_noise3d](float px, float py, float pz, int octaves) -> float {
+        float v=0.0f, amp=0.5f;
+        for (int i=0; i<octaves; i++) {
+            v += cpu_noise3d(px, py, pz) * amp;
+            px=px*2.07f+0.131f; py=py*2.07f-0.217f; pz=pz*2.07f+0.344f;
+            amp *= 0.48f;
+        }
+        return v;
+    };
+
+    std::vector<uint8_t> data(N*N*N*4);
+    std::cout << "[Cloud] Baking 3D noise texture (" << N << "^3)..." << std::flush;
+    for (int z=0; z<N; z++)
+    for (int y=0; y<N; y++)
+    for (int x=0; x<N; x++) {
+        float px=(float)x/N, py=(float)y/N, pz=(float)z/N;
+        // Scale by 8 so one texture tile = 8 tc units = 640km (vs 80km at scale 1)
+        // Sample in shader at tc/8 to recover fbm(tc,N) exactly. Reduces visible tiling 8x.
+        float r = cpu_fbm(px*8,    py*8,    pz*8,    6);
+        float g = cpu_fbm(px*8,    py*8,    pz*8,    4);
+        float b = cpu_fbm(px*8,    py*8,    pz*8,    3);
+        int idx = (z*N*N + y*N + x)*4;
+        auto clamp01 = [](float v) -> uint8_t {
+            int i = (int)(v * 255.0f + 0.5f);
+            return (uint8_t)(i < 0 ? 0 : i > 255 ? 255 : i);
+        };
+        data[idx+0]=clamp01(r); data[idx+1]=clamp01(g);
+        data[idx+2]=clamp01(b); data[idx+3]=255;
+    }
+    if (cloudNoiseTex3D) glDeleteTextures(1, &cloudNoiseTex3D);
+    glGenTextures(1, &cloudNoiseTex3D);
+    glBindTexture(GL_TEXTURE_3D, cloudNoiseTex3D);
+    glTexImage3D(GL_TEXTURE_3D, 0, GL_RGBA8, N, N, N, 0, GL_RGBA, GL_UNSIGNED_BYTE, data.data());
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_REPEAT);
+    glBindTexture(GL_TEXTURE_3D, 0);
+    std::cout << " done." << std::endl;
+  }
+
+  void drawAtmosphere(const Mesh& sphereMesh, const Mat4& model,
+                      const Vec3& camPos, const Vec3& lightDir,
                       const Vec3& planetCenter, float surfaceRadius, float outerRadius, double time, int planetIdx, float sunVisibility, bool showClouds) {
     // Front face culling guarantees we draw exactly ONE layer of the bounding sphere per pixel,
     // eliminating double-drawing artifacts, and it never gets clipped by the near plane.
@@ -4843,6 +4928,10 @@ R"(
     glActiveTexture(GL_TEXTURE7);
     glBindTexture(GL_TEXTURE_2D, taaDepthTex);
     glUniform1i(ua_depthTex, 7);
+
+    glActiveTexture(GL_TEXTURE8);
+    glBindTexture(GL_TEXTURE_3D, cloudNoiseTex3D);
+    glUniform1i(ua_noiseTex3D, 8);
 
     // --- Graphics State for Volumetric Shell ---
     glDisable(GL_DEPTH_TEST);
