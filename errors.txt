@@ -1,2 +1,0 @@
-C:\antigravity_code\RocketSim3D\src\scene/flight_scene.h(354): error C2039: "smoke_particles": 不是 "RocketState" 的成员
-C:\antigravity_code\RocketSim3D\src\scene/flight_scene.h(354): error C2039: "smoke_particles": 不是 "VFXComponent" 的成员

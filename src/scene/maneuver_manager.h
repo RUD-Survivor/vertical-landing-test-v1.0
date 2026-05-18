@@ -39,7 +39,6 @@ struct ManeuverManager {
     void update(GLFWwindow* window, entt::registry& registry, entt::entity entity, FlightHUD& hud, const CameraDirector& cam, double dt, int ww, int wh);
     void render(entt::registry& registry, entt::entity entity, FlightHUD& hud, Renderer3D* r3d, const Mat4& view, const Mat4& proj, float aspect, float earth_r, float cam_dist, double ws_d, double ro_x, double ro_y, double ro_z, double dt);
 
-private:
     void handleHandleDragging(ManeuverNode& node, float mouse_x, float mouse_y, const Vec2& n_scr, const Vec2& h_scr, const Vec2& axis2D, double dt);
     void updatePopupState(ManeuverNode& node, entt::registry& registry, entt::entity entity, FlightHUD& hud, const Mat4& view, const Mat4& proj, float aspect, double ws_d, double ro_x, double ro_y, double ro_z, float mouse_x, float mouse_y, bool lmb, double dt);
 };
@@ -56,7 +55,7 @@ struct HUDContext;
 
 #include "render/HUD_system.h"
 
-void ManeuverManager::update(GLFWwindow* window, entt::registry& registry, entt::entity entity, FlightHUD& hud, 
+inline void ManeuverManager::update(GLFWwindow* window, entt::registry& registry, entt::entity entity, FlightHUD& hud,
                 const CameraDirector& cam, double dt, int ww, int wh) {
         auto& mnv = registry.get<ManeuverComponent>(entity);
         auto& tele = registry.get<TelemetryComponent>(entity);
@@ -134,7 +133,7 @@ void ManeuverManager::update(GLFWwindow* window, entt::registry& registry, entt:
         // DO NOT update lmb_prev here! It must be updated after render() can see the click.
     }
 
-    void ManeuverManager::render(entt::registry& registry, entt::entity entity, FlightHUD& hud, Renderer3D* r3d, 
+inline void ManeuverManager::render(entt::registry& registry, entt::entity entity, FlightHUD& hud, Renderer3D* r3d,
                 const Mat4& view, const Mat4& proj, float aspect, float earth_r, float cam_dist,
                 double ws_d, double ro_x, double ro_y, double ro_z, double dt) {
         auto& mnv = registry.get<ManeuverComponent>(entity);
@@ -260,7 +259,7 @@ void ManeuverManager::update(GLFWwindow* window, entt::registry& registry, entt:
         last_pass_my = mouse_y;
     }
 
-void ManeuverManager::handleHandleDragging(ManeuverNode& node, float mouse_x, float mouse_y, 
+inline void ManeuverManager::handleHandleDragging(ManeuverNode& node, float mouse_x, float mouse_y,
                               const Vec2& n_scr, const Vec2& h_scr, const Vec2& axis2D, double dt) {
         float screen_len_sq = axis2D.lengthSq();
         if (screen_len_sq < 1e-8f) return;
@@ -290,9 +289,9 @@ void ManeuverManager::handleHandleDragging(ManeuverNode& node, float mouse_x, fl
         node.active = true;
     }
 
-    void ManeuverManager::updatePopupState(ManeuverNode& node, entt::registry& registry, entt::entity entity, FlightHUD& hud, 
-                         const Mat4& view, const Mat4& proj, float aspect, 
-                         double ws_d, double ro_x, double ro_y, double ro_z, 
+inline void ManeuverManager::updatePopupState(ManeuverNode& node, entt::registry& registry, entt::entity entity, FlightHUD& hud,
+                         const Mat4& view, const Mat4& proj, float aspect,
+                         double ws_d, double ro_x, double ro_y, double ro_z,
                          float mouse_x, float mouse_y, bool lmb, double dt) {
         auto& tele = registry.get<TelemetryComponent>(entity);
         auto& mnv = registry.get<ManeuverComponent>(entity);

@@ -56,5 +56,17 @@
   "C_Cpp_Runner.showCompilationTime": false,
   "C_Cpp_Runner.useLinkTimeOptimization": false,
   "C_Cpp_Runner.msvcSecureNoWarnings": false,
-  "kiroAgent.configureMCP": "Enabled"
+  "kiroAgent.configureMCP": "Enabled",
+  "C_Cpp.default.compilerPath": "D:/Microsoft Visual Studio 2026/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/cl.exe",
+  "C_Cpp.default.intelliSenseMode": "windows-msvc-x64",
+  "C_Cpp.default.cppStandard": "c++17",
+  "C_Cpp.default.includePath": [
+    "${workspaceFolder}/dependencires/include",
+    "${workspaceFolder}/vendor",
+    "${workspaceFolder}/src",
+    "D:/Microsoft Visual Studio 2026/VC/Tools/MSVC/14.50.35717/include",
+    "C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt",
+    "C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um",
+    "C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared"
+  ]
 }

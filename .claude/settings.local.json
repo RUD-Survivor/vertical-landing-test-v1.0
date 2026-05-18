@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Get-ChildItem \"D:\\\\Microsoft Visual Studio 2026\\\\VC\\\\Tools\\\\MSVC\\\\\" | ForEach-Object { $_.Name })",
+      "Bash(python -c ' *)",
+      "Bash(cmake --build build --config Release --target RocketSim3D)",
+      "Bash(awk 'NR>=2082 && NR<=2270' \"c:/antigravity_code/RocketSim3D/src/render/renderer3d.h\")"
+    ]
+  }
+}

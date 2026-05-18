@@ -23,6 +23,7 @@
 #include "spaceport_manager.h"
 #include "celestial_renderer.h"
 #include "rocket_visuals.h"
+#include "render/cloud_tuner.h"
 #include "environment_system.h"
 #include "hud_manager.h"
 #include "render_context.h"
@@ -64,6 +65,7 @@ public:
     FlightInputSystem inputSystem;
     int last_soi = -1;
     bool show_clouds = true;
+    CloudTuner cloudTuner;
     void onEnter() override {
 
 
@@ -202,7 +204,7 @@ else {
     }
     
     // ======== INPUT ROUTER INITIALIZATION ========
-    inputSystem.setup(input, rocket_config, control_input, hudManager.hud, cam, show_clouds, world, rocket_entity);
+    inputSystem.setup(input, rocket_config, control_input, hudManager.hud, cam, show_clouds, world, rocket_entity, cloudTuner);
     // Keep a reference to the assembly for rendering
     const RocketAssembly& assembly = builder_state_assembly;
      // 飞行模式相机控制器
@@ -402,8 +404,16 @@ else {
             r3d->endFrame();
         }
         // ================= 2D HUD 渲染通道 (已转移至 HUDManager) =================
-        hudManager.render(renderer, r3d, world, rocket_entity, cam, sim_ctrl, mnvManager, assembly, ctx, 
+        hudManager.render(renderer, r3d, world, rocket_entity, cam, sim_ctrl, mnvManager, assembly, ctx,
                           dt, frame, ws_d, (float)mouse_x, (float)mouse_y, lmb, lmb_prev, rmb);
+
+        // Cloud tuner overlay (Tab to toggle)
+        if (cloudTuner.visible && r3d) {
+            renderer->beginFrame();
+            cloudTuner.render(renderer, r3d, (float)mouse_x, (float)mouse_y, lmb);
+            renderer->endFrame();
+        }
+
         // Update state for next frame ONLY at the very end
         lmb_prev = lmb;
     }

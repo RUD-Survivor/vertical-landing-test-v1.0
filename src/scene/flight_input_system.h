@@ -7,6 +7,7 @@
 #include "camera/camera_director.h"
 #include "render/HUD_system.h"
 #include "simulation/simulation_controller.h"
+#include "render/cloud_tuner.h"
 
 struct FlightInputSystem {
     // --- SVO State ---
@@ -14,9 +15,9 @@ struct FlightInputSystem {
     bool svo_auto_activated = false;
     int svo_op_cooldown = 0;
 
-    void setup(InputRouter& router, RocketConfig& rocket_config, 
+    void setup(InputRouter& router, RocketConfig& rocket_config,
                ControlInput& control_input, FlightHUD& hud, CameraDirector& cam, bool& show_clouds,
-               entt::registry& world, entt::entity rocket_entity) {
+               entt::registry& world, entt::entity rocket_entity, CloudTuner& cloudTuner) {
         
         router.on_ignition = [&world, rocket_entity]() {
             auto& guid = world.get<GuidanceComponent>(rocket_entity);
@@ -88,6 +89,21 @@ struct FlightInputSystem {
         router.registerShiftKey(GLFW_KEY_P, [&show_clouds]() {
             show_clouds = !show_clouds;
             std::cout << "[CLOUDS] " << (show_clouds ? "ON" : "OFF") << std::endl;
+        });
+
+        // Tab: toggle cloud tuner panel
+        router.registerKey(GLFW_KEY_TAB, [&cloudTuner]() {
+            cloudTuner.toggle();
+        });
+
+        // F3: cycle debug modes  0=off → 1=coverage grayscale → 2=curl field color → 0
+        router.registerKey(GLFW_KEY_F3, []() {
+            Renderer3D* r3d = GameContext::getInstance().renderer3d;
+            if (r3d) {
+                r3d->cloudTuneParams.debugMode = (r3d->cloudTuneParams.debugMode + 1) % 3;
+                const char* names[] = { "OFF", "COVERAGE", "CURL FIELD" };
+                std::cout << "[DBG] Cloud debug: " << names[r3d->cloudTuneParams.debugMode] << std::endl;
+            }
         });
 
         router.registerShiftKey(GLFW_KEY_V, [this, &world, rocket_entity]() {

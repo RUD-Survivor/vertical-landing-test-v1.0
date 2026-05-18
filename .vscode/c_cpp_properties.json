@@ -1,17 +1,20 @@
 {
   "configurations": [
     {
-      "name": "windows-gcc-x64",
+      "name": "MSVC x64",
       "includePath": [
-        "${workspaceFolder}/**"
+        "${workspaceFolder}/dependencires/include",
+        "${workspaceFolder}/vendor",
+        "${workspaceFolder}/src",
+        "D:/Microsoft Visual Studio 2026/VC/Tools/MSVC/14.50.35717/include",
+        "C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt",
+        "C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um",
+        "C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared"
       ],
-      "compilerPath": "gcc",
-      "cStandard": "${default}",
-      "cppStandard": "${default}",
-      "intelliSenseMode": "windows-gcc-x64",
-      "compilerArgs": [
-        ""
-      ]
+      "compilerPath": "D:/Microsoft Visual Studio 2026/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/cl.exe",
+      "cStandard": "c17",
+      "cppStandard": "c++17",
+      "intelliSenseMode": "windows-msvc-x64"
     }
   ],
   "version": 4

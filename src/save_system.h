@@ -14,11 +14,12 @@
 #include <string>
 #include <vector>
 #include <map>
-
+#include <cstdio>
+#include <stdio.h>
 namespace SaveSystem {
 
 // 保存文件路径
-const char* SAVE_FILE_PATH = "rocket_save.dat";
+inline constexpr const char* SAVE_FILE_PATH = "rocket_save.dat";
 
 // 保存数据结构
 struct SaveData {
@@ -56,7 +57,7 @@ struct SaveData {
 };
 
 // 简单的序列化函数(使用文本格式便于调试)
-bool SaveGame(const RocketAssembly& assembly, entt::registry& world, entt::entity rocket_entity, const ControlInput& input) {
+inline bool SaveGame(const RocketAssembly& assembly, entt::registry& world, entt::entity rocket_entity, const ControlInput& input) {
     auto& trans = world.get<TransformComponent>(rocket_entity);
     auto& vel   = world.get<VelocityComponent>(rocket_entity);
     auto& att   = world.get<AttitudeComponent>(rocket_entity);
@@ -120,7 +121,7 @@ bool SaveGame(const RocketAssembly& assembly, entt::registry& world, entt::entit
 }
 
 // 加载游戏
-bool LoadGame(RocketAssembly& assembly, entt::registry& world, entt::entity rocket_entity, ControlInput& input) {
+inline bool LoadGame(RocketAssembly& assembly, entt::registry& world, entt::entity rocket_entity, ControlInput& input) {
     auto& trans = world.get<TransformComponent>(rocket_entity);
     auto& vel   = world.get<VelocityComponent>(rocket_entity);
     auto& att   = world.get<AttitudeComponent>(rocket_entity);
@@ -384,14 +385,14 @@ inline bool LoadAgencyFactory(AgencyState& agency, FactorySystem& factory) {
 }
 
 // 检查是否存在保存文件
-bool HasSaveFile() {
+inline bool HasSaveFile() {
     std::ifstream file(SAVE_FILE_PATH);
     bool exists = file.good();
     file.close();
     return exists;
 }
 
-bool HasAgencySave() {
+inline bool HasAgencySave() {
     std::ifstream file("agency_save.dat");
     bool exists = file.good();
     file.close();
@@ -399,12 +400,12 @@ bool HasAgencySave() {
 }
 
 // 删除保存文件
-void DeleteSaveFile() {
+inline void DeleteSaveFile() {
     std::remove(SAVE_FILE_PATH);
 }
 
 // 获取保存文件信息(用于显示)
-bool GetSaveInfo(double& sim_time, int& part_count) {
+inline bool GetSaveInfo(double& sim_time, int& part_count) {
     std::ifstream file(SAVE_FILE_PATH);
     if (!file.is_open()) {
         return false;

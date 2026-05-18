@@ -68,13 +68,6 @@ public:
 
 
 
-
-    void RenderTelemetry(entt::registry& registry, entt::entity entity, Renderer* renderer, Renderer3D* r3d, CameraDirector& cam, const RocketAssembly& assembly, const RenderContext& ctx, double dt, int frame, double ws_d, float global_best_ang, int time_warp, float mouse_x, float mouse_y, bool& hlmb_prev_ref);
-    void RenderIndicators(entt::registry& registry, entt::entity entity, Renderer* renderer, Renderer3D* r3d, CameraDirector& cam, const RocketAssembly& assembly, const RenderContext& ctx, double dt, int frame, double ws_d, float global_best_ang, int time_warp, float mouse_x, float mouse_y, bool& hlmb_prev_ref);
-    void RenderNavball(entt::registry& registry, entt::entity entity, Renderer* renderer, Renderer3D* r3d, CameraDirector& cam, const RocketAssembly& assembly, const RenderContext& ctx, double dt, int frame, double ws_d, float global_best_ang, int time_warp, float mouse_x, float mouse_y, bool& hlmb_prev_ref);
-    void RenderAdvancedMenus(entt::registry& registry, entt::entity entity, Renderer* renderer, Renderer3D* r3d, CameraDirector& cam, const RocketAssembly& assembly, const RenderContext& ctx, double dt, int frame, double ws_d, float global_best_ang, int time_warp, float mouse_x, float mouse_y, bool& hlmb_prev_ref);
-    void RenderApsides(entt::registry& registry, entt::entity entity, Renderer* renderer, Renderer3D* r3d, CameraDirector& cam, const RocketAssembly& assembly, const RenderContext& ctx, double dt, int frame, double ws_d, float global_best_ang, int time_warp, float mouse_x, float mouse_y, bool& hlmb_prev_ref);
-    void RenderManeuver(entt::registry& registry, entt::entity entity, Renderer* renderer, Renderer3D* r3d, CameraDirector& cam, const RocketAssembly& assembly, const RenderContext& ctx, double dt, int frame, double ws_d, float global_best_ang, int time_warp, float mouse_x, float mouse_y, bool& hlmb_prev_ref);
     void render(entt::registry& registry, entt::entity entity, Renderer* renderer, Renderer3D* r3d, 
                 CameraDirector& cam, const RocketAssembly& assembly,
                 const RenderContext& ctx, double dt, int frame, double ws_d, float global_best_ang, int time_warp,
@@ -134,8 +127,7 @@ glDisable(GL_DEPTH_TEST);
 
     // ====================================================================
     // ===== 2D 叠加层 HUD =====
-    static bool hlmb_prev = false;
-
+    
     if (show_hud) {  // 用户按 H 键切换开关
         
         // --- 强制重置 2D 渲染器批处理状态 ---
@@ -202,21 +194,20 @@ glDisable(GL_DEPTH_TEST);
     float bg_h = 0.05f;
     double current_fuel = prop.fuel;
 
-    RenderTelemetry(registry, entity, renderer, r3d, cam, assembly, ctx, dt, frame, ws_d, global_best_ang, time_warp, mouse_x, mouse_y, hlmb_prev);
-    RenderIndicators(registry, entity, renderer, r3d, cam, assembly, ctx, dt, frame, ws_d, global_best_ang, time_warp, mouse_x, mouse_y, hlmb_prev);
-    RenderNavball(registry, entity, renderer, r3d, cam, assembly, ctx, dt, frame, ws_d, global_best_ang, time_warp, mouse_x, mouse_y, hlmb_prev);
-    RenderAdvancedMenus(registry, entity, renderer, r3d, cam, assembly, ctx, dt, frame, ws_d, global_best_ang, time_warp, mouse_x, mouse_y, hlmb_prev);
-    RenderApsides(registry, entity, renderer, r3d, cam, assembly, ctx, dt, frame, ws_d, global_best_ang, time_warp, mouse_x, mouse_y, hlmb_prev);
-    
-    // update hlmb_prev
-    bool hlmb = glfwGetMouseButton(GameContext::getInstance().window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+
+    RenderFlightHUD_Telemetry(*this, registry, entity, renderer, r3d, cam, assembly, ctx, dt, frame, ws_d, global_best_ang, time_warp, mouse_x, mouse_y, hlmb, hlmb_prev, current_vel, current_alt, current_vvel, hud_opacity, hmouse_x, hmouse_y, ww, wh);
+    RenderFlightHUD_Indicators(*this, registry, entity, renderer, r3d, cam, assembly, ctx, dt, frame, ws_d, global_best_ang, time_warp, mouse_x, mouse_y, hlmb, hlmb_prev, current_vel, current_alt, current_vvel, hud_opacity, hmouse_x, hmouse_y, ww, wh);
+    RenderFlightHUD_Navball(*this, registry, entity, renderer, r3d, cam, assembly, ctx, dt, frame, ws_d, global_best_ang, time_warp, mouse_x, mouse_y, hlmb, hlmb_prev, current_vel, current_alt, current_vvel, hud_opacity, hmouse_x, hmouse_y, ww, wh);
+    RenderFlightHUD_AdvancedMenus(*this, registry, entity, renderer, r3d, cam, assembly, ctx, dt, frame, ws_d, global_best_ang, time_warp, mouse_x, mouse_y, hlmb, hlmb_prev, current_vel, current_alt, current_vvel, hud_opacity, hmouse_x, hmouse_y, ww, wh);
+    RenderFlightHUD_Apsides(*this, registry, entity, renderer, r3d, cam, assembly, ctx, dt, frame, ws_d, global_best_ang, time_warp, mouse_x, mouse_y, hlmb, hlmb_prev, current_vel, current_alt, current_vvel, hud_opacity, hmouse_x, hmouse_y, ww, wh);
     hlmb_prev = hlmb;
 
     // ========================================================================
     } 
     
 
-    RenderManeuver(registry, entity, renderer, r3d, cam, assembly, ctx, dt, frame, ws_d, global_best_ang, time_warp, mouse_x, mouse_y, hlmb_prev);
+    RenderFlightHUD_Maneuver(*this, registry, entity, renderer, r3d, cam, assembly, ctx, dt, frame, ws_d, global_best_ang, time_warp, mouse_x, mouse_y, hlmb, hlmb_prev, current_vel, current_alt, current_vvel, hud_opacity, hmouse_x, hmouse_y, ww, wh);
+    }
     }
 };
 

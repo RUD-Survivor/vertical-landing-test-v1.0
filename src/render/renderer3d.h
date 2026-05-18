@@ -416,6 +416,20 @@ public:
     return tex;
   }
 
+  // Cloud parameter tuning (set by CloudTuner panel, read by drawAtmosphere)
+  struct CloudTuneParams {
+      float covLo      = 0.270f; // coverage linear ramp low  (below → density=0)
+      float covHi      = 0.580f; // coverage linear ramp high (above → density=full)
+      float threshLo   = 0.236f; // shape noise mask low  (min(lo,hi) → smoothstep low)
+      float threshHi   = 0.513f; // shape noise mask high (max(lo,hi) → smoothstep high)
+      float erosion    = 0.217f;
+      float density    = 1.458f;
+      float extinction = 0.321f;
+      float minAlt     = 1.5f;
+      float maxAlt     = 14.0f;
+      int   debugMode = 0;  // 0=off, 1=coverage grayscale, 2=curl field color
+  } cloudTuneParams;
+
   GLuint program3d = 0;
   GLuint earthProgram = 0;
   GLuint gasGiantProgram = 0;
@@ -440,6 +454,9 @@ public:
   GLint ua_time = -1, ua_planetIdx = -1, ua_sunVisibility = -1, ua_showClouds = -1;
   GLint ua_ringInner = -1, ua_ringOuter = -1, ua_cloudTime = -1, ua_cloudPhaseSin = -1, ua_cloudPhaseCos = -1;
   GLint ua_frameIdx = -1, ua_res = -1, ua_invProj = -1, ua_depthTex = -1;
+  GLint ua_tuneCovLo=-1, ua_tuneCovHi=-1, ua_tuneThreshLo=-1, ua_tuneThreshHi=-1;
+  GLint ua_tuneErosion=-1, ua_tuneDensity=-1, ua_tuneExtinction=-1, ua_tuneMinAlt=-1, ua_tuneMaxAlt=-1;
+  GLint ua_debugCoverage=-1;
   // Skybox uniforms
   GLint us_invViewProj = -1, us_skyVibrancy = -1;
 
@@ -1901,14 +1918,26 @@ public:
       uniform float uSunVisibility;
       uniform float uRingInner;
       uniform float uRingOuter;
-      
+
+      // Cloud tuning uniforms — must be declared before setupPlanetProfile() uses them
+      uniform float uTuneCovLo;
+      uniform float uTuneCovHi;
+      uniform float uTuneThreshLo;
+      uniform float uTuneThreshHi;
+      uniform float uTuneErosion;
+      uniform float uTuneDensity;
+      uniform float uTuneExtinction;
+      uniform float uTuneMinAlt;
+      uniform float uTuneMaxAlt;
+      uniform float uDebugCoverage;  // 1.0 = output raw coverage as grayscale (F3 toggle)
+
       out vec4 FragColor;
 
       #define PI 3.14159265359
 
       // 步进采样数：采样越多，过渡越平滑，但性能消耗越高。
-      const int PRIMARY_STEPS = 48; // 主光线步进数
-      const int LIGHT_STEPS = 16;   // 辅助（向太阳）的光线步进数
+      const int PRIMARY_STEPS = 72; // 主光线步进数
+      const int LIGHT_STEPS = 20;   // 辅助（向太阳）的光线步进数
       
       // --- Dynamic Atmosphere Parameters ---
       vec3 gRayleighCoeff;
@@ -1935,8 +1964,8 @@ public:
               gMieCoeff = 0.005; gHRayleigh = 8.0; gHMie = 1.0; gGMie = 0.8;
               // 臭氧吸收系数 (吸收特定红色波段，增强蓝天的饱和度)
               gOzoneCoeff = vec3(0.00035, 0.00085, 0.00009); gHOzoneCenter = 25.0; gHOzoneWidth = 15.0;
-              gCloudMinAlt = 3.0; gCloudMaxAlt = 14.0;
-              gCloudExtinction = vec3(0.08); gCloudScattering = vec3(0.45);
+              gCloudMinAlt = uTuneMinAlt; gCloudMaxAlt = uTuneMaxAlt;
+              gCloudExtinction = vec3(uTuneExtinction); gCloudScattering = vec3(0.70);
           } else if (uPlanetIdx == 2) {
               // --- 金星 (Venus) ---
               // 极厚的大气层和硫酸云，天空呈现土黄色。
@@ -2077,7 +2106,93 @@ public:
         }
         return v;
       }
-      
+      // Worley (cellular) noise — 3×3×3 neighbor search, returns nearest feature distance [0,1]
+      float worley3d(vec3 p) {
+          vec3 i = floor(p); vec3 f = fract(p);
+          float md = 1.0;
+          for (int x = -1; x <= 1; x++) {
+            for (int y = -1; y <= 1; y++) {
+              for (int z = -1; z <= 1; z++) {
+                vec3 nb = vec3(float(x), float(y), float(z));
+                vec3 h = fract(sin(vec3(dot(i+nb, vec3(127.1,311.7,74.7)),
+                                       dot(i+nb, vec3(269.5,183.3,246.1)),
+                                       dot(i+nb, vec3(113.5,271.9,124.6)))) * 43758.5453);
+                vec3 d = nb + h - f;
+                md = min(md, dot(d, d));
+              }
+            }
+          }
+          return sqrt(md);
+      }
+      // Perlin-Worley: Worley carves rounded cellular blobs into Perlin base → cauliflower cumulus shape
+      float fbm_pw(vec3 p, int octaves) {
+          float pn = fbm(p, octaves);
+          float wn = 1.0 - worley3d(p * 1.8); // inverted: bright cell interior, dark edges
+          return clamp(pn - (1.0 - wn) * 0.32, 0.0, 1.0);
+      }
+      // Curl noise on unit sphere: ∇×(φ·n̂) → divergence-free tangential wind velocity.
+      // Finite-difference gradient of noise3d projected to tangent plane, then rotated 90°.
+      // 6 noise evaluations per call — use sparingly (coverage map only, not per-step detail).
+      vec3 curlSph(vec3 p, float scale, float toff) {
+          vec3 n = p * scale + vec3(toff, toff * 0.7, toff * 1.3);
+          const float eps = 0.015;
+          float dx = noise3d(n + vec3(eps,0,0)) - noise3d(n - vec3(eps,0,0));
+          float dy = noise3d(n + vec3(0,eps,0)) - noise3d(n - vec3(0,eps,0));
+          float dz = noise3d(n + vec3(0,0,eps)) - noise3d(n - vec3(0,0,eps));
+          vec3 grad = vec3(dx, dy, dz) * (0.5 / eps);
+          grad -= p * dot(p, grad); // project onto tangent plane (remove radial component)
+          return cross(p, grad);    // 90° rotation on tangent plane = curl on sphere
+      }
+      // Returns raw Earth coverage [0,1] BEFORE smoothstep — used for F3 debug visualization.
+      // Must mirror the coverage computation in cloudDensity() Layer 1 exactly.
+      float rawCoverage(vec3 sph, float t) {
+          float latWarp = sph.z * sph.z * sph.z * 0.3;
+          float sB = sin(latWarp); float cB = cos(latWarp);
+          float s1 = uCloudPhaseSin * cB + uCloudPhaseCos * sB;
+          float c1 = uCloudPhaseCos * cB - uCloudPhaseSin * sB;
+          vec3 cs = vec3(sph.x*c1 - sph.y*s1, sph.x*s1 + sph.y*c1, sph.z);
+          vec3 ax = normalize(cross(cs, vec3(0.0, 0.0, 1.0) + cs * 0.01));
+          vec3 va = cross(cs, ax);
+          // Curl noise: 4-sample finite-difference gradient of φ, rotated 90°.
+          // Divergence-free → flow lines are closed vortex rings.
+          const float EPS = 0.06;
+          vec3 slLo = vec3(t * 0.003, 0.0, t * 0.002);
+          // scale 1.5 → vortex diameter ~4000km; at 0.6 was ~8000km (one vortex = half the planet)
+          float rLo_pu = fbm(cs * 1.5 + ax * EPS + slLo, 2);
+          float rLo_mu = fbm(cs * 1.5 - ax * EPS + slLo, 2);
+          float rLo_pv = fbm(cs * 1.5 + va * EPS + slLo, 2);
+          float rLo_mv = fbm(cs * 1.5 - va * EPS + slLo, 2);
+          float cUlo = -(rLo_pv - rLo_mv);
+          float cVlo =  (rLo_pu - rLo_mu);
+          vec3 slHi = vec3(91.2 + t * 0.005, 5.1, 22.0);
+          float rHi_pu = fbm(cs * 6.0 + ax * EPS + slHi, 1);
+          float rHi_mu = fbm(cs * 6.0 - ax * EPS + slHi, 1);
+          float rHi_pv = fbm(cs * 6.0 + va * EPS + slHi, 1);
+          float rHi_mv = fbm(cs * 6.0 - va * EPS + slHi, 1);
+          float cUhi = -(rHi_pv - rHi_mv);
+          float cVhi =  (rHi_pu - rHi_mu);
+          // grad≈3.0 for scale 1.5 2oct, ≈6.0 for scale 6.0 1oct → raw curl ≈ ±0.36/±0.72
+          // scale 2.5/1.0 → lo displacement ≈0.9, hi ≈0.72
+          float wU = cUlo * 2.5 + cUhi * 1.0;
+          float wV = cVlo * 2.5 + cVhi * 1.0;
+          vec3 ws = normalize(cs + ax * wU + va * wV);
+          float latNoise = fbm(cs*4.0 + vec3(127.3, 88.1, 9.6+t*0.006), 3) - 0.5;
+          float warpedLat = sph.z + latNoise * 0.40;
+          float cov = fbm(ws * 0.8 + vec3(t*0.004), 5) * 0.65
+                    + fbm(ws * 6.0 + vec3(t*0.011, -t*0.008, t*0.013), 3) * 0.35;
+          float lat = warpedLat;
+          float latCloud = clamp(
+              0.28 + 0.45*exp(-(lat/0.34)*(lat/0.34))
+            + 0.38*exp(-((lat-0.766)/0.42)*((lat-0.766)/0.42))
+            + 0.38*exp(-((lat+0.766)/0.42)*((lat+0.766)/0.42))
+            + 0.20*exp(-((lat-0.940)/0.34)*((lat-0.940)/0.34))
+            + 0.20*exp(-((lat+0.940)/0.34)*((lat+0.940)/0.34))
+            - 0.12*exp(-((abs(lat)-0.50)/0.28)*((abs(lat)-0.50)/0.28)),
+            0.28, 1.0);
+          return clamp(cov * latCloud, 0.0, 1.0);
+      }
+)"
+R"(
       float cloudDensity(vec3 p, float h, bool highDetail) {
           if (uShowClouds < 0.5) return 0.0;
           if (h < gCloudMinAlt || h > gCloudMaxAlt) return 0.0;
@@ -2091,12 +2206,14 @@ public:
               // Layer 1: Low-altitude Cumulus/Stratus (Dense, massive blobs)
               if (h >= gCloudMinAlt && h <= 7.0) {
                   float altNorm = (h - gCloudMinAlt) / (7.0 - gCloudMinAlt);
-                  float altShape = 4.0 * altNorm * (1.0 - altNorm);
+                  float altBase = smoothstep(0.0, 0.07, altNorm);
 
                   // Industrial Grade: Phase Separation for rotation
                   // Replace sin(t*speed + warp) with sin(A + B) = sinA*cosB + cosA*sinB
                   // uCloudPhaseSin/Cos represent the temporal rotation component
-                  float latWarp = sph.z * sph.z * sph.z * 0.8;
+                  // latWarp coefficient reduced from 0.8 → 0.3 to break zonal symmetry:
+                  // high latWarp makes clouds at same latitude look identical → horizontal bands.
+                  float latWarp = sph.z * sph.z * sph.z * 0.3;
                   float sB = sin(latWarp);
                   float cB = cos(latWarp);
                   float s1 = uCloudPhaseSin * cB + uCloudPhaseCos * sB;
@@ -2105,52 +2222,139 @@ public:
                   vec3 windSph1 = vec3(sph.x * c1 - sph.y * s1, sph.x * s1 + sph.y * c1, sph.z);
                   
                   // ====== CYCLONE ATTRACTOR (Hurricane) ======
-                  float cycAngle = t * -0.1; // Slower cyclone movement
-                  vec3 cycCenter = normalize(vec3(0.6 * cos(cycAngle), 0.6 * sin(cycAngle), 0.35)); // Mid-latitude
-                  float cycDist = distance(windSph1, cycCenter);
-                  float cycRadius = 0.25; // Realistic proportion (~1500km on Earth)
-                  
-                  // Gradual feathered edge: twist fades smoothly at boundary
-                  float cycInfluence = smoothstep(cycRadius, cycRadius * 0.3, cycDist); // 0 at edge, 1 near center
+                  float cycAngle = t * -0.1;
+                  vec3 cycCenter = normalize(vec3(0.6*cos(cycAngle), 0.6*sin(cycAngle), 0.35));
+                  float cycDist = distance(sph, cycCenter);
+                  float cycRadius = 0.22;
+                  // Linear falloff from edge → stronger gradient → more visible shear bands
+                  float cycInfluence = smoothstep(cycRadius, 0.0, cycDist);
                   if (cycInfluence > 0.001) {
-                      float twist = pow(cycInfluence, 1.5) * 8.0; // Vortex intensity
-                      // Rodrigues rotation around the cyclone center
+                      // ~103° max twist: FBM bands shear into visible spiral arms.
+                      // Old 459° scrambled noise into a featureless ring — spiral structure lost.
+                      float twist = cycInfluence * 1.8;
                       float ct = cos(twist); float st = sin(twist);
-                      vec3 warped = windSph1 * ct + cross(cycCenter, windSph1) * st + cycCenter * dot(cycCenter, windSph1) * (1.0 - ct);
-                      windSph1 = mix(windSph1, warped, cycInfluence); // Smooth blend at edges
+                      vec3 cycCenterW = normalize(vec3(cycCenter.x*c1 - cycCenter.y*s1,
+                                                       cycCenter.x*s1 + cycCenter.y*c1, cycCenter.z));
+                      vec3 warped = windSph1*ct + cross(cycCenterW, windSph1)*st + cycCenterW*dot(cycCenterW, windSph1)*(1.0-ct);
+                      windSph1 = mix(windSph1, warped, cycInfluence);
                   }
                   
                   // ====== MACRO CLOUD COVERAGE (Fronts & Clear Oceans) ======
                   vec3 coverageSph = vec3(sph.x * c1 - sph.y * s1, sph.x * s1 + sph.y * c1, sph.z);
-                  float coverage = fbm(coverageSph * 2.5 + vec3(t * 0.01), 3);
-                  // Target ~66% cloud cover: raise bounds so more area falls below threshold
-                  coverage = smoothstep(0.28, 0.52, coverage);
+                  vec3 wAxis = normalize(cross(coverageSph, vec3(0.0, 0.0, 1.0) + coverageSph * 0.01));
+                  vec3 vAxis = cross(coverageSph, wAxis);  // meridional tangent
+                  // Curl noise domain warp: ∇φ rotated 90° is divergence-free.
+                  // Flow lines of a div-free field are closed vortex rings → spiral/comma structures
+                  // emerge from FBM extrema without any explicit vortex placement.
+                  const float EPS = 0.06;
+                  // Lo scale 1.5 → vortex diameter ~4000km; 4-6 vortices visible per hemisphere
+                  vec3 seedLo = vec3(t * 0.003, 0.0, t * 0.002);
+                  float pLo_pu = fbm(coverageSph * 1.5 + wAxis * EPS + seedLo, 2);
+                  float pLo_mu = fbm(coverageSph * 1.5 - wAxis * EPS + seedLo, 2);
+                  float pLo_pv = fbm(coverageSph * 1.5 + vAxis * EPS + seedLo, 2);
+                  float pLo_mv = fbm(coverageSph * 1.5 - vAxis * EPS + seedLo, 2);
+                  float curlU_lo = -(pLo_pv - pLo_mv);  // rotate gradient 90°
+                  float curlV_lo =  (pLo_pu - pLo_mu);
+                  // Hi scale 6.0 → mesoscale eddies ~1000km
+                  vec3 seedHi = vec3(91.2 + t * 0.005, 5.1, 22.0);
+                  float pHi_pu = fbm(coverageSph * 6.0 + wAxis * EPS + seedHi, 1);
+                  float pHi_mu = fbm(coverageSph * 6.0 - wAxis * EPS + seedHi, 1);
+                  float pHi_pv = fbm(coverageSph * 6.0 + vAxis * EPS + seedHi, 1);
+                  float pHi_mv = fbm(coverageSph * 6.0 - vAxis * EPS + seedHi, 1);
+                  float curlU_hi = -(pHi_pv - pHi_mv);
+                  float curlV_hi =  (pHi_pu - pHi_mu);
+                  // grad≈3.0 for scale 1.5 2oct; ≈6.0 for scale 6.0 1oct → raw curl ≈ ±0.36/±0.72
+                  float warpU = curlU_lo * 2.5 + curlU_hi * 1.0;
+                  float warpV = curlV_lo * 2.5 + curlV_hi * 1.0;
+                  vec3 warpedSph = normalize(coverageSph + wAxis * warpU + vAxis * warpV);
+                  float latNoise = fbm(coverageSph*4.0 + vec3(127.3, 88.1, 9.6+t*0.006), 3) - 0.5;
+                  float warpedLat = sph.z + latNoise * 0.40;
+                  float cov_large  = fbm(warpedSph * 0.8 + vec3(t * 0.004), 5);
+                  float cov_medium = fbm(warpedSph * 6.0 + vec3(t * 0.011, -t * 0.008, t * 0.013), 3);
+                  float coverage = cov_large * 0.65 + cov_medium * 0.35;
+                  float lat = warpedLat;
+                  float itczB = exp(-(lat/0.34)*(lat/0.34));
+                  float ntmpB = exp(-((lat-0.766)/0.42)*((lat-0.766)/0.42));
+                  float stmpB = exp(-((lat+0.766)/0.42)*((lat+0.766)/0.42));
+                  float npolB = exp(-((lat-0.940)/0.34)*((lat-0.940)/0.34));
+                  float spolB = exp(-((lat+0.940)/0.34)*((lat+0.940)/0.34));
+                  // width 0.28 (was 0.18): smoother band edges; coeff 0.12 (was 0.28): half-depth clearing
+                  float subDry= exp(-((abs(lat)-0.50)/0.28)*((abs(lat)-0.50)/0.28));
+                  float latCloud = clamp(
+                      0.28 + 0.45*itczB + 0.38*ntmpB + 0.38*stmpB + 0.20*npolB + 0.20*spolB
+                    - 0.12*subDry, 0.28, 1.0);
+                  coverage = clamp(coverage * latCloud, 0.0, 1.0);
+                  // Linear ramp (not smoothstep): preserves continuous coverage gradient.
+                  // smoothstep's S-curve pushes coverage toward 0 or 1 → density becomes binary again.
+                  float covRange = max(uTuneCovHi - uTuneCovLo, 0.001);
+                  coverage = clamp((coverage - uTuneCovLo) / covRange, 0.0, 1.0);
                   
-                  // Force cloud buildup around cyclone, carve out eye
+                  // Cyclone: amplify existing coverage (no forced ring), carve ragged eye
                   if (cycInfluence > 0.001) {
-                      float eye = 0.012; // Tiny eye (~75km)
-                      float eyewall = smoothstep(eye, eye + 0.03, cycDist) * smoothstep(cycRadius * 0.6, cycRadius * 0.15, cycDist);
-                      coverage = max(coverage, eyewall * 0.95); 
-                      coverage *= smoothstep(eye * 0.3, eye, cycDist); 
+                      // Multiplicative boost — only brightens where FBM already has cloud signal.
+                      // Avoids forced white ring; spiral arms come from twisted FBM naturally.
+                      coverage = mix(coverage, clamp(coverage * 1.9, 0.0, 1.0), cycInfluence * 0.7);
+                      // Ragged eye boundary: FBM noise on radius so edge is organic, not circular
+                      float eyeNoise = fbm(sph * 38.0 + vec3(t * 0.02), 2) * 0.009;
+                      float eyeRadius = 0.017 + eyeNoise;
+                      coverage *= smoothstep(eyeRadius * 0.35, eyeRadius, cycDist);
                   }
                   
-                  // Detail noise
-                  vec3 tc = windSph1 * 14.0;
+                  // Variable cloud top: topExp < 1 = tall Cb towers, topExp > 2 = short fair-weather Cu
+                  // Uses windSph1 at ~160km scale → each cloud cluster has its own characteristic height.
+                  float topNoise = fbm(windSph1 * 40.0 + vec3(t * 0.012), 2); // all 3 sphere components
+                  float topExp   = mix(0.85, 2.6, topNoise);
+                  float altDome  = clamp(1.0 - pow(altNorm, topExp), 0.0, 1.0);
+                  float altShape = altBase * altDome * 1.5;
+
+                  // TRUE 3D sphere coordinates: use all 3 components of windSph1.
+                  // windSph1.z = sin(lat): moving north at equator changes tc.z → N-S variation ✓
+                  // Old .xy-only approach had d(sph.x,y)/d(lat)=0 at equator → N-S zero variation → vertical streaks.
+                  // Altitude encodes as sphere-radius expansion: tc magnitude increases by h*0.45 over 4km band.
+                  vec3 tc = windSph1 * (80.0 + h * 0.45) + vec3(t * 0.6, t * 0.4, t * 0.15);
                   float n = 0.0;
                   if (highDetail) {
-                      float warp = fbm(tc * 0.5, 3);
-                      n = fbm(tc + vec3(warp * 1.2) + vec3(t * 0.02), 6); 
-                      float detail = fbm(tc * 3.0 - vec3(t * 0.04), 4);
-                      n = n - detail * 0.3; 
+                      float warp = fbm(tc * 0.3, 3);
+                      n = fbm(tc + vec3(warp * 0.4, warp * 0.4, warp * 0.2) + vec3(t * 0.02), 6);
+                      // Erosion at 2.3× scale (non-integer, avoids FBM octave alignment)
+                      float ero = fbm(tc * 2.3 + vec3(-t * 0.04, t * 0.03, 0.0), 4);
+                      n -= ero * uTuneErosion;
+                      // Proximity LOD: modulate n BEFORE smoothstep for visible cloud sub-structure
+                      float viewDist = length(uCamPos - p);
+                      // 250km: Perlin-Worley cauliflower — added only inside existing clouds to avoid dots
+                      if (viewDist < 250.0) {
+                          float wm = 1.0 - smoothstep(80.0, 250.0, viewDist);
+                          // scale 0.04 → ~160km Worley cells; only enriches existing cloud bodies
+                          float cellDetail = (1.0 - worley3d(p * 0.04 + vec3(t * 0.03))) * 0.16 * wm;
+                          n += cellDetail * smoothstep(0.3, 0.55, n);
+                      }
+                      // 80km: 3km bumps and cauliflower at cloud edges
+                      if (viewDist < 80.0) {
+                          float w1 = 1.0 - smoothstep(10.0, 80.0, viewDist);
+                          n += fbm(p * 0.3 + vec3(t * 0.12, -t * 0.08, t * 0.05), 3) * 0.13 * w1;
+                      }
+                      // 10km: fine boiling surface texture visible from inside cloud
+                      if (viewDist < 10.0) {
+                          float w2 = 1.0 - smoothstep(1.0, 10.0, viewDist);
+                          n += fbm(p * 2.5 + vec3(-t * 0.20, t * 0.28, t * 0.10), 3) * 0.10 * w2;
+                      }
+                      // 1.5km: micro-detail for flying through clouds
+                      if (viewDist < 1.5) {
+                          float w3 = 1.0 - smoothstep(0.15, 1.5, viewDist);
+                          n += fbm(p * 18.0 + vec3(t * 0.40, -t * 0.30, t * 0.22), 2) * 0.05 * w3;
+                      }
+                      // ─────────────────────────────────────────────────────────────────
                   } else {
-                      n = fbm(tc + vec3(t * 0.02), 2);
+                      n = fbm(tc, 2);
                   }
                   
-                  // coverage=1.0 -> threshold=0.20 (dense fronts)
-                  // coverage=0.0 -> threshold=0.58 (clear skies, only occasional puffs)
-                  float threshold = mix(0.58, 0.20, coverage);
-                  float mask = smoothstep(threshold, threshold + 0.12, n) * altShape;
-                  density = max(density, mask * 4.0);
+                  // Fixed-threshold mask: n controls cloud geometry, coverage controls density strength.
+                  // coverage=0 → density=0 (zero scatter guaranteed); coverage=0.5 → half-density cloud.
+                  // min/max guards: smoothstep(e0,e1,x) is undefined when e0≥e1 (GLSL spec).
+                  float maskLo = min(uTuneThreshLo, uTuneThreshHi);
+                  float maskHi = max(uTuneThreshLo, uTuneThreshHi);
+                  float mask = smoothstep(maskLo, maskHi, n) * altShape;
+                  density = max(density, mask * uTuneDensity * coverage);
               }
               
               // Layer 2: High-altitude Cirrus/Anvils (Thin, sweeping streaks)
@@ -2160,29 +2364,30 @@ public:
                   float altShape = 1.0 - pow(abs(altNorm * 2.0 - 1.0), 2.0);
                   // Slightly faster uniform wind for cirrus (Z-axis)
                   float angle2 = t * -0.5;
-                  // Coriolis Warping for high cirrus
-                  float latWarp2 = sph.z * sph.z * sph.z * 0.4; // Z is the polar axis
+                  // Coriolis Warping for high cirrus — reduced to 0.15 to prevent zonal banding
+                  float latWarp2 = sph.z * sph.z * sph.z * 0.15; // Z is the polar axis
                   float s2 = sin(angle2 + latWarp2); 
                   float c2 = cos(angle2 + latWarp2);
                   vec3 windSph2 = vec3(sph.x * c2 - sph.y * s2, sph.x * s2 + sph.y * c2, sph.z); // Rotate around Z axis
-                  vec3 tc = windSph2 * 12.0;
-                  
+                  vec3 tc = windSph2 * 50.0; // ~127km cirrus streak features
+
                   // Cirrus shape
                   float n = 0.0;
                   if (highDetail) {
-                      float warp = fbm(tc * 1.2, 2);
-                      n = fbm(tc + vec3(warp * 2.5) + vec3(t * 0.04), 4);
-                      // Cirrus Erosion: subtract wispy fractal detail
-                      float detail = fbm(tc * 4.0 + vec3(t * 0.08), 2);
-                      n = n - detail * 0.2;
+                      float warp = fbm(tc * 0.4, 2); // coarser warp
+                      n = fbm(tc + vec3(warp * 0.7, warp * 0.9, 0.0) + vec3(t * 0.04), 4); // elongated streaks
+                      // Cirrus Erosion: wispy fractal detail
+                      float detail = fbm(tc * 2.5 + vec3(t * 0.08), 2);
+                      n = n - detail * 0.18;
                   } else {
                       n = fbm(tc + vec3(t * 0.04), 1); // Fast path for shadow rays
                   }
-                  
+
                   // Thin clouds: wider threshold, soft borders
-                  float mask = smoothstep(0.35 + altNorm * 0.15, 0.85, n) * altShape;
-                  density = max(density, mask * 0.35); // Thinner density
+                  float mask = smoothstep(0.42 + altNorm * 0.10, 0.82, n) * altShape;
+                  density = max(density, mask * 0.30); // Thinner density
               }
+
           } else if (uPlanetIdx == 2) {
               // VENUS global acid cloud deck
               float altNorm = (h - gCloudMinAlt) / (gCloudMaxAlt - gCloudMinAlt);
@@ -2218,7 +2423,7 @@ R"(
           // Mix lobes: mostly forward scattering, some backward
           float w = 0.7; // Weight of forward lobe
           // Reduced boost from 12.0 to 1.5 to prevent blowing out exposure
-          return mix(phase2, phase1, w) * 1.5; 
+          return mix(phase2, phase1, w);
       }
 
       void getOpticalDepth(vec3 p, vec3 lightDir, out float dR, out float dM, out float dO, out float dC) {
@@ -2271,7 +2476,8 @@ R"(
               dC += cloudDensity(pos, h, false) * stepSize;
           }
       }
-
+)"
+R"(
       void main() {
           setupPlanetProfile();
           vec3 rayDir = normalize(vWorldPos - uCamPos);
@@ -2352,63 +2558,148 @@ R"(
               float dR = exp(-h / gHRayleigh) * stepSize;
               float dM = exp(-h / gHMie) * stepSize;
               float dO = ozoneDensity(h) * stepSize;
-              float dC = cloudDensity(pos, h, true) * stepSize;
               optDepthR += dR;
               optDepthM += dM;
               optDepthO += dO;
-              optDepthC += dC;
-              
-              // Light ray optical depth to sun
-              float lightR, lightM, lightO, lightC;
-              getOpticalDepth(pos, uLightDir, lightR, lightM, lightO, lightC);
-              
+
+              // Light ray optical depth to sun (no cloud in primary pass)
+              float lightR, lightM, lightO, lightC_dummy;
+              getOpticalDepth(pos, uLightDir, lightR, lightM, lightO, lightC_dummy);
+
               // Total extinction including ozone absorption
-              vec3 tauBase = gRayleighCoeff * (optDepthR + lightR) 
+              vec3 tauBase = gRayleighCoeff * (optDepthR + lightR)
                            + gMieCoeff * 1.1 * (optDepthM + lightM)
                            + gOzoneCoeff * (optDepthO + lightO);
-                           
-              // Cloud Extinction & Powder Effect Approx
-              float tauCloud = gCloudExtinction.x * (optDepthC + lightC);
               vec3 attenuationBase = exp(-tauBase);
-              
-              // Beer-Lambert attenuation (direct absorption)
-              float beer = exp(-tauCloud);
-              
-              // Powder effect (multiple scattering illuminates interior edges)
-              // 1.0 - exp(-d*2.0) creates a soft "bump" of light just inside the cloud
-              float powder = 1.0 - exp(-tauCloud * 2.0);
-              
-              // Mix them: outer edges rely on powder, deep interiors rely on beer
-              float cloudAttenuation = beer * mix(1.0, powder, 0.7); 
-              
-              // Combine atmosphere and cloud attenuation
-              vec3 attenuation = attenuationBase * cloudAttenuation;
-              
-              sumRayleigh += dR * attenuationBase * exp(-gCloudExtinction.x * optDepthC); // Air only attenuated by local cloud, not sun cloud
-              sumMie += dM * attenuationBase * exp(-gCloudExtinction.x * optDepthC);
-              sumCloud += dC * attenuation;
-              
-              // Early Ray Termination (ERT)
-              // If transmittance (attenuation) drops below 1%, stop raymarching to save massive GPU cycles
-              float maxTransmittance = max(attenuation.x, max(attenuation.y, attenuation.z));
-              if (maxTransmittance < 0.01) {
-                  break; 
+
+              sumRayleigh += dR * attenuationBase;
+              sumMie += dM * attenuationBase;
+
+              // Early Ray Termination
+              float maxTransmittance = max(attenuationBase.x, max(attenuationBase.y, attenuationBase.z));
+              if (maxTransmittance < 0.01) break;
+          }
+)"
+R"(
+          // ── Dedicated Cloud Pass ──────────────────────────────────────────────
+          // Fine-step integration ONLY within the cloud altitude band.
+          // Always uses highDetail (6 octaves, ~40km features) regardless of camera altitude.
+          // Step size ≈ 2-5 km → well below Nyquist for 40km features → no Moire aliasing.
+          const int CLOUD_STEPS = 48;
+          float cloudInnerR = uSurfaceRadius + gCloudMinAlt;
+          float cloudOuterR = uSurfaceRadius + gCloudMaxAlt;
+
+          float cNear, cFar;
+          bool hitOuter = intersectSphere(uCamPos, rayDir, cloudOuterR, cNear, cFar);
+          if (hitOuter) {
+              float cStart, cEnd;
+              // Entry point: first intersection with outer shell (or 0 if inside)
+              cStart = (cNear < 0.0) ? 0.0 : cNear;
+              cEnd   = cFar;
+
+              // Clip to inner shell: if ray hits the planet surface, stop there
+              float iNear, iFar;
+              if (intersectSphere(uCamPos, rayDir, cloudInnerR, iNear, iFar) && iNear > 0.0) {
+                  cEnd = min(cEnd, iNear);
+              }
+              // Also clip to geometry depth (tFar already set above)
+              cEnd = min(cEnd, tFar);
+
+              float cloudSegLen = cEnd - cStart;
+              if (cloudSegLen > 0.0) {
+                  float cStep = cloudSegLen / float(CLOUD_STEPS);
+                  float cJitter = screenHash(gl_FragCoord.xy + vec2(17.3, 31.7));
+                  cStart += cJitter * cStep;
+
+                  // Accumulate atmosphere transmittance at cloud entry point
+                  // (approximate: use the transmittance from the primary pass scaled to entry)
+                  float entryFrac = clamp(cStart / max(tFar, 0.001), 0.0, 1.0);
+                  vec3 atmTransAtCloud = exp(-(gRayleighCoeff * optDepthR + gMieCoeff * optDepthM + gOzoneCoeff * optDepthO) * entryFrac);
+
+                  for (int ci = 0; ci < CLOUD_STEPS; ci++) {
+                      vec3 cPos = uCamPos + rayDir * (cStart + (float(ci) + 0.5) * cStep);
+                      float ch = max(length(cPos - uPlanetCenter) - uSurfaceRadius, 0.0);
+
+                      float dC = cloudDensity(cPos, ch, true) * cStep;  // always highDetail
+                      // Limb fade: when the ray is nearly tangent to the surface, it integrates through
+                      // thousands of km of cloud horizontally → solid white stripe artifact at horizon.
+                      // Fade based on the ANGLE between ray and the sample point's radial direction:
+                      //   abs(dot) = 1 → ray is radial (looking down/up) → no fade
+                      //   abs(dot) = 0 → ray is tangential → full fade
+                      vec3 sampleUp = normalize(cPos - uPlanetCenter);
+                      float tangFrac = 1.0 - abs(dot(rayDir, sampleUp)); // 0=radial, 1=tangential
+                      dC *= 1.0 - smoothstep(0.82, 0.97, tangFrac);
+                      if (dC < 0.0001) continue;
+
+                      optDepthC += dC;
+
+                      // Sun optical depth through cloud column
+                      float cLightR, cLightM, cLightO, cLightC;
+                      getOpticalDepth(cPos, uLightDir, cLightR, cLightM, cLightO, cLightC);
+
+                      // ── Direct sun: wavelength-dependent orange/red at terminator ──
+                      vec3 sunTint = exp(-(gRayleighCoeff * cLightR + gMieCoeff * 1.1 * cLightM + gOzoneCoeff * cLightO));
+
+                      // ── Multiple scattering approximation (Jimenez 2016) ─────────────
+                      // Real clouds: photons scatter many times inside → interior stays
+                      // bright and the dark-underside gradient is soft, not harsh.
+                      // Approximate as 3-term geometric series of attenuated Beer-Lambert.
+                      float tauCloud = gCloudExtinction.x * (optDepthC + cLightC);
+                      float ms0 = exp(-tauCloud);
+                      float ms1 = exp(-tauCloud * 0.5) * 0.5;
+                      float ms2 = exp(-tauCloud * 0.25) * 0.25;
+                      float ms3 = exp(-tauCloud * 0.125) * 0.125; // 4th order: keeps cloud interiors bright
+                      float multiScatter = (ms0 + ms1 + ms2 + ms3) / 1.875;
+                      float powder = 1.0 - exp(-tauCloud * 2.0); // Silver lining: forward-scatter only
+                      float silverMask = max(0.0, cosTheta);        // only brightens sun-facing rays
+                      float cloudAtt = multiScatter * mix(1.0, powder, 0.55 * silverMask);
+
+                      // ── Height-based AO: dark underbelly, bright tops ────────────────
+                      // Approximates the vertical optical depth of the cloud mass above.
+                      // Layer-specific height: cumulus 3-7km gets its OWN 0-1 range for full AO contrast.
+                      // Using global band (3-14km) would make cumulus top only reach heightInBand=0.36 → dim.
+                      float layerBase = (ch < 7.5) ? gCloudMinAlt : 8.0;
+                      float layerTop  = (ch < 7.5) ? 7.0 : gCloudMaxAlt;
+                      float heightInBand = clamp((ch - layerBase) / max(layerTop - layerBase, 0.1), 0.0, 1.0);
+                      float aoDirect  = mix(0.10, 1.0, pow(heightInBand, 0.35)); // strong dark underbelly → bright top
+                      float aoAmbient = mix(0.35, 1.0, heightInBand);            // sky blocked below
+
+                      // ── Sky ambient: orange/red near terminator, blue on day side ────
+                      // Even shadowed clouds near terminator glow warm — illuminated by
+                      // the orange scattered sky rather than direct sunlight.
+                      float sunElev = dot(normalize(cPos - uPlanetCenter), uLightDir);
+                      float skyPathKm = min(8.0 / max(sunElev, 0.02), 60.0);
+                      float skyVis = smoothstep(-0.5, 0.15, sunElev);
+                      float nightGlow = 0.012 * (1.0 - skyVis); // moonlit/earthshine ambient on night side
+                      vec3 skyAmbColor = exp(-gRayleighCoeff * skyPathKm) * skyVis + vec3(nightGlow);
+
+                      // atmTransAtCloud contains view-path orange at the limb (long path).
+                      // Use only its luminance for dimming → color comes from sunTint
+                      // (orange/red when sun path is long = terminator) and skyAmbColor
+                      // (orange when sunElev≈0 = terminator). Orange now tracks terminator.
+                      float atmLum = dot(atmTransAtCloud, vec3(0.299, 0.587, 0.114));
+                      vec3 directContrib  = atmLum * sunTint  * cloudAtt * aoDirect;
+                      vec3 ambientContrib = atmLum * skyAmbColor * 0.85 * aoAmbient;
+                      sumCloud += dC * (directContrib + ambientContrib);
+
+                      if (cloudAtt < 0.008) break;
+                  }
               }
           }
-          
+          // ─────────────────────────────────────────────────────────────────────
+
           // Phase functions
           float phaseR = rayleighPhase(cosTheta);
           float phaseM = miePhase(cosTheta);
           float phaseC = cloudPhase(cosTheta);
-          
-          // Ambient multi-scattering for clouds (prevents black clouds on day side)
-          // Uses a broader, softer phase approximation and less attenuation
-          float ambientPhaseC = 0.5; // Isotropic-ish
-          vec3 ambientCloud = sumCloud * gCloudScattering * ambientPhaseC * 0.4; // 40% ambient boost
-          
+
+          // Ambient multi-scattering for clouds (prevents black clouds on dark side)
+          float ambientPhaseC = 0.5;
+          vec3 ambientCloud = sumCloud * gCloudScattering * ambientPhaseC * 0.4;
+
           // Inscattering color
-          vec3 color = sumRayleigh * gRayleighCoeff * phaseR + 
-                       sumMie * gMieCoeff * phaseM + 
+          vec3 color = sumRayleigh * gRayleighCoeff * phaseR +
+                       sumMie * gMieCoeff * phaseM +
                        sumCloud * gCloudScattering * phaseC +
                        ambientCloud;
           
@@ -2449,7 +2740,50 @@ R"(
           // ACES filmic tone mapping (richer sunset/sunrise colors than Reinhard)
           vec3 x = max(color, vec3(0.0));
           color = (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);
-          
+
+          // F3 debug modes (cycle with F3 key):
+          //   1 = coverage grayscale (pre-smoothstep)
+          //   2 = curl field color: R=curlU, G=curlV, B=0.5
+          //       vortex pattern (colors rotate around center) → curl working
+          //       uniform color → amplitude too small / EPS wrong
+          //       salt-and-pepper noise → EPS too small
+          if (uDebugCoverage > 0.5 && uPlanetIdx == 3) {
+              float cOuter = uSurfaceRadius + gCloudMaxAlt;
+              float dbgN, dbgF;
+              if (intersectSphere(uCamPos, rayDir, cOuter, dbgN, dbgF) && dbgF > 0.0) {
+                  vec3 dbgPos = uCamPos + rayDir * max(dbgN, 0.0);
+                  vec3 dbgSph = normalize(dbgPos - uPlanetCenter);
+                  float dt = uCloudTime * 0.004;
+                  if (uDebugCoverage > 1.5) {
+                      // Curl field visualization
+                      float latW = dbgSph.z * dbgSph.z * dbgSph.z * 0.3;
+                      float sB2 = sin(latW); float cB2 = cos(latW);
+                      float s1d = uCloudPhaseSin * cB2 + uCloudPhaseCos * sB2;
+                      float c1d = uCloudPhaseCos * cB2 - uCloudPhaseSin * sB2;
+                      vec3 cs2 = vec3(dbgSph.x*c1d - dbgSph.y*s1d, dbgSph.x*s1d + dbgSph.y*c1d, dbgSph.z);
+                      vec3 ax2 = normalize(cross(cs2, vec3(0.0, 0.0, 1.0) + cs2 * 0.01));
+                      vec3 va2 = cross(cs2, ax2);
+                      const float EPSD = 0.06;
+                      vec3 slD = vec3(dt * 0.003, 0.0, dt * 0.002);
+                      // scale 1.5 matches rawCoverage; raw curl ≈ ±0.36 → scale by 1.8 fills [0,1]
+                      float pu = fbm(cs2 * 1.5 + ax2 * EPSD + slD, 2);
+                      float mu = fbm(cs2 * 1.5 - ax2 * EPSD + slD, 2);
+                      float pv = fbm(cs2 * 1.5 + va2 * EPSD + slD, 2);
+                      float mv = fbm(cs2 * 1.5 - va2 * EPSD + slD, 2);
+                      float cU = -(pv - mv);
+                      float cV =  (pu - mu);
+                      // vortex center → colors rotate around it; smooth grad → too-large vortices
+                      FragColor = vec4(cU * 1.8 + 0.5, cV * 1.8 + 0.5, 0.5, 1.0);
+                  } else {
+                      float cov = rawCoverage(dbgSph, dt);
+                      FragColor = vec4(vec3(cov), 1.0);
+                  }
+                  return;
+              }
+              FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+              return;
+          }
+
           FragColor = vec4(color, opacity);
       }
     )";
@@ -2475,6 +2809,16 @@ R"(
     ua_res = glGetUniformLocation(atmoProg, "uResolution");
     ua_invProj = glGetUniformLocation(atmoProg, "uInvProj");
     ua_depthTex = glGetUniformLocation(atmoProg, "uDepthTex");
+    ua_tuneCovLo     = glGetUniformLocation(atmoProg, "uTuneCovLo");
+    ua_tuneCovHi     = glGetUniformLocation(atmoProg, "uTuneCovHi");
+    ua_tuneThreshLo  = glGetUniformLocation(atmoProg, "uTuneThreshLo");
+    ua_tuneThreshHi  = glGetUniformLocation(atmoProg, "uTuneThreshHi");
+    ua_tuneErosion   = glGetUniformLocation(atmoProg, "uTuneErosion");
+    ua_tuneDensity   = glGetUniformLocation(atmoProg, "uTuneDensity");
+    ua_tuneExtinction= glGetUniformLocation(atmoProg, "uTuneExtinction");
+    ua_tuneMinAlt    = glGetUniformLocation(atmoProg, "uTuneMinAlt");
+    ua_tuneMaxAlt    = glGetUniformLocation(atmoProg, "uTuneMaxAlt");
+    ua_debugCoverage = glGetUniformLocation(atmoProg, "uDebugCoverage");
 
     // --- Ribbon Shader (Trajectory Trails) ---
     const char* ribbonVertSrc = R"(
@@ -2967,42 +3311,60 @@ R"(
       uniform sampler2D uHistoryFrame;
       uniform sampler2D uDepthTex;
       uniform float uBlendFactor;
-      
       uniform mat4 uInvViewProj;
       uniform mat4 uPrevViewProj;
-
       out vec4 FragColor;
 
       void main() {
-        // 1. SAMPLING: Pure screen-space history
         vec4 current = texture(uCurrentFrame, vUV);
-        vec4 history = texture(uHistoryFrame, vUV);
 
-        // 2. VARIANCE CLIPPING (High quality anti-ghosting)
+        // 3x3 variance clipping (tighter gamma=1.0 vs old 1.5)
         vec2 texelSize = 1.0 / vec2(textureSize(uCurrentFrame, 0));
         vec3 m1 = vec3(0.0), m2 = vec3(0.0);
-        
-        // 3x3 neighborhood statistics for "soft" clamping
         for (int x = -1; x <= 1; x++) {
           for (int y = -1; y <= 1; y++) {
             vec3 s = texture(uCurrentFrame, vUV + vec2(float(x), float(y)) * texelSize).rgb;
-            m1 += s;
-            m2 += s * s;
+            m1 += s; m2 += s * s;
           }
         }
-        
         vec3 mu = m1 / 9.0;
         vec3 sigma = sqrt(max(vec3(0.0), m2 / 9.0 - mu * mu));
-        
-        // Clamp history to mu +/- N*sigma (variance box)
-        float gamma = 1.5; // Controls the "tightness" of history rejection
+        float gamma = 1.0;
         vec3 cMin = mu - gamma * sigma;
         vec3 cMax = mu + gamma * sigma;
-        
-        history.rgb = clamp(history.rgb, cMin, cMax);
 
-        // Standard blend factor (smooth accumulation when static, rejection when moving)
-        FragColor = mix(history, current, uBlendFactor);
+        // Depth-based reprojection
+        float depth = texture(uDepthTex, vUV).r;
+        bool isSkyPixel = depth >= 0.9999;
+
+        float blend = uBlendFactor;
+        vec2 historyUV = vUV;
+
+        if (!isSkyPixel) {
+          // Surface/geometry: reproject to previous frame UV
+          vec4 clipPos = vec4(vUV * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
+          vec4 worldPos = uInvViewProj * clipPos;
+          worldPos /= worldPos.w;
+          vec4 prevClip = uPrevViewProj * worldPos;
+          prevClip /= prevClip.w;
+          vec2 prevUV = prevClip.xy * 0.5 + 0.5;
+          bool valid = all(greaterThan(prevUV, vec2(0.01))) && all(lessThan(prevUV, vec2(0.99)));
+          if (valid) {
+            historyUV = prevUV;
+            float motion = length(prevUV - vUV);
+            blend = clamp(blend + motion * 4.0, blend, 0.9);
+          } else {
+            blend = 1.0;
+          }
+        } else {
+          // Sky / atmosphere pixel: camera rotation moves these everywhere,
+          // use higher blend so current frame dominates and ghosting is suppressed.
+          blend = max(blend, 0.4);
+        }
+
+        vec4 history = texture(uHistoryFrame, historyUV);
+        history.rgb = clamp(history.rgb, cMin, cMax);
+        FragColor = mix(history, current, blend);
       }
     )";
     taaProg = compileProgram(taaVertSrc, taaFragSrc);
@@ -3811,9 +4173,8 @@ R"(
     sendMat4(glGetUniformLocation(taaProg, "uInvViewProj"), invViewProj);
     sendMat4(glGetUniformLocation(taaProg, "uPrevViewProj"), prevViewProj);
 
-    // Blend factor: 10% new, 90% history for smooth accumulation
-    // First few frames use more of the current frame to converge faster
-    float blend = (taaFrameIndex < 8) ? 0.5f : 0.1f;
+    // Blend factor: current-frame weight (higher = less ghosting, less AA smoothing)
+    float blend = (taaFrameIndex < 4) ? 0.6f : 0.2f;
     if (taaBlendOverride >= 0.0f) blend = taaBlendOverride; // Allow external override
     glUniform1f(glGetUniformLocation(taaProg, "uBlendFactor"), blend);
 
@@ -4463,6 +4824,18 @@ R"(
 
     // Pass cloud toggle
     glUniform1f(ua_showClouds, showClouds ? 1.0f : 0.0f);
+
+    // Pass tunable cloud parameters
+    glUniform1f(ua_tuneCovLo,     cloudTuneParams.covLo);
+    glUniform1f(ua_tuneCovHi,     cloudTuneParams.covHi);
+    glUniform1f(ua_tuneThreshLo,  cloudTuneParams.threshLo);
+    glUniform1f(ua_tuneThreshHi,  cloudTuneParams.threshHi);
+    glUniform1f(ua_tuneErosion,   cloudTuneParams.erosion);
+    glUniform1f(ua_tuneDensity,   cloudTuneParams.density);
+    glUniform1f(ua_tuneExtinction,cloudTuneParams.extinction);
+    glUniform1f(ua_tuneMinAlt,    cloudTuneParams.minAlt);
+    glUniform1f(ua_tuneMaxAlt,    cloudTuneParams.maxAlt);
+    glUniform1f(ua_debugCoverage, (float)cloudTuneParams.debugMode);
 
     // Bind Depth Texture for Physical Terrain Occlusion
     glUniform2f(ua_res, (float)taaWidth, (float)taaHeight);
