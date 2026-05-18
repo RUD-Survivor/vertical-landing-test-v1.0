@@ -459,9 +459,11 @@ public:
   GLint ua_debugCoverage=-1;
   GLint ua_noiseTex3D=-1;
   GLint ua_coverTex3D=-1;
+  GLint ua_detailTex3D=-1;
   GLint ua_cloudSteps=-1, ua_lightSteps=-1;
   GLuint cloudCoverTex3D = 0;
   GLuint cloudNoiseTex3D = 0;
+  GLuint cloudDetailTex3D = 0;
   // Skybox uniforms
   GLint us_invViewProj = -1, us_skyVibrancy = -1;
 
@@ -1935,9 +1937,10 @@ public:
       uniform float uTuneMinAlt;
       uniform float uTuneMaxAlt;
       uniform float uDebugCoverage;  // 1.0 = output raw coverage as grayscale (F3 toggle)
-      uniform sampler3D uNoiseTex3D; // R=shape(6oct) G=erosion(4oct) B=warp(3oct) A=cov_large(5oct)
-      uniform sampler3D uCoverTex3D; // R=curl_lo(2oct) G=curl_hi(1oct) B=latNoise(3oct) A=cov_med(3oct)
-      uniform int uCloudSteps;  // distance-based LOD: 48(low-orbit) / 32(mid) / 16(high-orbit)
+      uniform sampler3D uNoiseTex3D;  // R=shape(6oct) G=erosion(4oct) B=warp(3oct) A=cov_large(5oct)
+      uniform sampler3D uCoverTex3D;  // R=curl_lo(2oct) G=curl_hi(1oct) B=latNoise(3oct) A=cov_med(3oct)
+      uniform sampler3D uDetailTex3D; // 32^3: R=midDetail(4oct) G=ero(3oct) B=fine(3oct) A=micro(2oct)
+      uniform int uCloudSteps;  // distance-based LOD: 128(in-cloud) / 48(low-orbit) / 32(mid) / 16(high)
       uniform int uLightSteps;  // distance-based LOD: 12 / 8 / 4
 
       out vec4 FragColor;
@@ -2309,12 +2312,23 @@ R"(
                       coverage *= smoothstep(eyeRadius * 0.35, eyeRadius, cycDist);
                   }
                   
-                  // Variable cloud top: topExp < 1 = tall Cb towers, topExp > 2 = short fair-weather Cu
-                  // Uses windSph1 at ~160km scale → each cloud cluster has its own characteristic height.
-                  float topNoise = fbm(windSph1 * 40.0 + vec3(t * 0.012), 2); // all 3 sphere components
-                  float topExp   = mix(0.85, 2.6, topNoise);
-                  float altDome  = clamp(1.0 - pow(altNorm, topExp), 0.0, 1.0);
-                  float altShape = altBase * altDome * 1.5;
+                  // Cloud type [0=stratus flat, 0.5=cumulus, 1=cumulonimbus tall] from low-freq spatial variation
+                  float cloudType = texture(uCoverTex3D, (warpedSph * 2.5 + vec3(31.4, 17.8, 42.1)) * INV8).r;
+                  // Per-type height profiles (altNorm: 0=cloud base, 1=7km top)
+                  float stratusGrad      = altBase * (1.0 - smoothstep(0.15, 0.30, altNorm)); // flat, low
+                  float cumulusGrad      = altBase * (1.0 - smoothstep(0.55, 0.80, altNorm)); // medium blobs
+                  float cumulonimbusGrad = altBase * (1.0 - smoothstep(0.90, 1.00, altNorm)); // tall towers
+                  // Lower-freq top noise (scale 8 vs old 40) → large-scale Cb vs stratus regions
+                  float topNoise  = texture(uCoverTex3D, (windSph1 * 8.0 + vec3(53.2, 29.7, 71.4 + t * 0.01)) * INV8).r;
+                  float topHeight = mix(0.40, 1.00, topNoise); // cloud top at 40%–100% of layer thickness
+                  float topMask   = 1.0 - smoothstep(topHeight - 0.06, topHeight + 0.06, altNorm);
+                  // Blend height profiles by cloud type, then cut off above per-cluster top
+                  float heightGradient = mix(
+                      mix(stratusGrad, cumulusGrad, smoothstep(0.0, 0.5, cloudType)),
+                      cumulonimbusGrad,
+                      smoothstep(0.5, 1.0, cloudType)
+                  ) * topMask;
+                  float altShape = heightGradient * 1.5;
 
                   // TRUE 3D sphere coordinates: use all 3 components of windSph1.
                   // windSph1.z = sin(lat): moving north at equator changes tc.z → N-S variation ✓
@@ -2330,7 +2344,10 @@ R"(
                       vec3 warpedTc = tc + vec3(warp * 0.4, warp * 0.4, warp * 0.2) + vec3(t * 0.02);
                       n = fbm(warpedTc, 4);                                // software: aperiodic, no grid artifact
                       float ero = texture(uNoiseTex3D, tc * 0.2875 + vec3(-t * 0.04, t * 0.03, 0.0)).g; // replaces fbm(tc*2.3, 4)
-                      n -= ero * uTuneErosion;
+                      // Near cloud top: invert erosion direction → cauliflower turrets (cumulus/Cb tops)
+                      float topFraction = smoothstep(topHeight * 0.5, topHeight * 0.95, altNorm);
+                      float eroDir = mix(ero, 1.0 - ero, topFraction);
+                      n -= eroDir * uTuneErosion;
                       // Proximity LOD: modulate n BEFORE smoothstep for visible cloud sub-structure
                       float viewDist = length(uCamPos - p);
                       // 250km: Perlin-Worley cauliflower — added only inside existing clouds to avoid dots
@@ -2340,20 +2357,41 @@ R"(
                           float cellDetail = (1.0 - worley3d(p * 0.04 + vec3(t * 0.03))) * 0.16 * wm;
                           n += cellDetail * smoothstep(0.3, 0.55, n);
                       }
-                      // 80km: 3km bumps and cauliflower at cloud edges
-                      if (viewDist < 80.0) {
-                          float w1 = 1.0 - smoothstep(10.0, 80.0, viewDist);
-                          n += fbm(p * 0.3 + vec3(t * 0.12, -t * 0.08, t * 0.05), 3) * 0.13 * w1;
+                      // 5km: mid-freq detail via tiled 32^3 texture, tile=220m, 6.9m/voxel
+                      if (viewDist < 5.0) {
+                          float w1  = 1.0 - smoothstep(1.0, 5.0, viewDist);
+                          const float T1 = 0.22;
+                          vec3  ti1 = mod(floor(p / T1), 256.0);
+                          float rot1 = fract(sin(dot(ti1, vec3(127.1, 311.7, 74.7))) * 43758.55) * 6.2832;
+                          float c1 = cos(rot1), s1 = sin(rot1);
+                          vec3  fp1 = fract(p / T1);
+                          vec2  rxy1 = vec2(fp1.x*c1 - fp1.y*s1, fp1.x*s1 + fp1.y*c1);
+                          float mid = texture(uDetailTex3D, vec3(rxy1, fp1.z)).r;
+                          n += (mid - 0.5) * 0.15 * w1;
                       }
-                      // 10km: fine boiling surface texture visible from inside cloud
-                      if (viewDist < 10.0) {
-                          float w2 = 1.0 - smoothstep(1.0, 10.0, viewDist);
-                          n += fbm(p * 2.5 + vec3(-t * 0.20, t * 0.28, t * 0.10), 3) * 0.10 * w2;
+                      // 1km: fine-grain erosion, tile=50m, 1.56m/voxel
+                      if (viewDist < 1.0) {
+                          float w2  = 1.0 - smoothstep(0.2, 1.0, viewDist);
+                          const float T2 = 0.05;
+                          vec3  ti2 = mod(floor(p / T2), 256.0);
+                          float rot2 = fract(sin(dot(ti2, vec3(269.5, 183.3, 246.1))) * 43758.55) * 6.2832;
+                          float c2 = cos(rot2), s2 = sin(rot2);
+                          vec3  fp2 = fract(p / T2);
+                          vec2  rxy2 = vec2(fp2.x*c2 - fp2.y*s2, fp2.x*s2 + fp2.y*c2);
+                          float fine = texture(uDetailTex3D, vec3(rxy2, fp2.z)).g;
+                          n += (fine - 0.5) * 0.10 * w2;
                       }
-                      // 1.5km: micro-detail for flying through clouds
-                      if (viewDist < 1.5) {
-                          float w3 = 1.0 - smoothstep(0.15, 1.5, viewDist);
-                          n += fbm(p * 18.0 + vec3(t * 0.40, -t * 0.30, t * 0.22), 2) * 0.05 * w3;
+                      // 200m: micro-detail for flying through clouds, tile=10m, 0.31m/voxel
+                      if (viewDist < 0.2) {
+                          float w3   = 1.0 - smoothstep(0.02, 0.2, viewDist);
+                          const float T3 = 0.010;
+                          vec3  ti3  = mod(floor(p / T3), 256.0);
+                          float rot3 = fract(sin(dot(ti3, vec3(113.5, 271.9, 124.6))) * 43758.55) * 6.2832;
+                          float c3 = cos(rot3), s3 = sin(rot3);
+                          vec3  fp3  = fract(p / T3);
+                          vec2  rxy3 = vec2(fp3.x*c3 - fp3.y*s3, fp3.x*s3 + fp3.y*c3);
+                          float micro = texture(uDetailTex3D, vec3(rxy3, fp3.z)).b;
+                          n += (micro - 0.5) * 0.06 * w3;
                       }
                       // ─────────────────────────────────────────────────────────────────
                   } else {
@@ -2831,10 +2869,12 @@ R"(
     ua_debugCoverage = glGetUniformLocation(atmoProg, "uDebugCoverage");
     ua_noiseTex3D    = glGetUniformLocation(atmoProg, "uNoiseTex3D");
     ua_coverTex3D    = glGetUniformLocation(atmoProg, "uCoverTex3D");
+    ua_detailTex3D   = glGetUniformLocation(atmoProg, "uDetailTex3D");
     ua_cloudSteps    = glGetUniformLocation(atmoProg, "uCloudSteps");
     ua_lightSteps    = glGetUniformLocation(atmoProg, "uLightSteps");
     bakeCloudNoise();
     bakeCoverNoise();
+    bakeDetailNoise();
 
     // --- Ribbon Shader (Trajectory Trails) ---
     const char* ribbonVertSrc = R"(
@@ -4939,6 +4979,80 @@ R"(
     std::cout << " done." << std::endl;
   }
 
+  void bakeDetailNoise() {
+    // 32^3 RGBA8 high-frequency detail texture for near-field cloud detail (< 5km view distance).
+    // Tiled in world space; 32 voxels per tile → resolution scales with tile size:
+    //   T1=220m → 6.9m/voxel, T2=50m → 1.56m/voxel, T3=10m → 0.31m/voxel
+    const int N = 32;
+
+    auto cpu_fract = [](float x) -> float { return x - floorf(x); };
+
+    auto cpu_hash = [&cpu_fract](float px, float py, float pz) -> float {
+        px = cpu_fract(px * 443.897f);
+        py = cpu_fract(py * 441.423f);
+        pz = cpu_fract(pz * 437.195f);
+        float d = px*(py+19.19f) + py*(pz+19.19f) + pz*(px+19.19f);
+        px += d; py += d; pz += d;
+        return cpu_fract((px + py) * pz);
+    };
+
+    auto cpu_noise3d = [&cpu_hash](float px, float py, float pz) -> float {
+        float ix=floorf(px), iy=floorf(py), iz=floorf(pz);
+        float fx=px-ix, fy=py-iy, fz=pz-iz;
+        fx = fx*fx*fx*(fx*(fx*6.0f-15.0f)+10.0f);
+        fy = fy*fy*fy*(fy*(fy*6.0f-15.0f)+10.0f);
+        fz = fz*fz*fz*(fz*(fz*6.0f-15.0f)+10.0f);
+        float n000=cpu_hash(ix,  iy,  iz  ), n100=cpu_hash(ix+1,iy,  iz  );
+        float n010=cpu_hash(ix,  iy+1,iz  ), n110=cpu_hash(ix+1,iy+1,iz  );
+        float n001=cpu_hash(ix,  iy,  iz+1), n101=cpu_hash(ix+1,iy,  iz+1);
+        float n011=cpu_hash(ix,  iy+1,iz+1), n111=cpu_hash(ix+1,iy+1,iz+1);
+        float nx00=n000+fx*(n100-n000), nx10=n010+fx*(n110-n010);
+        float nx01=n001+fx*(n101-n001), nx11=n011+fx*(n111-n011);
+        float nxy0=nx00+fy*(nx10-nx00), nxy1=nx01+fy*(nx11-nx01);
+        return nxy0+fz*(nxy1-nxy0);
+    };
+
+    auto cpu_fbm = [&cpu_noise3d](float px, float py, float pz, int octaves) -> float {
+        float v=0.0f, amp=0.5f;
+        for (int i=0; i<octaves; i++) {
+            v += cpu_noise3d(px, py, pz) * amp;
+            px=px*2.07f+0.131f; py=py*2.07f-0.217f; pz=pz*2.07f+0.344f;
+            amp *= 0.48f;
+        }
+        return v;
+    };
+
+    std::vector<uint8_t> data(N*N*N*4);
+    std::cout << "[Cloud] Baking detail noise texture (" << N << "^3)..." << std::flush;
+    for (int z=0; z<N; z++)
+    for (int y=0; y<N; y++)
+    for (int x=0; x<N; x++) {
+        float px=(float)x/N, py=(float)y/N, pz=(float)z/N;
+        float r = cpu_fbm(px*8,        py*8, pz*8, 4);  // mid detail
+        float g = cpu_fbm(px*8+17.3f,  py*8, pz*8, 3);  // fine erosion
+        float b = cpu_fbm(px*8+31.9f,  py*8, pz*8, 3);  // finer
+        float a = cpu_fbm(px*8+53.7f,  py*8, pz*8, 2);  // micro
+        int idx=(z*N*N+y*N+x)*4;
+        auto clamp01 = [](float v) -> uint8_t {
+            int i = (int)(v * 255.0f + 0.5f);
+            return (uint8_t)(i < 0 ? 0 : i > 255 ? 255 : i);
+        };
+        data[idx+0]=clamp01(r); data[idx+1]=clamp01(g);
+        data[idx+2]=clamp01(b); data[idx+3]=clamp01(a);
+    }
+    if (cloudDetailTex3D) glDeleteTextures(1, &cloudDetailTex3D);
+    glGenTextures(1, &cloudDetailTex3D);
+    glBindTexture(GL_TEXTURE_3D, cloudDetailTex3D);
+    glTexImage3D(GL_TEXTURE_3D, 0, GL_RGBA8, N, N, N, 0, GL_RGBA, GL_UNSIGNED_BYTE, data.data());
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_REPEAT);
+    glBindTexture(GL_TEXTURE_3D, 0);
+    std::cout << " done." << std::endl;
+  }
+
   void drawAtmosphere(const Mesh& sphereMesh, const Mat4& model,
                       const Vec3& camPos, const Vec3& lightDir,
                       const Vec3& planetCenter, float surfaceRadius, float outerRadius, double time, int planetIdx, float sunVisibility, bool showClouds) {
@@ -5016,9 +5130,10 @@ R"(
     {
         float camAlt = (camPos - planetCenter).length() - surfaceRadius;
         int cSteps, lSteps;
-        if      (camAlt < 500.0f)  { cSteps = 48; lSteps = 12; }
-        else if (camAlt < 5000.0f) { cSteps = 32; lSteps =  8; }
-        else                       { cSteps = 16; lSteps =  4; }
+        if      (camAlt < 15.0f)   { cSteps = 128; lSteps = 16; }  // inside cloud layer
+        else if (camAlt < 500.0f)  { cSteps = 48;  lSteps = 12; }
+        else if (camAlt < 5000.0f) { cSteps = 32;  lSteps =  8; }
+        else                       { cSteps = 16;  lSteps =  4; }
         glUniform1i(ua_cloudSteps, cSteps);
         glUniform1i(ua_lightSteps, lSteps);
     }
@@ -5030,6 +5145,10 @@ R"(
     glActiveTexture(GL_TEXTURE9);
     glBindTexture(GL_TEXTURE_3D, cloudCoverTex3D);
     glUniform1i(ua_coverTex3D, 9);
+
+    glActiveTexture(GL_TEXTURE10);
+    glBindTexture(GL_TEXTURE_3D, cloudDetailTex3D);
+    glUniform1i(ua_detailTex3D, 10);
 
     // --- Graphics State for Volumetric Shell ---
     glDisable(GL_DEPTH_TEST);
