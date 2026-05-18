@@ -458,6 +458,9 @@ public:
   GLint ua_tuneErosion=-1, ua_tuneDensity=-1, ua_tuneExtinction=-1, ua_tuneMinAlt=-1, ua_tuneMaxAlt=-1;
   GLint ua_debugCoverage=-1;
   GLint ua_noiseTex3D=-1;
+  GLint ua_coverTex3D=-1;
+  GLint ua_cloudSteps=-1, ua_lightSteps=-1;
+  GLuint cloudCoverTex3D = 0;
   GLuint cloudNoiseTex3D = 0;
   // Skybox uniforms
   GLint us_invViewProj = -1, us_skyVibrancy = -1;
@@ -1932,15 +1935,16 @@ public:
       uniform float uTuneMinAlt;
       uniform float uTuneMaxAlt;
       uniform float uDebugCoverage;  // 1.0 = output raw coverage as grayscale (F3 toggle)
-      uniform sampler3D uNoiseTex3D; // Precomputed 3D FBM: R=shape(6oct) G=erosion(4oct) B=warp(3oct)
+      uniform sampler3D uNoiseTex3D; // R=shape(6oct) G=erosion(4oct) B=warp(3oct) A=cov_large(5oct)
+      uniform sampler3D uCoverTex3D; // R=curl_lo(2oct) G=curl_hi(1oct) B=latNoise(3oct) A=cov_med(3oct)
+      uniform int uCloudSteps;  // distance-based LOD: 48(low-orbit) / 32(mid) / 16(high-orbit)
+      uniform int uLightSteps;  // distance-based LOD: 12 / 8 / 4
 
       out vec4 FragColor;
 
       #define PI 3.14159265359
 
-      // 步进采样数：采样越多，过渡越平滑，但性能消耗越高。
-      const int PRIMARY_STEPS = 72; // 主光线步进数
-      const int LIGHT_STEPS = 20;   // 辅助（向太阳）的光线步进数
+      const int PRIMARY_STEPS = 72;
       
       // --- Dynamic Atmosphere Parameters ---
       vec3 gRayleighCoeff;
@@ -2251,29 +2255,31 @@ R"(
                   // emerge from FBM extrema without any explicit vortex placement.
                   const float EPS = 0.06;
                   // Lo scale 1.5 → vortex diameter ~4000km; 4-6 vortices visible per hemisphere
+                  // Coverage FBMs → baked 3D textures: fbm(sph*S+seed,N) ≡ texture((sph*S+seed)*INV8)
+                  // BAKE_SCALE=8; tile period = 8/S sphere-radii → full globe < 2 tiles for S≤1.5.
+                  const float INV8 = 0.125;
                   vec3 seedLo = vec3(t * 0.003, 0.0, t * 0.002);
-                  float pLo_pu = fbm(coverageSph * 1.5 + wAxis * EPS + seedLo, 2);
-                  float pLo_mu = fbm(coverageSph * 1.5 - wAxis * EPS + seedLo, 2);
-                  float pLo_pv = fbm(coverageSph * 1.5 + vAxis * EPS + seedLo, 2);
-                  float pLo_mv = fbm(coverageSph * 1.5 - vAxis * EPS + seedLo, 2);
-                  float curlU_lo = -(pLo_pv - pLo_mv);  // rotate gradient 90°
+                  float pLo_pu = texture(uCoverTex3D,(coverageSph*1.5+wAxis*EPS+seedLo)*INV8).r;
+                  float pLo_mu = texture(uCoverTex3D,(coverageSph*1.5-wAxis*EPS+seedLo)*INV8).r;
+                  float pLo_pv = texture(uCoverTex3D,(coverageSph*1.5+vAxis*EPS+seedLo)*INV8).r;
+                  float pLo_mv = texture(uCoverTex3D,(coverageSph*1.5-vAxis*EPS+seedLo)*INV8).r;
+                  float curlU_lo = -(pLo_pv - pLo_mv);
                   float curlV_lo =  (pLo_pu - pLo_mu);
                   // Hi scale 6.0 → mesoscale eddies ~1000km
                   vec3 seedHi = vec3(91.2 + t * 0.005, 5.1, 22.0);
-                  float pHi_pu = fbm(coverageSph * 6.0 + wAxis * EPS + seedHi, 1);
-                  float pHi_mu = fbm(coverageSph * 6.0 - wAxis * EPS + seedHi, 1);
-                  float pHi_pv = fbm(coverageSph * 6.0 + vAxis * EPS + seedHi, 1);
-                  float pHi_mv = fbm(coverageSph * 6.0 - vAxis * EPS + seedHi, 1);
+                  float pHi_pu = texture(uCoverTex3D,(coverageSph*6.0+wAxis*EPS+seedHi)*INV8).g;
+                  float pHi_mu = texture(uCoverTex3D,(coverageSph*6.0-wAxis*EPS+seedHi)*INV8).g;
+                  float pHi_pv = texture(uCoverTex3D,(coverageSph*6.0+vAxis*EPS+seedHi)*INV8).g;
+                  float pHi_mv = texture(uCoverTex3D,(coverageSph*6.0-vAxis*EPS+seedHi)*INV8).g;
                   float curlU_hi = -(pHi_pv - pHi_mv);
                   float curlV_hi =  (pHi_pu - pHi_mu);
-                  // grad≈3.0 for scale 1.5 2oct; ≈6.0 for scale 6.0 1oct → raw curl ≈ ±0.36/±0.72
                   float warpU = curlU_lo * 2.5 + curlU_hi * 1.0;
                   float warpV = curlV_lo * 2.5 + curlV_hi * 1.0;
                   vec3 warpedSph = normalize(coverageSph + wAxis * warpU + vAxis * warpV);
-                  float latNoise = fbm(coverageSph*4.0 + vec3(127.3, 88.1, 9.6+t*0.006), 3) - 0.5;
+                  float latNoise = texture(uCoverTex3D,(coverageSph*4.0+vec3(127.3,88.1,9.6+t*0.006))*INV8).b - 0.5;
                   float warpedLat = sph.z + latNoise * 0.40;
-                  float cov_large  = fbm(warpedSph * 0.8 + vec3(t * 0.004), 5);
-                  float cov_medium = fbm(warpedSph * 6.0 + vec3(t * 0.011, -t * 0.008, t * 0.013), 3);
+                  float cov_large  = texture(uNoiseTex3D,(warpedSph*0.8+vec3(t*0.004))*INV8).a;
+                  float cov_medium = texture(uCoverTex3D,(warpedSph*6.0+vec3(t*0.011,-t*0.008,t*0.013))*INV8).a;
                   float coverage = cov_large * 0.65 + cov_medium * 0.35;
                   float lat = warpedLat;
                   float itczB = exp(-(lat/0.34)*(lat/0.34));
@@ -2470,8 +2476,9 @@ R"(
           float t0, t1;
           if (!intersectSphere(p, lightDir, uOuterRadius, t0, t1) || t1 <= 0.0) return;
           float start = max(t0, 0.0);
-          float stepSize = (t1 - start) / float(LIGHT_STEPS);
-          for (int i = 0; i < LIGHT_STEPS; i++) {
+          float stepSize = (t1 - start) / float(uLightSteps);
+          for (int i = 0; i < 20; i++) {
+              if (i >= uLightSteps) break;
               vec3 pos = p + lightDir * (start + (float(i) + 0.5) * stepSize);
               float h = length(pos - uPlanetCenter) - uSurfaceRadius;
               // Hard cutoff for underground points to prevent light leaking through the planet core
@@ -2587,108 +2594,105 @@ R"(
           }
 )"
 R"(
-          // ── Dedicated Cloud Pass ──────────────────────────────────────────────
-          // Fine-step integration ONLY within the cloud altitude band.
-          // Always uses highDetail (6 octaves, ~40km features) regardless of camera altitude.
-          // Step size ≈ 2-5 km → well below Nyquist for 40km features → no Moire aliasing.
-          const int CLOUD_STEPS = 48;
+          // ── Dedicated Cloud Pass with Adaptive Stepping (F + G) ─────────────
+          // Outside cloud: bigStep=4× to skip empty air fast.
+          // Inside cloud: fineStep=1× for full density + lighting.
+          // Probe = single 3D texture fetch to decide which mode to use.
+          // uCloudSteps/uLightSteps are set per-frame from C++ based on camera altitude (G).
+          // MAX_CLOUD_ITER is a compile-time cap required by GLSL 3.30 drivers.
           float cloudInnerR = uSurfaceRadius + gCloudMinAlt;
           float cloudOuterR = uSurfaceRadius + gCloudMaxAlt;
 
           float cNear, cFar;
           bool hitOuter = intersectSphere(uCamPos, rayDir, cloudOuterR, cNear, cFar);
           if (hitOuter) {
-              float cStart, cEnd;
-              // Entry point: first intersection with outer shell (or 0 if inside)
-              cStart = (cNear < 0.0) ? 0.0 : cNear;
-              cEnd   = cFar;
+              float cStart = (cNear < 0.0) ? 0.0 : cNear;
+              float cEnd   = cFar;
 
-              // Clip to inner shell: if ray hits the planet surface, stop there
               float iNear, iFar;
               if (intersectSphere(uCamPos, rayDir, cloudInnerR, iNear, iFar) && iNear > 0.0) {
                   cEnd = min(cEnd, iNear);
               }
-              // Also clip to geometry depth (tFar already set above)
               cEnd = min(cEnd, tFar);
 
               float cloudSegLen = cEnd - cStart;
               if (cloudSegLen > 0.0) {
-                  float cStep = cloudSegLen / float(CLOUD_STEPS);
-                  float cJitter = screenHash(gl_FragCoord.xy + vec2(17.3, 31.7));
-                  cStart += cJitter * cStep;
+                  float fineStep = cloudSegLen / float(uCloudSteps);
+                  float bigStep  = fineStep * 4.0;
 
-                  // Accumulate atmosphere transmittance at cloud entry point
-                  // (approximate: use the transmittance from the primary pass scaled to entry)
+                  float cJitter = screenHash(gl_FragCoord.xy + vec2(17.3, 31.7));
                   float entryFrac = clamp(cStart / max(tFar, 0.001), 0.0, 1.0);
                   vec3 atmTransAtCloud = exp(-(gRayleighCoeff * optDepthR + gMieCoeff * optDepthM + gOzoneCoeff * optDepthO) * entryFrac);
 
-                  for (int ci = 0; ci < CLOUD_STEPS; ci++) {
-                      vec3 cPos = uCamPos + rayDir * (cStart + (float(ci) + 0.5) * cStep);
+                  float tPos = cStart + cJitter * fineStep;
+                  bool inCloud = false;
+                  const int MAX_CLOUD_ITER = 96;
+
+                  for (int ci = 0; ci < MAX_CLOUD_ITER; ci++) {
+                      if (tPos >= cEnd) break;
+
+                      vec3 cPos = uCamPos + rayDir * tPos;
                       float ch = max(length(cPos - uPlanetCenter) - uSurfaceRadius, 0.0);
 
-                      float dC = cloudDensity(cPos, ch, true) * cStep;  // always highDetail
-                      // Limb fade: when the ray is nearly tangent to the surface, it integrates through
-                      // thousands of km of cloud horizontally → solid white stripe artifact at horizon.
-                      // Fade based on the ANGLE between ray and the sample point's radial direction:
-                      //   abs(dot) = 1 → ray is radial (looking down/up) → no fade
-                      //   abs(dot) = 0 → ray is tangential → full fade
-                      vec3 sampleUp = normalize(cPos - uPlanetCenter);
-                      float tangFrac = 1.0 - abs(dot(rayDir, sampleUp)); // 0=radial, 1=tangential
+                      // Cheap probe: coarse shape from baked texture (1 tex fetch, no wind warp).
+                      // Threshold 0.20 is below maskLo=0.236 so thin cloud rarely escapes big-step mode.
+                      vec3 probeSph = normalize(cPos - uPlanetCenter);
+                      float probeVal = texture(uNoiseTex3D, probeSph * 0.125).r;
+
+                      if (!inCloud && probeVal <= 0.20) {
+                          tPos += bigStep;
+                          continue;
+                      }
+                      if (inCloud && probeVal < 0.18) {
+                          inCloud = false;
+                          tPos += bigStep;
+                          continue;
+                      }
+                      inCloud = true;
+
+                      float dC = cloudDensity(cPos, ch, true) * fineStep;
+
+                      // Limb fade: tangential rays integrate km of cloud → white band artifact.
+                      float tangFrac = 1.0 - abs(dot(rayDir, probeSph));
                       dC *= 1.0 - smoothstep(0.82, 0.97, tangFrac);
-                      if (dC < 0.0001) continue;
+                      if (dC < 0.0001) { tPos += fineStep; continue; }
 
                       optDepthC += dC;
 
-                      // Sun optical depth through cloud column
                       float cLightR, cLightM, cLightO, cLightC;
                       getOpticalDepth(cPos, uLightDir, cLightR, cLightM, cLightO, cLightC);
 
-                      // ── Direct sun: wavelength-dependent orange/red at terminator ──
                       vec3 sunTint = exp(-(gRayleighCoeff * cLightR + gMieCoeff * 1.1 * cLightM + gOzoneCoeff * cLightO));
 
-                      // ── Multiple scattering approximation (Jimenez 2016) ─────────────
-                      // Real clouds: photons scatter many times inside → interior stays
-                      // bright and the dark-underside gradient is soft, not harsh.
-                      // Approximate as 3-term geometric series of attenuated Beer-Lambert.
                       float tauCloud = gCloudExtinction.x * (optDepthC + cLightC);
                       float ms0 = exp(-tauCloud);
                       float ms1 = exp(-tauCloud * 0.5) * 0.5;
                       float ms2 = exp(-tauCloud * 0.25) * 0.25;
-                      float ms3 = exp(-tauCloud * 0.125) * 0.125; // 4th order: keeps cloud interiors bright
+                      float ms3 = exp(-tauCloud * 0.125) * 0.125;
                       float multiScatter = (ms0 + ms1 + ms2 + ms3) / 1.875;
-                      float powder = 1.0 - exp(-tauCloud * 2.0); // Silver lining: forward-scatter only
-                      float silverMask = max(0.0, cosTheta);        // only brightens sun-facing rays
+                      float powder = 1.0 - exp(-tauCloud * 2.0);
+                      float silverMask = max(0.0, cosTheta);
                       float cloudAtt = multiScatter * mix(1.0, powder, 0.55 * silverMask);
 
-                      // ── Height-based AO: dark underbelly, bright tops ────────────────
-                      // Approximates the vertical optical depth of the cloud mass above.
-                      // Layer-specific height: cumulus 3-7km gets its OWN 0-1 range for full AO contrast.
-                      // Using global band (3-14km) would make cumulus top only reach heightInBand=0.36 → dim.
                       float layerBase = (ch < 7.5) ? gCloudMinAlt : 8.0;
                       float layerTop  = (ch < 7.5) ? 7.0 : gCloudMaxAlt;
                       float heightInBand = clamp((ch - layerBase) / max(layerTop - layerBase, 0.1), 0.0, 1.0);
-                      float aoDirect  = mix(0.10, 1.0, pow(heightInBand, 0.35)); // strong dark underbelly → bright top
-                      float aoAmbient = mix(0.35, 1.0, heightInBand);            // sky blocked below
+                      float aoDirect  = mix(0.10, 1.0, pow(heightInBand, 0.35));
+                      float aoAmbient = mix(0.35, 1.0, heightInBand);
 
-                      // ── Sky ambient: orange/red near terminator, blue on day side ────
-                      // Even shadowed clouds near terminator glow warm — illuminated by
-                      // the orange scattered sky rather than direct sunlight.
-                      float sunElev = dot(normalize(cPos - uPlanetCenter), uLightDir);
+                      float sunElev = dot(probeSph, uLightDir);
                       float skyPathKm = min(8.0 / max(sunElev, 0.02), 60.0);
                       float skyVis = smoothstep(-0.5, 0.15, sunElev);
-                      float nightGlow = 0.012 * (1.0 - skyVis); // moonlit/earthshine ambient on night side
+                      float nightGlow = 0.012 * (1.0 - skyVis);
                       vec3 skyAmbColor = exp(-gRayleighCoeff * skyPathKm) * skyVis + vec3(nightGlow);
 
-                      // atmTransAtCloud contains view-path orange at the limb (long path).
-                      // Use only its luminance for dimming → color comes from sunTint
-                      // (orange/red when sun path is long = terminator) and skyAmbColor
-                      // (orange when sunElev≈0 = terminator). Orange now tracks terminator.
                       float atmLum = dot(atmTransAtCloud, vec3(0.299, 0.587, 0.114));
                       vec3 directContrib  = atmLum * sunTint  * cloudAtt * aoDirect;
                       vec3 ambientContrib = atmLum * skyAmbColor * 0.85 * aoAmbient;
                       sumCloud += dC * (directContrib + ambientContrib);
 
                       if (cloudAtt < 0.008) break;
+                      tPos += fineStep;
                   }
               }
           }
@@ -2826,7 +2830,11 @@ R"(
     ua_tuneMaxAlt    = glGetUniformLocation(atmoProg, "uTuneMaxAlt");
     ua_debugCoverage = glGetUniformLocation(atmoProg, "uDebugCoverage");
     ua_noiseTex3D    = glGetUniformLocation(atmoProg, "uNoiseTex3D");
+    ua_coverTex3D    = glGetUniformLocation(atmoProg, "uCoverTex3D");
+    ua_cloudSteps    = glGetUniformLocation(atmoProg, "uCloudSteps");
+    ua_lightSteps    = glGetUniformLocation(atmoProg, "uLightSteps");
     bakeCloudNoise();
+    bakeCoverNoise();
 
     // --- Ribbon Shader (Trajectory Trails) ---
     const char* ribbonVertSrc = R"(
@@ -4835,17 +4843,92 @@ R"(
         float r = cpu_fbm(px*8,    py*8,    pz*8,    6);
         float g = cpu_fbm(px*8,    py*8,    pz*8,    4);
         float b = cpu_fbm(px*8,    py*8,    pz*8,    3);
+        float a = cpu_fbm(px*8,    py*8,    pz*8,    5);  // cov_large
         int idx = (z*N*N + y*N + x)*4;
         auto clamp01 = [](float v) -> uint8_t {
             int i = (int)(v * 255.0f + 0.5f);
             return (uint8_t)(i < 0 ? 0 : i > 255 ? 255 : i);
         };
         data[idx+0]=clamp01(r); data[idx+1]=clamp01(g);
-        data[idx+2]=clamp01(b); data[idx+3]=255;
+        data[idx+2]=clamp01(b); data[idx+3]=clamp01(a);
     }
     if (cloudNoiseTex3D) glDeleteTextures(1, &cloudNoiseTex3D);
     glGenTextures(1, &cloudNoiseTex3D);
     glBindTexture(GL_TEXTURE_3D, cloudNoiseTex3D);
+    glTexImage3D(GL_TEXTURE_3D, 0, GL_RGBA8, N, N, N, 0, GL_RGBA, GL_UNSIGNED_BYTE, data.data());
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_REPEAT);
+    glBindTexture(GL_TEXTURE_3D, 0);
+    std::cout << " done." << std::endl;
+  }
+
+  void bakeCoverNoise() {
+    // Second 3D texture for coverage FBMs: R=curl_lo(2oct) G=curl_hi(1oct) B=latNoise(3oct) A=cov_med(3oct)
+    // All baked at BAKE_SCALE=8; sampled at (worldPos*SHADER_SCALE+seed)/8 to match fbm(worldPos*SHADER_SCALE+seed, N).
+    // B/A use different seed offsets (+12.3/+47.1) to keep latNoise and cov_medium statistically independent.
+    const int N = 128;
+
+    auto cpu_fract = [](float x) -> float { return x - floorf(x); };
+
+    auto cpu_hash = [&cpu_fract](float px, float py, float pz) -> float {
+        px = cpu_fract(px * 443.897f);
+        py = cpu_fract(py * 441.423f);
+        pz = cpu_fract(pz * 437.195f);
+        float d = px*(py+19.19f) + py*(pz+19.19f) + pz*(px+19.19f);
+        px += d; py += d; pz += d;
+        return cpu_fract((px + py) * pz);
+    };
+
+    auto cpu_noise3d = [&cpu_hash](float px, float py, float pz) -> float {
+        float ix=floorf(px), iy=floorf(py), iz=floorf(pz);
+        float fx=px-ix, fy=py-iy, fz=pz-iz;
+        fx = fx*fx*fx*(fx*(fx*6.0f-15.0f)+10.0f);
+        fy = fy*fy*fy*(fy*(fy*6.0f-15.0f)+10.0f);
+        fz = fz*fz*fz*(fz*(fz*6.0f-15.0f)+10.0f);
+        float n000=cpu_hash(ix,  iy,  iz  ), n100=cpu_hash(ix+1,iy,  iz  );
+        float n010=cpu_hash(ix,  iy+1,iz  ), n110=cpu_hash(ix+1,iy+1,iz  );
+        float n001=cpu_hash(ix,  iy,  iz+1), n101=cpu_hash(ix+1,iy,  iz+1);
+        float n011=cpu_hash(ix,  iy+1,iz+1), n111=cpu_hash(ix+1,iy+1,iz+1);
+        float nx00=n000+fx*(n100-n000), nx10=n010+fx*(n110-n010);
+        float nx01=n001+fx*(n101-n001), nx11=n011+fx*(n111-n011);
+        float nxy0=nx00+fy*(nx10-nx00), nxy1=nx01+fy*(nx11-nx01);
+        return nxy0+fz*(nxy1-nxy0);
+    };
+
+    auto cpu_fbm = [&cpu_noise3d](float px, float py, float pz, int octaves) -> float {
+        float v=0.0f, amp=0.5f;
+        for (int i=0; i<octaves; i++) {
+            v += cpu_noise3d(px, py, pz) * amp;
+            px=px*2.07f+0.131f; py=py*2.07f-0.217f; pz=pz*2.07f+0.344f;
+            amp *= 0.48f;
+        }
+        return v;
+    };
+
+    std::vector<uint8_t> data(N*N*N*4);
+    std::cout << "[Cloud] Baking coverage noise texture (" << N << "^3)..." << std::flush;
+    for (int z=0; z<N; z++)
+    for (int y=0; y<N; y++)
+    for (int x=0; x<N; x++) {
+        float px=(float)x/N, py=(float)y/N, pz=(float)z/N;
+        float r = cpu_fbm(px*8,         py*8, pz*8, 2); // curl lo (scale 1.5 in shader)
+        float g = cpu_fbm(px*8,         py*8, pz*8, 1); // curl hi (scale 6.0 in shader)
+        float b = cpu_fbm(px*8+12.3f,   py*8, pz*8, 3); // latNoise (scale 4.0), independent seed
+        float a = cpu_fbm(px*8+47.1f,   py*8, pz*8, 3); // cov_medium (scale 6.0), independent seed
+        int idx=(z*N*N+y*N+x)*4;
+        auto clamp01 = [](float v) -> uint8_t {
+            int i = (int)(v * 255.0f + 0.5f);
+            return (uint8_t)(i < 0 ? 0 : i > 255 ? 255 : i);
+        };
+        data[idx+0]=clamp01(r); data[idx+1]=clamp01(g);
+        data[idx+2]=clamp01(b); data[idx+3]=clamp01(a);
+    }
+    if (cloudCoverTex3D) glDeleteTextures(1, &cloudCoverTex3D);
+    glGenTextures(1, &cloudCoverTex3D);
+    glBindTexture(GL_TEXTURE_3D, cloudCoverTex3D);
     glTexImage3D(GL_TEXTURE_3D, 0, GL_RGBA8, N, N, N, 0, GL_RGBA, GL_UNSIGNED_BYTE, data.data());
     glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -4929,9 +5012,24 @@ R"(
     glBindTexture(GL_TEXTURE_2D, taaDepthTex);
     glUniform1i(ua_depthTex, 7);
 
+    // Distance-based LOD (G): cloud and light step counts scaled by camera altitude
+    {
+        float camAlt = (camPos - planetCenter).length() - surfaceRadius;
+        int cSteps, lSteps;
+        if      (camAlt < 500.0f)  { cSteps = 48; lSteps = 12; }
+        else if (camAlt < 5000.0f) { cSteps = 32; lSteps =  8; }
+        else                       { cSteps = 16; lSteps =  4; }
+        glUniform1i(ua_cloudSteps, cSteps);
+        glUniform1i(ua_lightSteps, lSteps);
+    }
+
     glActiveTexture(GL_TEXTURE8);
     glBindTexture(GL_TEXTURE_3D, cloudNoiseTex3D);
     glUniform1i(ua_noiseTex3D, 8);
+
+    glActiveTexture(GL_TEXTURE9);
+    glBindTexture(GL_TEXTURE_3D, cloudCoverTex3D);
+    glUniform1i(ua_coverTex3D, 9);
 
     // --- Graphics State for Volumetric Shell ---
     glDisable(GL_DEPTH_TEST);

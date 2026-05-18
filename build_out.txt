@@ -1,12 +1,3 @@
-'vswhere.exe' is not recognized as an internal or external command,
-operable program or batch file.
-**********************************************************************
-** Visual Studio 2026 Developer Command Prompt v18.0
-** Copyright (c) 2025 Microsoft Corporation
-**********************************************************************
-[DEBUG:ext\vcvars.bat] Found potential v145 version file: 'Microsoft.VCToolsVersion.VC.14.50.18.0.txt'
-[DEBUG:ext\vcvars.bat] Testing v145 version file: 'Microsoft.VCToolsVersion.VC.14.50.18.0.txt'
-[vcvarsall.bat] Environment initialized for: 'x64'
 用于 x64 的 Microsoft (R) C/C++ 优化编译器 19.50.35724 版
 版权所有(C) Microsoft Corporation。保留所有权利。
 
