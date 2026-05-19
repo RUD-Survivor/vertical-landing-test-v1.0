@@ -1,6 +1,8 @@
 #include "cloud_system.h"
 #include <vector>
 #include <iostream>
+#include <fstream>
+#include <sstream>
 #include <cmath>
 #include <algorithm>
 
@@ -92,6 +94,19 @@ static uint8_t clamp01_u8(float v) {
 }
 
 // ─── CloudSystem public API ───────────────────────────────────────────────────
+
+bool CloudSystem::loadGLSL(const char* path) {
+    std::ifstream f(path);
+    if (!f.is_open()) {
+        std::cerr << "[CloudSystem] Cannot open GLSL file: " << path << std::endl;
+        return false;
+    }
+    std::ostringstream ss;
+    ss << f.rdbuf();
+    m_glsl = ss.str();
+    std::cout << "[CloudSystem] Loaded cloud.glsl (" << m_glsl.size() << " bytes)" << std::endl;
+    return true;
+}
 
 void CloudSystem::init(GLuint prog) {
     ua_time       = glGetUniformLocation(prog, "uCloudTime");

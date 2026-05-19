@@ -1,5 +1,6 @@
 #pragma once
 #include <glad/glad.h>
+#include <string>
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CloudSystem — self-contained volumetric cloud GPU/CPU subsystem.
@@ -41,6 +42,13 @@ class CloudSystem {
 public:
     CloudTuneParams tuneParams;
 
+    // Load cloud.glsl from disk; must be called BEFORE shader compilation.
+    // Returns false and prints an error if the file cannot be opened.
+    bool loadGLSL(const char* path);
+
+    // Returns the loaded GLSL source (empty string if loadGLSL not yet called).
+    const char* glslSource() const { return m_glsl.c_str(); }
+
     // Grab all uniform locations from prog and bake the four noise textures.
     // Must be called once after the atmosphere shader program has been compiled.
     void init(GLuint prog);
@@ -68,6 +76,9 @@ private:
     GLint ua_erosion = -1, ua_density = -1, ua_extinction = -1;
     GLint ua_minAlt = -1, ua_maxAlt = -1, ua_debug = -1;
     GLint ua_noiseT = -1, ua_coverT = -1, ua_detailT = -1, ua_weatherT = -1;
+
+    // Loaded GLSL source (cloud.glsl contents)
+    std::string m_glsl;
 
     // CPU bake functions — each builds a texture from scratch at startup.
     void bakeNoise();    // Perlin-Worley + tileable Worley
