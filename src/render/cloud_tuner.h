@@ -20,7 +20,7 @@ struct CloudTuner {
     void render(Renderer* r2d, Renderer3D* r3d, float mx, float my, bool lmb) {
         if (!visible) return;
 
-        auto& p = r3d->cloudTuneParams;
+        auto& p = r3d->cloudSystem.tuneParams;
 
         // Panel layout (NDC)
         const float PX  = -0.99f;  // left edge

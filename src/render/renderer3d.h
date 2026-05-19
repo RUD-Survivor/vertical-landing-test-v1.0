@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // ==========================================================
 // renderer3d.h — 3D Rendering Pipeline
 // Requires: glad, math3d.h
@@ -15,6 +15,7 @@
 #include "vegetation_system.h"
 #include "svo_system.h"
 #include "svo_meshing.h"
+#include "cloud_system.h"
 
 inline void sendMat4(GLint loc, const Mat4& m) {
     float arr[16];
@@ -416,19 +417,7 @@ public:
     return tex;
   }
 
-  // Cloud parameter tuning (set by CloudTuner panel, read by drawAtmosphere)
-  struct CloudTuneParams {
-      float covLo      = 0.300f; // coverage linear ramp low  (below → density=0)
-      float covHi      = 0.600f; // coverage linear ramp high (above → density=full)
-      float threshLo   = 0.260f; // shape noise mask low  (min(lo,hi) → smoothstep low)
-      float threshHi   = 0.450f; // shape noise mask high (max(lo,hi) → smoothstep high)
-      float erosion    = 0.217f;
-      float density    = 1.200f;
-      float extinction = 0.380f;
-      float minAlt     = 1.5f;
-      float maxAlt     = 14.0f;
-      int   debugMode = 0;  // 0=off, 1=coverage grayscale, 2=curl field color
-  } cloudTuneParams;
+  CloudSystem cloudSystem;
 
   GLuint program3d = 0;
   GLuint earthProgram = 0;
@@ -452,18 +441,8 @@ public:
   GLint ua_mvp = -1, ua_model = -1, ua_lightDir = -1, ua_viewPos = -1;
   GLint ua_camPos = -1, ua_planetCenter = -1, ua_innerRadius = -1, ua_outerRadius = -1, ua_surfaceRadius = -1;
   GLint ua_time = -1, ua_planetIdx = -1, ua_sunVisibility = -1, ua_showClouds = -1;
-  GLint ua_ringInner = -1, ua_ringOuter = -1, ua_cloudTime = -1, ua_cloudPhaseSin = -1, ua_cloudPhaseCos = -1;
-  GLint ua_frameIdx = -1, ua_res = -1, ua_invProj = -1, ua_depthTex = -1;
-  GLint ua_tuneCovLo=-1, ua_tuneCovHi=-1, ua_tuneThreshLo=-1, ua_tuneThreshHi=-1;
-  GLint ua_tuneErosion=-1, ua_tuneDensity=-1, ua_tuneExtinction=-1, ua_tuneMinAlt=-1, ua_tuneMaxAlt=-1;
-  GLint ua_debugCoverage=-1;
-  GLint ua_noiseTex3D=-1;
-  GLint ua_coverTex3D=-1;
-  GLint ua_detailTex3D=-1;
-  GLint ua_cloudSteps=-1, ua_lightSteps=-1;
-  GLuint cloudCoverTex3D = 0;
-  GLuint cloudNoiseTex3D = 0;
-  GLuint cloudDetailTex3D = 0;
+  GLint ua_ringInner = -1, ua_ringOuter = -1;
+  GLint ua_res = -1, ua_invProj = -1, ua_depthTex = -1;
   // Skybox uniforms
   GLint us_invViewProj = -1, us_skyVibrancy = -1;
 
@@ -1940,6 +1919,7 @@ public:
       uniform sampler3D uNoiseTex3D;  // R=PerlinWorley [probe] G=Worley [erosion] B=fbm(3oct) [warp] A=fbm(5oct) [cov_large]
       uniform sampler3D uCoverTex3D;  // R=curl_lo(2oct) G=curl_hi(1oct) B=latNoise(3oct) A=cov_med(3oct)
       uniform sampler3D uDetailTex3D; // 32^3: R=Worley(4x,50m), G=Worley(8x,25m), B=Worley(16x,12.5m), A=fBm blend
+      uniform sampler2D uWeatherMap;  // 2048x1024: R=coverage_bias, G=cloud_type, B=humidity, A=land_mask
       uniform int uCloudSteps;  // distance-based LOD: 128(in-cloud) / 48(low-orbit) / 32(mid) / 16(high)
       uniform int uLightSteps;  // distance-based LOD: 12 / 8 / 4
 
@@ -2190,16 +2170,10 @@ public:
           float warpedLat = sph.z + latNoise * 0.40;
           float cov = fbm(ws * 0.8 + vec3(t*0.004), 5) * 0.65
                     + fbm(ws * 6.0 + vec3(t*0.011, -t*0.008, t*0.013), 3) * 0.35;
-          float lat = warpedLat;
-          float latCloud = clamp(
-              0.28 + 0.45*exp(-(lat/0.34)*(lat/0.34))
-            + 0.38*exp(-((lat-0.766)/0.42)*((lat-0.766)/0.42))
-            + 0.38*exp(-((lat+0.766)/0.42)*((lat+0.766)/0.42))
-            + 0.20*exp(-((lat-0.940)/0.34)*((lat-0.940)/0.34))
-            + 0.20*exp(-((lat+0.940)/0.34)*((lat+0.940)/0.34))
-            - 0.12*exp(-((abs(lat)-0.50)/0.28)*((abs(lat)-0.50)/0.28)),
-            0.28, 1.0);
-          return clamp(cov * latCloud, 0.0, 1.0);
+          vec2 rwUV = vec2(atan(ws.y, ws.x) * (0.5 / PI) + 0.5,
+                          asin(clamp(ws.z, -1.0, 1.0)) / PI + 0.5);
+          float wxCov = (uPlanetIdx == 3) ? texture(uWeatherMap, rwUV).r : 0.65;
+          return clamp(cov * wxCov, 0.0, 1.0);
       }
 )"
 R"(
@@ -2284,18 +2258,16 @@ R"(
                   float cov_large  = texture(uNoiseTex3D,(warpedSph*0.8+vec3(t*0.004))*INV8).a;
                   float cov_medium = texture(uCoverTex3D,(warpedSph*6.0+vec3(t*0.011,-t*0.008,t*0.013))*INV8).a;
                   float coverage = cov_large * 0.65 + cov_medium * 0.35;
-                  float lat = warpedLat;
-                  float itczB = exp(-(lat/0.34)*(lat/0.34));
-                  float ntmpB = exp(-((lat-0.766)/0.42)*((lat-0.766)/0.42));
-                  float stmpB = exp(-((lat+0.766)/0.42)*((lat+0.766)/0.42));
-                  float npolB = exp(-((lat-0.940)/0.34)*((lat-0.940)/0.34));
-                  float spolB = exp(-((lat+0.940)/0.34)*((lat+0.940)/0.34));
-                  // width 0.28 (was 0.18): smoother band edges; coeff 0.12 (was 0.28): half-depth clearing
-                  float subDry= exp(-((abs(lat)-0.50)/0.28)*((abs(lat)-0.50)/0.28));
-                  float latCloud = clamp(
-                      0.28 + 0.45*itczB + 0.38*ntmpB + 0.38*stmpB + 0.20*npolB + 0.20*spolB
-                    - 0.12*subDry, 0.28, 1.0);
-                  coverage = clamp(coverage * latCloud, 0.0, 1.0);
+                  // Global weather map: encodes land/sea climate distribution.
+                  // R=coverage_bias (desert≈0.04, ITCZ ocean≈0.82), G=cloud_type, B=humidity.
+                  // Equirectangular UV: atan→lon [-π,π]→[0,1]; asin→lat [-π/2,π/2]→[0,1].
+                  // Only applied for Earth (planetIdx==3); other planets keep unity scaling.
+                  vec2 wUV = vec2(
+                      atan(warpedSph.y, warpedSph.x) * (0.5 / PI) + 0.5,
+                      asin(clamp(warpedSph.z, -1.0, 1.0)) / PI + 0.5
+                  );
+                  vec4 weather = (uPlanetIdx == 3) ? texture(uWeatherMap, wUV) : vec4(0.65, 0.5, 0.6, 0.0);
+                  coverage = clamp(coverage * weather.r, 0.0, 1.0);
                   // Linear ramp (not smoothstep): preserves continuous coverage gradient.
                   // smoothstep's S-curve pushes coverage toward 0 or 1 → density becomes binary again.
                   float covRange = max(uTuneCovHi - uTuneCovLo, 0.001);
@@ -2313,7 +2285,7 @@ R"(
                   }
                   
                   // Cloud type [0=stratus flat, 0.5=cumulus, 1=cumulonimbus tall] from low-freq spatial variation
-                  float cloudType = texture(uCoverTex3D, (warpedSph * 2.5 + vec3(31.4, 17.8, 42.1)) * INV8).r;
+                  float cloudType = mix(texture(uCoverTex3D, (warpedSph * 2.5 + vec3(31.4, 17.8, 42.1)) * INV8).r, weather.g, 0.55);
                   // Per-type height profiles (altNorm: 0=cloud base, 1=7km top)
                   float stratusGrad      = altBase * (1.0 - smoothstep(0.15, 0.30, altNorm)); // flat, low
                   float cumulusGrad      = altBase * (1.0 - smoothstep(0.55, 0.80, altNorm)); // medium blobs
@@ -2343,7 +2315,15 @@ R"(
                       // Warp tile=2133km / erosion tile=278km: both indirect effects, not directly visible.
                       float warp = texture(uNoiseTex3D, tc * 0.0375).b;   // replaces fbm(tc*0.3, 3)
                       vec3 warpedTc = tc + vec3(warp * 0.4, warp * 0.4, warp * 0.2) + vec3(t * 0.02);
-                      n = fbm(warpedTc, 4);                                // software: aperiodic, no grid artifact
+                      // Perlin-Worley screen blend (Schneider 2015):
+                      // 3-oct FBM for aperiodic macro structure; baked inverted Worley (G→1-G) at the
+                      // same scale as octave-1 (warpedTc*0.125 → UV features at ~80km) carves organic
+                      // concavities at cell edges → cauliflower silhouette without circular artifacts.
+                      // Signed blend: (wInv-0.5)*(1-n)*0.50 → zero bias at mean wInv=0.5, ±0.10 push
+                      // at extremes; preserves coverage level while adding Worley curvature.
+                      n = fbm(warpedTc, 3);
+                      float wInv = 1.0 - texture(uNoiseTex3D, warpedTc * 0.125).g;
+                      n = n + (wInv - 0.5) * (1.0 - n) * 0.50;
                       float ero = texture(uNoiseTex3D, tc * 0.2875 + vec3(-t * 0.04, t * 0.03, 0.0)).g; // replaces fbm(tc*2.3, 4)
                       // Near cloud top: invert erosion direction → cauliflower turrets (cumulus/Cb tops)
                       float topFraction = smoothstep(topHeight * 0.5, topHeight * 0.95, altNorm);
@@ -2356,21 +2336,28 @@ R"(
                       // Screen-blend forced n→0.75 at ALL centers → uniformly opaque dots (polka-dot worse).
                       // Additive only gently boosts center; FBM & coverage still control existence.
                       {
+                          // Baked Worley (G channel, UV=p*S/8): hardware bilinear pre-filters high-freq →
+                          // eliminates temporal aliasing from runtime worley3d() near the isosurface.
+                          // Seed offsets /8 to convert from noise-space to UV-space.
                           vec3 pW = p + vec3(warp - 0.5, warp * 1.4 - 0.7, 0.5 - warp * 0.9) * 18.0;
-                          float c1 = 1.0 - worley3d(pW * 0.040 + vec3(7.31 + t * 0.018, 4.17, 2.73 + t * 0.012));
-                          float c2 = 1.0 - worley3d(pW * 0.078 + vec3(0.31, 3.52 + t * 0.022, 0.73));
+                          float c1 = 1.0 - texture(uNoiseTex3D, pW * 0.005   + vec3(0.914 + t * 0.00225, 0.521, 0.341 + t * 0.00150)).g;
+                          float c2 = 1.0 - texture(uNoiseTex3D, pW * 0.00975 + vec3(0.039, 0.440 + t * 0.00275, 0.091)).g;
                           n += (c1 * (0.4 + 0.6 * c2)) * 0.30 - 0.16;
                       }
-                      // Proximity LOD: modulate n BEFORE smoothstep for visible cloud sub-structure
+                      // Proximity LOD: modulate n BEFORE smoothstep for visible cloud sub-structure.
+                      // cloudExists gates all LOD sculpting so blocks can only REFINE existing clouds,
+                      // never CREATE new ones from empty space — prevents LOD-induced cloud pops.
                       float viewDist = length(uCamPos - p);
+                      float maskLoVal = min(uTuneThreshLo, uTuneThreshHi);
+                      float cloudExists = smoothstep(maskLoVal + 0.02, maskLoVal + 0.10, n);
                       // 250km: bidirectional Worley sculpt at cloud surface.
                       // cellVal>0.5 pushes n outward (puff bulge), <0.5 pushes inward (concavity).
                       // surfaceProx concentrates effect at the visible boundary, not cloud core.
                       if (viewDist < 250.0) {
                           float wm = 1.0 - smoothstep(80.0, 250.0, viewDist);
-                          float cellVal = 1.0 - worley3d(p * 0.04 + vec3(t * 0.03));
+                          float cellVal = 1.0 - texture(uNoiseTex3D, p * 0.005 + vec3(t * 0.00375, 0.0, 0.0)).g;
                           float surfaceProx = smoothstep(0.20, 0.50, n) * (1.0 - smoothstep(0.50, 0.70, n));
-                          n += (cellVal - 0.5) * 0.22 * wm * (0.3 + 0.7 * surfaceProx);
+                          n += (cellVal - 0.5) * 0.22 * wm * (0.3 + 0.7 * surfaceProx) * cloudExists;
                       }
                       // Block L: 8km-scale surface erosion, visible at 15-80km distance.
                       // Fills the gap between Block 1 (25km: too coarse at 15km) and Block M (2.6km: invisible >15km).
@@ -2378,21 +2365,20 @@ R"(
                       // surfW concentrates sculpt at cloud boundary (n≈maskLo), leaves cloud core intact.
                       if (viewDist < 80.0) {
                           float lm = 1.0 - smoothstep(40.0, 80.0, viewDist);
-                          float largeW = 1.0 - worley3d(p * 0.125 + vec3(t * 0.025, t * 0.015, 0.0));
+                          float largeW = 1.0 - texture(uNoiseTex3D, p * 0.015625 + vec3(t * 0.003125, t * 0.001875, 0.0)).g;
                           float largeSurf = smoothstep(0.15, 0.45, n) * (1.0 - smoothstep(0.45, 0.65, n));
-                          n += (largeW - 0.5) * 0.14 * lm * (0.30 + 0.70 * largeSurf);
+                          n += (largeW - 0.5) * 0.14 * lm * (0.30 + 0.70 * largeSurf) * cloudExists;
                       }
                       // Block M: 2.6km-scale bumps, visible at 2-30km.
                       if (viewDist < 30.0) {
                           float mm = 1.0 - smoothstep(15.0, 30.0, viewDist);
-                          float mesoW = 1.0 - worley3d(p * 0.380 + vec3(t * 0.06, t * 0.04, 0.0));
+                          float mesoW = 1.0 - texture(uNoiseTex3D, p * 0.04750 + vec3(t * 0.0075, t * 0.005, 0.0)).g;
                           float mesoSurf = smoothstep(0.15, 0.45, n) * (1.0 - smoothstep(0.45, 0.65, n));
-                          n += (mesoW - 0.5) * 0.18 * mm * (0.35 + 0.65 * mesoSurf);
+                          n += (mesoW - 0.5) * 0.18 * mm * (0.35 + 0.65 * mesoSurf) * cloudExists;
                       }
                       // Near-field detail: surface-weighted Worley erosion via 32^3 texture.
                       // surfW = 1 at cloud boundary (n≈maskLo), 0 in cloud core.
                       // Strong erosion at surface → cauliflower bumps; core stays solid.
-                      float maskLoVal = min(uTuneThreshLo, uTuneThreshHi);
                       if (viewDist < 8.0) {    // A channel: 200m tile, 50/25/12.5m cells
                           float dW1   = 1.0 - smoothstep(0.5, 8.0, viewDist);
                           vec3  uvA   = fract(p / 0.200 + vec3(0.137, 0.421, 0.073));
@@ -2421,13 +2407,15 @@ R"(
                       // ─────────────────────────────────────────────────────────────────
                   } else {
                       n = fbm(tc, 2);
-                      // Shadow-accuracy puff isolation: mirrors highDetail A2 exactly (warp + additive).
-                      // One extra tex fetch for pw — same sample as highDetail warp, negligible cost.
+                      // P-W screen blend (mirrors primary path; uses tc≈warpedTc, close enough for shadows).
+                      { float wInvS = 1.0 - texture(uNoiseTex3D, tc * 0.125).g;
+                        n = n + (wInvS - 0.5) * (1.0 - n) * 0.50; }
+                      // Shadow puff isolation: mirrors highDetail A2 (baked Worley, no runtime worley3d).
                       {
                           float pw = texture(uNoiseTex3D, tc * 0.0375).b;
                           vec3 pW = p + vec3(pw - 0.5, pw * 1.4 - 0.7, 0.5 - pw * 0.9) * 18.0;
-                          float c1 = 1.0 - worley3d(pW * 0.040 + vec3(7.31 + t * 0.018, 4.17, 2.73 + t * 0.012));
-                          float c2 = 1.0 - worley3d(pW * 0.078 + vec3(0.31, 3.52 + t * 0.022, 0.73));
+                          float c1 = 1.0 - texture(uNoiseTex3D, pW * 0.005   + vec3(0.914 + t * 0.00225, 0.521, 0.341 + t * 0.00150)).g;
+                          float c2 = 1.0 - texture(uNoiseTex3D, pW * 0.00975 + vec3(0.039, 0.440 + t * 0.00275, 0.091)).g;
                           n += (c1 * (0.4 + 0.6 * c2)) * 0.30 - 0.16;
                       }
                   }
@@ -2703,9 +2691,15 @@ R"(
               float cloudSegLen = cEnd - cStart;
               if (cloudSegLen > 0.0) {
                   float fineStep = cloudSegLen / float(uCloudSteps);
-                  float bigStep  = fineStep * 4.0;
+                  // Anti-boiling: inside/near cloud layer, halve bigStep and reduce jitter amplitude.
+                  // Root cause: IGN jitter shifts first-cloud-hit by up to 1 fineStep; bigStep=4x
+                  // causes the probe-based skip to jump over the entry region discontinuously → per-frame
+                  // first-hit variance at steep isosurface = violent boiling at close range.
+                  float camAlt_cloud = length(uCamPos - uPlanetCenter) - uSurfaceRadius;
+                  bool inCloudLayer  = (camAlt_cloud < gCloudMaxAlt + 5.0);
+                  float bigStep  = fineStep * (inCloudLayer ? 2.0 : 4.0);
 
-                  float cJitter = screenHash(gl_FragCoord.xy + vec2(17.3, 31.7));
+                  float cJitter = screenHash(gl_FragCoord.xy + vec2(17.3, 31.7)) * (inCloudLayer ? 0.20 : 1.0);
                   float entryFrac = clamp(cStart / max(tFar, 0.001), 0.0, 1.0);
                   vec3 atmTransAtCloud = exp(-(gRayleighCoeff * optDepthR + gMieCoeff * optDepthM + gOzoneCoeff * optDepthO) * entryFrac);
 
@@ -2719,10 +2713,15 @@ R"(
                       vec3 cPos = uCamPos + rayDir * tPos;
                       float ch = max(length(cPos - uPlanetCenter) - uSurfaceRadius, 0.0);
 
-                      // Cheap probe: coarse shape from baked texture (1 tex fetch, no wind warp).
-                      // Threshold 0.20 is below maskLo=0.236 so thin cloud rarely escapes big-step mode.
+                      // Probe at density-correlated scale (UV≈10, same as P-W blend in cloudDensity).
+                      // Old probeSph*0.125 (UV≈0.125) sampled a completely different noise region
+                      // than the density warpedTc*0.125 (UV≈10): probe decisions were uncorrelated
+                      // with actual cloud presence → clouds popped with any camera movement.
+                      // Fix: probeSph*10.0 matches the density UV, making probe threshold meaningful.
+                      // Time offset mirrors density's tc animation so probe tracks cloud drift.
                       vec3 probeSph = normalize(cPos - uPlanetCenter);
-                      float probeVal = texture(uNoiseTex3D, probeSph * 0.125).r;
+                      float probeT = uCloudTime * 0.004;
+                      float probeVal = texture(uNoiseTex3D, probeSph * 10.0 + vec3(probeT * 0.075, probeT * 0.05, probeT * 0.019)).r;
 
                       if (!inCloud && probeVal <= 0.20) {
                           tPos += bigStep;
@@ -2900,31 +2899,10 @@ R"(
     ua_showClouds = glGetUniformLocation(atmoProg, "uShowClouds");
     ua_ringInner = glGetUniformLocation(atmoProg, "uRingInner");
     ua_ringOuter = glGetUniformLocation(atmoProg, "uRingOuter");
-    ua_cloudTime = glGetUniformLocation(atmoProg, "uCloudTime");
-    ua_cloudPhaseSin = glGetUniformLocation(atmoProg, "uCloudPhaseSin");
-    ua_cloudPhaseCos = glGetUniformLocation(atmoProg, "uCloudPhaseCos");
-    ua_frameIdx = glGetUniformLocation(atmoProg, "uFrameIndex");
     ua_res = glGetUniformLocation(atmoProg, "uResolution");
     ua_invProj = glGetUniformLocation(atmoProg, "uInvProj");
     ua_depthTex = glGetUniformLocation(atmoProg, "uDepthTex");
-    ua_tuneCovLo     = glGetUniformLocation(atmoProg, "uTuneCovLo");
-    ua_tuneCovHi     = glGetUniformLocation(atmoProg, "uTuneCovHi");
-    ua_tuneThreshLo  = glGetUniformLocation(atmoProg, "uTuneThreshLo");
-    ua_tuneThreshHi  = glGetUniformLocation(atmoProg, "uTuneThreshHi");
-    ua_tuneErosion   = glGetUniformLocation(atmoProg, "uTuneErosion");
-    ua_tuneDensity   = glGetUniformLocation(atmoProg, "uTuneDensity");
-    ua_tuneExtinction= glGetUniformLocation(atmoProg, "uTuneExtinction");
-    ua_tuneMinAlt    = glGetUniformLocation(atmoProg, "uTuneMinAlt");
-    ua_tuneMaxAlt    = glGetUniformLocation(atmoProg, "uTuneMaxAlt");
-    ua_debugCoverage = glGetUniformLocation(atmoProg, "uDebugCoverage");
-    ua_noiseTex3D    = glGetUniformLocation(atmoProg, "uNoiseTex3D");
-    ua_coverTex3D    = glGetUniformLocation(atmoProg, "uCoverTex3D");
-    ua_detailTex3D   = glGetUniformLocation(atmoProg, "uDetailTex3D");
-    ua_cloudSteps    = glGetUniformLocation(atmoProg, "uCloudSteps");
-    ua_lightSteps    = glGetUniformLocation(atmoProg, "uLightSteps");
-    bakeCloudNoise();
-    bakeCoverNoise();
-    bakeDetailNoise();
+    cloudSystem.init(atmoProg);
 
     // --- Ribbon Shader (Trajectory Trails) ---
     const char* ribbonVertSrc = R"(
@@ -4877,274 +4855,6 @@ R"(
     glUseProgram(0);
   }
 
-  void bakeCloudNoise() {
-    // 128^3 RGBA8: R=PerlinWorley [probe+shape], G=Worley [erosion], B=fbm(3oct) [warp], A=fbm(5oct) [cov_large]
-    // R: screen-blend of fbm(4oct) and inverted Worley → compact puff shapes with Perlin continuity
-    // G: raw Worley distance → 0 at cell centers, 1 at edges → carves round pits when subtracted
-    const int N = 128;
-
-    auto cpu_fract = [](float x) -> float { return x - floorf(x); };
-
-    // Matches GLSL: p = fract(p * vec3(443.897, 441.423, 437.195));
-    //              p += dot(p, p.yzx + 19.19);  return fract((p.x+p.y)*p.z);
-    auto cpu_hash = [&cpu_fract](float px, float py, float pz) -> float {
-        px = cpu_fract(px * 443.897f);
-        py = cpu_fract(py * 441.423f);
-        pz = cpu_fract(pz * 437.195f);
-        float d = px*(py+19.19f) + py*(pz+19.19f) + pz*(px+19.19f);
-        px += d; py += d; pz += d;
-        return cpu_fract((px + py) * pz);
-    };
-
-    auto cpu_noise3d = [&cpu_hash](float px, float py, float pz) -> float {
-        float ix=floorf(px), iy=floorf(py), iz=floorf(pz);
-        float fx=px-ix, fy=py-iy, fz=pz-iz;
-        fx = fx*fx*fx*(fx*(fx*6.0f-15.0f)+10.0f);
-        fy = fy*fy*fy*(fy*(fy*6.0f-15.0f)+10.0f);
-        fz = fz*fz*fz*(fz*(fz*6.0f-15.0f)+10.0f);
-        float n000=cpu_hash(ix,  iy,  iz  ), n100=cpu_hash(ix+1,iy,  iz  );
-        float n010=cpu_hash(ix,  iy+1,iz  ), n110=cpu_hash(ix+1,iy+1,iz  );
-        float n001=cpu_hash(ix,  iy,  iz+1), n101=cpu_hash(ix+1,iy,  iz+1);
-        float n011=cpu_hash(ix,  iy+1,iz+1), n111=cpu_hash(ix+1,iy+1,iz+1);
-        float nx00=n000+fx*(n100-n000), nx10=n010+fx*(n110-n010);
-        float nx01=n001+fx*(n101-n001), nx11=n011+fx*(n111-n011);
-        float nxy0=nx00+fy*(nx10-nx00), nxy1=nx01+fy*(nx11-nx01);
-        return nxy0+fz*(nxy1-nxy0);
-    };
-
-    auto cpu_fbm = [&cpu_noise3d](float px, float py, float pz, int octaves) -> float {
-        float v=0.0f, amp=0.5f;
-        for (int i=0; i<octaves; i++) {
-            v += cpu_noise3d(px, py, pz) * amp;
-            px=px*2.07f+0.131f; py=py*2.07f-0.217f; pz=pz*2.07f+0.344f;
-            amp *= 0.48f;
-        }
-        return v;
-    };
-
-    // Matches GPU worley3d(): sqrt of min squared distance to feature points, capped at 1.
-    auto cpu_worley = [&cpu_fract](float px, float py, float pz) -> float {
-        float ix=floorf(px), iy=floorf(py), iz=floorf(pz);
-        float fx=px-ix, fy=py-iy, fz=pz-iz;
-        float md = 1.0f;
-        for (int x=-1; x<=1; x++) for (int y=-1; y<=1; y++) for (int z=-1; z<=1; z++) {
-            float bx=ix+x, by=iy+y, bz=iz+z;
-            float hx=cpu_fract(sinf(bx*127.1f+by*311.7f+bz*74.7f)*43758.5453f);
-            float hy=cpu_fract(sinf(bx*269.5f+by*183.3f+bz*246.1f)*43758.5453f);
-            float hz=cpu_fract(sinf(bx*113.5f+by*271.9f+bz*124.6f)*43758.5453f);
-            float dx=fx-(x+hx), dy=fy-(y+hy), dz=fz-(z+hz);
-            float dd=dx*dx+dy*dy+dz*dz;
-            if (dd < md) md = dd;
-        }
-        return sqrtf(md);
-    };
-
-    std::vector<uint8_t> data(N*N*N*4);
-    std::cout << "[Cloud] Baking 3D noise texture (" << N << "^3)..." << std::flush;
-    for (int z=0; z<N; z++)
-    for (int y=0; y<N; y++)
-    for (int x=0; x<N; x++) {
-        float px=(float)x/N, py=(float)y/N, pz=(float)z/N;
-        float s = px*8, t8 = py*8, u = pz*8;
-        // R: Perlin-Worley — screen blend of fbm(4oct) with inverted Worley.
-        // Gives compact rounded puffs (Worley structure) with Perlin continuity.
-        float perlin  = cpu_fbm(s, t8, u, 4);
-        float w_inv   = 1.0f - cpu_worley(s, t8, u);
-        float r = w_inv + perlin * (1.0f - w_inv);          // screen blend
-        // G: raw Worley — 0 at cell centers, 1 at edges. Used as erosion:
-        // subtracting this from n carves round pits at cell boundaries → puff surfaces.
-        float g = cpu_worley(s, t8, u);
-        float b = cpu_fbm(s,    t8, u, 3);                  // warp: keep smooth fbm
-        float a = cpu_fbm(s,    t8, u, 5);                  // cov_large: keep smooth fbm
-        int idx = (z*N*N + y*N + x)*4;
-        auto clamp01 = [](float v) -> uint8_t {
-            int i = (int)(v * 255.0f + 0.5f);
-            return (uint8_t)(i < 0 ? 0 : i > 255 ? 255 : i);
-        };
-        data[idx+0]=clamp01(r); data[idx+1]=clamp01(g);
-        data[idx+2]=clamp01(b); data[idx+3]=clamp01(a);
-    }
-    if (cloudNoiseTex3D) glDeleteTextures(1, &cloudNoiseTex3D);
-    glGenTextures(1, &cloudNoiseTex3D);
-    glBindTexture(GL_TEXTURE_3D, cloudNoiseTex3D);
-    glTexImage3D(GL_TEXTURE_3D, 0, GL_RGBA8, N, N, N, 0, GL_RGBA, GL_UNSIGNED_BYTE, data.data());
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_REPEAT);
-    glBindTexture(GL_TEXTURE_3D, 0);
-    std::cout << " done." << std::endl;
-  }
-
-  void bakeCoverNoise() {
-    // Second 3D texture for coverage FBMs: R=curl_lo(2oct) G=curl_hi(1oct) B=latNoise(3oct) A=cov_med(3oct)
-    // All baked at BAKE_SCALE=8; sampled at (worldPos*SHADER_SCALE+seed)/8 to match fbm(worldPos*SHADER_SCALE+seed, N).
-    // B/A use different seed offsets (+12.3/+47.1) to keep latNoise and cov_medium statistically independent.
-    const int N = 128;
-
-    auto cpu_fract = [](float x) -> float { return x - floorf(x); };
-
-    auto cpu_hash = [&cpu_fract](float px, float py, float pz) -> float {
-        px = cpu_fract(px * 443.897f);
-        py = cpu_fract(py * 441.423f);
-        pz = cpu_fract(pz * 437.195f);
-        float d = px*(py+19.19f) + py*(pz+19.19f) + pz*(px+19.19f);
-        px += d; py += d; pz += d;
-        return cpu_fract((px + py) * pz);
-    };
-
-    auto cpu_noise3d = [&cpu_hash](float px, float py, float pz) -> float {
-        float ix=floorf(px), iy=floorf(py), iz=floorf(pz);
-        float fx=px-ix, fy=py-iy, fz=pz-iz;
-        fx = fx*fx*fx*(fx*(fx*6.0f-15.0f)+10.0f);
-        fy = fy*fy*fy*(fy*(fy*6.0f-15.0f)+10.0f);
-        fz = fz*fz*fz*(fz*(fz*6.0f-15.0f)+10.0f);
-        float n000=cpu_hash(ix,  iy,  iz  ), n100=cpu_hash(ix+1,iy,  iz  );
-        float n010=cpu_hash(ix,  iy+1,iz  ), n110=cpu_hash(ix+1,iy+1,iz  );
-        float n001=cpu_hash(ix,  iy,  iz+1), n101=cpu_hash(ix+1,iy,  iz+1);
-        float n011=cpu_hash(ix,  iy+1,iz+1), n111=cpu_hash(ix+1,iy+1,iz+1);
-        float nx00=n000+fx*(n100-n000), nx10=n010+fx*(n110-n010);
-        float nx01=n001+fx*(n101-n001), nx11=n011+fx*(n111-n011);
-        float nxy0=nx00+fy*(nx10-nx00), nxy1=nx01+fy*(nx11-nx01);
-        return nxy0+fz*(nxy1-nxy0);
-    };
-
-    auto cpu_fbm = [&cpu_noise3d](float px, float py, float pz, int octaves) -> float {
-        float v=0.0f, amp=0.5f;
-        for (int i=0; i<octaves; i++) {
-            v += cpu_noise3d(px, py, pz) * amp;
-            px=px*2.07f+0.131f; py=py*2.07f-0.217f; pz=pz*2.07f+0.344f;
-            amp *= 0.48f;
-        }
-        return v;
-    };
-
-    std::vector<uint8_t> data(N*N*N*4);
-    std::cout << "[Cloud] Baking coverage noise texture (" << N << "^3)..." << std::flush;
-    for (int z=0; z<N; z++)
-    for (int y=0; y<N; y++)
-    for (int x=0; x<N; x++) {
-        float px=(float)x/N, py=(float)y/N, pz=(float)z/N;
-        float r = cpu_fbm(px*8,         py*8, pz*8, 2); // curl lo (scale 1.5 in shader)
-        float g = cpu_fbm(px*8,         py*8, pz*8, 1); // curl hi (scale 6.0 in shader)
-        float b = cpu_fbm(px*8+12.3f,   py*8, pz*8, 3); // latNoise (scale 4.0), independent seed
-        float a = cpu_fbm(px*8+47.1f,   py*8, pz*8, 3); // cov_medium (scale 6.0), independent seed
-        int idx=(z*N*N+y*N+x)*4;
-        auto clamp01 = [](float v) -> uint8_t {
-            int i = (int)(v * 255.0f + 0.5f);
-            return (uint8_t)(i < 0 ? 0 : i > 255 ? 255 : i);
-        };
-        data[idx+0]=clamp01(r); data[idx+1]=clamp01(g);
-        data[idx+2]=clamp01(b); data[idx+3]=clamp01(a);
-    }
-    if (cloudCoverTex3D) glDeleteTextures(1, &cloudCoverTex3D);
-    glGenTextures(1, &cloudCoverTex3D);
-    glBindTexture(GL_TEXTURE_3D, cloudCoverTex3D);
-    glTexImage3D(GL_TEXTURE_3D, 0, GL_RGBA8, N, N, N, 0, GL_RGBA, GL_UNSIGNED_BYTE, data.data());
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_REPEAT);
-    glBindTexture(GL_TEXTURE_3D, 0);
-    std::cout << " done." << std::endl;
-  }
-
-  void bakeDetailNoise() {
-    // 32^3 RGBA8: multi-frequency raw Worley noise.
-    // R=scale4(~50m cells), G=scale8(~25m), B=scale16(~12.5m) at 200m world tile.
-    // A=fBm blend (R*0.625+G*0.25+B*0.125) for combined detail erosion.
-    // Raw Worley (0=cell center, 1=edge): erosion (n-=val) carves puff structure.
-    const int N = 32;
-
-    auto cpu_fract = [](float x) -> float { return x - floorf(x); };
-
-    auto cpu_hash = [&cpu_fract](float px, float py, float pz) -> float {
-        px = cpu_fract(px * 443.897f);
-        py = cpu_fract(py * 441.423f);
-        pz = cpu_fract(pz * 437.195f);
-        float d = px*(py+19.19f) + py*(pz+19.19f) + pz*(px+19.19f);
-        px += d; py += d; pz += d;
-        return cpu_fract((px + py) * pz);
-    };
-
-    auto cpu_noise3d = [&cpu_hash](float px, float py, float pz) -> float {
-        float ix=floorf(px), iy=floorf(py), iz=floorf(pz);
-        float fx=px-ix, fy=py-iy, fz=pz-iz;
-        fx = fx*fx*fx*(fx*(fx*6.0f-15.0f)+10.0f);
-        fy = fy*fy*fy*(fy*(fy*6.0f-15.0f)+10.0f);
-        fz = fz*fz*fz*(fz*(fz*6.0f-15.0f)+10.0f);
-        float n000=cpu_hash(ix,  iy,  iz  ), n100=cpu_hash(ix+1,iy,  iz  );
-        float n010=cpu_hash(ix,  iy+1,iz  ), n110=cpu_hash(ix+1,iy+1,iz  );
-        float n001=cpu_hash(ix,  iy,  iz+1), n101=cpu_hash(ix+1,iy,  iz+1);
-        float n011=cpu_hash(ix,  iy+1,iz+1), n111=cpu_hash(ix+1,iy+1,iz+1);
-        float nx00=n000+fx*(n100-n000), nx10=n010+fx*(n110-n010);
-        float nx01=n001+fx*(n101-n001), nx11=n011+fx*(n111-n011);
-        float nxy0=nx00+fy*(nx10-nx00), nxy1=nx01+fy*(nx11-nx01);
-        return nxy0+fz*(nxy1-nxy0);
-    };
-
-    auto cpu_fbm = [&cpu_noise3d](float px, float py, float pz, int octaves) -> float {
-        float v=0.0f, amp=0.5f;
-        for (int i=0; i<octaves; i++) {
-            v += cpu_noise3d(px, py, pz) * amp;
-            px=px*2.07f+0.131f; py=py*2.07f-0.217f; pz=pz*2.07f+0.344f;
-            amp *= 0.48f;
-        }
-        return v;
-    };
-    (void)cpu_fbm; // reserved for future use
-
-    auto cpu_worley = [&cpu_fract](float px, float py, float pz) -> float {
-        float ix=floorf(px), iy=floorf(py), iz=floorf(pz);
-        float fx=px-ix, fy=py-iy, fz=pz-iz;
-        float md = 1.0f;
-        for (int x=-1; x<=1; x++) for (int y=-1; y<=1; y++) for (int z=-1; z<=1; z++) {
-            float bx=ix+x, by=iy+y, bz=iz+z;
-            float hx=cpu_fract(sinf(bx*127.1f+by*311.7f+bz*74.7f)*43758.5453f);
-            float hy=cpu_fract(sinf(bx*269.5f+by*183.3f+bz*246.1f)*43758.5453f);
-            float hz=cpu_fract(sinf(bx*113.5f+by*271.9f+bz*124.6f)*43758.5453f);
-            float dx=fx-(x+hx), dy=fy-(y+hy), dz=fz-(z+hz);
-            float dd=dx*dx+dy*dy+dz*dz;
-            if (dd < md) md = dd;
-        }
-        return sqrtf(md);
-    };
-
-    std::vector<uint8_t> data(N*N*N*4);
-    std::cout << "[Cloud] Baking detail noise texture (" << N << "^3, multi-freq Worley)..." << std::flush;
-    auto clamp01 = [](float v) -> uint8_t {
-        int i = (int)(v * 255.0f + 0.5f);
-        return (uint8_t)(i < 0 ? 0 : i > 255 ? 255 : i);
-    };
-    for (int z=0; z<N; z++)
-    for (int y=0; y<N; y++)
-    for (int x=0; x<N; x++) {
-        float px=(float)x/N, py=(float)y/N, pz=(float)z/N;
-        // Three independent Worley scales; seed offsets prevent correlated patterns.
-        // At 200m world tile: scale4→50m cells, scale8→25m cells, scale16→12.5m cells.
-        float r = cpu_worley(px*4.0f  + 0.13f, py*4.0f  + 0.47f, pz*4.0f  + 0.31f);
-        float g = cpu_worley(px*8.0f  + 7.31f, py*8.0f  + 5.17f, pz*8.0f  + 2.89f);
-        float b = cpu_worley(px*16.0f + 11.8f, py*16.0f + 9.44f, pz*16.0f + 14.3f);
-        float a = r * 0.625f + g * 0.25f + b * 0.125f;
-        int idx=(z*N*N+y*N+x)*4;
-        data[idx+0]=clamp01(r); data[idx+1]=clamp01(g);
-        data[idx+2]=clamp01(b); data[idx+3]=clamp01(a);
-    }
-    if (cloudDetailTex3D) glDeleteTextures(1, &cloudDetailTex3D);
-    glGenTextures(1, &cloudDetailTex3D);
-    glBindTexture(GL_TEXTURE_3D, cloudDetailTex3D);
-    glTexImage3D(GL_TEXTURE_3D, 0, GL_RGBA8, N, N, N, 0, GL_RGBA, GL_UNSIGNED_BYTE, data.data());
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_REPEAT);
-    glBindTexture(GL_TEXTURE_3D, 0);
-    std::cout << " done." << std::endl;
-  }
-
   void drawAtmosphere(const Mesh& sphereMesh, const Mat4& model,
                       const Vec3& camPos, const Vec3& lightDir,
                       const Vec3& planetCenter, float surfaceRadius, float outerRadius, double time, int planetIdx, float sunVisibility, bool showClouds) {
@@ -5183,33 +4893,8 @@ R"(
         glUniform1f(ua_ringOuter, 0.0f);
     }
 
-    // Wrap time for noise (reset every 10,000s) to keep float precision high
-    float wrappedTime = (float)fmod(time, 10000.0);
-    glUniform1f(ua_cloudTime, wrappedTime);
-
-    // Precompute global phase for clouds on CPU using double precision
-    // Speed matches shader logic (t * -0.2 * 0.004)
-    double phase = time * 0.004 * -0.2;
-    glUniform1f(ua_cloudPhaseSin, (float)sin(phase));
-    glUniform1f(ua_cloudPhaseCos, (float)cos(phase));
-
-    // Pass frame index for animated noise (TAA jitter)
-    glUniform1i(ua_frameIdx, taaFrameIndex);
-
     // Pass cloud toggle
     glUniform1f(ua_showClouds, showClouds ? 1.0f : 0.0f);
-
-    // Pass tunable cloud parameters
-    glUniform1f(ua_tuneCovLo,     cloudTuneParams.covLo);
-    glUniform1f(ua_tuneCovHi,     cloudTuneParams.covHi);
-    glUniform1f(ua_tuneThreshLo,  cloudTuneParams.threshLo);
-    glUniform1f(ua_tuneThreshHi,  cloudTuneParams.threshHi);
-    glUniform1f(ua_tuneErosion,   cloudTuneParams.erosion);
-    glUniform1f(ua_tuneDensity,   cloudTuneParams.density);
-    glUniform1f(ua_tuneExtinction,cloudTuneParams.extinction);
-    glUniform1f(ua_tuneMinAlt,    cloudTuneParams.minAlt);
-    glUniform1f(ua_tuneMaxAlt,    cloudTuneParams.maxAlt);
-    glUniform1f(ua_debugCoverage, (float)cloudTuneParams.debugMode);
 
     // Bind Depth Texture for Physical Terrain Occlusion
     glUniform2f(ua_res, (float)taaWidth, (float)taaHeight);
@@ -5218,29 +4903,10 @@ R"(
     glBindTexture(GL_TEXTURE_2D, taaDepthTex);
     glUniform1i(ua_depthTex, 7);
 
-    // Distance-based LOD (G): cloud and light step counts scaled by camera altitude
     {
         float camAlt = (camPos - planetCenter).length() - surfaceRadius;
-        int cSteps, lSteps;
-        if      (camAlt < 20.0f)   { cSteps = 128; lSteps = 16; }  // inside/near cloud layer
-        else if (camAlt < 500.0f)  { cSteps = 48;  lSteps = 12; }
-        else if (camAlt < 5000.0f) { cSteps = 32;  lSteps =  8; }
-        else                       { cSteps = 16;  lSteps =  4; }
-        glUniform1i(ua_cloudSteps, cSteps);
-        glUniform1i(ua_lightSteps, lSteps);
+        cloudSystem.bind(atmoProg, time, taaFrameIndex, camAlt);
     }
-
-    glActiveTexture(GL_TEXTURE8);
-    glBindTexture(GL_TEXTURE_3D, cloudNoiseTex3D);
-    glUniform1i(ua_noiseTex3D, 8);
-
-    glActiveTexture(GL_TEXTURE9);
-    glBindTexture(GL_TEXTURE_3D, cloudCoverTex3D);
-    glUniform1i(ua_coverTex3D, 9);
-
-    glActiveTexture(GL_TEXTURE10);
-    glBindTexture(GL_TEXTURE_3D, cloudDetailTex3D);
-    glUniform1i(ua_detailTex3D, 10);
 
     // --- Graphics State for Volumetric Shell ---
     glDisable(GL_DEPTH_TEST);

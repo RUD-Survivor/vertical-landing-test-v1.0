@@ -100,9 +100,9 @@ struct FlightInputSystem {
         router.registerKey(GLFW_KEY_F3, []() {
             Renderer3D* r3d = GameContext::getInstance().renderer3d;
             if (r3d) {
-                r3d->cloudTuneParams.debugMode = (r3d->cloudTuneParams.debugMode + 1) % 3;
+                r3d->cloudSystem.tuneParams.debugMode = (r3d->cloudSystem.tuneParams.debugMode + 1) % 3;
                 const char* names[] = { "OFF", "COVERAGE", "CURL FIELD" };
-                std::cout << "[DBG] Cloud debug: " << names[r3d->cloudTuneParams.debugMode] << std::endl;
+                std::cout << "[DBG] Cloud debug: " << names[r3d->cloudSystem.tuneParams.debugMode] << std::endl;
             }
         });
 
