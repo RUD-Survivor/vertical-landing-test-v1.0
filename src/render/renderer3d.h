@@ -2349,15 +2349,16 @@ R"(
                       float topFraction = smoothstep(topHeight * 0.5, topHeight * 0.95, altNorm);
                       float eroDir = mix(ero, 1.0 - ero, topFraction);
                       n -= eroDir * uTuneErosion;
-                      // Puff isolation via n-modulation: dual-frequency Worley breaks circular symmetry.
-                      // c1 (25km) isolates cluster-scale puffs; c2 (13km) creates sub-lobes within clusters.
-                      // n-based: FBM spatial variation in n bends the isosurface (n=maskLo) non-circularly.
-                      // At cluster edge (c1≈0): n -= 0.16 → below maskLo → sky gap.
-                      // At cluster core (c1=1,c2=1): n += 0.14 → denser cloud.
-                      // Different spatial offsets from Block 1 below → decorrelated patterns → no interference.
+                      // Puff isolation: domain-warped dual-frequency Worley (additive n-shift).
+                      // Warp: reuse existing warp scalar to stretch Worley cells non-uniformly.
+                      // Each cell sees a different warp value → cells are deformed differently → non-circular.
+                      // Additive (not screen-blend): center gets +0.14, edge gets -0.16.
+                      // Screen-blend forced n→0.75 at ALL centers → uniformly opaque dots (polka-dot worse).
+                      // Additive only gently boosts center; FBM & coverage still control existence.
                       {
-                          float c1 = 1.0 - worley3d(p * 0.040 + vec3(7.31 + t * 0.018, 4.17, 2.73 + t * 0.012));
-                          float c2 = 1.0 - worley3d(p * 0.078 + vec3(0.31, 3.52 + t * 0.022, 0.73));
+                          vec3 pW = p + vec3(warp - 0.5, warp * 1.4 - 0.7, 0.5 - warp * 0.9) * 18.0;
+                          float c1 = 1.0 - worley3d(pW * 0.040 + vec3(7.31 + t * 0.018, 4.17, 2.73 + t * 0.012));
+                          float c2 = 1.0 - worley3d(pW * 0.078 + vec3(0.31, 3.52 + t * 0.022, 0.73));
                           n += (c1 * (0.4 + 0.6 * c2)) * 0.30 - 0.16;
                       }
                       // Proximity LOD: modulate n BEFORE smoothstep for visible cloud sub-structure
@@ -2371,11 +2372,19 @@ R"(
                           float surfaceProx = smoothstep(0.20, 0.50, n) * (1.0 - smoothstep(0.50, 0.70, n));
                           n += (cellVal - 0.5) * 0.22 * wm * (0.3 + 0.7 * surfaceProx);
                       }
-                      // Meso-scale 2-3km: individual puff bumps visible at 2-15km.
-                      // Fills the gap between Block 1 (25km, too large to see bumps at 2km)
-                      // and Block A (200m, invisible at >500m). Bidirectional surface sculpt.
-                      if (viewDist < 15.0) {
-                          float mm = 1.0 - smoothstep(8.0, 15.0, viewDist);
+                      // Block L: 8km-scale surface erosion, visible at 15-80km distance.
+                      // Fills the gap between Block 1 (25km: too coarse at 15km) and Block M (2.6km: invisible >15km).
+                      // At 50km: subtends ~9° → individually visible bumps on cloud silhouette.
+                      // surfW concentrates sculpt at cloud boundary (n≈maskLo), leaves cloud core intact.
+                      if (viewDist < 80.0) {
+                          float lm = 1.0 - smoothstep(40.0, 80.0, viewDist);
+                          float largeW = 1.0 - worley3d(p * 0.125 + vec3(t * 0.025, t * 0.015, 0.0));
+                          float largeSurf = smoothstep(0.15, 0.45, n) * (1.0 - smoothstep(0.45, 0.65, n));
+                          n += (largeW - 0.5) * 0.14 * lm * (0.30 + 0.70 * largeSurf);
+                      }
+                      // Block M: 2.6km-scale bumps, visible at 2-30km.
+                      if (viewDist < 30.0) {
+                          float mm = 1.0 - smoothstep(15.0, 30.0, viewDist);
                           float mesoW = 1.0 - worley3d(p * 0.380 + vec3(t * 0.06, t * 0.04, 0.0));
                           float mesoSurf = smoothstep(0.15, 0.45, n) * (1.0 - smoothstep(0.45, 0.65, n));
                           n += (mesoW - 0.5) * 0.18 * mm * (0.35 + 0.65 * mesoSurf);
@@ -2412,6 +2421,15 @@ R"(
                       // ─────────────────────────────────────────────────────────────────
                   } else {
                       n = fbm(tc, 2);
+                      // Shadow-accuracy puff isolation: mirrors highDetail A2 exactly (warp + additive).
+                      // One extra tex fetch for pw — same sample as highDetail warp, negligible cost.
+                      {
+                          float pw = texture(uNoiseTex3D, tc * 0.0375).b;
+                          vec3 pW = p + vec3(pw - 0.5, pw * 1.4 - 0.7, 0.5 - pw * 0.9) * 18.0;
+                          float c1 = 1.0 - worley3d(pW * 0.040 + vec3(7.31 + t * 0.018, 4.17, 2.73 + t * 0.012));
+                          float c2 = 1.0 - worley3d(pW * 0.078 + vec3(0.31, 3.52 + t * 0.022, 0.73));
+                          n += (c1 * (0.4 + 0.6 * c2)) * 0.30 - 0.16;
+                      }
                   }
                   
                   // Fixed-threshold mask: n controls cloud geometry, coverage controls density strength.
