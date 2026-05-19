@@ -418,13 +418,13 @@ public:
 
   // Cloud parameter tuning (set by CloudTuner panel, read by drawAtmosphere)
   struct CloudTuneParams {
-      float covLo      = 0.270f; // coverage linear ramp low  (below → density=0)
-      float covHi      = 0.580f; // coverage linear ramp high (above → density=full)
-      float threshLo   = 0.236f; // shape noise mask low  (min(lo,hi) → smoothstep low)
-      float threshHi   = 0.513f; // shape noise mask high (max(lo,hi) → smoothstep high)
+      float covLo      = 0.300f; // coverage linear ramp low  (below → density=0)
+      float covHi      = 0.600f; // coverage linear ramp high (above → density=full)
+      float threshLo   = 0.260f; // shape noise mask low  (min(lo,hi) → smoothstep low)
+      float threshHi   = 0.450f; // shape noise mask high (max(lo,hi) → smoothstep high)
       float erosion    = 0.217f;
-      float density    = 1.458f;
-      float extinction = 0.321f;
+      float density    = 1.200f;
+      float extinction = 0.380f;
       float minAlt     = 1.5f;
       float maxAlt     = 14.0f;
       int   debugMode = 0;  // 0=off, 1=coverage grayscale, 2=curl field color
@@ -1937,9 +1937,9 @@ public:
       uniform float uTuneMinAlt;
       uniform float uTuneMaxAlt;
       uniform float uDebugCoverage;  // 1.0 = output raw coverage as grayscale (F3 toggle)
-      uniform sampler3D uNoiseTex3D;  // R=shape(6oct) G=erosion(4oct) B=warp(3oct) A=cov_large(5oct)
+      uniform sampler3D uNoiseTex3D;  // R=PerlinWorley [probe] G=Worley [erosion] B=fbm(3oct) [warp] A=fbm(5oct) [cov_large]
       uniform sampler3D uCoverTex3D;  // R=curl_lo(2oct) G=curl_hi(1oct) B=latNoise(3oct) A=cov_med(3oct)
-      uniform sampler3D uDetailTex3D; // 32^3: R=midDetail(4oct) G=ero(3oct) B=fine(3oct) A=micro(2oct)
+      uniform sampler3D uDetailTex3D; // 32^3: R=Worley(4x,50m), G=Worley(8x,25m), B=Worley(16x,12.5m), A=fBm blend
       uniform int uCloudSteps;  // distance-based LOD: 128(in-cloud) / 48(low-orbit) / 32(mid) / 16(high)
       uniform int uLightSteps;  // distance-based LOD: 12 / 8 / 4
 
@@ -2300,7 +2300,7 @@ R"(
                   // smoothstep's S-curve pushes coverage toward 0 or 1 → density becomes binary again.
                   float covRange = max(uTuneCovHi - uTuneCovLo, 0.001);
                   coverage = clamp((coverage - uTuneCovLo) / covRange, 0.0, 1.0);
-                  
+
                   // Cyclone: amplify existing coverage (no forced ring), carve ragged eye
                   if (cycInfluence > 0.001) {
                       // Multiplicative boost — only brightens where FBM already has cloud signal.
@@ -2329,7 +2329,8 @@ R"(
                       smoothstep(0.5, 1.0, cloudType)
                   ) * topMask;
                   float altShape = heightGradient * 1.5;
-
+)"
+R"(
                   // TRUE 3D sphere coordinates: use all 3 components of windSph1.
                   // windSph1.z = sin(lat): moving north at equator changes tc.z → N-S variation ✓
                   // Old .xy-only approach had d(sph.x,y)/d(lat)=0 at equator → N-S zero variation → vertical streaks.
@@ -2348,50 +2349,65 @@ R"(
                       float topFraction = smoothstep(topHeight * 0.5, topHeight * 0.95, altNorm);
                       float eroDir = mix(ero, 1.0 - ero, topFraction);
                       n -= eroDir * uTuneErosion;
+                      // Puff isolation via n-modulation: dual-frequency Worley breaks circular symmetry.
+                      // c1 (25km) isolates cluster-scale puffs; c2 (13km) creates sub-lobes within clusters.
+                      // n-based: FBM spatial variation in n bends the isosurface (n=maskLo) non-circularly.
+                      // At cluster edge (c1≈0): n -= 0.16 → below maskLo → sky gap.
+                      // At cluster core (c1=1,c2=1): n += 0.14 → denser cloud.
+                      // Different spatial offsets from Block 1 below → decorrelated patterns → no interference.
+                      {
+                          float c1 = 1.0 - worley3d(p * 0.040 + vec3(7.31 + t * 0.018, 4.17, 2.73 + t * 0.012));
+                          float c2 = 1.0 - worley3d(p * 0.078 + vec3(0.31, 3.52 + t * 0.022, 0.73));
+                          n += (c1 * (0.4 + 0.6 * c2)) * 0.30 - 0.16;
+                      }
                       // Proximity LOD: modulate n BEFORE smoothstep for visible cloud sub-structure
                       float viewDist = length(uCamPos - p);
-                      // 250km: Perlin-Worley cauliflower — added only inside existing clouds to avoid dots
+                      // 250km: bidirectional Worley sculpt at cloud surface.
+                      // cellVal>0.5 pushes n outward (puff bulge), <0.5 pushes inward (concavity).
+                      // surfaceProx concentrates effect at the visible boundary, not cloud core.
                       if (viewDist < 250.0) {
                           float wm = 1.0 - smoothstep(80.0, 250.0, viewDist);
-                          // scale 0.04 → ~160km Worley cells; only enriches existing cloud bodies
-                          float cellDetail = (1.0 - worley3d(p * 0.04 + vec3(t * 0.03))) * 0.16 * wm;
-                          n += cellDetail * smoothstep(0.3, 0.55, n);
+                          float cellVal = 1.0 - worley3d(p * 0.04 + vec3(t * 0.03));
+                          float surfaceProx = smoothstep(0.20, 0.50, n) * (1.0 - smoothstep(0.50, 0.70, n));
+                          n += (cellVal - 0.5) * 0.22 * wm * (0.3 + 0.7 * surfaceProx);
                       }
-                      // 5km: mid-freq detail via tiled 32^3 texture, tile=220m, 6.9m/voxel
-                      if (viewDist < 5.0) {
-                          float w1  = 1.0 - smoothstep(1.0, 5.0, viewDist);
-                          const float T1 = 0.22;
-                          vec3  ti1 = mod(floor(p / T1), 256.0);
-                          float rot1 = fract(sin(dot(ti1, vec3(127.1, 311.7, 74.7))) * 43758.55) * 6.2832;
-                          float c1 = cos(rot1), s1 = sin(rot1);
-                          vec3  fp1 = fract(p / T1);
-                          vec2  rxy1 = vec2(fp1.x*c1 - fp1.y*s1, fp1.x*s1 + fp1.y*c1);
-                          float mid = texture(uDetailTex3D, vec3(rxy1, fp1.z)).r;
-                          n += (mid - 0.5) * 0.15 * w1;
+                      // Meso-scale 2-3km: individual puff bumps visible at 2-15km.
+                      // Fills the gap between Block 1 (25km, too large to see bumps at 2km)
+                      // and Block A (200m, invisible at >500m). Bidirectional surface sculpt.
+                      if (viewDist < 15.0) {
+                          float mm = 1.0 - smoothstep(8.0, 15.0, viewDist);
+                          float mesoW = 1.0 - worley3d(p * 0.380 + vec3(t * 0.06, t * 0.04, 0.0));
+                          float mesoSurf = smoothstep(0.15, 0.45, n) * (1.0 - smoothstep(0.45, 0.65, n));
+                          n += (mesoW - 0.5) * 0.18 * mm * (0.35 + 0.65 * mesoSurf);
                       }
-                      // 1km: fine-grain erosion, tile=50m, 1.56m/voxel
-                      if (viewDist < 1.0) {
-                          float w2  = 1.0 - smoothstep(0.2, 1.0, viewDist);
-                          const float T2 = 0.05;
-                          vec3  ti2 = mod(floor(p / T2), 256.0);
-                          float rot2 = fract(sin(dot(ti2, vec3(269.5, 183.3, 246.1))) * 43758.55) * 6.2832;
-                          float c2 = cos(rot2), s2 = sin(rot2);
-                          vec3  fp2 = fract(p / T2);
-                          vec2  rxy2 = vec2(fp2.x*c2 - fp2.y*s2, fp2.x*s2 + fp2.y*c2);
-                          float fine = texture(uDetailTex3D, vec3(rxy2, fp2.z)).g;
-                          n += (fine - 0.5) * 0.10 * w2;
+                      // Near-field detail: surface-weighted Worley erosion via 32^3 texture.
+                      // surfW = 1 at cloud boundary (n≈maskLo), 0 in cloud core.
+                      // Strong erosion at surface → cauliflower bumps; core stays solid.
+                      float maskLoVal = min(uTuneThreshLo, uTuneThreshHi);
+                      if (viewDist < 8.0) {    // A channel: 200m tile, 50/25/12.5m cells
+                          float dW1   = 1.0 - smoothstep(0.5, 8.0, viewDist);
+                          vec3  uvA   = fract(p / 0.200 + vec3(0.137, 0.421, 0.073));
+                          float da    = texture(uDetailTex3D, uvA).a;
+                          float tFr1  = smoothstep(0.5, 0.85, altNorm);
+                          float dirDa = mix(da, 1.0 - da, tFr1);
+                          float surfW = 1.0 - smoothstep(maskLoVal, maskLoVal + 0.10, n);
+                          n -= dirDa * (0.10 + 0.30 * surfW) * dW1;
                       }
-                      // 200m: micro-detail for flying through clouds, tile=10m, 0.31m/voxel
-                      if (viewDist < 0.2) {
-                          float w3   = 1.0 - smoothstep(0.02, 0.2, viewDist);
-                          const float T3 = 0.010;
-                          vec3  ti3  = mod(floor(p / T3), 256.0);
-                          float rot3 = fract(sin(dot(ti3, vec3(113.5, 271.9, 124.6))) * 43758.55) * 6.2832;
-                          float c3 = cos(rot3), s3 = sin(rot3);
-                          vec3  fp3  = fract(p / T3);
-                          vec2  rxy3 = vec2(fp3.x*c3 - fp3.y*s3, fp3.x*s3 + fp3.y*c3);
-                          float micro = texture(uDetailTex3D, vec3(rxy3, fp3.z)).b;
-                          n += (micro - 0.5) * 0.06 * w3;
+                      if (viewDist < 0.5) {    // G channel: 40m tile → ~3m effective cells
+                          float dW2    = 1.0 - smoothstep(0.05, 0.5, viewDist);
+                          vec3  uvG    = fract(p / 0.040 + vec3(0.251, 0.637, 0.184));
+                          float dg     = texture(uDetailTex3D, uvG).g;
+                          float tFr2   = smoothstep(0.5, 0.85, altNorm);
+                          float dirDg  = mix(dg, 1.0 - dg, tFr2);
+                          float surfW2 = 1.0 - smoothstep(maskLoVal, maskLoVal + 0.08, n);
+                          n -= dirDg * (0.06 + 0.18 * surfW2) * dW2;
+                      }
+                      if (viewDist < 0.10) {   // B channel: 8m tile → ~0.5m effective cells
+                          float dW3  = 1.0 - smoothstep(0.01, 0.10, viewDist);
+                          vec3  uvB  = fract(p / 0.008 + vec3(0.712, 0.053, 0.835));
+                          float db   = texture(uDetailTex3D, uvB).b;
+                          float tFr3 = smoothstep(0.5, 0.85, altNorm);
+                          n -= mix(db, 1.0 - db, tFr3) * 0.08 * dW3;
                       }
                       // ─────────────────────────────────────────────────────────────────
                   } else {
@@ -2514,17 +2530,30 @@ R"(
           float t0, t1;
           if (!intersectSphere(p, lightDir, uOuterRadius, t0, t1) || t1 <= 0.0) return;
           float start = max(t0, 0.0);
+          // Uniform steps for atmospheric gases (preserves Rayleigh/Mie/ozone accuracy over full path)
           float stepSize = (t1 - start) / float(uLightSteps);
           for (int i = 0; i < 20; i++) {
               if (i >= uLightSteps) break;
               vec3 pos = p + lightDir * (start + (float(i) + 0.5) * stepSize);
               float h = length(pos - uPlanetCenter) - uSurfaceRadius;
-              // Hard cutoff for underground points to prevent light leaking through the planet core
               if (h < -0.1) { dR = 1e6; dM = 1e6; dO = 1e6; dC = 1e6; return; }
               dR += exp(-h / gHRayleigh) * stepSize;
               dM += exp(-h / gHMie) * stepSize;
               dO += ozoneDensity(h) * stepSize;
-              dC += cloudDensity(pos, h, false) * stepSize;
+          }
+          // Exponential steps for cloud self-shadow — concentrate samples near p where the
+          // shadow gradient is steepest (cloud surface), then coarsen outward.
+          // 7 steps: 0.08→0.16→0.32→0.64→1.28→2.56→5.12 km = 10.16 km total (covers cloud layer).
+          // First step center at 40 m: resolves 80 m bumps casting shadows on neighbors.
+          float cStep = 0.08;
+          float cTPos = cStep * 0.5;
+          for (int j = 0; j < 7; j++) {
+              if (cTPos >= t1) break;
+              vec3 cPos = p + lightDir * cTPos;
+              float cH = max(length(cPos - uPlanetCenter) - uSurfaceRadius, 0.0);
+              dC += cloudDensity(cPos, cH, false) * cStep;
+              cTPos += cStep;
+              cStep *= 2.0;
           }
       }
 )"
@@ -2703,20 +2732,23 @@ R"(
                       vec3 sunTint = exp(-(gRayleighCoeff * cLightR + gMieCoeff * 1.1 * cLightM + gOzoneCoeff * cLightO));
 
                       float tauCloud = gCloudExtinction.x * (optDepthC + cLightC);
+                      float tauLight  = gCloudExtinction.x * cLightC;
                       float ms0 = exp(-tauCloud);
                       float ms1 = exp(-tauCloud * 0.5) * 0.5;
                       float ms2 = exp(-tauCloud * 0.25) * 0.25;
                       float ms3 = exp(-tauCloud * 0.125) * 0.125;
                       float multiScatter = (ms0 + ms1 + ms2 + ms3) / 1.875;
-                      float powder = 1.0 - exp(-tauCloud * 2.0);
+                      // Powder uses light-path tau only: near-zero at lit cloud tops, peaks inside shadowed cores.
+                      // Using tauCloud here saturates powder=1 everywhere once any view depth is accumulated.
+                      float powder = 1.0 - exp(-tauLight * 2.0);
                       float silverMask = max(0.0, cosTheta);
                       float cloudAtt = multiScatter * mix(1.0, powder, 0.55 * silverMask);
 
                       float layerBase = (ch < 7.5) ? gCloudMinAlt : 8.0;
                       float layerTop  = (ch < 7.5) ? 7.0 : gCloudMaxAlt;
                       float heightInBand = clamp((ch - layerBase) / max(layerTop - layerBase, 0.1), 0.0, 1.0);
-                      float aoDirect  = mix(0.10, 1.0, pow(heightInBand, 0.35));
-                      float aoAmbient = mix(0.35, 1.0, heightInBand);
+                      float aoDirect  = mix(0.04, 1.0, pow(heightInBand, 0.50));
+                      float aoAmbient = mix(0.20, 1.0, heightInBand);
 
                       float sunElev = dot(probeSph, uLightDir);
                       float skyPathKm = min(8.0 / max(sunElev, 0.02), 60.0);
@@ -4828,9 +4860,9 @@ R"(
   }
 
   void bakeCloudNoise() {
-    // CPU implementations matching the GLSL hash/noise3d/fbm exactly.
-    // Bakes three FBM channels into a 128^3 RGBA8 3D texture at startup.
-    // R = fbm(p, 6) [cloud shape], G = fbm(p, 4) [erosion], B = fbm(p, 3) [warp]
+    // 128^3 RGBA8: R=PerlinWorley [probe+shape], G=Worley [erosion], B=fbm(3oct) [warp], A=fbm(5oct) [cov_large]
+    // R: screen-blend of fbm(4oct) and inverted Worley → compact puff shapes with Perlin continuity
+    // G: raw Worley distance → 0 at cell centers, 1 at edges → carves round pits when subtracted
     const int N = 128;
 
     auto cpu_fract = [](float x) -> float { return x - floorf(x); };
@@ -4872,18 +4904,40 @@ R"(
         return v;
     };
 
+    // Matches GPU worley3d(): sqrt of min squared distance to feature points, capped at 1.
+    auto cpu_worley = [&cpu_fract](float px, float py, float pz) -> float {
+        float ix=floorf(px), iy=floorf(py), iz=floorf(pz);
+        float fx=px-ix, fy=py-iy, fz=pz-iz;
+        float md = 1.0f;
+        for (int x=-1; x<=1; x++) for (int y=-1; y<=1; y++) for (int z=-1; z<=1; z++) {
+            float bx=ix+x, by=iy+y, bz=iz+z;
+            float hx=cpu_fract(sinf(bx*127.1f+by*311.7f+bz*74.7f)*43758.5453f);
+            float hy=cpu_fract(sinf(bx*269.5f+by*183.3f+bz*246.1f)*43758.5453f);
+            float hz=cpu_fract(sinf(bx*113.5f+by*271.9f+bz*124.6f)*43758.5453f);
+            float dx=fx-(x+hx), dy=fy-(y+hy), dz=fz-(z+hz);
+            float dd=dx*dx+dy*dy+dz*dz;
+            if (dd < md) md = dd;
+        }
+        return sqrtf(md);
+    };
+
     std::vector<uint8_t> data(N*N*N*4);
     std::cout << "[Cloud] Baking 3D noise texture (" << N << "^3)..." << std::flush;
     for (int z=0; z<N; z++)
     for (int y=0; y<N; y++)
     for (int x=0; x<N; x++) {
         float px=(float)x/N, py=(float)y/N, pz=(float)z/N;
-        // Scale by 8 so one texture tile = 8 tc units = 640km (vs 80km at scale 1)
-        // Sample in shader at tc/8 to recover fbm(tc,N) exactly. Reduces visible tiling 8x.
-        float r = cpu_fbm(px*8,    py*8,    pz*8,    6);
-        float g = cpu_fbm(px*8,    py*8,    pz*8,    4);
-        float b = cpu_fbm(px*8,    py*8,    pz*8,    3);
-        float a = cpu_fbm(px*8,    py*8,    pz*8,    5);  // cov_large
+        float s = px*8, t8 = py*8, u = pz*8;
+        // R: Perlin-Worley — screen blend of fbm(4oct) with inverted Worley.
+        // Gives compact rounded puffs (Worley structure) with Perlin continuity.
+        float perlin  = cpu_fbm(s, t8, u, 4);
+        float w_inv   = 1.0f - cpu_worley(s, t8, u);
+        float r = w_inv + perlin * (1.0f - w_inv);          // screen blend
+        // G: raw Worley — 0 at cell centers, 1 at edges. Used as erosion:
+        // subtracting this from n carves round pits at cell boundaries → puff surfaces.
+        float g = cpu_worley(s, t8, u);
+        float b = cpu_fbm(s,    t8, u, 3);                  // warp: keep smooth fbm
+        float a = cpu_fbm(s,    t8, u, 5);                  // cov_large: keep smooth fbm
         int idx = (z*N*N + y*N + x)*4;
         auto clamp01 = [](float v) -> uint8_t {
             int i = (int)(v * 255.0f + 0.5f);
@@ -4980,9 +5034,10 @@ R"(
   }
 
   void bakeDetailNoise() {
-    // 32^3 RGBA8 high-frequency detail texture for near-field cloud detail (< 5km view distance).
-    // Tiled in world space; 32 voxels per tile → resolution scales with tile size:
-    //   T1=220m → 6.9m/voxel, T2=50m → 1.56m/voxel, T3=10m → 0.31m/voxel
+    // 32^3 RGBA8: multi-frequency raw Worley noise.
+    // R=scale4(~50m cells), G=scale8(~25m), B=scale16(~12.5m) at 200m world tile.
+    // A=fBm blend (R*0.625+G*0.25+B*0.125) for combined detail erosion.
+    // Raw Worley (0=cell center, 1=edge): erosion (n-=val) carves puff structure.
     const int N = 32;
 
     auto cpu_fract = [](float x) -> float { return x - floorf(x); };
@@ -5021,22 +5076,41 @@ R"(
         }
         return v;
     };
+    (void)cpu_fbm; // reserved for future use
+
+    auto cpu_worley = [&cpu_fract](float px, float py, float pz) -> float {
+        float ix=floorf(px), iy=floorf(py), iz=floorf(pz);
+        float fx=px-ix, fy=py-iy, fz=pz-iz;
+        float md = 1.0f;
+        for (int x=-1; x<=1; x++) for (int y=-1; y<=1; y++) for (int z=-1; z<=1; z++) {
+            float bx=ix+x, by=iy+y, bz=iz+z;
+            float hx=cpu_fract(sinf(bx*127.1f+by*311.7f+bz*74.7f)*43758.5453f);
+            float hy=cpu_fract(sinf(bx*269.5f+by*183.3f+bz*246.1f)*43758.5453f);
+            float hz=cpu_fract(sinf(bx*113.5f+by*271.9f+bz*124.6f)*43758.5453f);
+            float dx=fx-(x+hx), dy=fy-(y+hy), dz=fz-(z+hz);
+            float dd=dx*dx+dy*dy+dz*dz;
+            if (dd < md) md = dd;
+        }
+        return sqrtf(md);
+    };
 
     std::vector<uint8_t> data(N*N*N*4);
-    std::cout << "[Cloud] Baking detail noise texture (" << N << "^3)..." << std::flush;
+    std::cout << "[Cloud] Baking detail noise texture (" << N << "^3, multi-freq Worley)..." << std::flush;
+    auto clamp01 = [](float v) -> uint8_t {
+        int i = (int)(v * 255.0f + 0.5f);
+        return (uint8_t)(i < 0 ? 0 : i > 255 ? 255 : i);
+    };
     for (int z=0; z<N; z++)
     for (int y=0; y<N; y++)
     for (int x=0; x<N; x++) {
         float px=(float)x/N, py=(float)y/N, pz=(float)z/N;
-        float r = cpu_fbm(px*8,        py*8, pz*8, 4);  // mid detail
-        float g = cpu_fbm(px*8+17.3f,  py*8, pz*8, 3);  // fine erosion
-        float b = cpu_fbm(px*8+31.9f,  py*8, pz*8, 3);  // finer
-        float a = cpu_fbm(px*8+53.7f,  py*8, pz*8, 2);  // micro
+        // Three independent Worley scales; seed offsets prevent correlated patterns.
+        // At 200m world tile: scale4→50m cells, scale8→25m cells, scale16→12.5m cells.
+        float r = cpu_worley(px*4.0f  + 0.13f, py*4.0f  + 0.47f, pz*4.0f  + 0.31f);
+        float g = cpu_worley(px*8.0f  + 7.31f, py*8.0f  + 5.17f, pz*8.0f  + 2.89f);
+        float b = cpu_worley(px*16.0f + 11.8f, py*16.0f + 9.44f, pz*16.0f + 14.3f);
+        float a = r * 0.625f + g * 0.25f + b * 0.125f;
         int idx=(z*N*N+y*N+x)*4;
-        auto clamp01 = [](float v) -> uint8_t {
-            int i = (int)(v * 255.0f + 0.5f);
-            return (uint8_t)(i < 0 ? 0 : i > 255 ? 255 : i);
-        };
         data[idx+0]=clamp01(r); data[idx+1]=clamp01(g);
         data[idx+2]=clamp01(b); data[idx+3]=clamp01(a);
     }
@@ -5130,7 +5204,7 @@ R"(
     {
         float camAlt = (camPos - planetCenter).length() - surfaceRadius;
         int cSteps, lSteps;
-        if      (camAlt < 15.0f)   { cSteps = 128; lSteps = 16; }  // inside cloud layer
+        if      (camAlt < 20.0f)   { cSteps = 128; lSteps = 16; }  // inside/near cloud layer
         else if (camAlt < 500.0f)  { cSteps = 48;  lSteps = 12; }
         else if (camAlt < 5000.0f) { cSteps = 32;  lSteps =  8; }
         else                       { cSteps = 16;  lSteps =  4; }
