@@ -1914,7 +1914,7 @@ public:
 
       #define PI 3.14159265359
 
-      const int PRIMARY_STEPS = 72;
+      const int PRIMARY_STEPS = 512; // covers 1024 km at 2 km/step (handles horizon rays from low altitude)
       
       // --- Dynamic Atmosphere Parameters ---
       vec3 gRayleighCoeff;
@@ -2138,14 +2138,27 @@ R"(
               float errorMargin = camAlt * 0.05 + 150.0;
               
               if (diff < errorMargin) {
-                  // Eliminate Z-fighting and concentric rings by smoothly blending depth into analytical sphere at large distances
-                  // At < 100km, we fully trust depth buffer for crisp mountain occlusion.
-                  // At > 1000km, we fully trust mathematical sphere to prevent precision banding.
+                  // Blend depth buffer → analytical sphere as terrain gets farther away.
+                  // At low altitude, mesh LOD creates polygons that span dozens of rows;
+                  // within a polygon every row gets the same terrainDist → same tFar →
+                  // identical atmospheric color. At polygon boundaries tFar jumps → band.
+                  // The smooth analytical sphere has no such discontinuities.
+                  // Thresholds are altitude-aware: low-alt camera (3-20 km) needs to switch
+                  // to smooth sphere much earlier (>15 km) than high-alt (>100 km already
+                  // handled by tScale).
                   float tScale = clamp((camAlt - 100.0) / 1000.0, 0.0, 1.0);
-                  tFar = min(tFar, mix(terrainDist, analyticalSurf, tScale));
-              } else {
-                  tFar = min(tFar, terrainDist); // e.g. looking at a spaceship
+                  float distScale = clamp((terrainDist - 3.0) / 12.0, 0.0, 1.0);
+                  float blend = max(tScale, distScale);
+                  tFar = min(tFar, mix(terrainDist, analyticalSurf, blend));
+              } else if (analyticalSurf < 1e5 || terrainDist < 50.0) {
+                  // analyticalSurf found → foreground object (rocket, spaceship…).
+                  // analyticalSurf = 1e6 + terrainDist < 50 km → close object on near-horizontal ray.
+                  tFar = min(tFar, terrainDist);
               }
+              // else: near-horizontal ray (analyticalSurf=1e6), distant terrain (>50 km).
+              // Mesh at this angle spans huge polygons → polygon-edge tFar jumps → bands.
+              // Atmosphere here is nearly opaque (thick column), so keeping outer-sphere
+              // tFar instead of terrain tFar makes negligible visual difference.
           } else {
               // Clamp mathematical surface intersection if looking at space
               float tSurf0, tSurf1;
@@ -2159,12 +2172,16 @@ R"(
           float segmentLength = tFar - tNear;
           if (segmentLength <= 0.0) discard;
           
-          float stepSize = segmentLength / float(PRIMARY_STEPS);
-          
-          // Apply screen-space dithering to eliminate banding artifacts
-          float jitter = screenHash(gl_FragCoord.xy);
-          tNear += jitter * stepSize;
-          
+          // Fixed 2 km step: the root cause of horizontal banding is adaptive step size.
+          // segmentLength/N varies between adjacent rows (different elevation angles have
+          // different path lengths), so step size varies → optical depth integration error
+          // varies → adjacent rows get different colors → visible horizontal bands.
+          // A fixed step size gives every pixel identical integration quality: no banding.
+          // PRIMARY_STEPS=512 covers 1024 km, handling the ~1100 km horizon ray from 5 km alt.
+          const float STEP_KM = 2.0;
+          float jitter = fract(gl_FragCoord.y * 0.6180339887 + float(uFrameIndex % 64) * 0.6180339887);
+          float tCur = tNear + jitter * STEP_KM;
+
           vec3 sumRayleigh = vec3(0.0);
           vec3 sumMie = vec3(0.0);
           vec3 sumCloud = vec3(0.0);
@@ -2173,14 +2190,16 @@ R"(
           float optDepthO = 0.0;
           float optDepthC = 0.0;
           float cosTheta = dot(rayDir, uLightDir);
-          
+
           for (int i = 0; i < PRIMARY_STEPS; i++) {
-              vec3 pos = uCamPos + rayDir * (tNear + (float(i) + 0.5) * stepSize);
+              if (tCur >= tFar) break;
+              float dt = min(STEP_KM, tFar - tCur);
+              vec3 pos = uCamPos + rayDir * (tCur + dt * 0.5);
               float h = max(length(pos - uPlanetCenter) - uSurfaceRadius, 0.0);
-              
-              float dR = exp(-h / gHRayleigh) * stepSize;
-              float dM = exp(-h / gHMie) * stepSize;
-              float dO = ozoneDensity(h) * stepSize;
+
+              float dR = exp(-h / gHRayleigh) * dt;
+              float dM = exp(-h / gHMie) * dt;
+              float dO = ozoneDensity(h) * dt;
               optDepthR += dR;
               optDepthM += dM;
               optDepthO += dO;
@@ -2197,6 +2216,8 @@ R"(
 
               sumRayleigh += dR * attenuationBase;
               sumMie += dM * attenuationBase;
+
+              tCur += STEP_KM;
 
               // Early Ray Termination
               float maxTransmittance = max(attenuationBase.x, max(attenuationBase.y, attenuationBase.z));

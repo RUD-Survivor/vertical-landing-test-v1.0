@@ -392,12 +392,20 @@ void marchClouds(
     float cloudSegLen = cEnd - cStart;
     if (cloudSegLen <= 0.0) return;
 
-    float fineStep = cloudSegLen / float(uCloudSteps);
     float camAlt_cloud = length(uCamPos - uPlanetCenter) - uSurfaceRadius;
     bool inCloudLayer  = (camAlt_cloud < gCloudMaxAlt + 5.0);
-    float bigStep = fineStep * (inCloudLayer ? 2.0 : 4.0);
+    // Fixed step sizes: cloudSegLen/uCloudSteps varies 8x between rows (-7° to -90°),
+    // giving different integration quality per row → horizontal banding.
+    // Fixed values give every row identical quality.
+    float fineStep = 0.50;
+    float bigStep  = inCloudLayer ? 3.0 : 5.0;
 
-    float cJitter = screenHash(gl_FragCoord.xy + vec2(17.3, 31.7)) * (inCloudLayer ? 0.20 : 1.0);
+    // Per-row golden-ratio jitter, same rationale as atmosphere primary march:
+    // IGN (~3.2-row period) causes systematic cloud density differences between rows
+    // → horizontal bands when viewing cloud layer at a grazing angle from above.
+    // Golden ratio is irrational → no period → every row is independent.
+    float cJitter = fract(gl_FragCoord.y * 0.6180339887 + float(uFrameIndex % 64) * 0.6180339887 + 0.38196601125)
+                  * (inCloudLayer ? 0.20 : 1.0);
     float entryFrac = clamp(cStart / max(tFar, 0.001), 0.0, 1.0);
     vec3 atmTransAtCloud = exp(-(gRayleighCoeff * optDepthR + gMieCoeff * optDepthM + gOzoneCoeff * optDepthO) * entryFrac);
 
