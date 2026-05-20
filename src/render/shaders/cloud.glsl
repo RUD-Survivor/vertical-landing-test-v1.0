@@ -404,13 +404,15 @@ void marchClouds(
     // IGN (~3.2-row period) causes systematic cloud density differences between rows
     // → horizontal bands when viewing cloud layer at a grazing angle from above.
     // Golden ratio is irrational → no period → every row is independent.
-    float cJitter = fract(gl_FragCoord.y * 0.6180339887 + float(uFrameIndex % 64) * 0.6180339887 + 0.38196601125)
+    // Same 2D IGN fix as atmosphere primary march: y-only jitter creates concentric rings
+    // when looking straight down (same y = same ring radius = same jitter = same cloud density).
+    float cIgn = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+    float cJitter = fract(cIgn + float(uFrameIndex % 64) * 0.6180339887 + 0.38196601125)
                   * (inCloudLayer ? 0.20 : 1.0);
     float entryFrac = clamp(cStart / max(tFar, 0.001), 0.0, 1.0);
     vec3 atmTransAtCloud = exp(-(gRayleighCoeff * optDepthR + gMieCoeff * optDepthM + gOzoneCoeff * optDepthO) * entryFrac);
 
     float tPos = cStart + cJitter * fineStep;
-    bool inCloud = false;
     const int MAX_CLOUD_ITER = 96;
 
     for (int ci = 0; ci < MAX_CLOUD_ITER; ci++) {
@@ -419,18 +421,13 @@ void marchClouds(
         vec3 cPos = uCamPos + rayDir * tPos;
         float ch = max(length(cPos - uPlanetCenter) - uSurfaceRadius, 0.0);
 
+        // Altitude-based step decision: no texture probe.
+        // Any probe sampled near the cloud entry point is nearly constant for all rays
+        // at the same elevation angle (same ring) → probe threshold creates concentric rings.
+        // Altitude is smooth and spherically symmetric → no ring artifacts.
+        if (ch < gCloudMinAlt || ch > gCloudMaxAlt) { tPos += bigStep; continue; }
+
         vec3 probeSph = normalize(cPos - uPlanetCenter);
-        float probeT = uCloudTime * 0.004;
-        // Probe must use world-space cPos, NOT probeSph.
-        // probeSph changes < 0.2% through a 12.5 km cloud layer → effectively constant per ray.
-        // PerlinWorley level-sets on the sphere appear as perfect concentric rings from above.
-        // cPos * 0.008 (125 km features) varies 0.1 per texture-period through the cloud → no rings.
-        float probeVal = texture(uNoiseTex3D, cPos * 0.008 + vec3(probeT * 0.60, probeT * 0.40, probeT * 0.15)).r;
-
-        if (!inCloud && probeVal <= 0.20) { tPos += bigStep; continue; }
-        if (inCloud && probeVal < 0.18) { inCloud = false; tPos += bigStep; continue; }
-        inCloud = true;
-
         float dC = cloudDensity(cPos, ch, true) * fineStep;
         float tangFrac = 1.0 - abs(dot(rayDir, probeSph));
         dC *= 1.0 - smoothstep(0.82, 0.97, tangFrac);

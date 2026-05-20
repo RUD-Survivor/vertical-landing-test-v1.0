@@ -2180,7 +2180,11 @@ R"(
           // A fixed step size gives every pixel identical integration quality: no banding.
           // PRIMARY_STEPS=512 covers 1024 km, handling the ~1100 km horizon ray from 5 km alt.
           const float STEP_KM = 2.0;
-          float jitter = fract(gl_FragCoord.y * 0.6180339887 + float(uFrameIndex % 64) * 0.6180339887);
+          // 2D IGN jitter: using only gl_FragCoord.y means all pixels in the same screen row
+          // share identical jitter → when looking straight down, same screen-y = same ring
+          // radius → perfect concentric rings. Adding x breaks the radial symmetry.
+          float ign = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+          float jitter = fract(ign + float(uFrameIndex % 64) * 0.6180339887);
           float tCur = tNear + jitter * STEP_KM;
 
           vec3 sumRayleigh = vec3(0.0);
