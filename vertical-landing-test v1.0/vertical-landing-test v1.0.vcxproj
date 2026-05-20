@@ -28,6 +28,8 @@
     <ClCompile Include="..\src\simulation\center_visualizer.cpp" />
     <ClCompile Include="..\src\simulation\predictor.cpp" />
     <ClCompile Include="..\src\render\stb_impl.cpp" />
+    <ClCompile Include="..\src\render\cloud_system.cpp" />
+    <ClCompile Include="..\src\render\vulkan\vk_allocator.cpp" />
     <ClCompile Include="testECS.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -35,6 +37,7 @@
     <ClInclude Include="..\src\control\control_system.h" />
     <ClInclude Include="..\src\render\HUD_system.h" />
     <ClInclude Include="..\src\render\renderer3d.h" />
+    <ClInclude Include="..\src\render\vulkan\vk_context.h" />
     <ClInclude Include="..\src\simulation\rocket_builder.h" />
     <ClInclude Include="..\src\simulation\rocket_state.h" />
     <ClInclude Include="..\src\save_system.h" />
@@ -45,6 +48,7 @@
     <ClInclude Include="..\src\simulation\orbit_physics.h" />
     <ClInclude Include="..\src\render\renderer_2d.h" />
     <ClInclude Include="..\src\simulation\predictor.h" />
+    <ClInclude Include="..\vendor\vma\vk_mem_alloc.h" />
   </ItemGroup>
   <ItemGroup>
     <Font Include="..\assets\fonts\SourceHanSansCN-Regular.otf" />
@@ -136,17 +140,17 @@
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>USE_VULKAN;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <AdditionalIncludeDirectories>..\src;..\vendor;..\dependencires\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\src;..\vendor;..\dependencires\include;$(VULKAN_SDK)\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/utf-8</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>glfw3.lib;opengl32.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>..\dependencires\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>glfw3.lib;opengl32.lib;vulkan-1.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>..\dependencires\lib;$(VULKAN_SDK)\Lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -155,17 +159,17 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>USE_VULKAN;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <AdditionalIncludeDirectories>..\src;..\vendor;..\dependencires\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\src;..\vendor;..\dependencires\include;$(VULKAN_SDK)\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/utf-8</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>glfw3.lib;opengl32.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>..\dependencires\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>glfw3.lib;opengl32.lib;vulkan-1.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>..\dependencires\lib;$(VULKAN_SDK)\Lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

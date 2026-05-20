@@ -1,4 +1,11 @@
 // Build optimization test
+#ifdef USE_VULKAN
+// Vulkan 相关宏必须在 GLFW 第一次 include 之前定义
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#define GLFW_INCLUDE_VULKAN
+#endif
+
 #include<glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <algorithm>
@@ -49,6 +56,16 @@ static void scroll_callback(GLFWwindow* /*w*/, double /*xoffset*/, double yoffse
 #include "scene/agency_scene.h"
 #include "scene/workshop_scene.h"
 #include "scene/flight_scene.h"
+
+#ifdef USE_VULKAN
+// 必须在 GLFW（带 GLFW_INCLUDE_VULKAN）之后 include
+// vendor 目录已在 include 路径中（vcxproj: ..\vendor）
+#include "vma/vk_mem_alloc.h"
+#include "render/vulkan/vk_context.h"
+#include "render/vulkan/vk_frame.h"
+static VulkanContext g_vkCtx;
+static FrameSync     g_frameSync;
+#endif
 
 
 // ==========================================
@@ -137,6 +154,17 @@ int main() {
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
   // Enable hardware multisampling
   glEnable(GL_MULTISAMPLE);
+
+#ifdef USE_VULKAN
+  // Phase 1: 只初始化 Instance + Device + VMA（不创建 surface/swapchain）
+  // Windows 上 WGL 锁定了窗口 DC，无法与 Vulkan WSI 共存。
+  // Surface/Swapchain 在 Phase 5 切换 GLFW_NO_API 窗口后再创建。
+  if (!g_vkCtx.initCore()) {
+    printf("[Vulkan] Core initialization failed — continuing with OpenGL only\n");
+  }
+  // g_frameSync 需要 command pool（Phase 1 跳过），Phase 5 时启用
+#endif
+
   renderer = new Renderer();
   
   PhysicsSystem::InitSolarSystem();
@@ -197,6 +225,11 @@ int main() {
   delete renderer;
   if (ctx.renderer3d) delete ctx.renderer3d;
   orbit_predictor.Stop();
+
+#ifdef USE_VULKAN
+  // g_frameSync.shutdown(g_vkCtx.device);  // Phase 5 启用
+  g_vkCtx.shutdown();
+#endif
 
   glfwTerminate();
   return 0;
