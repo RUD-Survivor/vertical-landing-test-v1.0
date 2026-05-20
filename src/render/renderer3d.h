@@ -2125,45 +2125,46 @@ R"(
           float tNear, tFar;
           if (!intersectSphere(uCamPos, rayDir, uOuterRadius, tNear, tFar)) discard;
           
-          // Occlude atmosphere against physical terrain distance
-          if (dVal < 1.0) {
-              float analyticalSurf = 1e6;
+          // ── tFar: root-cause fix for atmospheric polygon banding ───────────────
+          // Problem: the depth buffer returns the terrain *mesh* distance.  LOD creates
+          // large polygons far from the camera; every pixel in the same polygon gets the
+          // same terrainDist → same tFar → identical atmospheric color within the polygon,
+          // sharp color jump at polygon boundaries → horizontal banding rings.
+          //
+          // Root-cause solution (same as Bruneton 2008/2017, KSP, NMS, SpaceEngine, etc.):
+          // Use the smooth mathematical sphere intersection (analyticalSurf) as tFar for
+          // ALL distant terrain.  The analytical sphere varies continuously with ray
+          // direction and contains no polygon steps → zero banding, regardless of LOD.
+          //
+          // The only exception: objects closer than 5 km (rocket body, launch pad, close
+          // terrain) still use the depth buffer so they correctly occlude the atmosphere.
+          // At <5 km the mesh is dense enough that polygon steps create no visible bands.
+          {
+              // MUST use uSurfaceRadius (actual terrain sphere), NOT uInnerRadius.
+              // uInnerRadius = surfaceRadius * 0.9995 is 3.19 km below the actual surface.
+              // From 1 km altitude, rays within ±3.3° of horizontal miss uInnerRadius entirely
+              // → fall into the near-horizontal fallback → distant ocean (50-100 km) has
+              // no tFar clip → atmosphere over-integrates → bright "horizon break" band.
+              // With uSurfaceRadius the blind zone shrinks to ±1°, essentially just the tangent.
               float tSurf0, tSurf1;
-              if (intersectSphere(uCamPos, rayDir, uInnerRadius, tSurf0, tSurf1) && tSurf0 > 0.0) {
-                  analyticalSurf = tSurf0;
-              }
-              
-              float diff = abs(terrainDist - analyticalSurf);
-              // Error margin scales with distance because 24-bit depth buffer precision degrades at huge distances
-              float errorMargin = camAlt * 0.05 + 150.0;
-              
-              if (diff < errorMargin) {
-                  // Blend depth buffer → analytical sphere as terrain gets farther away.
-                  // At low altitude, mesh LOD creates polygons that span dozens of rows;
-                  // within a polygon every row gets the same terrainDist → same tFar →
-                  // identical atmospheric color. At polygon boundaries tFar jumps → band.
-                  // The smooth analytical sphere has no such discontinuities.
-                  // Thresholds are altitude-aware: low-alt camera (3-20 km) needs to switch
-                  // to smooth sphere much earlier (>15 km) than high-alt (>100 km already
-                  // handled by tScale).
-                  float tScale = clamp((camAlt - 100.0) / 1000.0, 0.0, 1.0);
-                  float distScale = clamp((terrainDist - 3.0) / 12.0, 0.0, 1.0);
-                  float blend = max(tScale, distScale);
-                  tFar = min(tFar, mix(terrainDist, analyticalSurf, blend));
-              } else if (analyticalSurf < 1e5 || terrainDist < 50.0) {
-                  // analyticalSurf found → foreground object (rocket, spaceship…).
-                  // analyticalSurf = 1e6 + terrainDist < 50 km → close object on near-horizontal ray.
-                  tFar = min(tFar, terrainDist);
-              }
-              // else: near-horizontal ray (analyticalSurf=1e6), distant terrain (>50 km).
-              // Mesh at this angle spans huge polygons → polygon-edge tFar jumps → bands.
-              // Atmosphere here is nearly opaque (thick column), so keeping outer-sphere
-              // tFar instead of terrain tFar makes negligible visual difference.
-          } else {
-              // Clamp mathematical surface intersection if looking at space
-              float tSurf0, tSurf1;
-              if (intersectSphere(uCamPos, rayDir, uInnerRadius, tSurf0, tSurf1) && tSurf0 > 0.0) {
-                  tFar = min(tFar, tSurf0);
+              if (dVal < 1.0) {
+                  float analyticalSurf = 1e6;
+                  if (intersectSphere(uCamPos, rayDir, uSurfaceRadius, tSurf0, tSurf1) && tSurf0 > 0.0)
+                      analyticalSurf = tSurf0;
+
+                  if (analyticalSurf < 1e5) {
+                      // Surface sphere found: use smooth sphere for distant terrain; depth buffer
+                      // only for close foreground objects (rocket, launch pad, etc.).
+                      tFar = min(tFar, terrainDist < 5.0 ? terrainDist : analyticalSurf);
+                  } else {
+                      // Truly tangential ray (within ~1° of horizontal) — sphere not intersected.
+                      // Only clip tFar for close objects; tangent-horizon rays naturally fade.
+                      if (terrainDist < 20.0) tFar = min(tFar, terrainDist);
+                  }
+              } else {
+                  // Sky pixel: clamp at surface sphere so the ray doesn't leave the atmosphere.
+                  if (intersectSphere(uCamPos, rayDir, uSurfaceRadius, tSurf0, tSurf1) && tSurf0 > 0.0)
+                      tFar = min(tFar, tSurf0);
               }
           }
           

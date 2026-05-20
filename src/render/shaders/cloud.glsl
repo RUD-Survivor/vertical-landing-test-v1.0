@@ -421,7 +421,11 @@ void marchClouds(
 
         vec3 probeSph = normalize(cPos - uPlanetCenter);
         float probeT = uCloudTime * 0.004;
-        float probeVal = texture(uNoiseTex3D, probeSph * 10.0 + vec3(probeT * 0.075, probeT * 0.05, probeT * 0.019)).r;
+        // Probe must use world-space cPos, NOT probeSph.
+        // probeSph changes < 0.2% through a 12.5 km cloud layer → effectively constant per ray.
+        // PerlinWorley level-sets on the sphere appear as perfect concentric rings from above.
+        // cPos * 0.008 (125 km features) varies 0.1 per texture-period through the cloud → no rings.
+        float probeVal = texture(uNoiseTex3D, cPos * 0.008 + vec3(probeT * 0.60, probeT * 0.40, probeT * 0.15)).r;
 
         if (!inCloud && probeVal <= 0.20) { tPos += bigStep; continue; }
         if (inCloud && probeVal < 0.18) { inCloud = false; tPos += bigStep; continue; }
