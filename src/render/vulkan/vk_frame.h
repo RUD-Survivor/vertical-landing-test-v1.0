@@ -2,30 +2,37 @@
 // ==========================================================================
 // vk_frame.h — Per-frame 同步对象与 Command Buffer
 //
-// 使用前提：已包含 <GLFW/glfw3.h>（带 GLFW_INCLUDE_VULKAN）
+// Semaphore 设计（修复 MAILBOX 模式下的 semaphore 重用警告）：
+//   - renderFinished: 每张 swapchain image 独立一个，避免 present 未消费时被再次发射
+//   - acquireSems:    独立于 frame slot 的获取信号量池（MAX_ACQUIRE_SEMS 个）
 // ==========================================================================
 
 #include <cstdio>
 
-// 同时在 GPU 上飞行的最大帧数（CPU 领先 GPU 的帧数）
-static constexpr int FRAMES_IN_FLIGHT = 2;
+static constexpr int FRAMES_IN_FLIGHT  = 2;
+static constexpr int MAX_SWAPCHAIN_IMG = 4;  // 典型 swapchain 最多 3~4 张
 
 // -----------------------------------------------------------------------
-// 每帧的同步资源
+// 每帧的同步资源（fence + command buffer 仍按 frame slot 分配）
 // -----------------------------------------------------------------------
 struct FrameData {
-    VkCommandBuffer commandBuffer  = VK_NULL_HANDLE;
-    VkSemaphore     imageAvailable = VK_NULL_HANDLE;  // vkAcquireNextImageKHR 信号
-    VkSemaphore     renderFinished = VK_NULL_HANDLE;  // vkQueuePresentKHR 等待
-    VkFence         inFlightFence  = VK_NULL_HANDLE;  // CPU 等待 GPU 完成
+    VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
+    VkFence         inFlightFence = VK_NULL_HANDLE;
 };
 
 // -----------------------------------------------------------------------
-// FrameSync — 管理所有帧的同步对象
+// FrameSync
 // -----------------------------------------------------------------------
 struct FrameSync {
-    FrameData frames[FRAMES_IN_FLIGHT]{};
-    int       currentFrame = 0;
+    FrameData   frames[FRAMES_IN_FLIGHT]{};
+    int         currentFrame = 0;
+
+    // 独立的 acquire 信号量池（不与 frame slot 绑定）
+    VkSemaphore acquireSems[MAX_SWAPCHAIN_IMG]{};
+    int         acquireIdx  = 0;
+
+    // 每张 swapchain image 独立的 renderFinished 信号量
+    VkSemaphore renderSems[MAX_SWAPCHAIN_IMG]{};
 
     bool init(VkDevice device, VkCommandPool commandPool) {
         VkCommandBufferAllocateInfo allocInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
@@ -34,17 +41,22 @@ struct FrameSync {
         allocInfo.commandBufferCount = 1;
 
         VkSemaphoreCreateInfo semCI{ VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
-
-        VkFenceCreateInfo fenceCI{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
-        fenceCI.flags = VK_FENCE_CREATE_SIGNALED_BIT;  // 初始已信号，第一帧不会永久等待
+        VkFenceCreateInfo     fenceCI{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+        fenceCI.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
         for (int i = 0; i < FRAMES_IN_FLIGHT; i++) {
             if (vkAllocateCommandBuffers(device, &allocInfo, &frames[i].commandBuffer) != VK_SUCCESS
-             || vkCreateSemaphore(device, &semCI, nullptr, &frames[i].imageAvailable) != VK_SUCCESS
-             || vkCreateSemaphore(device, &semCI, nullptr, &frames[i].renderFinished) != VK_SUCCESS
              || vkCreateFence(device, &fenceCI, nullptr, &frames[i].inFlightFence) != VK_SUCCESS)
             {
                 fprintf(stderr, "[Vulkan] Failed to create frame sync objects for frame %d\n", i);
+                return false;
+            }
+        }
+        for (int i = 0; i < MAX_SWAPCHAIN_IMG; i++) {
+            if (vkCreateSemaphore(device, &semCI, nullptr, &acquireSems[i]) != VK_SUCCESS
+             || vkCreateSemaphore(device, &semCI, nullptr, &renderSems[i])  != VK_SUCCESS)
+            {
+                fprintf(stderr, "[Vulkan] Failed to create semaphore %d\n", i);
                 return false;
             }
         }
@@ -52,19 +64,24 @@ struct FrameSync {
     }
 
     void shutdown(VkDevice device) {
+        for (int i = 0; i < MAX_SWAPCHAIN_IMG; i++) {
+            if (acquireSems[i] != VK_NULL_HANDLE) vkDestroySemaphore(device, acquireSems[i], nullptr);
+            if (renderSems[i]  != VK_NULL_HANDLE) vkDestroySemaphore(device, renderSems[i],  nullptr);
+        }
         for (int i = 0; i < FRAMES_IN_FLIGHT; i++) {
-            if (frames[i].imageAvailable != VK_NULL_HANDLE)
-                vkDestroySemaphore(device, frames[i].imageAvailable, nullptr);
-            if (frames[i].renderFinished != VK_NULL_HANDLE)
-                vkDestroySemaphore(device, frames[i].renderFinished, nullptr);
             if (frames[i].inFlightFence != VK_NULL_HANDLE)
                 vkDestroyFence(device, frames[i].inFlightFence, nullptr);
-            // commandBuffer 在 commandPool 销毁时自动释放，无需单独 vkFreeCommandBuffers
         }
     }
 
     FrameData& current() { return frames[currentFrame]; }
-    const FrameData& current() const { return frames[currentFrame]; }
+
+    // 每次 acquire 取一个新信号量（循环）
+    VkSemaphore nextAcquireSem() {
+        VkSemaphore s = acquireSems[acquireIdx];
+        acquireIdx = (acquireIdx + 1) % MAX_SWAPCHAIN_IMG;
+        return s;
+    }
 
     void advance() { currentFrame = (currentFrame + 1) % FRAMES_IN_FLIGHT; }
 };

@@ -58,21 +58,112 @@ static void scroll_callback(GLFWwindow* /*w*/, double /*xoffset*/, double yoffse
 #include "scene/flight_scene.h"
 
 #ifdef USE_VULKAN
-// 必须在 GLFW（带 GLFW_INCLUDE_VULKAN）之后 include
 // vendor 目录已在 include 路径中（vcxproj: ..\vendor）
 #include "vma/vk_mem_alloc.h"
 #include "render/vulkan/vk_context.h"
 #include "render/vulkan/vk_frame.h"
-// Phase 2: mesh rendering infrastructure (activated in Phase 5)
 #include "render/vulkan/vk_mesh.h"
 #include "render/vulkan/vk_descriptors.h"
 #include "render/vulkan/vk_renderpass.h"
 #include "render/vulkan/vk_pipeline.h"
+#include "render/vulkan/vk_taa.h"
 static VulkanContext       g_vkCtx;
 static FrameSync           g_frameSync;
 static VkDescriptorManager g_vkDesc;
-static VkFrameRenderer     g_vkRP;
 static VkMeshPipeline      g_meshPipe;
+static VkTAA               g_vkTAA;
+static bool                g_vkSwapchainDirty = false;
+
+static void handleVkSwapchainResize(GLFWwindow* window) {
+    g_vkCtx.recreateSwapchain(window);
+    g_vkTAA.recreate(g_vkCtx, g_vkCtx.swapExtent, g_vkCtx.swapFormat,
+        "src/render/shaders/spirv/taa.vert.spv",
+        "src/render/shaders/spirv/taa.frag.spv");
+    g_vkSwapchainDirty = false;
+}
+
+static void renderVulkanFrame(GLFWwindow* window) {
+    if (g_vkSwapchainDirty) { handleVkSwapchainResize(window); return; }
+
+    auto& frame = g_frameSync.current();
+
+    // acquire 信号量从独立池取（不与 frame slot 绑定，避免 MAILBOX 下的重用冲突）
+    VkSemaphore acquireSem = g_frameSync.nextAcquireSem();
+
+    vkWaitForFences(g_vkCtx.device, 1, &frame.inFlightFence, VK_TRUE, UINT64_MAX);
+
+    uint32_t imageIdx = 0;
+    VkResult result = vkAcquireNextImageKHR(g_vkCtx.device, g_vkCtx.swapchain,
+        UINT64_MAX, acquireSem, VK_NULL_HANDLE, &imageIdx);
+    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
+        handleVkSwapchainResize(window);
+        return;
+    }
+    if (result != VK_SUCCESS) return;
+
+    // renderFinished 按 swapchain image index 取（避免 present 未消费就被再次发射）
+    VkSemaphore renderSem = g_frameSync.renderSems[imageIdx];
+
+    vkResetFences(g_vkCtx.device, 1, &frame.inFlightFence);
+    vkResetCommandBuffer(frame.commandBuffer, 0);
+
+    VkCommandBufferBeginInfo beginInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(frame.commandBuffer, &beginInfo);
+
+    // Pass 1: 几何渲染 → RGBA16F ping-pong 缓冲
+    g_vkTAA.beginGeometryPass(frame.commandBuffer, g_vkCtx.swapExtent);
+    VkFrameRenderer::setViewportScissor(frame.commandBuffer, g_vkCtx.swapExtent);
+    // [TODO: 绑定 g_meshPipe 并提交 DrawCall — renderer3d 迁移时填入]
+    g_vkTAA.endGeometryPass(frame.commandBuffer);
+
+    // Pass 2: TAA resolve → swapchain image
+    g_vkTAA.beginResolvePass(frame.commandBuffer,
+        g_vkCtx.swapImages[imageIdx],
+        g_vkCtx.swapImageViews[imageIdx],
+        g_vkCtx.swapExtent);
+    VkFrameRenderer::setViewportScissor(frame.commandBuffer, g_vkCtx.swapExtent);
+    g_vkTAA.drawResolve(frame.commandBuffer, 0.1f);
+    g_vkTAA.endResolvePass(frame.commandBuffer, g_vkCtx.swapImages[imageIdx]);
+
+    vkEndCommandBuffer(frame.commandBuffer);
+
+    // 提交（Vulkan 1.3 vkQueueSubmit2）
+    VkCommandBufferSubmitInfo cmdInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO };
+    cmdInfo.commandBuffer = frame.commandBuffer;
+
+    VkSemaphoreSubmitInfo waitInfo{ VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO };
+    waitInfo.semaphore = acquireSem;
+    waitInfo.stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+
+    VkSemaphoreSubmitInfo signalInfo{ VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO };
+    signalInfo.semaphore = renderSem;
+    signalInfo.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+
+    VkSubmitInfo2 submitInfo2{ VK_STRUCTURE_TYPE_SUBMIT_INFO_2 };
+    submitInfo2.waitSemaphoreInfoCount   = 1;
+    submitInfo2.pWaitSemaphoreInfos      = &waitInfo;
+    submitInfo2.commandBufferInfoCount   = 1;
+    submitInfo2.pCommandBufferInfos      = &cmdInfo;
+    submitInfo2.signalSemaphoreInfoCount = 1;
+    submitInfo2.pSignalSemaphoreInfos    = &signalInfo;
+
+    vkQueueSubmit2(g_vkCtx.graphicsQueue, 1, &submitInfo2, frame.inFlightFence);
+
+    VkPresentInfoKHR presentInfo{ VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
+    presentInfo.waitSemaphoreCount = 1;
+    presentInfo.pWaitSemaphores    = &renderSem;
+    presentInfo.swapchainCount     = 1;
+    presentInfo.pSwapchains        = &g_vkCtx.swapchain;
+    presentInfo.pImageIndices      = &imageIdx;
+
+    result = vkQueuePresentKHR(g_vkCtx.presentQueue, &presentInfo);
+    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR)
+        g_vkSwapchainDirty = true;
+
+    g_vkTAA.swap();
+    g_frameSync.advance();
+}
 #endif
 
 
@@ -81,11 +172,13 @@ static VkMeshPipeline      g_meshPipe;
 // ==========================================
 
 
-void framebuffer_size_callback(GLFWwindow *window, int width, int height) {
+void framebuffer_size_callback(GLFWwindow* /*window*/, int /*width*/, int /*height*/) {
+#ifdef USE_VULKAN
+  g_vkSwapchainDirty = true;
+#else
   glViewport(0, 0, width, height);
+#endif
 }
-//函数用于处理窗口大小变化的事件。
-//当窗口大小发生变化时，该函数会自动调整OpenGL的视口，以确保渲染输出正确地适应新的窗口大小。
 
 #include "render/HUD_system.h"
 #include "simulation/simulation_controller.h"
@@ -139,44 +232,58 @@ int main() {
   // #############等待被模块化进入AppFramework：仅负责基础设置（GLFW/GLAD）、窗口管理和最外层异常处理。#############
   // ==========================================================
   glfwInit();
+
+#ifdef USE_VULKAN
+  // Phase 5: 纯 Vulkan 窗口，不创建 OpenGL 上下文
+  glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+#else
   glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-
-  // 请求一个包含 4倍多重采样 的帧缓冲
   glfwWindowHint(GLFW_SAMPLES, 4);
+#endif
 
   GLFWwindow *window = glfwCreateWindow(1000, 800, "3D Rocket Sim", NULL, NULL);
   if (!window) {
     glfwTerminate();
     return -1;
   }
-  glfwMakeContextCurrent(window);
+
   glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
   glfwSetScrollCallback(window, scroll_callback);
 
+#ifdef USE_VULKAN
+  // 完整 Vulkan 初始化序列（Phase 5）
+  if (!g_vkCtx.initCore()
+   || !g_vkCtx.initSwapchain(window)
+   || !g_frameSync.init(g_vkCtx.device, g_vkCtx.commandPool)
+   || !g_vkDesc.init(g_vkCtx)
+   || !g_meshPipe.init(g_vkCtx, g_vkDesc,
+                       VkTAA::kColorFmt, VkTAA::kDepthFmt,
+                       "src/render/shaders/spirv/mesh.vert.spv",
+                       "src/render/shaders/spirv/mesh.frag.spv")
+   || !g_vkTAA.init(g_vkCtx, g_vkCtx.swapExtent, g_vkCtx.swapFormat,
+                    "src/render/shaders/spirv/taa.vert.spv",
+                    "src/render/shaders/spirv/taa.frag.spv")) {
+    fprintf(stderr, "[Vulkan] Fatal: initialization failed\n");
+    glfwTerminate();
+    return -1;
+  }
+#else
+  glfwMakeContextCurrent(window);
   if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
     return -1;
-  // Enable transparency blending
   glEnable(GL_BLEND);
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-  // Enable hardware multisampling
   glEnable(GL_MULTISAMPLE);
-
-#ifdef USE_VULKAN
-  // Phase 1: 只初始化 Instance + Device + VMA（不创建 surface/swapchain）
-  // Windows 上 WGL 锁定了窗口 DC，无法与 Vulkan WSI 共存。
-  // Surface/Swapchain 在 Phase 5 切换 GLFW_NO_API 窗口后再创建。
-  if (!g_vkCtx.initCore()) {
-    printf("[Vulkan] Core initialization failed — continuing with OpenGL only\n");
-  }
-  // g_frameSync 需要 command pool（Phase 1 跳过），Phase 5 时启用
 #endif
 
+#ifndef USE_VULKAN
   renderer = new Renderer();
-  
+#endif
+
   PhysicsSystem::InitSolarSystem();
-  
+
   Simulation::AsyncOrbitPredictor orbit_predictor;
   orbit_predictor.Start();
 
@@ -185,10 +292,14 @@ int main() {
   // =========================================================
   GameContext& ctx = GameContext::getInstance();
   ctx.window = window;
+#ifndef USE_VULKAN
   ctx.renderer2d = renderer;
+#endif
   ctx.orbit_predictor = &orbit_predictor;
 
+#ifndef USE_VULKAN
   SceneManager::getInstance().changeScene(std::make_unique<MenuScene>());
+#endif
 
   double last_time = glfwGetTime();
 
@@ -200,6 +311,7 @@ int main() {
       last_time = current_time;
       if (real_dt > 0.1) real_dt = 0.02;
 
+#ifndef USE_VULKAN
       // Handle Scene Transitions based on flags
       IScene* cur = SceneManager::getInstance().getCurrentScene();
       if (cur) {
@@ -220,22 +332,32 @@ int main() {
               }
           }
       }
-
       SceneManager::getInstance().update(real_dt);
-      
+#endif
+
       // If window got closed by a scene
       if (glfwWindowShouldClose(window)) break;
 
+#ifdef USE_VULKAN
+      renderVulkanFrame(window);
+#else
       SceneManager::getInstance().render();
       glfwSwapBuffers(window);
+#endif
   }
 
+#ifndef USE_VULKAN
   delete renderer;
   if (ctx.renderer3d) delete ctx.renderer3d;
+#endif
   orbit_predictor.Stop();
 
 #ifdef USE_VULKAN
-  // g_frameSync.shutdown(g_vkCtx.device);  // Phase 5 启用
+  vkDeviceWaitIdle(g_vkCtx.device);
+  g_vkTAA.shutdown(g_vkCtx);
+  g_meshPipe.shutdown(g_vkCtx.device);
+  g_vkDesc.shutdown(g_vkCtx);
+  g_frameSync.shutdown(g_vkCtx.device);
   g_vkCtx.shutdown();
 #endif
 

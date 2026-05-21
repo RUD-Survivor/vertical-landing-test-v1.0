@@ -12,6 +12,7 @@
 
 #include "vk_context.h"
 #include "vk_utils.h"
+#include "vk_mesh.h"      // beginSingleTimeCommands / endSingleTimeCommands
 #include "vk_pipeline.h"  // loadSPIRV, createShaderModule
 
 #include <cstdio>
@@ -63,10 +64,11 @@ struct VkTAA {
               VkFormat      swapFormat,
               const char*   vertSpv,
               const char*   fragSpv) {
-        if (!createImages(ctx, extent))                         return false;
-        if (!createSamplers(ctx))                               return false;
-        if (!createResolvePipeline(ctx, swapFormat, vertSpv, fragSpv)) return false;
-        if (!createDescriptors(ctx))                            return false;
+        if (!createImages(ctx, extent))                                    return false;
+        if (!createSamplers(ctx))                                          return false;
+        initialLayoutTransition(ctx);  // history 图像在第 0 帧必须为 SHADER_READ_ONLY
+        if (!createResolvePipeline(ctx, swapFormat, vertSpv, fragSpv))    return false;
+        if (!createDescriptors(ctx))                                       return false;
         printf("[VkTAA] Initialized %ux%u RGBA16F ping-pong\n",
                extent.width, extent.height);
         return true;
@@ -479,6 +481,21 @@ private:
             vkUpdateDescriptorSets(ctx.device, 3, writes, 0, nullptr);
         }
         return true;
+    }
+
+    // 初始化后立即调用：将两张颜色图转到 SHADER_READ_ONLY_OPTIMAL
+    // 这样第 0 帧 TAA resolve 采样 history 图像时 layout 正确
+    // beginGeometryPass 用 oldLayout=UNDEFINED（丢弃内容），LOAD_OP_CLEAR 无需保留
+    void initialLayoutTransition(VulkanContext& ctx) {
+        VkCommandBuffer cmd = beginSingleTimeCommands(ctx);
+        for (int i = 0; i < 2; ++i) {
+            transitionImage(cmd, colorImages[i],
+                VK_IMAGE_LAYOUT_UNDEFINED,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,     VK_ACCESS_2_NONE,
+                VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
+        }
+        endSingleTimeCommands(ctx, cmd);
     }
 
     void destroyImages(VulkanContext& ctx) {
