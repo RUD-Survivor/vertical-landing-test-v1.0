@@ -67,12 +67,109 @@ static void scroll_callback(GLFWwindow* /*w*/, double /*xoffset*/, double yoffse
 #include "render/vulkan/vk_renderpass.h"
 #include "render/vulkan/vk_pipeline.h"
 #include "render/vulkan/vk_taa.h"
+#include "render/vulkan/vk_texture.h"
 static VulkanContext       g_vkCtx;
 static FrameSync           g_frameSync;
 static VkDescriptorManager g_vkDesc;
 static VkMeshPipeline      g_meshPipe;
 static VkTAA               g_vkTAA;
 static bool                g_vkSwapchainDirty = false;
+
+// --- Test scene resources ---
+static VkMesh          g_testMesh;
+static VkTexture2D     g_nullTex;
+static VkDescriptorSet g_nullTexSet = VK_NULL_HANDLE;
+
+// Column-major 4×4 matrix (matches GLSL mat4 memory layout)
+struct VkMat4 { float m[16]; };
+static VkMat4 mat4Mul(const VkMat4& a, const VkMat4& b) {
+    VkMat4 c{};
+    for (int col = 0; col < 4; col++)
+        for (int row = 0; row < 4; row++)
+            for (int k = 0; k < 4; k++)
+                c.m[col*4+row] += a.m[k*4+row] * b.m[col*4+k];
+    return c;
+}
+static VkMat4 mat4LookAt(float ex, float ey, float ez, float tx, float ty, float tz) {
+    float fx=tx-ex, fy=ty-ey, fz=tz-ez;
+    float fl=sqrtf(fx*fx+fy*fy+fz*fz); fx/=fl; fy/=fl; fz/=fl;
+    float rx=-fz, ry=0.0f, rz=fx;
+    float rl=sqrtf(rx*rx+rz*rz); rx/=rl; rz/=rl;
+    float ux=ry*fz-rz*fy, uy=rz*fx-rx*fz, uz=rx*fy-ry*fx;
+    float dd0=-(rx*ex+ry*ey+rz*ez), dd1=-(ux*ex+uy*ey+uz*ez), dd2=fx*ex+fy*ey+fz*ez;
+    return {{ rx,ux,-fx,0, ry,uy,-fy,0, rz,uz,-fz,0, dd0,dd1,dd2,1 }};
+}
+static VkMat4 mat4Perspective(float fovY, float aspect, float zn, float zf) {
+    float f = 1.0f / tanf(fovY * 0.5f);
+    float C = (zf + zn) / (zn - zf), D = (2.0f * zf * zn) / (zn - zf);
+    return {{ f/aspect,0,0,0, 0,f,0,0, 0,0,C,-1, 0,0,D,0 }};
+}
+
+struct TestVertex { float pos[3], normal[3], uv[2], color[4]; };
+static bool initTestScene() {
+    static const TestVertex verts[] = {
+        // Front  (z=+0.5, n=0,0,1)
+        {{-0.5f,-0.5f, 0.5f},{0,0,1},{0,0},{1,1,1,1}}, {{ 0.5f,-0.5f, 0.5f},{0,0,1},{1,0},{1,1,1,1}},
+        {{ 0.5f, 0.5f, 0.5f},{0,0,1},{1,1},{1,1,1,1}}, {{-0.5f, 0.5f, 0.5f},{0,0,1},{0,1},{1,1,1,1}},
+        // Back   (z=-0.5, n=0,0,-1)
+        {{ 0.5f,-0.5f,-0.5f},{0,0,-1},{0,0},{1,1,1,1}}, {{-0.5f,-0.5f,-0.5f},{0,0,-1},{1,0},{1,1,1,1}},
+        {{-0.5f, 0.5f,-0.5f},{0,0,-1},{1,1},{1,1,1,1}}, {{ 0.5f, 0.5f,-0.5f},{0,0,-1},{0,1},{1,1,1,1}},
+        // Left   (x=-0.5, n=-1,0,0)
+        {{-0.5f,-0.5f,-0.5f},{-1,0,0},{0,0},{1,1,1,1}}, {{-0.5f,-0.5f, 0.5f},{-1,0,0},{1,0},{1,1,1,1}},
+        {{-0.5f, 0.5f, 0.5f},{-1,0,0},{1,1},{1,1,1,1}}, {{-0.5f, 0.5f,-0.5f},{-1,0,0},{0,1},{1,1,1,1}},
+        // Right  (x=+0.5, n=1,0,0)
+        {{ 0.5f,-0.5f, 0.5f},{1,0,0},{0,0},{1,1,1,1}},  {{ 0.5f,-0.5f,-0.5f},{1,0,0},{1,0},{1,1,1,1}},
+        {{ 0.5f, 0.5f,-0.5f},{1,0,0},{1,1},{1,1,1,1}},  {{ 0.5f, 0.5f, 0.5f},{1,0,0},{0,1},{1,1,1,1}},
+        // Top    (y=+0.5, n=0,1,0)
+        {{-0.5f, 0.5f, 0.5f},{0,1,0},{0,0},{1,1,1,1}},  {{ 0.5f, 0.5f, 0.5f},{0,1,0},{1,0},{1,1,1,1}},
+        {{ 0.5f, 0.5f,-0.5f},{0,1,0},{1,1},{1,1,1,1}},  {{-0.5f, 0.5f,-0.5f},{0,1,0},{0,1},{1,1,1,1}},
+        // Bottom (y=-0.5, n=0,-1,0)
+        {{-0.5f,-0.5f,-0.5f},{0,-1,0},{0,0},{1,1,1,1}}, {{ 0.5f,-0.5f,-0.5f},{0,-1,0},{1,0},{1,1,1,1}},
+        {{ 0.5f,-0.5f, 0.5f},{0,-1,0},{1,1},{1,1,1,1}}, {{-0.5f,-0.5f, 0.5f},{0,-1,0},{0,1},{1,1,1,1}},
+    };
+    static const uint32_t indices[] = {
+         0, 1, 2,  2, 3, 0,   4, 5, 6,  6, 7, 4,
+         8, 9,10, 10,11, 8,  12,13,14, 14,15,12,
+        16,17,18, 18,19,16,  20,21,22, 22,23,20,
+    };
+    if (!g_testMesh.upload(g_vkCtx, verts, sizeof(verts), indices, 36))
+        return false;
+    static const uint8_t white[4] = {255,255,255,255};
+    if (!g_nullTex.upload(g_vkCtx, white, 1, 1))
+        return false;
+    g_nullTexSet = g_vkDesc.allocateTextureSet(g_vkCtx.device, g_nullTex.view, g_nullTex.sampler);
+    return g_nullTexSet != VK_NULL_HANDLE;
+}
+static void updateTestFrameUBO(int frameIdx, float time) {
+    float angle = time * 0.5f;
+    float ex = sinf(angle) * 3.0f, ey = 1.5f, ez = cosf(angle) * 3.0f;
+    float aspect = (float)g_vkCtx.swapExtent.width / (float)g_vkCtx.swapExtent.height;
+    VkMat4 view = mat4LookAt(ex, ey, ez, 0.0f, 0.0f, 0.0f);
+    VkMat4 proj = mat4Perspective(1.047f, aspect, 0.1f, 100.0f);
+    FrameUBO ubo{};
+    memcpy(ubo.view, view.m, 64);
+    memcpy(ubo.proj, proj.m, 64);
+    ubo.lightDir[0] = 0.577f; ubo.lightDir[1] = 0.577f; ubo.lightDir[2] = 0.577f;
+    ubo.viewPos[0] = ex; ubo.viewPos[1] = ey; ubo.viewPos[2] = ez;
+    ubo.time = time;
+    g_vkDesc.updateFrameUBO(frameIdx, ubo);
+}
+static void drawTestScene(VkCommandBuffer cmd, int frameIdx) {
+    g_meshPipe.bind(cmd);
+    VkDescriptorSet sets[] = { g_vkDesc.set0[frameIdx], g_nullTexSet };
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+        g_meshPipe.layout, 0, 2, sets, 0, nullptr);
+    MeshPushConstants pc{};
+    pc.model[0] = pc.model[5] = pc.model[10] = pc.model[15] = 1.0f;
+    pc.baseColor[0] = pc.baseColor[1] = pc.baseColor[2] = pc.baseColor[3] = 1.0f;
+    pc.ambientStr = 0.15f;
+    pc.hasTexture = 0;
+    vkCmdPushConstants(cmd, g_meshPipe.layout,
+        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+        0, sizeof(MeshPushConstants), &pc);
+    g_testMesh.bind(cmd);
+    g_testMesh.draw(cmd);
+}
 
 static void handleVkSwapchainResize(GLFWwindow* window) {
     g_vkCtx.recreateSwapchain(window);
@@ -114,7 +211,8 @@ static void renderVulkanFrame(GLFWwindow* window) {
     // Pass 1: 几何渲染 → RGBA16F ping-pong 缓冲
     g_vkTAA.beginGeometryPass(frame.commandBuffer, g_vkCtx.swapExtent);
     VkFrameRenderer::setViewportScissor(frame.commandBuffer, g_vkCtx.swapExtent);
-    // [TODO: 绑定 g_meshPipe 并提交 DrawCall — renderer3d 迁移时填入]
+    updateTestFrameUBO(g_frameSync.currentFrame, (float)glfwGetTime());
+    drawTestScene(frame.commandBuffer, g_frameSync.currentFrame);
     g_vkTAA.endGeometryPass(frame.commandBuffer);
 
     // Pass 2: TAA resolve → swapchain image
@@ -264,7 +362,8 @@ int main() {
                        "src/render/shaders/spirv/mesh.frag.spv")
    || !g_vkTAA.init(g_vkCtx, g_vkCtx.swapExtent, g_vkCtx.swapFormat,
                     "src/render/shaders/spirv/taa.vert.spv",
-                    "src/render/shaders/spirv/taa.frag.spv")) {
+                    "src/render/shaders/spirv/taa.frag.spv")
+   || !initTestScene()) {
     fprintf(stderr, "[Vulkan] Fatal: initialization failed\n");
     glfwTerminate();
     return -1;
@@ -354,6 +453,8 @@ int main() {
 
 #ifdef USE_VULKAN
   vkDeviceWaitIdle(g_vkCtx.device);
+  g_testMesh.destroy(g_vkCtx);
+  g_nullTex.destroy(g_vkCtx);
   g_vkTAA.shutdown(g_vkCtx);
   g_meshPipe.shutdown(g_vkCtx.device);
   g_vkDesc.shutdown(g_vkCtx);

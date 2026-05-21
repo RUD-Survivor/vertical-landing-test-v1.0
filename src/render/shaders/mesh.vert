@@ -39,5 +39,5 @@ void main() {
     // Vulkan NDC: Y is flipped relative to OpenGL
     gl_Position.y = -gl_Position.y;
     // Vulkan depth range: [0, 1] instead of OpenGL [-1, 1]
-    gl_Position.z = gl_Position.z * 0.5 + 0.5;
+    gl_Position.z = gl_Position.z * 0.5 + gl_Position.w * 0.5;
 }
