@@ -38,6 +38,13 @@
     <ClInclude Include="..\src\render\HUD_system.h" />
     <ClInclude Include="..\src\render\renderer3d.h" />
     <ClInclude Include="..\src\render\vulkan\vk_context.h" />
+    <ClInclude Include="..\src\render\vulkan\vk_frame.h" />
+    <ClInclude Include="..\src\render\vulkan\vk_mesh.h" />
+    <ClInclude Include="..\src\render\vulkan\vk_descriptors.h" />
+    <ClInclude Include="..\src\render\vulkan\vk_renderpass.h" />
+    <ClInclude Include="..\src\render\vulkan\vk_pipeline.h" />
+    <ClInclude Include="..\src\render\vulkan\vk_texture.h" />
+    <ClInclude Include="..\src\render\vulkan\vk_utils.h" />
     <ClInclude Include="..\src\simulation\rocket_builder.h" />
     <ClInclude Include="..\src\simulation\rocket_state.h" />
     <ClInclude Include="..\src\save_system.h" />
@@ -52,6 +59,11 @@
   </ItemGroup>
   <ItemGroup>
     <Font Include="..\assets\fonts\SourceHanSansCN-Regular.otf" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\src\render\shaders\mesh.vert" />
+    <None Include="..\src\render\shaders\mesh.frag" />
+    <None Include="..\compile_shaders.bat" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="..\src\keys.txt" />

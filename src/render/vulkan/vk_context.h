@@ -3,14 +3,13 @@
 // ==========================================================================
 // vk_context.h — Vulkan 基础设施
 // Instance / Physical Device / Logical Device / Swapchain / VMA
-//
-// 使用前提（调用方必须已定义/包含）：
-//   #define WIN32_LEAN_AND_MEAN
-//   #define NOMINMAX
-//   #define GLFW_INCLUDE_VULKAN     ← 必须在第一次 include glfw3.h 之前
-//   #include <GLFW/glfw3.h>         ← glfw 会自动 include vulkan/vulkan.h
-//   #include <vk_mem_alloc.h>       ← VMA 单头文件
 // ==========================================================================
+
+// Include Vulkan directly so all vk_*.h are self-contained.
+// Include guards make this a no-op if already included via GLFW_INCLUDE_VULKAN.
+#include <vulkan/vulkan.h>
+// VMA declarations (VMA_IMPLEMENTATION compiled only in vk_allocator.cpp)
+#include <vma/vk_mem_alloc.h>
 
 #include <vector>
 #include <string>
@@ -371,16 +370,23 @@ private:
             queueCIs.push_back(qci);
         }
 
-        VkPhysicalDeviceFeatures features{};
-        features.samplerAnisotropy = VK_TRUE;
+        // Vulkan 1.3 核心特性：dynamic rendering + synchronization2
+        VkPhysicalDeviceVulkan13Features features13{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
+        features13.dynamicRendering = VK_TRUE;
+        features13.synchronization2 = VK_TRUE;
+
+        VkPhysicalDeviceFeatures2 features2{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+        features2.features.samplerAnisotropy = VK_TRUE;
+        features2.pNext = &features13;
 
         const char* swapExt = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
         VkDeviceCreateInfo ci{ VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
+        ci.pNext                   = &features2;   // pNext 链传递 1.3 特性
+        ci.pEnabledFeatures        = nullptr;      // 使用 pNext 链时必须为 null
         ci.queueCreateInfoCount    = (uint32_t)queueCIs.size();
         ci.pQueueCreateInfos       = queueCIs.data();
         ci.enabledExtensionCount   = 1;
         ci.ppEnabledExtensionNames = &swapExt;
-        ci.pEnabledFeatures        = &features;
 
         if (vkCreateDevice(physDevice, &ci, nullptr, &device) != VK_SUCCESS) {
             fprintf(stderr, "[Vulkan] Failed to create logical device\n");

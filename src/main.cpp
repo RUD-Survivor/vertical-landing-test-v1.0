@@ -63,8 +63,16 @@ static void scroll_callback(GLFWwindow* /*w*/, double /*xoffset*/, double yoffse
 #include "vma/vk_mem_alloc.h"
 #include "render/vulkan/vk_context.h"
 #include "render/vulkan/vk_frame.h"
-static VulkanContext g_vkCtx;
-static FrameSync     g_frameSync;
+// Phase 2: mesh rendering infrastructure (activated in Phase 5)
+#include "render/vulkan/vk_mesh.h"
+#include "render/vulkan/vk_descriptors.h"
+#include "render/vulkan/vk_renderpass.h"
+#include "render/vulkan/vk_pipeline.h"
+static VulkanContext       g_vkCtx;
+static FrameSync           g_frameSync;
+static VkDescriptorManager g_vkDesc;
+static VkFrameRenderer     g_vkRP;
+static VkMeshPipeline      g_meshPipe;
 #endif
 
 
