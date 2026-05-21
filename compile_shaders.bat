@@ -15,12 +15,20 @@ if not exist %OUT_DIR% mkdir %OUT_DIR%
 
 echo === Compiling Vulkan shaders ===
 
-echo [1/2] mesh.vert
+echo [1/4] mesh.vert
 %GLSLC% %SHADER_DIR%\mesh.vert -o %OUT_DIR%\mesh.vert.spv
 if %ERRORLEVEL% neq 0 goto :fail
 
-echo [2/2] mesh.frag
+echo [2/4] mesh.frag
 %GLSLC% %SHADER_DIR%\mesh.frag -o %OUT_DIR%\mesh.frag.spv
+if %ERRORLEVEL% neq 0 goto :fail
+
+echo [3/4] taa.vert
+%GLSLC% %SHADER_DIR%\taa.vert -o %OUT_DIR%\taa.vert.spv
+if %ERRORLEVEL% neq 0 goto :fail
+
+echo [4/4] taa.frag
+%GLSLC% %SHADER_DIR%\taa.frag -o %OUT_DIR%\taa.frag.spv
 if %ERRORLEVEL% neq 0 goto :fail
 
 echo.

@@ -44,6 +44,7 @@
     <ClInclude Include="..\src\render\vulkan\vk_renderpass.h" />
     <ClInclude Include="..\src\render\vulkan\vk_pipeline.h" />
     <ClInclude Include="..\src\render\vulkan\vk_texture.h" />
+    <ClInclude Include="..\src\render\vulkan\vk_taa.h" />
     <ClInclude Include="..\src\render\vulkan\vk_utils.h" />
     <ClInclude Include="..\src\simulation\rocket_builder.h" />
     <ClInclude Include="..\src\simulation\rocket_state.h" />
@@ -63,6 +64,8 @@
   <ItemGroup>
     <None Include="..\src\render\shaders\mesh.vert" />
     <None Include="..\src\render\shaders\mesh.frag" />
+    <None Include="..\src\render\shaders\taa.vert" />
+    <None Include="..\src\render\shaders\taa.frag" />
     <None Include="..\compile_shaders.bat" />
   </ItemGroup>
   <ItemGroup>
