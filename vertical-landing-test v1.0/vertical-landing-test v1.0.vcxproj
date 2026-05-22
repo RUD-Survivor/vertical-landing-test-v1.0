@@ -44,6 +44,7 @@
     <ClInclude Include="..\src\render\vulkan\vk_renderpass.h" />
     <ClInclude Include="..\src\render\vulkan\vk_pipeline.h" />
     <ClInclude Include="..\src\render\vulkan\vk_texture.h" />
+    <ClInclude Include="..\src\render\vulkan\vk_renderer3d.h" />
     <ClInclude Include="..\src\render\vulkan\vk_taa.h" />
     <ClInclude Include="..\src\render\vulkan\vk_utils.h" />
     <ClInclude Include="..\src\simulation\rocket_builder.h" />

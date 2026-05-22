@@ -26,6 +26,9 @@ public:
     GLFWwindow* window = nullptr;
     Renderer* renderer2d = nullptr;
     Renderer3D* renderer3d = nullptr;
+#ifdef USE_VULKAN
+    struct VkRenderer3D* vkRenderer3d = nullptr;
+#endif
 
     // ==== 跨模式持久化存档状态 (Persistent State) ====
     // 玩家在 Agency 中积攒的资金、物品

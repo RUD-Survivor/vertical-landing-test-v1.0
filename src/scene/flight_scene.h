@@ -254,9 +254,11 @@ else {
         Renderer3D* r3d = GameContext::getInstance().renderer3d;
         // Limit spikes
         frame++;
+#ifndef USE_VULKAN
         if (frame == 1) {
             cout << "[FlightScene] r3d=" << (void*)r3d << " earthProg=" << r3d->earthProgram << " atmoProg=" << r3d->atmoProg << " terrainProg=" << r3d->terrainProg << endl;
         }
+#endif
         // Scene escape logic handled externally or here
         if (glfwGetKey(GameContext::getInstance().GameContext::getInstance().window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
             glfwSetWindowShouldClose(GameContext::getInstance().window, true);
@@ -286,7 +288,7 @@ else {
             mnvManager.update(GameContext::getInstance().window, world, rocket_entity, hudManager.hud, cam, dt, ww, wh);
         }
         // --- Ensure Rocket starts perfectly on the Terrain/SVO surface ---
-        if (r3d->terrain) {
+        if (r3d && r3d->terrain) {
             Vec3 localUp(trans.surf_px, trans.surf_py, trans.surf_pz);
             localUp = localUp.normalized();
             Quat unalign_from_z = Quat::fromAxisAngle(Vec3(1.0f, 0.0f, 0.0f), (float)(PI / 2.0));
@@ -342,7 +344,9 @@ else {
         {
             // === 1. 构建本帧渲染参考系上下文 (浮动原点、物理变换、投影矩阵) ===
             ctx.update(trans, vel, att, tele, guid, rocket_config, UniverseModel::getInstance().current_soi_index, last_soi, comma_prev, period_prev, cam, ws_d, dt);
-
+#ifdef USE_VULKAN
+            return;
+#endif
             // 相机设置 (TAA 与 GL 状态清理)
             int ww, wh;
             glfwGetFramebufferSize(GameContext::getInstance().window, &ww, &wh);

@@ -402,3 +402,128 @@ void CloudSystem::bakeWeather() {
     glBindTexture(GL_TEXTURE_2D, 0);
     std::cout << " done." << std::endl;
 }
+
+// ─── Re-bake: 2048×1024 weather map from procedural terrain ───────────────────
+// Uses tectonic height map for land/sea mask + planetary-wave FBM to break
+// zonal uniformity + coastal proximity enhancement.
+void CloudSystem::rebakeWeather(const std::vector<float>& heightMap, int hw, int hh, float seaLevel) {
+    std::cout << "[Cloud] Re-baking weather map from terrain ("
+              << hw << "x" << hh << ")..." << std::flush;
+    const int W = 2048, H = 1024;
+    std::vector<uint8_t> data(W * H * 4);
+
+    // ── height map samplers ──────────────────────────────────────────────
+    auto sampleRaw = [&](float lon, float lat) -> float {
+        float u = lon / 360.f + 0.5f;  // [0,1]
+        float v = lat / 180.f + 0.5f;
+        u = u - std::floor(u);         // wrap longitude
+        float fx = u * (hw - 1);
+        float fy = v * (hh - 1);
+        int x0 = (int)fx, y0 = (int)fy;
+        int x1 = (x0 + 1) % hw;
+        int y1 = std::min(hh - 1, y0 + 1);
+        float tx = fx - (float)x0, ty = fy - (float)y0;
+        float h00 = heightMap[y0 * hw + x0];
+        float h10 = heightMap[y0 * hw + x1];
+        float h01 = heightMap[y1 * hw + x0];
+        float h11 = heightMap[y1 * hw + x1];
+        return h00*(1.f-tx)*(1.f-ty) + h10*tx*(1.f-ty) + h01*(1.f-tx)*ty + h11*tx*ty;
+    };
+
+    // Smooth land mask [0,1] with softened coastal transition
+    auto sampleLand = [&](float lon, float lat) -> float {
+        float h = sampleRaw(lon, lat);
+        float band = 0.025f; // ~2.5% height range for transition
+        return std::min(1.f, std::max(0.f, (h - seaLevel + band) / (2.f * band)));
+    };
+
+    // Gaussian helper
+    auto gauss = [](float x, float center, float sigma) -> float {
+        float d = (x - center) / sigma;
+        return std::exp(-0.5f * d * d);
+    };
+
+    for (int y = 0; y < H; y++) {
+        float lat = ((float)y / (float)H - 0.5f) * 180.f;
+
+        for (int x = 0; x < W; x++) {
+            float lon = ((float)x / (float)W - 0.5f) * 360.f;
+
+            // ── Procedural land mask from terrain ────────────────────────
+            float land = sampleLand(lon, lat);
+
+            // ── Coastal proximity (gradient magnitude of land mask) ──────
+            float dLon = 0.35f; // ~80km at equator in 2048 map
+            float dLat = 0.35f;
+            float gradX = sampleLand(lon + dLon, lat) - sampleLand(lon - dLon, lat);
+            float gradY = sampleLand(lon, lat + dLat) - sampleLand(lon, lat - dLat);
+            float gradMag = std::sqrt(gradX*gradX + gradY*gradY);
+            float coastalProx = std::min(1.f, gradMag / 0.8f); // coastal band [0,1]
+            float coastalCov = coastalProx * 0.18f;            // +18% coverage at coast
+
+            // ── Planetary-wave FBM (breaks zonal band uniformity) ───────
+            float latRad = lat * 0.0174533f;
+            float lonRad = lon * 0.0174533f;
+            float sx = std::cos(latRad) * std::cos(lonRad);
+            float sy = std::sin(latRad);
+            float sz = std::cos(latRad) * std::sin(lonRad);
+
+            float pWave = 0.f;
+            // 3 octaves: wavenumber 1-6, wavelength ~6000-36000km
+            pWave += cpu_fbm(sx * 1.0f, sy * 1.0f, sz * 1.0f, 3) * 0.40f;  // ~20000km
+            pWave += cpu_fbm(sx * 2.5f, sy * 2.5f, sz * 2.5f, 3) * 0.35f;  // ~8000km
+            pWave += cpu_fbm(sx * 6.0f, sy * 6.0f, sz * 6.0f, 2) * 0.25f;  // ~3000km
+            // Remap: pWave is roughly 0.2-0.8, center around 0.5
+            float pWaveBias = (pWave - 0.45f) * 0.30f; // ±0.15 modulation
+
+            // ── Climate zone weights by absolute latitude ────────────────
+            float absLat = std::abs(lat);
+            float wITCZ      = gauss(absLat,  2.f,  6.f);
+            float wSubDry    = gauss(absLat, 27.f, 10.f);
+            float wTemperate = gauss(absLat, 52.f, 13.f);
+            float wPolar     = gauss(absLat, 75.f,  9.f);
+            float wSum = wITCZ + wSubDry + wTemperate + wPolar + 1e-6f;
+            wITCZ /= wSum; wSubDry /= wSum; wTemperate /= wSum; wPolar /= wSum;
+
+            // ── Ocean climate (latitude-driven + planetary wave) ─────────
+            float cov_oc  = wITCZ*0.82f + wSubDry*0.35f + wTemperate*0.68f + wPolar*0.52f;
+            float type_oc = wITCZ*0.84f + wSubDry*0.15f + wTemperate*0.48f + wPolar*0.12f;
+            float hum_oc  = wITCZ*0.88f + wSubDry*0.52f + wTemperate*0.72f + wPolar*0.58f;
+            cov_oc = std::max(0.f, std::min(1.f, cov_oc + pWaveBias));
+
+            // ── Land climate (continentality effect) ─────────────────────
+            // Land has less cloud overall, but coastal areas have more
+            float cov_la  = wITCZ*0.55f + wSubDry*0.28f + wTemperate*0.48f + wPolar*0.38f;
+            float type_la = wITCZ*0.65f + wSubDry*0.30f + wTemperate*0.38f + wPolar*0.08f;
+            float hum_la  = wITCZ*0.62f + wSubDry*0.28f + wTemperate*0.52f + wPolar*0.42f;
+            cov_la = std::max(0.f, std::min(1.f, cov_la + pWaveBias * 0.7f));
+
+            // ── Blend ocean/land with coastal enhancement ────────────────
+            float coverage  = cov_oc  + (cov_la  - cov_oc)  * land + coastalCov * (1.f - std::abs(land - 0.5f) * 2.f);
+            float cloudType = type_oc + (type_la - type_oc) * land;
+            float humidity  = hum_oc  + (hum_la  - hum_oc)  * land;
+
+            coverage  = std::min(1.f, std::max(0.f, coverage));
+            cloudType = std::min(1.f, std::max(0.f, cloudType));
+            humidity  = std::min(1.f, std::max(0.f, humidity));
+
+            int idx = (y * W + x) * 4;
+            data[idx+0] = (uint8_t)std::min(255, (int)(coverage  * 255.f + 0.5f));
+            data[idx+1] = (uint8_t)std::min(255, (int)(cloudType * 255.f + 0.5f));
+            data[idx+2] = (uint8_t)std::min(255, (int)(humidity  * 255.f + 0.5f));
+            data[idx+3] = (uint8_t)std::min(255, (int)(land      * 255.f + 0.5f));
+        }
+    }
+
+    // Upload to GPU (replaces previous weatherT)
+    if (weatherT) glDeleteTextures(1, &weatherT);
+    glGenTextures(1, &weatherT);
+    glBindTexture(GL_TEXTURE_2D, weatherT);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, W, H, 0, GL_RGBA, GL_UNSIGNED_BYTE, data.data());
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    std::cout << " done." << std::endl;
+}

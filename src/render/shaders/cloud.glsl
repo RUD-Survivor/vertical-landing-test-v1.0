@@ -217,18 +217,25 @@ float cloudDensity(vec3 p, float h, bool highDetail) {
                 coverage *= smoothstep(eyeRadius * 0.35, eyeRadius, cycDist);
             }
 
+            // ── Physics-driven vertical profiles per cloud type ──────────────────
+            // Stratus:  uniform layer, sharp base, gradual top
+            // Cumulus:  flat base, dense core at 0.3-0.6h, cauliflower top
+            // Cumulonimbus: tower + anvil shelf at 0.7-0.95h
             float cloudType = mix(texture(uCoverTex3D, (warpedSph * 2.5 + vec3(31.4, 17.8, 42.1)) * INV8).r, weather.g, 0.55);
-            float stratusGrad      = altBase * (1.0 - smoothstep(0.15, 0.30, altNorm));
-            float cumulusGrad      = altBase * (1.0 - smoothstep(0.55, 0.80, altNorm));
-            float cumulonimbusGrad = altBase * (1.0 - smoothstep(0.90, 1.00, altNorm));
+            float stratusProfile      = altBase * (1.0 - smoothstep(0.82, 1.0, altNorm));
+            float cumulusCore         = exp(-((altNorm - 0.35) * (altNorm - 0.35)) / (0.25 * 0.25));
             float topNoise  = texture(uCoverTex3D, (windSph1 * 8.0 + vec3(53.2, 29.7, 71.4 + t * 0.01)) * INV8).r;
-            float topHeight = mix(0.40, 1.00, topNoise);
-            float topMask   = 1.0 - smoothstep(topHeight - 0.06, topHeight + 0.06, altNorm);
+            float topHeight = mix(0.55, 1.00, topNoise);
+            float cumulusTop          = 1.0 - smoothstep(topHeight - 0.08, topHeight + 0.08, altNorm);
+            float cumulusProfile      = altBase * cumulusCore * cumulusTop;
+            float cbTower             = smoothstep(0.0, 0.50, altNorm) * (1.0 - smoothstep(0.50, 0.72, altNorm));
+            float cbAnvil             = smoothstep(0.68, 0.80, altNorm) * (1.0 - smoothstep(0.88, 1.00, altNorm)) * 0.35;
+            float cumulonimbusProfile = altBase * max(cbTower, cbAnvil);
             float heightGradient = mix(
-                mix(stratusGrad, cumulusGrad, smoothstep(0.0, 0.5, cloudType)),
-                cumulonimbusGrad,
+                mix(stratusProfile, cumulusProfile, smoothstep(0.0, 0.5, cloudType)),
+                cumulonimbusProfile,
                 smoothstep(0.5, 1.0, cloudType)
-            ) * topMask;
+            );
             float altShape = heightGradient * 1.5;
 
             vec3 tc = windSph1 * (80.0 + h * 0.45) + vec3(t * 0.6, t * 0.4, t * 0.15);
@@ -308,6 +315,31 @@ float cloudDensity(vec3 p, float h, bool highDetail) {
                 }
             }
 
+            // ── Turbulent updraft cores ──────────────────────────────────────
+            // Approximate TKE (turbulent kinetic energy) from curl noise divergence.
+            // Strong TKE → distinct updraft columns with higher density cores.
+            {
+                float edgeMaskLo = min(uTuneThreshLo, uTuneThreshHi);
+                vec3 curlVec = curlSph(windSph1 * 4.0, 3.0, t * 0.3);
+                float tke = abs(dot(curlVec, windSph1)) * 2.5;
+                float tkeThreshold = smoothstep(0.35, 0.75, tke);
+
+                // Updraft core: discrete columnar structures where TKE is high
+                float distToCore = 1.0 - worley3d(windSph1 * 14.0 + t * 0.12);
+                float coreStrength = exp(-distToCore * distToCore * 18.0) * tkeThreshold;
+                // Only boost density near cloud surface (not deep interior or empty space)
+                float surfaceZone = smoothstep(edgeMaskLo - 0.06, edgeMaskLo + 0.02, n)
+                                  * (1.0 - smoothstep(edgeMaskLo + 0.18, edgeMaskLo + 0.35, n));
+                n += coreStrength * 0.12 * surfaceZone * (0.4 + 0.6 * altNorm);
+
+                // ── Entrainment mixing fingers ───────────────────────────────
+                // At cloud edges, dry-air intrusion creates finger-like structures
+                float edgeZone = smoothstep(edgeMaskLo - 0.04, edgeMaskLo + 0.04, n)
+                               * (1.0 - smoothstep(edgeMaskLo + 0.08, edgeMaskLo + 0.20, n));
+                float fingers = fbm(p * 24.0 + vec3(t * 0.09, t * 0.06, 0.0), 3);
+                n += edgeZone * (fingers - 0.5) * 0.18 * (0.5 + 0.5 * tke);
+            }
+
             float maskLo = min(uTuneThreshLo, uTuneThreshHi);
             float maskHi = max(uTuneThreshLo, uTuneThreshHi);
             float mask = smoothstep(maskLo, maskHi, n) * altShape;
@@ -316,7 +348,11 @@ float cloudDensity(vec3 p, float h, bool highDetail) {
 
         if (h >= 8.0 && h <= gCloudMaxAlt) {
             float altNorm = (h - 8.0) / (gCloudMaxAlt - 8.0);
-            float altShape = 1.0 - pow(abs(altNorm * 2.0 - 1.0), 2.0);
+            // Asymmetric cirrus profile: sharp ice-crystal formation at base,
+            // exponential wisp decay at top (wind-shear streak effect)
+            float cirrusBase   = smoothstep(0.0, 0.08, altNorm);
+            float cirrusWisp   = exp(-altNorm * 3.2);
+            float altShape = cirrusBase * cirrusWisp;
             float angle2 = t * -0.5;
             float latWarp2 = sph.z * sph.z * sph.z * 0.15;
             float s2 = sin(angle2 + latWarp2); float c2 = cos(angle2 + latWarp2);
@@ -360,6 +396,66 @@ float cloudPhase(float cosTheta) {
     return mix(phase2, phase1, 0.7);
 }
 
+// ── Cone-traced ambient occlusion (lightweight, ~3-probe) ─────────────────────
+// Estimates how much neighbouring cloud mass surrounds a point by probing
+// downward and sideways with cheap 2-oct FBM density samples.
+// Returns [0,1]: 0 = fully buried in cloud, 1 = exposed to open sky.
+float coneAO(vec3 p, vec3 sph, float h) {
+    if (h < gCloudMinAlt + 0.3) return 0.08;  // cloud base is always dark
+
+    // 3 probe directions: straight down (radial inward) + 2 orthogonal tangents
+    vec3 down = -sph;
+    vec3 tan1 = normalize(cross(sph, vec3(0.371, 0.629, 0.683)));
+    vec3 tan2 = cross(sph, tan1);
+
+    float occlusion = 0.0;
+    float weightSum  = 0.0;
+
+    // 3 probe distances: 0.12, 0.28, 0.50 km (non-linear spacing)
+    float dists[3] = float[3](0.12, 0.28, 0.50);
+    float wgts[3]  = float[3](0.50, 0.30, 0.20);
+
+    for (int d = 0; d < 3; d++) {
+        // Downward probe (heaviest weight — most meaningful occlusion)
+        {
+            vec3 probePos = p + down * dists[d];
+            float probeH = length(probePos - uPlanetCenter) - uSurfaceRadius;
+            if (probeH >= gCloudMinAlt && probeH <= gCloudMaxAlt) {
+                vec3 probeSph = normalize(probePos - uPlanetCenter);
+                float dC = fbm_pw(probeSph * 3.0, 2);  // cheap 2-oct estimate
+                occlusion += dC * wgts[d] * 0.50;
+            }
+            weightSum += wgts[d] * 0.50;
+        }
+        // Tangent probe 1
+        {
+            vec3 probePos = p + tan1 * dists[d] * 1.5;
+            float probeH = length(probePos - uPlanetCenter) - uSurfaceRadius;
+            if (probeH >= gCloudMinAlt && probeH <= gCloudMaxAlt) {
+                vec3 probeSph = normalize(probePos - uPlanetCenter);
+                float dC = fbm_pw(probeSph * 3.0, 2);
+                occlusion += dC * wgts[d] * 0.25;
+            }
+            weightSum += wgts[d] * 0.25;
+        }
+        // Tangent probe 2
+        {
+            vec3 probePos = p + tan2 * dists[d] * 1.5;
+            float probeH = length(probePos - uPlanetCenter) - uSurfaceRadius;
+            if (probeH >= gCloudMinAlt && probeH <= gCloudMaxAlt) {
+                vec3 probeSph = normalize(probePos - uPlanetCenter);
+                float dC = fbm_pw(probeSph * 3.0, 2);
+                occlusion += dC * wgts[d] * 0.25;
+            }
+            weightSum += wgts[d] * 0.25;
+        }
+    }
+
+    float avgOcclusion = (weightSum > 0.001) ? occlusion / weightSum : 0.0;
+    // Remap: even moderate occlusion should darken noticeably
+    return 1.0 - avgOcclusion * 1.3;
+}
+
 // ── Cloud ray march: shadow + inscatter ───────────────────────────────────────
 // Encapsulates the full volumetric cloud pass (adaptive big/fine step + probe).
 // Uses gCloudMinAlt/MaxAlt/Extinction/Scattering from atmosphere globals.
@@ -394,11 +490,10 @@ void marchClouds(
 
     float camAlt_cloud = length(uCamPos - uPlanetCenter) - uSurfaceRadius;
     bool inCloudLayer  = (camAlt_cloud < gCloudMaxAlt + 5.0);
-    // Fixed step sizes: cloudSegLen/uCloudSteps varies 8x between rows (-7° to -90°),
-    // giving different integration quality per row → horizontal banding.
-    // Fixed values give every row identical quality.
-    float fineStep = 0.50;
-    float bigStep  = inCloudLayer ? 3.0 : 5.0;
+    // Fixed step sizes — 200 m fine step resolves ~70 samples across the 14 km cloud layer,
+    // sufficient to capture all 6 LOD detail levels in cloudDensity().
+    float fineStep = 0.20;
+    float bigStep  = inCloudLayer ? 2.50 : 4.0;
 
     // Per-row golden-ratio jitter, same rationale as atmosphere primary march:
     // IGN (~3.2-row period) causes systematic cloud density differences between rows
@@ -413,7 +508,8 @@ void marchClouds(
     vec3 atmTransAtCloud = exp(-(gRayleighCoeff * optDepthR + gMieCoeff * optDepthM + gOzoneCoeff * optDepthO) * entryFrac);
 
     float tPos = cStart + cJitter * fineStep;
-    const int MAX_CLOUD_ITER = 96;
+    float prevDC = 0.0;  // for edge-detection silver lining
+    const int MAX_CLOUD_ITER = 128;
 
     for (int ci = 0; ci < MAX_CLOUD_ITER; ci++) {
         if (tPos >= cEnd) break;
@@ -440,22 +536,39 @@ void marchClouds(
 
         vec3 sunTint = exp(-(gRayleighCoeff * cLightR + gMieCoeff * 1.1 * cLightM + gOzoneCoeff * cLightO));
 
-        float tauCloud  = gCloudExtinction.x * (optDepthC + cLightC);
-        float tauLight  = gCloudExtinction.x * cLightC;
-        float ms0 = exp(-tauCloud);
-        float ms1 = exp(-tauCloud * 0.5) * 0.5;
-        float ms2 = exp(-tauCloud * 0.25) * 0.25;
-        float ms3 = exp(-tauCloud * 0.125) * 0.125;
-        float multiScatter = (ms0 + ms1 + ms2 + ms3) / 1.875;
-        float powder = 1.0 - exp(-tauLight * 2.0);
-        float silverMask = max(0.0, cosTheta);
-        float cloudAtt = multiScatter * mix(1.0, powder, 0.55 * silverMask);
+        // ── Spectral multi-scatter (RGB wavelength-dependent) ─────────────────
+        // Blue scatters more in Rayleigh regime → longer path → redder clouds at depth.
+        // Simple vectorised Jimenez 4-term with wavelength bias.
+        vec3 tauRgb = gCloudExtinction.x * (optDepthC + cLightC)
+                    * vec3(1.0, 1.04, 1.10);  // R preserved, G slightly, B most attenuated
+        vec3 msRgb = (exp(-tauRgb) + exp(-tauRgb * 0.5) * 0.5
+                   + exp(-tauRgb * 0.25) * 0.25 + exp(-tauRgb * 0.125) * 0.125) / 1.875;
 
+        // ── Silver-lining with edge detection ────────────────────────────────
+        float tauLight  = gCloudExtinction.x * cLightC;
+        float powder = 1.0 - exp(-tauLight * 2.0);
+        // Edge gradient: previous-step density drop → cloud boundary
+        float edgeSharpness = smoothstep(0.002, 0.018, abs(dC - prevDC) / max(fineStep, 0.0001));
+        float powderEdge = powder * (1.0 + edgeSharpness * 0.7);
+        float silverMask = max(0.0, cosTheta);
+        vec3 cloudAtt = msRgb * (vec3(1.0) + powderEdge * silverMask * 0.65);
+        prevDC = dC;
+
+        // ── Ambient occlusion: height-based + cone-traced (every 4th step) ──
+        // Height AO provides the baseline bottom→top gradient (free).
+        // Cone-traced AO adds spatial surrounding-occlusion (3 probes × 3 distances).
         float layerBase = (ch < 7.5) ? gCloudMinAlt : 8.0;
         float layerTop  = (ch < 7.5) ? 7.0 : gCloudMaxAlt;
         float heightInBand = clamp((ch - layerBase) / max(layerTop - layerBase, 0.1), 0.0, 1.0);
-        float aoDirect  = mix(0.04, 1.0, pow(heightInBand, 0.50));
-        float aoAmbient = mix(0.20, 1.0, heightInBand);
+        float aoHeight = pow(heightInBand, 0.55);
+        float aoCone   = aoHeight;  // default: fall back to height-only
+        if ((ci & 3) == 0) {
+            // Cone trace every 4th step → amortised ~3 extra fbm_pw calls per step
+            float aoConeSample = coneAO(cPos, probeSph, ch);
+            aoCone = aoHeight * 0.35 + aoConeSample * 0.65;
+        }
+        float aoDirect  = mix(0.04, 1.0, aoCone);
+        float aoAmbient = mix(0.16, 1.0, aoCone);
 
         float sunElev = dot(probeSph, uLightDir);
         float skyPathKm = min(8.0 / max(sunElev, 0.02), 60.0);
@@ -468,7 +581,12 @@ void marchClouds(
         vec3 ambientContrib = atmLum * skyAmbColor * 0.85 * aoAmbient;
         sumCloud += dC * (directContrib + ambientContrib);
 
-        if (cloudAtt < 0.008) break;
+        // ── Early termination ─────────────────────────────────────────────────
+        // Stop marching when the cumulative transmittance is < 2% —
+        // further samples would contribute negligibly to the pixel.
+        float totalTrans = exp(-gCloudExtinction.x * optDepthC);
+        if (totalTrans < 0.02) break;
+        if (dot(cloudAtt, vec3(0.333)) < 0.006) break;
         tPos += fineStep;
     }
 }

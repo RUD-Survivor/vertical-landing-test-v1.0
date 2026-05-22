@@ -41,7 +41,11 @@ struct Vertex3D {
 struct Mesh {
   GLuint vao = 0, vbo = 0, ebo = 0;
   int indexCount = 0;
-  
+#ifdef USE_VULKAN
+  std::vector<Vertex3D> cpuVerts;
+  std::vector<uint32_t> cpuIndices;
+#endif
+
   // Geometric properties for automatic scaling
   float minX = 0, minY = 0, minZ = 0;
   float maxX = 0, maxY = 0, maxZ = 0;
@@ -52,6 +56,11 @@ struct Mesh {
   void upload(const std::vector<Vertex3D>& verts,
               const std::vector<unsigned int>& indices) {
     indexCount = (int)indices.size();
+#ifdef USE_VULKAN
+    cpuVerts = verts;
+    cpuIndices.assign(indices.begin(), indices.end());
+    return;
+#endif
     if (!vao) {
       glGenVertexArrays(1, &vao);
       glGenBuffers(1, &vbo);
@@ -88,17 +97,21 @@ struct Mesh {
   }
 
   void draw() const {
+#ifndef USE_VULKAN
     if (!vao || indexCount == 0) return;
     glBindVertexArray(vao);
     glDrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_INT, 0);
     glBindVertexArray(0);
+#endif
   }
 
   void destroy() {
+#ifndef USE_VULKAN
     if (vao) glDeleteVertexArrays(1, &vao);
     if (vbo) glDeleteBuffers(1, &vbo);
     if (ebo) glDeleteBuffers(1, &ebo);
     vao = vbo = ebo = 0;
+#endif
   }
 };
 
@@ -405,6 +418,10 @@ public:
         data[i + 2] = tmp;
     }
 
+#ifdef USE_VULKAN
+    tex.width = w; tex.height = h;
+    return tex;
+#endif
     glGenTextures(1, &tex.id);
     glBindTexture(GL_TEXTURE_2D, tex.id);
     glTexImage2D(GL_TEXTURE_2D, 0, (bpp == 32) ? GL_RGBA : GL_RGB, w, h, 0, (bpp == 32) ? GL_RGBA : GL_RGB, GL_UNSIGNED_BYTE, data.data());
@@ -3505,6 +3522,12 @@ R"(
     initVegetationGeometry();
     sharedPatchMesh = MeshGen::patch(32); // 32x32 segments per patch
     terrain = new Terrain::QuadtreeTerrain(EARTH_RADIUS);
+    // Re-bake weather map using procedural terrain (replaces ellipse mask)
+    if (terrain->sim && !terrain->sim->gridHeight.empty()) {
+        cloudSystem.rebakeWeather(terrain->sim->gridHeight,
+            terrain->sim->width, terrain->sim->height,
+            Tectonic::TectonicSimulator::CONT_THRESHOLD);
+    }
     vegSystem = new Vegetation::VegetationSystem();
 
     // --- SVO Shader (Camera-Relative, Vertex-Colored Phong) ---

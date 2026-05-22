@@ -68,28 +68,18 @@ static void scroll_callback(GLFWwindow* /*w*/, double /*xoffset*/, double yoffse
 #include "render/vulkan/vk_pipeline.h"
 #include "render/vulkan/vk_taa.h"
 #include "render/vulkan/vk_texture.h"
+#include "render/vulkan/vk_renderer3d.h"
 static VulkanContext       g_vkCtx;
 static FrameSync           g_frameSync;
 static VkDescriptorManager g_vkDesc;
 static VkMeshPipeline      g_meshPipe;
 static VkTAA               g_vkTAA;
+static VkRenderer3D        g_vkR3D;
+static FlightScene*        g_flightScene = nullptr;
 static bool                g_vkSwapchainDirty = false;
 
-// --- Test scene resources ---
-static VkMesh          g_testMesh;
-static VkTexture2D     g_nullTex;
-static VkDescriptorSet g_nullTexSet = VK_NULL_HANDLE;
-
-// Column-major 4×4 matrix (matches GLSL mat4 memory layout)
+// Minimal matrix helpers for renderVulkanFrame camera setup (column-major, GLSL-compatible)
 struct VkMat4 { float m[16]; };
-static VkMat4 mat4Mul(const VkMat4& a, const VkMat4& b) {
-    VkMat4 c{};
-    for (int col = 0; col < 4; col++)
-        for (int row = 0; row < 4; row++)
-            for (int k = 0; k < 4; k++)
-                c.m[col*4+row] += a.m[k*4+row] * b.m[col*4+k];
-    return c;
-}
 static VkMat4 mat4LookAt(float ex, float ey, float ez, float tx, float ty, float tz) {
     float fx=tx-ex, fy=ty-ey, fz=tz-ez;
     float fl=sqrtf(fx*fx+fy*fy+fz*fz); fx/=fl; fy/=fl; fz/=fl;
@@ -105,70 +95,106 @@ static VkMat4 mat4Perspective(float fovY, float aspect, float zn, float zf) {
     return {{ f/aspect,0,0,0, 0,f,0,0, 0,0,C,-1, 0,0,D,0 }};
 }
 
-struct TestVertex { float pos[3], normal[3], uv[2], color[4]; };
-static bool initTestScene() {
-    static const TestVertex verts[] = {
-        // Front  (z=+0.5, n=0,0,1)
-        {{-0.5f,-0.5f, 0.5f},{0,0,1},{0,0},{1,1,1,1}}, {{ 0.5f,-0.5f, 0.5f},{0,0,1},{1,0},{1,1,1,1}},
-        {{ 0.5f, 0.5f, 0.5f},{0,0,1},{1,1},{1,1,1,1}}, {{-0.5f, 0.5f, 0.5f},{0,0,1},{0,1},{1,1,1,1}},
-        // Back   (z=-0.5, n=0,0,-1)
-        {{ 0.5f,-0.5f,-0.5f},{0,0,-1},{0,0},{1,1,1,1}}, {{-0.5f,-0.5f,-0.5f},{0,0,-1},{1,0},{1,1,1,1}},
-        {{-0.5f, 0.5f,-0.5f},{0,0,-1},{1,1},{1,1,1,1}}, {{ 0.5f, 0.5f,-0.5f},{0,0,-1},{0,1},{1,1,1,1}},
-        // Left   (x=-0.5, n=-1,0,0)
-        {{-0.5f,-0.5f,-0.5f},{-1,0,0},{0,0},{1,1,1,1}}, {{-0.5f,-0.5f, 0.5f},{-1,0,0},{1,0},{1,1,1,1}},
-        {{-0.5f, 0.5f, 0.5f},{-1,0,0},{1,1},{1,1,1,1}}, {{-0.5f, 0.5f,-0.5f},{-1,0,0},{0,1},{1,1,1,1}},
-        // Right  (x=+0.5, n=1,0,0)
-        {{ 0.5f,-0.5f, 0.5f},{1,0,0},{0,0},{1,1,1,1}},  {{ 0.5f,-0.5f,-0.5f},{1,0,0},{1,0},{1,1,1,1}},
-        {{ 0.5f, 0.5f,-0.5f},{1,0,0},{1,1},{1,1,1,1}},  {{ 0.5f, 0.5f, 0.5f},{1,0,0},{0,1},{1,1,1,1}},
-        // Top    (y=+0.5, n=0,1,0)
-        {{-0.5f, 0.5f, 0.5f},{0,1,0},{0,0},{1,1,1,1}},  {{ 0.5f, 0.5f, 0.5f},{0,1,0},{1,0},{1,1,1,1}},
-        {{ 0.5f, 0.5f,-0.5f},{0,1,0},{1,1},{1,1,1,1}},  {{-0.5f, 0.5f,-0.5f},{0,1,0},{0,1},{1,1,1,1}},
-        // Bottom (y=-0.5, n=0,-1,0)
-        {{-0.5f,-0.5f,-0.5f},{0,-1,0},{0,0},{1,1,1,1}}, {{ 0.5f,-0.5f,-0.5f},{0,-1,0},{1,0},{1,1,1,1}},
-        {{ 0.5f,-0.5f, 0.5f},{0,-1,0},{1,1},{1,1,1,1}}, {{-0.5f,-0.5f, 0.5f},{0,-1,0},{0,1},{1,1,1,1}},
+static bool initVulkanFlight() {
+    g_flightScene = new FlightScene();
+    GameContext& gc = GameContext::getInstance();
+    gc.skip_builder = true;
+    gc.vkRenderer3d = &g_vkR3D;
+
+    // 初始位置：地表 + 100km，避免 RenderContext 零除
+    constexpr double ALT = 100000.0;
+    RocketState& rs = gc.loaded_rocket_state;
+    rs.py  = EARTH_RADIUS + ALT;
+    rs.abs_py = EARTH_RADIUS + ALT;
+    rs.surf_py = EARTH_RADIUS;
+    rs.altitude = ALT;
+    rs.fuel = 50000.0;
+
+    g_flightScene->onEnter();
+
+    // 将 CPU 网格数据注册到 Vulkan
+    auto reg = [](const char* id, const Mesh& m) -> bool {
+        if (m.cpuIndices.empty()) return true;
+        return g_vkR3D.registerMesh(g_vkCtx, id,
+            m.cpuVerts.data(),   m.cpuVerts.size() * sizeof(Vertex3D),
+            m.cpuIndices.data(), (uint32_t)m.cpuIndices.size());
     };
-    static const uint32_t indices[] = {
-         0, 1, 2,  2, 3, 0,   4, 5, 6,  6, 7, 4,
-         8, 9,10, 10,11, 8,  12,13,14, 14,15,12,
-        16,17,18, 18,19,16,  20,21,22, 22,23,20,
+    return reg("earth",      g_flightScene->earthMesh)
+        && reg("rocketBody", g_flightScene->rocketBody)
+        && reg("rocketNose", g_flightScene->rocketNose)
+        && reg("rocketBox",  g_flightScene->rocketBox);
+}
+
+static void renderFlightSceneVulkan(VkCommandBuffer cmd, int frameIdx) {
+    auto& ctx = g_flightScene->ctx;
+
+    // 地球（球心在渲染空间原点的负方向）
+    float er = ctx.earth_r;    // ≈ 6371 render units
+    float ex = (float)(-ctx.ro_x);
+    float ey = (float)(-ctx.ro_y);
+    float ez = (float)(-ctx.ro_z);
+
+    float viewArr[16], projArr[16];
+    ctx.viewMat.toFloatArray(viewArr);
+    ctx.macroProjMat.toFloatArray(projArr);
+
+    // Vec3::normalized() 对零向量返回 (0,0,0) 而非 NaN，
+    // 导致 lookAt(eye==target) 产生全零矩阵而非 NaN 矩阵。
+    // 用对角线检测：若 viewArr[0]/[5]/[10] 全为 0 或任意元素 NaN/Inf，切换降级相机。
+    {
+        bool degenerate = (fabsf(viewArr[0]) < 1e-6f && fabsf(viewArr[5]) < 1e-6f && fabsf(viewArr[10]) < 1e-6f)
+                       || !std::isfinite(viewArr[0]) || !std::isfinite(viewArr[5]);
+        if (degenerate) {
+            float aspect = (float)g_vkCtx.swapExtent.width / (float)g_vkCtx.swapExtent.height;
+            float cx = er * 0.5f, cy = er * 1.6f, cz = 0.0f;
+            VkMat4 fallView = mat4LookAt(cx, cy, cz, ex, ey, ez);
+            VkMat4 fallProj = mat4Perspective(0.785f, aspect, er * 0.001f, er * 30.0f);
+            memcpy(viewArr, fallView.m, 64);
+            memcpy(projArr, fallProj.m, 64);
+        }
+    }
+
+    // 归一化光照方向
+    float ldlen = sqrtf(ctx.lightVec.x*ctx.lightVec.x + ctx.lightVec.y*ctx.lightVec.y + ctx.lightVec.z*ctx.lightVec.z);
+    float ld[3];
+    if (ldlen > 1e-6f) { ld[0]=ctx.lightVec.x/ldlen; ld[1]=ctx.lightVec.y/ldlen; ld[2]=ctx.lightVec.z/ldlen; }
+    else               { ld[0]=0.577f; ld[1]=0.577f; ld[2]=0.577f; }
+
+    // 相机世界位置（用于高光计算）
+    bool vpBad = !std::isfinite(ctx.camEye_rel.x) || !std::isfinite(ctx.camEye_rel.y);
+    float vp[3] = { vpBad ? ex + er * 0.5f : (float)ctx.camEye_rel.x,
+                    vpBad ? ey + er * 1.6f : (float)ctx.camEye_rel.y,
+                    vpBad ? ez              : (float)ctx.camEye_rel.z };
+
+    float t = (float)glfwGetTime();
+    g_vkR3D.beginFrame(cmd, frameIdx, viewArr, projArr, ld, vp, t);
+
+    float earthModel[16] = {
+        er, 0,  0,  0,
+        0,  er, 0,  0,
+        0,  0,  er, 0,
+        ex, ey, ez, 1
     };
-    if (!g_testMesh.upload(g_vkCtx, verts, sizeof(verts), indices, 36))
-        return false;
-    static const uint8_t white[4] = {255,255,255,255};
-    if (!g_nullTex.upload(g_vkCtx, white, 1, 1))
-        return false;
-    g_nullTexSet = g_vkDesc.allocateTextureSet(g_vkCtx.device, g_nullTex.view, g_nullTex.sampler);
-    return g_nullTexSet != VK_NULL_HANDLE;
-}
-static void updateTestFrameUBO(int frameIdx, float time) {
-    float angle = time * 0.5f;
-    float ex = sinf(angle) * 3.0f, ey = 1.5f, ez = cosf(angle) * 3.0f;
-    float aspect = (float)g_vkCtx.swapExtent.width / (float)g_vkCtx.swapExtent.height;
-    VkMat4 view = mat4LookAt(ex, ey, ez, 0.0f, 0.0f, 0.0f);
-    VkMat4 proj = mat4Perspective(1.047f, aspect, 0.1f, 100.0f);
-    FrameUBO ubo{};
-    memcpy(ubo.view, view.m, 64);
-    memcpy(ubo.proj, proj.m, 64);
-    ubo.lightDir[0] = 0.577f; ubo.lightDir[1] = 0.577f; ubo.lightDir[2] = 0.577f;
-    ubo.viewPos[0] = ex; ubo.viewPos[1] = ey; ubo.viewPos[2] = ez;
-    ubo.time = time;
-    g_vkDesc.updateFrameUBO(frameIdx, ubo);
-}
-static void drawTestScene(VkCommandBuffer cmd, int frameIdx) {
-    g_meshPipe.bind(cmd);
-    VkDescriptorSet sets[] = { g_vkDesc.set0[frameIdx], g_nullTexSet };
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-        g_meshPipe.layout, 0, 2, sets, 0, nullptr);
-    MeshPushConstants pc{};
-    pc.model[0] = pc.model[5] = pc.model[10] = pc.model[15] = 1.0f;
-    pc.baseColor[0] = pc.baseColor[1] = pc.baseColor[2] = pc.baseColor[3] = 1.0f;
-    pc.ambientStr = 0.15f;
-    pc.hasTexture = 0;
-    vkCmdPushConstants(cmd, g_meshPipe.layout,
-        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-        0, sizeof(MeshPushConstants), &pc);
-    g_testMesh.bind(cmd);
-    g_testMesh.draw(cmd);
+    g_vkR3D.drawMesh(cmd, "earth", earthModel, 0.28f, 0.52f, 1.0f);
+
+    // 火箭在渲染原点（renderRocketBase ≈ 0）——用 earth_r 给出合理视觉尺寸
+    float rw = er * 0.0008f;   // 约 5 render units 宽
+    float rh = er * 0.005f;    // 约 32 render units 高
+    float bodyModel[16] = {
+        rw, 0,  0,  0,
+        0,  rh, 0,  0,
+        0,  0,  rw, 0,
+        0,  0,  0,  1
+    };
+    g_vkR3D.drawMesh(cmd, "rocketBody", bodyModel, 0.92f, 0.92f, 0.92f);
+
+    float noseModel[16] = {
+        rw,   0,        0,  0,
+        0,    rw * 2.f, 0,  0,
+        0,    0,        rw, 0,
+        0,    rh * 0.5f, 0, 1   // 圆锥基底接机体顶部
+    };
+    g_vkR3D.drawMesh(cmd, "rocketNose", noseModel, 0.88f, 0.88f, 0.88f);
 }
 
 static void handleVkSwapchainResize(GLFWwindow* window) {
@@ -211,8 +237,7 @@ static void renderVulkanFrame(GLFWwindow* window) {
     // Pass 1: 几何渲染 → RGBA16F ping-pong 缓冲
     g_vkTAA.beginGeometryPass(frame.commandBuffer, g_vkCtx.swapExtent);
     VkFrameRenderer::setViewportScissor(frame.commandBuffer, g_vkCtx.swapExtent);
-    updateTestFrameUBO(g_frameSync.currentFrame, (float)glfwGetTime());
-    drawTestScene(frame.commandBuffer, g_frameSync.currentFrame);
+    if (g_flightScene) renderFlightSceneVulkan(frame.commandBuffer, g_frameSync.currentFrame);
     g_vkTAA.endGeometryPass(frame.commandBuffer);
 
     // Pass 2: TAA resolve → swapchain image
@@ -270,7 +295,7 @@ static void renderVulkanFrame(GLFWwindow* window) {
 // ==========================================
 
 
-void framebuffer_size_callback(GLFWwindow* /*window*/, int /*width*/, int /*height*/) {
+void framebuffer_size_callback(GLFWwindow* /*window*/, int width, int height) {
 #ifdef USE_VULKAN
   g_vkSwapchainDirty = true;
 #else
@@ -350,6 +375,9 @@ int main() {
   glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
   glfwSetScrollCallback(window, scroll_callback);
 
+  // UniverseModel 初始化必须在 FlightScene::onEnter() 之前
+  PhysicsSystem::InitSolarSystem();
+
 #ifdef USE_VULKAN
   // 完整 Vulkan 初始化序列（Phase 5）
   if (!g_vkCtx.initCore()
@@ -363,7 +391,8 @@ int main() {
    || !g_vkTAA.init(g_vkCtx, g_vkCtx.swapExtent, g_vkCtx.swapFormat,
                     "src/render/shaders/spirv/taa.vert.spv",
                     "src/render/shaders/spirv/taa.frag.spv")
-   || !initTestScene()) {
+   || !g_vkR3D.init(g_vkCtx, g_meshPipe, g_vkDesc)
+   || !initVulkanFlight()) {
     fprintf(stderr, "[Vulkan] Fatal: initialization failed\n");
     glfwTerminate();
     return -1;
@@ -380,8 +409,6 @@ int main() {
 #ifndef USE_VULKAN
   renderer = new Renderer();
 #endif
-
-  PhysicsSystem::InitSolarSystem();
 
   Simulation::AsyncOrbitPredictor orbit_predictor;
   orbit_predictor.Start();
@@ -438,6 +465,7 @@ int main() {
       if (glfwWindowShouldClose(window)) break;
 
 #ifdef USE_VULKAN
+      if (g_flightScene) g_flightScene->render();  // ctx.update() → 相机矩阵，然后早退
       renderVulkanFrame(window);
 #else
       SceneManager::getInstance().render();
@@ -453,8 +481,8 @@ int main() {
 
 #ifdef USE_VULKAN
   vkDeviceWaitIdle(g_vkCtx.device);
-  g_testMesh.destroy(g_vkCtx);
-  g_nullTex.destroy(g_vkCtx);
+  delete g_flightScene; g_flightScene = nullptr;
+  g_vkR3D.shutdown(g_vkCtx);
   g_vkTAA.shutdown(g_vkCtx);
   g_meshPipe.shutdown(g_vkCtx.device);
   g_vkDesc.shutdown(g_vkCtx);

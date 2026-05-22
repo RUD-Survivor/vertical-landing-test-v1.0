@@ -1,6 +1,7 @@
 #pragma once
 #include <glad/glad.h>
 #include <string>
+#include <vector>
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CloudSystem — self-contained volumetric cloud GPU/CPU subsystem.
@@ -61,6 +62,14 @@ public:
     //   frameIdx  – TAA frame counter (for IGN dither animation)
     //   camAltKm  – camera altitude above planet surface in km (drives LOD step counts)
     void bind(GLuint prog, double time, int frameIdx, float camAltKm);
+
+    // Re-bake weather map from procedural terrain height data.
+    // Replaces the default ellipse-based land mask with the actual tectonic
+    // height map, and adds planetary-wave + coastal-proximity modulation.
+    //   heightMap – tectonic gridHeight (values in [0,1], seaLevel threshold for land)
+    //   w, h      – dimensions of heightMap
+    //   seaLevel  – threshold above which = land (default 0.45 matches Tectonic::CONT_THRESHOLD)
+    void rebakeWeather(const std::vector<float>& heightMap, int w, int h, float seaLevel = 0.45f);
 
 private:
     // GPU texture handles

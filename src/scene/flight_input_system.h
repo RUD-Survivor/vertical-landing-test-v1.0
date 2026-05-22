@@ -131,6 +131,7 @@ struct FlightInputSystem {
         auto& tele = world.get<TelemetryComponent>(rocket_entity);
         auto& trans = world.get<TransformComponent>(rocket_entity);
         router.poll(window);
+        if (!r3d) return;
 
         // --- SVO Automation ---
         if (r3d->svoManager) {
