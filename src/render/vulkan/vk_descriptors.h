@@ -128,6 +128,14 @@ struct AtmoPushConstants {
     float showClouds;      //  4 bytes — offset 60 (0.0=隐藏云, 1.0=显示云)
 };                         //            total: 64 bytes
 
+// Terrain patch 专属 UBO（binding 1 of Set 0）
+struct TerrainDataUBO {
+    float planetCenterRel[4]; // 16 bytes
+    float nodePos[4];         // 32 bytes
+    float nodeSide[4];        // 48 bytes
+    float nodeUp[4];          // 64 bytes
+};
+
 // -----------------------------------------------------------------------
 // VkDescriptorManager — owns layouts, pool, and per-frame UBO resources
 // -----------------------------------------------------------------------

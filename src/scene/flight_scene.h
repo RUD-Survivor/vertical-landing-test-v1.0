@@ -710,6 +710,112 @@ else {
             snap.cloudTuner.minAlt=p.minAlt; snap.cloudTuner.maxAlt=p.maxAlt;
         }
 
+        // ---- 15. SVO + Terrain + Vegetation (Block D) ----
+        _extractBlockD(snap, ss, ctx, ws_d, ro_x, ro_y, ro_z);
+
         return snap;
+    }
+
+private:
+    // Block D 数据提取（SVO / Terrain Quadtree / Vegetation 实例）
+    static void _extractBlockD(SceneSnapshot& snap,
+                               const std::vector<CelestialBody>& ss,
+                               const RenderContext& ctx,
+                               double ws_d, double ro_x, double ro_y, double ro_z) {
+        auto* r3d = GameContext::getInstance().renderer3d;
+        if (!r3d) return;
+
+        // 查找地球的 CelestialDraw 数据（bodyIdx==3）
+        const CelestialDraw* earthCD = nullptr;
+        for (auto& cd : snap.celestials) {
+            if (cd.bodyIdx == 3) { earthCD = &cd; break; }
+        }
+        if (!earthCD) return;
+
+        Vec3 planetCenter(earthCD->model[12], earthCD->model[13], earthCD->model[14]);
+        Vec3 planetCenterRel = planetCenter - Vec3(snap.camPos[0], snap.camPos[1], snap.camPos[2]);
+        Vec3 axisX(earthCD->model[0], earthCD->model[1], earthCD->model[2]);
+        Vec3 axisY(earthCD->model[4], earthCD->model[5], earthCD->model[6]);
+        Vec3 axisZ(earthCD->model[8], earthCD->model[9], earthCD->model[10]);
+        axisX = axisX.normalized(); axisY = axisY.normalized(); axisZ = axisZ.normalized();
+
+        // --- SVO ---
+        if (r3d->svoManager && r3d->svoManager->hasActiveChunks()) {
+            SVO::meshAllDirty(r3d->svoManager->chunks, r3d->svoManager->pool, r3d->svoManager->region);
+
+            Vec3 E = r3d->svoManager->region.east;
+            Vec3 U = r3d->svoManager->region.up;
+            Vec3 N = r3d->svoManager->region.north;
+            Vec3 OLocal = r3d->svoManager->region.centerNorm * r3d->svoManager->region.centerRadius;
+
+            Vec3 wE = axisX*E.x + axisY*E.y + axisZ*E.z;
+            Vec3 wU = axisX*U.x + axisY*U.y + axisZ*U.z;
+            Vec3 wN = axisX*N.x + axisY*N.y + axisZ*N.z;
+            Vec3 wO = axisX*OLocal.x + axisY*OLocal.y + axisZ*OLocal.z;
+            wE = wE.normalized(); wU = wU.normalized(); wN = wN.normalized();
+            Vec3 wOCamRel = wO + planetCenterRel;
+
+            SVOChunkDraw sc;
+            sc.svoMat[0]=wE.x;sc.svoMat[1]=wE.y;sc.svoMat[2]=wE.z;sc.svoMat[3]=0;
+            sc.svoMat[4]=wU.x;sc.svoMat[5]=wU.y;sc.svoMat[6]=wU.z;sc.svoMat[7]=0;
+            sc.svoMat[8]=wN.x;sc.svoMat[9]=wN.y;sc.svoMat[10]=wN.z;sc.svoMat[11]=0;
+            sc.svoMat[12]=wOCamRel.x;sc.svoMat[13]=wOCamRel.y;sc.svoMat[14]=wOCamRel.z;sc.svoMat[15]=1;
+            snap.svoChunks.push_back(sc);
+        }
+
+        // --- Terrain Quadtree ---
+        if (r3d->terrain) {
+            Vec3 camPosInertialRel = -planetCenterRel;
+            Vec3 camPosLocalRel(camPosInertialRel.dot(axisX),
+                                camPosInertialRel.dot(axisY),
+                                camPosInertialRel.dot(axisZ));
+
+            for (int i = 0; i < 6; i++) {
+                r3d->terrain->updateSubdivision(r3d->terrain->roots[i].get(), camPosLocalRel, earthCD->radius);
+                _extractTerrainLeaves(snap.terrainPatches,
+                    r3d->terrain->roots[i].get(), earthCD->radius, earthCD->model, snap.time);
+            }
+
+            // --- Vegetation 实例 ---
+            float camAlt = (Vec3(snap.camPos[0], snap.camPos[1], snap.camPos[2]) - planetCenter).length()
+                           - earthCD->radius;
+            if (camAlt < 300.0f) {
+                Vec3 camNorm = (Vec3(snap.camPos[0], snap.camPos[1], snap.camPos[2]) - planetCenter).normalized();
+                for (int i = 0; i < 500; i++) {
+                    float offX = ((i * 7) % 1000 / 500.f - 1.f) * 0.002f;
+                    float offZ = ((i * 13) % 1000 / 500.f - 1.f) * 0.002f;
+                    Vec3 p = (camNorm + Vec3(offX, 0, offZ)).normalized();
+                    float h = r3d->terrain->getHeight(p) / earthCD->radius;
+                    if (h > 0.0f) {
+                        Vec3 localPos = p * (earthCD->radius + h * earthCD->radius);
+                        Vec3 worldP = localPos + planetCenter;
+                        // 存储: pos(3) + scale(1) + rot(1) = 5 floats per instance
+                        snap.vegInstanceData.push_back(worldP.x);
+                        snap.vegInstanceData.push_back(worldP.y);
+                        snap.vegInstanceData.push_back(worldP.z);
+                        snap.vegInstanceData.push_back((0.5f + 0.5f * ((i * 3) % 100 / 100.f)) * 0.02f);
+                        snap.vegInstanceData.push_back(((i * 3) % 100 / 100.f) * 6.28f);
+                    }
+                }
+                snap.vegInstanceCount = (uint32_t)(snap.vegInstanceData.size() / 5);
+            }
+        }
+    }
+
+    static void _extractTerrainLeaves(std::vector<TerrainPatchDraw>& out,
+                                       Terrain::TerrainNode* node, float planetRadius,
+                                       const float model[16], float time) {
+        if (!node) return;
+        if (node->isLeaf) {
+            TerrainPatchDraw tp;
+            memcpy(tp.model, model, 64);
+            tp.planetRadius = planetRadius;
+            tp.maxElev = 25.f;
+            tp.time = time;
+            out.push_back(tp);
+        } else {
+            for (int i = 0; i < 4; i++)
+                _extractTerrainLeaves(out, node->children[i].get(), planetRadius, model, time);
+        }
     }
 };

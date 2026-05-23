@@ -57,6 +57,22 @@ struct VkSceneSystem {
     VmaAllocation terrainPatchIboAlloc= VK_NULL_HANDLE;
     uint32_t      terrainPatchIcount  = 0;
 
+    // Terrain 专属 UBO + descriptor set（Set0 binding 0=FrameUBO, binding 1=TerrainData）
+    VkBuffer      terrainDataUbo[2]   = {VK_NULL_HANDLE, VK_NULL_HANDLE};
+    VmaAllocation terrainDataAlloc[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
+    void*         terrainDataMapped[2]= {nullptr, nullptr};
+    VkDescriptorSet terrainSet0[2]    = {VK_NULL_HANDLE, VK_NULL_HANDLE};
+
+    // Vegetation 实例 VBO + 环形缓冲
+    VkBuffer      vegInstanceVbo      = VK_NULL_HANDLE;
+    VmaAllocation vegInstanceAlloc    = VK_NULL_HANDLE;
+    void*         vegInstanceMapped   = nullptr;
+
+    // Vegetation 顶点 mesh（树几何）
+    VkBuffer      vegVertVbo          = VK_NULL_HANDLE;
+    VmaAllocation vegVertAlloc        = VK_NULL_HANDLE;
+    uint32_t      vegVertCount        = 0;
+
     int _frameIdx = 0;
 
     // -----------------------------------------------------------------------
@@ -140,6 +156,12 @@ struct VkSceneSystem {
         if (!_buildTerrainPatch(ctx)) {
             fprintf(stderr, "[VkScene] Failed: terrain patch\n"); return false;
         }
+        if (!_initTerrainDescriptors(ctx)) {
+            fprintf(stderr, "[VkScene] Failed: terrain descriptors\n"); return false;
+        }
+        if (!_buildVegetationMesh(ctx)) {
+            fprintf(stderr, "[VkScene] Failed: vegetation mesh\n"); return false;
+        }
 
         printf("[VkScene] Initialized: %zu planet pipelines, atmo sphere %u verts\n",
                planetPipes.size(), atmoSphereVerts);
@@ -170,6 +192,20 @@ struct VkSceneSystem {
         if (billboardQuadVbo != VK_NULL_HANDLE) {
             vmaDestroyBuffer(ctx.allocator, billboardQuadVbo, billboardQuadAlloc);
             billboardQuadVbo = VK_NULL_HANDLE;
+        }
+        for (int i = 0; i < 2; i++) {
+            if (terrainDataUbo[i] != VK_NULL_HANDLE) {
+                vmaDestroyBuffer(ctx.allocator, terrainDataUbo[i], terrainDataAlloc[i]);
+                terrainDataUbo[i] = VK_NULL_HANDLE;
+            }
+        }
+        if (vegInstanceVbo != VK_NULL_HANDLE) {
+            vmaDestroyBuffer(ctx.allocator, vegInstanceVbo, vegInstanceAlloc);
+            vegInstanceVbo = VK_NULL_HANDLE;
+        }
+        if (vegVertVbo != VK_NULL_HANDLE) {
+            vmaDestroyBuffer(ctx.allocator, vegVertVbo, vegVertAlloc);
+            vegVertVbo = VK_NULL_HANDLE;
         }
         for (auto& e : meshCache)   e.second.destroy(ctx);
         meshCache.clear();
@@ -349,12 +385,16 @@ struct VkSceneSystem {
     void drawTerrainPatch(VkCommandBuffer cmd,
                           VkBuffer patchVbo, VkBuffer patchIbo, uint32_t indexCount,
                           const TerrainPushConstants& pc,
+                          const TerrainDataUBO& td,
                           VkDescriptorSet texSet) {
         if (terrainPipe.pipeline == VK_NULL_HANDLE) return;
 
+        // 更新 TerrainData UBO
+        int fi = _frameIdx;
+        if (terrainDataMapped[fi]) memcpy(terrainDataMapped[fi], &td, sizeof(TerrainDataUBO));
+
         terrainPipe.bind(cmd);
-        // Set 0 = FrameUBO + TerrainData, Set 1 = textures
-        VkDescriptorSet sets[] = { desc->set0[_frameIdx], texSet };
+        VkDescriptorSet sets[] = { terrainSet0[fi], texSet };
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
             terrainPipe.layout, 0, 2, sets, 0, nullptr);
         vkCmdPushConstants(cmd, terrainPipe.layout,
@@ -501,6 +541,92 @@ private:
         bci.size=idx.size()*4; bci.usage=VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
         if(vmaCreateBuffer(ctx.allocator,&bci,&aci,&terrainPatchIbo,&terrainPatchIboAlloc,&info)!=VK_SUCCESS)return false;
         memcpy(info.pMappedData,idx.data(),idx.size()*4);
+        return true;
+    }
+
+    // 为 terrain 管线创建专属 descriptor set（Set0 = FrameUBO + TerrainData）
+    bool _initTerrainDescriptors(VulkanContext& ctx) {
+        VkDescriptorSetLayout layout = terrainPipe.set0Layout;
+        if (layout == VK_NULL_HANDLE) return false;
+
+        // 创建 TerrainData UBO（每帧 64 bytes）
+        for (int i = 0; i < 2; i++) {
+            VkBufferCreateInfo bci{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+            bci.size = sizeof(TerrainDataUBO);
+            bci.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+            VmaAllocationCreateInfo aci{};
+            aci.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
+            aci.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
+            VmaAllocationInfo info;
+            if (vmaCreateBuffer(ctx.allocator, &bci, &aci, &terrainDataUbo[i], &terrainDataAlloc[i], &info) != VK_SUCCESS)
+                return false;
+            terrainDataMapped[i] = info.pMappedData;
+        }
+
+        // 分配 descriptor sets（terrain 使用自己的 pool）
+        // 共享 desc->pool
+        for (int i = 0; i < 2; i++) {
+            VkDescriptorSetAllocateInfo ai{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+            ai.descriptorPool = desc->pool;
+            ai.descriptorSetCount = 1;
+            ai.pSetLayouts = &layout;
+            if (vkAllocateDescriptorSets(ctx.device, &ai, &terrainSet0[i]) != VK_SUCCESS)
+                return false;
+
+            VkDescriptorBufferInfo fubi{};  // binding 0 = FrameUBO
+            fubi.buffer = desc->uboBuffers[i];
+            fubi.offset = 0; fubi.range = sizeof(FrameUBO);
+
+            VkDescriptorBufferInfo tdbi{};  // binding 1 = TerrainData
+            tdbi.buffer = terrainDataUbo[i];
+            tdbi.offset = 0; tdbi.range = sizeof(TerrainDataUBO);
+
+            VkWriteDescriptorSet w[2]{};
+            w[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            w[0].dstSet = terrainSet0[i]; w[0].dstBinding = 0;
+            w[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            w[0].descriptorCount = 1; w[0].pBufferInfo = &fubi;
+            w[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            w[1].dstSet = terrainSet0[i]; w[1].dstBinding = 1;
+            w[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            w[1].descriptorCount = 1; w[1].pBufferInfo = &tdbi;
+            vkUpdateDescriptorSets(ctx.device, 2, w, 0, nullptr);
+        }
+        return true;
+    }
+
+    // 构建植被顶点 mesh（树桩 + 锥形顶部）
+    bool _buildVegetationMesh(VulkanContext& ctx) {
+        struct VegV { float px,py,pz, nx,ny,nz, u,v, cr,cg,cb,ca; };
+        std::vector<VegV> verts;
+        // 树桩圆柱体
+        float r=0.15f, h=0.8f; int segs=8;
+        for (int i=0;i<=segs;i++) {
+            float a=i*(6.28318530718f/segs), cs=cosf(a), sn=sinf(a);
+            verts.push_back({cs*r,0,sn*r, cs,0,sn, i/(float)segs,1.f, 0.4f,0.25f,0.1f,1});
+            verts.push_back({cs*r,h,sn*r, cs,0,sn, i/(float)segs,0.f, 0.4f,0.25f,0.1f,1});
+        }
+        // 锥形顶部
+        verts.push_back({0,h+2.f,0, 0,1,0, 0.5f,0, 0.1f,0.35f,0.05f,1});
+        float cR=0.6f;
+        for (int i=0;i<=segs;i++) {
+            float a=i*(6.28318530718f/segs), cs=cosf(a), sn=sinf(a);
+            verts.push_back({cs*cR,h,sn*cR, cs,0.3f,sn, i/(float)segs,1.f, 0.1f,0.35f,0.05f,1});
+        }
+        vegVertCount = (uint32_t)verts.size();
+
+        VkBufferCreateInfo bci{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+        bci.size=verts.size()*sizeof(VegV); bci.usage=VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+        VmaAllocationCreateInfo aci{}; aci.usage=VMA_MEMORY_USAGE_CPU_TO_GPU; aci.flags=VMA_ALLOCATION_CREATE_MAPPED_BIT;
+        VmaAllocationInfo info;
+        if(vmaCreateBuffer(ctx.allocator,&bci,&aci,&vegVertVbo,&vegVertAlloc,&info)!=VK_SUCCESS)return false;
+        memcpy(info.pMappedData,verts.data(),verts.size()*sizeof(VegV));
+
+        // 实例 VBO（预分配 4096 实例）
+        bci.size=4096*20; bci.usage=VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+        aci.flags=VMA_ALLOCATION_CREATE_MAPPED_BIT|VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+        if(vmaCreateBuffer(ctx.allocator,&bci,&aci,&vegInstanceVbo,&vegInstanceAlloc,&info)!=VK_SUCCESS)return false;
+        vegInstanceMapped=info.pMappedData;
         return true;
     }
 };

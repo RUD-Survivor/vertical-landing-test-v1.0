@@ -445,6 +445,33 @@ public:
                 out.push_back({pts, cols, ribbon_w});
             }
         }
+
+        // --- 变轨节点预测轨道 ribbon ---
+        auto& mnvComp = registry.get<ManeuverComponent>(entity);
+        for (auto& node : mnvComp.maneuvers) {
+            if (!node.active || !node.snap_valid) continue;
+            double a = node.ref_a, ecc = node.ref_ecc;
+            if (a <= 0 || ecc >= 1.0) continue;
+            Vec3 eDir = node.ref_e_dir, pDir = node.ref_p_dir, center = node.ref_center;
+            int segs = 181;
+            std::vector<Vec3> pts; std::vector<Vec4> cols;
+            pts.reserve(segs); cols.reserve(segs);
+            for (int k = 0; k < segs; k++) {
+                double nu = (k / (double)(segs - 1)) * 2.0 * 3.141592653589793;
+                double rOrbit = a * (1.0 - ecc * ecc) / (1.0 + ecc * cos(nu));
+                Vec3 orbitPtRel = eDir * (rOrbit * cos(nu)) + pDir * (rOrbit * sin(nu));
+                Vec3 orbitPtWorld(
+                    (float)((center.x + orbitPtRel.x) * ws_d - ro_x),
+                    (float)((center.y + orbitPtRel.y) * ws_d - ro_y),
+                    (float)((center.z + orbitPtRel.z) * ws_d - ro_z));
+                pts.push_back(orbitPtWorld);
+                cols.push_back(Vec4(1.0f, 0.4f, 0.1f, 0.7f));
+            }
+            if (pts.size() >= 2) {
+                float ribbon_w = fmaxf(earth_r * 0.006f, cam_dist * 0.001f);
+                out.push_back({pts, cols, ribbon_w});
+            }
+        }
     }
 };
 

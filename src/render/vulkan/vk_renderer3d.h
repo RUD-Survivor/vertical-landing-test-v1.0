@@ -335,8 +335,34 @@ struct VkRenderer3D {
         for (const auto& sc : snap.svoChunks) {
             drawSVO(cmd, "svo_chunk", sc.svoMat);
         }
-        // Terrain patches extracted, rendering deferred (needs TerrainData UBO descriptor)
-        (void)snap.terrainPatches;
+        for (const auto& tp : snap.terrainPatches) {
+            TerrainPushConstants tpc{};
+            memcpy(tpc.model, tp.model, 64);
+            tpc.planetRadius = tp.planetRadius;
+            tpc.maxElevation = tp.maxElev;
+            tpc.nodeLevel = 0;
+            tpc.hasLocalHydro = 0;
+            TerrainDataUBO td{};
+            // 从 model 矩阵提取节点位置、侧向、上向
+            td.planetCenterRel[0] = tp.model[12] - snap.camPos[0];
+            td.planetCenterRel[1] = tp.model[13] - snap.camPos[1];
+            td.planetCenterRel[2] = tp.model[14] - snap.camPos[2];
+            td.planetCenterRel[3] = 0;
+            memset(td.nodePos, 0, 16); memset(td.nodeSide, 0, 16); memset(td.nodeUp, 0, 16);
+            td.nodeUp[1] = 1.f; // default up
+            drawTerrainPatch(cmd, scene.terrainPatchVbo, scene.terrainPatchIbo,
+                scene.terrainPatchIcount, tpc, td, VK_NULL_HANDLE);
+        }
+        // 植被实例渲染 — 从 snapshot 上传到 GPU
+        if (snap.vegInstanceCount > 0 && scene.vegVertVbo != VK_NULL_HANDLE
+            && scene.vegInstanceMapped) {
+            size_t sz = snap.vegInstanceCount * 5 * sizeof(float);
+            if (sz <= 4096 * 20) {
+                memcpy(scene.vegInstanceMapped, snap.vegInstanceData.data(), sz);
+                drawVegetation(cmd, scene.vegVertVbo, scene.vegVertCount,
+                    scene.vegInstanceVbo, snap.vegInstanceCount);
+            }
+        }
     }
 
 private:

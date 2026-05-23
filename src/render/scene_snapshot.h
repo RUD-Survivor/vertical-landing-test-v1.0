@@ -170,6 +170,10 @@ struct SceneSnapshot {
     // ---- 地形补丁 (Block D) ----
     std::vector<TerrainPatchDraw> terrainPatches;
 
+    // ---- 植被实例计数 (Block D) ----
+    uint32_t vegInstanceCount = 0;
+    std::vector<float> vegInstanceData;  // 每实例 5 floats: pos(3) + scale(1) + rot(1)
+
     // ========================================================================
     // 工厂方法
     // ========================================================================
