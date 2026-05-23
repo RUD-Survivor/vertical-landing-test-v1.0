@@ -12,6 +12,7 @@
 #include "input/input_router.h"
 #include "math/math3d.h"
 #include "render/HUD_system.h"
+#include "render/scene_snapshot.h"
 #include <entt/entt.hpp>
 
 
@@ -420,5 +421,295 @@ else {
 
         // Update state for next frame ONLY at the very end
         lmb_prev = lmb;
+    }
+
+    // ========================================================================
+    // extractRenderSnapshot — 从当前帧提取纯数据快照，供 Vulkan/OpenGL 渲染器消费
+    //
+    // 调用前必须已执行 ctx.update()（在 render() 开头自动完成）
+    // 返回的 Snapshot 不持有任何 GL/Vulkan 资源，可跨线程传递
+    // ========================================================================
+    SceneSnapshot extractRenderSnapshot() {
+        SceneSnapshot snap;
+
+        // ---- 1. 相机 ----
+        ctx.viewMat.toFloatArray(snap.view);
+        ctx.macroProjMat.toFloatArray(snap.proj);
+        snap.camPos[0] = (float)ctx.camEye_rel.x;
+        snap.camPos[1] = (float)ctx.camEye_rel.y;
+        snap.camPos[2] = (float)ctx.camEye_rel.z;
+        snap.time = (float)glfwGetTime();
+        snap.frameIndex = frame;
+
+        // ---- 2. 光照方向 ----
+        float ldlen = sqrtf(ctx.lightVec.x*ctx.lightVec.x +
+                            ctx.lightVec.y*ctx.lightVec.y +
+                            ctx.lightVec.z*ctx.lightVec.z);
+        if (ldlen > 1e-6f) {
+            snap.lightDir[0] = ctx.lightVec.x / ldlen;
+            snap.lightDir[1] = ctx.lightVec.y / ldlen;
+            snap.lightDir[2] = ctx.lightVec.z / ldlen;
+        } else {
+            snap.lightDir[0] = 0.577f; snap.lightDir[1] = 0.577f; snap.lightDir[2] = 0.577f;
+        }
+
+        // ---- 3. 屏幕宽高比 ----
+        int ww, wh;
+        glfwGetFramebufferSize(GameContext::getInstance().window, &ww, &wh);
+        snap.aspect = (float)ww / (float)wh;
+
+        // ---- 4. 天体（行星/卫星，跳过太阳） ----
+        auto& ss = UniverseModel::getInstance().solar_system;
+        double ro_x = ctx.ro_x, ro_y = ctx.ro_y, ro_z = ctx.ro_z;
+        auto& tele = world.get<TelemetryComponent>(rocket_entity);
+        double simT = tele.sim_time;
+        constexpr double kPI = 3.14159265358979323846;
+
+        static const char* kShaderKey[] = {
+            "", "mercury","venus","earth","moon","mars",
+            "jupiter","saturn","uranus","neptune"
+        };
+        static const int kAtmoIdx[] = { 0, 0, 2, 3, 0, 5, 6, 7, 8, 9 };
+
+        for (size_t i = 1; i < ss.size(); i++) {
+            auto& b = ss[i];
+            float r  = (float)(b.radius * ws_d);
+            float px = (float)(b.px * ws_d - ro_x);
+            float py = (float)(b.py * ws_d - ro_y);
+            float pz = (float)(b.pz * ws_d - ro_z);
+
+            Quat alignZ = Quat::fromAxisAngle(Vec3(1,0,0), -(float)(kPI/2.0));
+            Quat spin   = Quat::fromAxisAngle(Vec3(0,0,1),
+                (float)(b.prime_meridian_epoch + simT * 2.0 * kPI / b.rotation_period));
+            Quat tiltQ  = Quat::fromAxisAngle(Vec3(1,0,0), (float)b.axial_tilt);
+            Quat rot    = tiltQ * spin * alignZ;
+
+            Mat4 model = Mat4::translate(Vec3(px,py,pz)) *
+                         Mat4::fromQuat(rot) *
+                         Mat4::scale(Vec3(r,r,r));
+
+            CelestialDraw cd;
+            model.toFloatArray(cd.model);
+            cd.center[0] = px; cd.center[1] = py; cd.center[2] = pz;
+            cd.radius = r;
+            cd.r = b.r; cd.g = b.g; cd.b = b.b;
+            cd.shaderKey = (i < 10) ? kShaderKey[i] : "barren";
+            cd.bodyIdx   = (int)i;
+            cd.atmoIdx   = (i < 10) ? kAtmoIdx[i] : 0;
+            cd.hasRing   = (b.type == RINGED_GAS_GIANT);
+            cd.showClouds = show_clouds;
+            snap.celestials.push_back(cd);
+        }
+
+        // ---- 5. 火箭 ----
+        float er = ctx.earth_r;
+        float rh = (ctx.rh    > 0.f) ? ctx.rh    : er * 0.005f;
+        float rw = (ctx.rw_3d > 0.f) ? ctx.rw_3d : er * 0.0008f;
+
+        snap.rocketBodyModel[0] = rw; snap.rocketBodyModel[5] = rh;
+        snap.rocketBodyModel[10]= rw; snap.rocketBodyModel[15]= 1.0f;
+
+        snap.rocketNoseModel[0] = rw; snap.rocketNoseModel[5] = rw * 2.f;
+        snap.rocketNoseModel[10]= rw; snap.rocketNoseModel[13]= rh * 0.5f;
+        snap.rocketNoseModel[15]= 1.0f;
+
+        // ---- 6. 排气羽流 ----
+        auto& prop   = world.get<PropulsionComponent>(rocket_entity);
+        auto& config = world.get<RocketConfig>(rocket_entity);
+        auto& input  = world.get<ControlInput>(rocket_entity);
+        const RocketAssembly& assembly = GameContext::getInstance().launch_assembly;
+
+        if (prop.thrust_power >= 0.01 && !assembly.parts.empty()) {
+            float thrust      = (float)input.throttle;
+            float expansion   = (float)fmax(0.0,
+                1.0 - PhysicsSystem::get_air_density(tele.altitude) / 1.225);
+            float thrust_scale = 0.25f + 0.75f * powf(thrust, 1.5f);
+
+            int render_start = 0;
+            if (prop.current_stage < (int)config.stage_configs.size())
+                render_start = config.stage_configs[prop.current_stage].part_start_index;
+
+            const Quat& rocketQuat      = ctx.rocketQuat;
+            const Vec3& renderRocketBase = ctx.renderRocketBase;
+            constexpr float kTwoPi      = 6.28318530718f;
+
+            for (int pi = render_start; pi < (int)assembly.parts.size(); pi++) {
+                const PlacedPart& pp  = assembly.parts[pi];
+                const PartDef&    def = PART_CATALOG[pp.def_id];
+                if (def.category != CAT_ENGINE) continue;
+
+                for (int s = 0; s < pp.symmetry; s++) {
+                    float symAngle = (s * kTwoPi) / pp.symmetry;
+                    Vec3 localPos  = pp.pos;
+                    if (pp.symmetry > 1) {
+                        float dist = sqrtf(pp.pos.x*pp.pos.x + pp.pos.z*pp.pos.z);
+                        if (dist > 0.01f) {
+                            float ca = atan2f(pp.pos.z, pp.pos.x);
+                            localPos.x = cosf(ca + symAngle) * dist;
+                            localPos.z = sinf(ca + symAngle) * dist;
+                        }
+                    }
+
+                    Vec3 nozzlePos = renderRocketBase +
+                        rocketQuat.rotate(localPos * (float)ws_d);
+                    Quat nozzleRot = rocketQuat * pp.rot
+                                   * Quat::fromAxisAngle(Vec3(0,1,0), symAngle);
+                    Vec3 nozzleDir = nozzleRot.rotate(Vec3(0,1,0));
+
+                    float groundDist  = (float)tele.altitude * (float)ws_d;
+                    float engine_ph   = def.height * (float)ws_d;
+                    float plume_len   = engine_ph * 4.2f * thrust_scale * (1.0f + expansion);
+                    float plume_dia   = def.diameter * (float)ws_d * 2.0f * (1.1f + expansion * 4.2f);
+                    float gcd         = fmaxf(0.f, plume_len - groundDist);
+                    float splash      = gcd / fmaxf(0.001f, plume_len);
+                    plume_dia        *= (1.0f + splash * 8.0f);
+
+                    Vec3 plumePos = nozzlePos - nozzleDir * (plume_len * 0.5f);
+                    Mat4 plumeMdl = Mat4::TRS(plumePos, nozzleRot,
+                                              Vec3(plume_dia, plume_len, plume_dia));
+
+                    ExhaustDraw ed;
+                    plumeMdl.toFloatArray(ed.model);
+                    ed.throttle   = thrust;
+                    ed.expansion  = expansion;
+                    ed.groundDist = groundDist;
+                    ed.plumeLen   = plume_len;
+                    snap.plumes.push_back(ed);
+                }
+            }
+        }
+
+        // ---- 7. 太阳屏幕坐标（镜头光晕） ----
+        Vec3 sunWorld(ctx.renderSun.x, ctx.renderSun.y, ctx.renderSun.z);
+        Mat4 vp = ctx.macroProjMat * ctx.viewMat;
+        float cx = vp.m[0]*sunWorld.x + vp.m[4]*sunWorld.y + vp.m[8]*sunWorld.z + vp.m[12];
+        float cy = vp.m[1]*sunWorld.x + vp.m[5]*sunWorld.y + vp.m[9]*sunWorld.z + vp.m[13];
+        float cz = vp.m[2]*sunWorld.x + vp.m[6]*sunWorld.y + vp.m[10]*sunWorld.z + vp.m[14];
+        float cw = vp.m[3]*sunWorld.x + vp.m[7]*sunWorld.y + vp.m[11]*sunWorld.z + vp.m[15];
+        if (cw > 0.0f) {
+            snap.sunScreen[0] = cx / cw;
+            snap.sunScreen[1] = cy / cw;
+        }
+        float sunDist = (sunWorld - ctx.camEye_rel).length();
+        snap.sunIntensity = 149597870.0f / fmaxf(1.0f, sunDist);
+        snap.sunWorldPos[0] = sunWorld.x; snap.sunWorldPos[1] = sunWorld.y; snap.sunWorldPos[2] = sunWorld.z;
+
+        // ---- 8. 天空 + 大气 ----
+        snap.skyVibrancy = (float)environmentSystem.day_blend;
+        snap.dayBlend = (float)environmentSystem.day_blend;
+
+        // ---- 9. 镜头光晕遮挡体（每个星球中心+半径） ----
+        for (size_t i = 1; i < ss.size(); i++) {
+            SceneSnapshot::Occluder oc;
+            oc.cx = (float)(ss[i].px * ws_d - ro_x);
+            oc.cy = (float)(ss[i].py * ws_d - ro_y);
+            oc.cz = (float)(ss[i].pz * ws_d - ro_z);
+            oc.radius = (float)(ss[i].radius * ws_d);
+            snap.occluders.push_back(oc);
+        }
+
+        // ---- 10. 火箭全零件 ----
+        if (!assembly.parts.empty()) {
+            auto& prop = world.get<PropulsionComponent>(rocket_entity);
+            auto& config = world.get<RocketConfig>(rocket_entity);
+            int render_start = 0;
+            if (prop.current_stage < (int)config.stage_configs.size())
+                render_start = config.stage_configs[prop.current_stage].part_start_index;
+            const Quat& rq = ctx.rocketQuat;
+            const Vec3& rb = ctx.renderRocketBase;
+            constexpr float k2Pi = 6.28318530718f;
+            for (int pi = render_start; pi < (int)assembly.parts.size(); pi++) {
+                const PlacedPart& pp = assembly.parts[pi];
+                const PartDef& def = PART_CATALOG[pp.def_id];
+                for (int s = 0; s < pp.symmetry; s++) {
+                    float symAngle = (s * k2Pi) / pp.symmetry;
+                    Vec3 localPos = pp.pos;
+                    if (pp.symmetry > 1) {
+                        float dist = sqrtf(pp.pos.x*pp.pos.x + pp.pos.z*pp.pos.z);
+                        if (dist > 0.01f) {
+                            float ca = atan2f(pp.pos.z, pp.pos.x);
+                            localPos.x = cosf(ca+symAngle)*dist;
+                            localPos.z = sinf(ca+symAngle)*dist;
+                        }
+                    }
+                    Vec3 wp = rb + rq.rotate(localPos * (float)ws_d);
+                    Quat wr = rq * pp.rot * Quat::fromAxisAngle(Vec3(0,1,0), symAngle);
+                    RocketPartDraw rp;
+                    float h=def.height*(float)ws_d, d=def.diameter*(float)ws_d;
+                    Mat4 m=Mat4::TRS(wp, wr, Vec3(d,h,d));
+                    m.toFloatArray(rp.model);
+                    rp.r=0.9f; rp.g=0.9f; rp.b=0.9f;
+                    rp.meshType=(def.category==CAT_NOSE_CONE||def.category==CAT_COMMAND_POD)?1:0;
+                    snap.rocketParts.push_back(rp);
+                }
+            }
+        }
+
+        // ---- 11. 发射台 (Block C) ----
+        if (tele.altitude < 12000.0) {
+            auto& trans = world.get<TransformComponent>(rocket_entity);
+            CelestialBody& body = ss[UniverseModel::getInstance().current_soi_index];
+            double theta = body.prime_meridian_epoch + (tele.sim_time * 2.0 * kPI / body.rotation_period);
+            Quat rot = Quat::fromAxisAngle(Vec3(0,0,1), (float)theta);
+            Quat tilt = Quat::fromAxisAngle(Vec3(1,0,0), (float)body.axial_tilt);
+            Quat full_rot = tilt * rot;
+            Vec3 s_pos((float)trans.launch_site_px, (float)trans.launch_site_py, (float)trans.launch_site_pz);
+            Vec3 localUp = s_pos.normalized();
+            Vec3 i_surf = full_rot.rotate(localUp * s_pos.length());
+            Vec3 i_up = full_rot.rotate(localUp);
+            Vec3 padCenter(
+                (float)((body.px + (double)i_surf.x) * ws_d - ro_x),
+                (float)((body.py + (double)i_surf.y) * ws_d - ro_y),
+                (float)((body.pz + (double)i_surf.z) * ws_d - ro_z));
+            Vec3 padUp = i_up;
+            Vec3 defaultRight(1,0,0);
+            if (fabs(padUp.dot(defaultRight)) > 0.9f) defaultRight = Vec3(0,1,0);
+            Vec3 padRight = padUp.cross(defaultRight).normalized();
+            Vec3 padForward = padUp.cross(padRight).normalized();
+            Mat4 padRot;
+            padRot.m[0]=padRight.x;padRot.m[1]=padRight.y;padRot.m[2]=padRight.z;padRot.m[3]=0;
+            padRot.m[4]=padUp.x;padRot.m[5]=padUp.y;padRot.m[6]=padUp.z;padRot.m[7]=0;
+            padRot.m[8]=padForward.x;padRot.m[9]=padForward.y;padRot.m[10]=padForward.z;padRot.m[11]=0;
+            padRot.m[12]=0;padRot.m[13]=0;padRot.m[14]=0;padRot.m[15]=1;
+            float ps = (float)ws_d;
+            Vec3 correctedPos = padCenter - padUp * (8.f * ps);
+            Mat4 padModel = Mat4::translate(correctedPos) * padRot * Mat4::scale(Vec3(ps,ps,ps));
+            padModel.toFloatArray(snap.launchPad.model);
+            snap.hasLaunchPad = true;
+        }
+
+        // ---- 12. 太阳物理球体 (Block E, 仅全景模式) ----
+        if (cam.mode == 2) {
+            float sr = (float)ctx.sun_radius;
+            Vec3 sunWorld(ctx.renderSun.x, ctx.renderSun.y, ctx.renderSun.z);
+            Mat4 sm = Mat4::translate(sunWorld) * Mat4::scale(Vec3(sr,sr,sr));
+            sm.toFloatArray(snap.sunBody.model);
+            snap.sunBody.radius = sr;
+            snap.drawSunBody = true;
+        }
+
+        // ---- 13. 轨道线 + 变轨节点 (Block A) ----
+        if (cam.mode == 2) {
+            // 轨迹历史 (orbitSystem 使用 drawRibbon 的封装)
+            orbitSystem.extractRibbons(snap.ribbons, world, rocket_entity, hudManager.hud, mnvManager,
+                cam, ctx.viewMat, ctx.aspect, ws_d, ctx.ro_x, ctx.ro_y, ctx.ro_z, dt,
+                UniverseModel::getInstance().current_soi_index, ctx.earth_r, ctx.cam_dist, ctx.renderRocketBase, ctx.camEye_rel);
+            // 变轨节点 (广告牌)
+            mnvManager.extractBillboards(snap.billboards, world, rocket_entity, hudManager.hud,
+                ctx.viewMat, ctx.aspect, ctx.earth_r, ctx.cam_dist, ws_d, ctx.ro_x, ctx.ro_y, ctx.ro_z, dt);
+        }
+
+        // ---- 14. 云调试面板 (Block F) ----
+        snap.cloudTuner.visible = cloudTuner.visible;
+        if (cloudTuner.visible && GameContext::getInstance().renderer3d) {
+            auto& p = GameContext::getInstance().renderer3d->cloudSystem.tuneParams;
+            snap.cloudTuner.covLo=p.covLo; snap.cloudTuner.covHi=p.covHi;
+            snap.cloudTuner.threshLo=p.threshLo; snap.cloudTuner.threshHi=p.threshHi;
+            snap.cloudTuner.erosion=p.erosion; snap.cloudTuner.density=p.density;
+            snap.cloudTuner.extinction=p.extinction;
+            snap.cloudTuner.minAlt=p.minAlt; snap.cloudTuner.maxAlt=p.maxAlt;
+        }
+
+        return snap;
     }
 };

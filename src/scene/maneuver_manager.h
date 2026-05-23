@@ -9,6 +9,7 @@
 #include "math/math3d.h"
 #include "simulation/maneuver_system.h"
 #include "render/renderer3d.h"
+#include "render/scene_snapshot.h"  // BillboardDraw
 
 struct FlightHUD;
 struct HUDContext;
@@ -38,6 +39,29 @@ struct ManeuverManager {
 
     void update(GLFWwindow* window, entt::registry& registry, entt::entity entity, FlightHUD& hud, const CameraDirector& cam, double dt, int ww, int wh);
     void render(entt::registry& registry, entt::entity entity, FlightHUD& hud, Renderer3D* r3d, const Mat4& view, const Mat4& proj, float aspect, float earth_r, float cam_dist, double ws_d, double ro_x, double ro_y, double ro_z, double dt);
+
+    // --- Vulkan 快照提取：将变轨节点手柄导出为 BillboardDraw 列表 ---
+    void extractBillboards(std::vector<BillboardDraw>& out,
+                entt::registry& registry, entt::entity entity, FlightHUD& hud,
+                const Mat4& view, float aspect, float earth_r, float cam_dist,
+                double ws_d, double ro_x, double ro_y, double ro_z, double dt) {
+        (void)view; (void)aspect; (void)earth_r; (void)cam_dist; (void)dt;
+
+        auto& mnv = registry.get<ManeuverComponent>(entity);
+        if (mnv.maneuvers.empty()) return;
+
+        for (auto& node : mnv.maneuvers) {
+            if (!node.active) continue;
+            // 使用节点快照的绝对位置
+            BillboardDraw bd;
+            bd.pos[0] = (float)(node.snap_px * ws_d - ro_x);
+            bd.pos[1] = (float)(node.snap_py * ws_d - ro_y);
+            bd.pos[2] = (float)(node.snap_pz * ws_d - ro_z);
+            bd.size = (float)(earth_r * 0.08);
+            bd.r = 1.0f; bd.g = 0.5f; bd.b = 0.1f; bd.a = 0.9f;
+            out.push_back(bd);
+        }
+    }
 
     void handleHandleDragging(ManeuverNode& node, float mouse_x, float mouse_y, const Vec2& n_scr, const Vec2& h_scr, const Vec2& axis2D, double dt);
     void updatePopupState(ManeuverNode& node, entt::registry& registry, entt::entity entity, FlightHUD& hud, const Mat4& view, const Mat4& proj, float aspect, double ws_d, double ro_x, double ro_y, double ro_z, float mouse_x, float mouse_y, bool lmb, double dt);

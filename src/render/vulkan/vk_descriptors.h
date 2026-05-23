@@ -36,6 +36,99 @@ struct MeshPushConstants {
 };
 
 // -----------------------------------------------------------------------
+// PlanetPushConstants — 行星着色器扩展（在 MeshPushConstants 基础上追加
+// planetCenter.xyz，供 earth.frag 重建 vLocalPos）
+// 104 bytes total (< 128 byte minimum guarantee)
+// -----------------------------------------------------------------------
+// 字段顺序保证 GLSL std430 与 C++ sizeof 一致（均 104 字节，无隐式 padding）：
+//   mat4(64) + vec4 baseColor(16) + vec4 planetCenter(16) + float(4) + int(4)
+// 注意：vec4 planetCenter 必须在 float/int 标量之前，否则 GLSL std430 会在
+// offset 88 处插入 8 字节 padding 使块大小变为 112 字节（与 C++ 不一致）。
+struct PlanetPushConstants {
+    float model[16];       // 64 bytes — offset   0
+    float baseColor[4];    // 16 bytes — offset  64
+    float planetCenter[4]; // 16 bytes — offset  80 (.xyz = center world pos)
+    float ambientStr;      //  4 bytes — offset  96
+    int   hasTexture;      //  4 bytes — offset 100
+};                         //           total: 104 bytes
+
+// -----------------------------------------------------------------------
+// SkyboxPushConstants — fullscreen triangle skybox (no vertex buffer)
+// 80 bytes: mat4 invViewProj(64) + float skyVibrancy(4) + pad(12)
+// -----------------------------------------------------------------------
+struct SkyboxPushConstants {
+    float invViewProj[16]; // 64 bytes — offset  0
+    float skyVibrancy;     //  4 bytes — offset 64
+    float _pad[3];         // 12 bytes — offset 68
+};                         //            total: 80 bytes
+
+// -----------------------------------------------------------------------
+// ExhaustPushConstants — volumetric plume (additive blend)
+// 80 bytes: mat4 model(64) + 4×float(16)
+// -----------------------------------------------------------------------
+struct ExhaustPushConstants {
+    float model[16];   // 64 bytes — offset  0
+    float throttle;    //  4 bytes — offset 64
+    float expansion;   //  4 bytes — offset 68
+    float groundDist;  //  4 bytes — offset 72
+    float plumeLen;    //  4 bytes — offset 76
+};                     //            total: 80 bytes
+
+// -----------------------------------------------------------------------
+// RibbonPushConstants — alpha-blended trail ribbon
+// 64 bytes: mat4 model only
+// -----------------------------------------------------------------------
+struct RibbonPushConstants {
+    float model[16]; // 64 bytes
+};
+
+// -----------------------------------------------------------------------
+// BillboardPushConstants — screen-aligned sprite (alpha blend)
+// 48 bytes: vec4 center(16) + vec2 size(8) + pad(8) + vec4 color(16)
+// -----------------------------------------------------------------------
+struct BillboardPushConstants {
+    float center[4]; // 16 bytes — offset  0 (vec4 alignment)
+    float size[2];   //  8 bytes — offset 16
+    float _pad[2];   //  8 bytes — offset 24
+    float color[4];  // 16 bytes — offset 32
+};                   //            total: 48 bytes
+
+// -----------------------------------------------------------------------
+// LensFlarePushConstants — additive 2D lens flare element
+// 64 bytes: see layout below
+// -----------------------------------------------------------------------
+struct LensFlarePushConstants {
+    float sunScreenPos[2]; //  8 bytes — offset  0
+    float aspect;          //  4 bytes — offset  8
+    float intensity;       //  4 bytes — offset 12
+    float scale[2];        //  8 bytes — offset 16
+    float offset[2];       //  8 bytes — offset 24
+    float color[4];        // 16 bytes — offset 32
+    int   shapeType;       //  4 bytes — offset 48
+    float _pad[3];         // 12 bytes — offset 52
+};                         //            total: 64 bytes
+
+// -----------------------------------------------------------------------
+// AtmoPushConstants — 大气散射球体（64 bytes, < 128 byte minimum guarantee）
+// std430 layout: vec4(16) + 12×float/int(48) = 64 bytes
+// -----------------------------------------------------------------------
+struct AtmoPushConstants {
+    float planetCenter[4]; // 16 bytes — offset  0 (.xyz = center, .w unused)
+    float innerRadius;     //  4 bytes — offset 16 (行星表面半径)
+    float outerRadius;     //  4 bytes — offset 20 (大气层外缘)
+    float surfaceRadius;   //  4 bytes — offset 24 (同 innerRadius, 用于不同计算)
+    int   planetIdx;       //  4 bytes — offset 28 (行星索引: 2=Venus 3=Earth 5=Mars …)
+    float sunVisibility;   //  4 bytes — offset 32 (0=夜 1=昼)
+    float ringInner;       //  4 bytes — offset 36 (土星环内径, 0=无环)
+    float ringOuter;       //  4 bytes — offset 40
+    int   frameIndex;      //  4 bytes — offset 44 (TAA 抖动帧号)
+    float tuneMinAlt;      //  4 bytes — offset 48 (云层最低高度 km)
+    float tuneMaxAlt;      //  4 bytes — offset 52
+    float tuneExtinction;  //  4 bytes — offset 56 (云层消光系数)
+    float showClouds;      //  4 bytes — offset 60 (0.0=隐藏云, 1.0=显示云)
+};                         //            total: 64 bytes
+
+// -----------------------------------------------------------------------
 // VkDescriptorManager — owns layouts, pool, and per-frame UBO resources
 // -----------------------------------------------------------------------
 struct VkDescriptorManager {

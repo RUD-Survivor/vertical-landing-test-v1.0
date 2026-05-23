@@ -7,6 +7,7 @@
 #include "camera/camera_director.h"
 #include "scene/maneuver_manager.h"
 #include "render/HUD_system.h"
+#include "render/scene_snapshot.h"  // RibbonSegment, BillboardDraw
 
 // 提供样条插值支持
 #include "math/spline.h" 
@@ -388,6 +389,60 @@ public:
                         }
                     }
                 }
+            }
+        }
+    }
+
+    // ---- Vulkan 快照提取：将本帧所有 Ribbon 导出为 RibbonSegment 列表 ----
+    void extractRibbons(std::vector<RibbonSegment>& out,
+                entt::registry& registry, entt::entity entity, FlightHUD& hud,
+                ManeuverManager& mnvManager, CameraDirector& cam,
+                const Mat4& viewMat, float aspect, double ws_d,
+                double ro_x, double ro_y, double ro_z, double dt,
+                int current_soi_index, float earth_r, float cam_dist,
+                Vec3 renderRocketBase, Vec3 camEye_rel) {
+        (void)viewMat; (void)aspect; (void)cam; // 快照提取不需要这些
+
+        auto& trans = registry.get<TransformComponent>(entity);
+        auto& vel   = registry.get<VelocityComponent>(entity);
+        auto& tele  = registry.get<TelemetryComponent>(entity);
+        auto& orb   = registry.get<OrbitComponent>(entity);
+        auto& mnv   = registry.get<ManeuverComponent>(entity);
+        auto& rocket_config = registry.get<RocketConfig>(entity);
+
+        // --- 轨迹历史 ribbon ---
+        if (!traj_history.empty()) {
+            std::vector<Vec3> pts; std::vector<Vec4> cols;
+            pts.reserve(traj_history.size()); cols.reserve(traj_history.size());
+            float macro_fade = 1.0f;
+            for (size_t i = 0; i < traj_history.size(); i++) {
+                float wx = (float)(traj_history[i].e.x * ws_d - ro_x);
+                float wy = (float)(traj_history[i].e.y * ws_d - ro_y);
+                float wz = (float)(traj_history[i].e.z * ws_d - ro_z);
+                pts.push_back(Vec3(wx,wy,wz));
+                cols.push_back(Vec4(0.4f, 1.0f, 0.3f, 0.8f * macro_fade));
+            }
+            if (pts.size() >= 2) {
+                float hist_w = fmaxf(earth_r * 0.006f, cam_dist * 0.001f);
+                out.push_back({pts, cols, hist_w});
+            }
+        }
+
+        // --- 缓存轨道预测点 ribbon ---
+        if (!cached_rel_pts.empty()) {
+            Vec3 ref((float)(trans.px * ws_d - ro_x),
+                     (float)(trans.py * ws_d - ro_y),
+                     (float)(trans.pz * ws_d - ro_z));
+            std::vector<Vec3> pts; std::vector<Vec4> cols;
+            pts.reserve(cached_rel_pts.size()); cols.reserve(cached_rel_pts.size());
+            for (auto& rp : cached_rel_pts) {
+                Vec3 wp = ref + rp;
+                pts.push_back(wp);
+                cols.push_back(Vec4(0.4f, 0.8f, 1.0f, 0.85f));
+            }
+            if (pts.size() >= 2) {
+                float ribbon_w = fmaxf(earth_r * 0.006f, cam_dist * 0.001f);
+                out.push_back({pts, cols, ribbon_w});
             }
         }
     }

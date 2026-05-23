@@ -69,31 +69,16 @@ static void scroll_callback(GLFWwindow* /*w*/, double /*xoffset*/, double yoffse
 #include "render/vulkan/vk_taa.h"
 #include "render/vulkan/vk_texture.h"
 #include "render/vulkan/vk_renderer3d.h"
+#include "render/vulkan/systems/vk_hud.h"
+#include "render/scene_snapshot.h"
 static VulkanContext       g_vkCtx;
 static FrameSync           g_frameSync;
 static VkDescriptorManager g_vkDesc;
-static VkMeshPipeline      g_meshPipe;
 static VkTAA               g_vkTAA;
 static VkRenderer3D        g_vkR3D;
+static VkHUDSystem         g_vkHUD;
 static FlightScene*        g_flightScene = nullptr;
 static bool                g_vkSwapchainDirty = false;
-
-// Minimal matrix helpers for renderVulkanFrame camera setup (column-major, GLSL-compatible)
-struct VkMat4 { float m[16]; };
-static VkMat4 mat4LookAt(float ex, float ey, float ez, float tx, float ty, float tz) {
-    float fx=tx-ex, fy=ty-ey, fz=tz-ez;
-    float fl=sqrtf(fx*fx+fy*fy+fz*fz); fx/=fl; fy/=fl; fz/=fl;
-    float rx=-fz, ry=0.0f, rz=fx;
-    float rl=sqrtf(rx*rx+rz*rz); rx/=rl; rz/=rl;
-    float ux=ry*fz-rz*fy, uy=rz*fx-rx*fz, uz=rx*fy-ry*fx;
-    float dd0=-(rx*ex+ry*ey+rz*ez), dd1=-(ux*ex+uy*ey+uz*ez), dd2=fx*ex+fy*ey+fz*ez;
-    return {{ rx,ux,-fx,0, ry,uy,-fy,0, rz,uz,-fz,0, dd0,dd1,dd2,1 }};
-}
-static VkMat4 mat4Perspective(float fovY, float aspect, float zn, float zf) {
-    float f = 1.0f / tanf(fovY * 0.5f);
-    float C = (zf + zn) / (zn - zf), D = (2.0f * zf * zn) / (zn - zf);
-    return {{ f/aspect,0,0,0, 0,f,0,0, 0,0,C,-1, 0,0,D,0 }};
-}
 
 static bool initVulkanFlight() {
     g_flightScene = new FlightScene();
@@ -119,82 +104,116 @@ static bool initVulkanFlight() {
             m.cpuVerts.data(),   m.cpuVerts.size() * sizeof(Vertex3D),
             m.cpuIndices.data(), (uint32_t)m.cpuIndices.size());
     };
+    // "earth" mesh 用于所有星球（unit sphere），"ring" 用于土星环
     return reg("earth",      g_flightScene->earthMesh)
+        && reg("ring",       g_flightScene->ringMesh)
         && reg("rocketBody", g_flightScene->rocketBody)
         && reg("rocketNose", g_flightScene->rocketNose)
         && reg("rocketBox",  g_flightScene->rocketBox);
 }
 
-static void renderFlightSceneVulkan(VkCommandBuffer cmd, int frameIdx) {
-    auto& ctx = g_flightScene->ctx;
+// 递归提取 Quadtree 叶子节点（匹配 OpenGL renderNode）
+static void _extractTerrainLeaves(std::vector<TerrainPatchDraw>& out,
+                                   Terrain::TerrainNode* node, float planetRadius,
+                                   const float model[16], float time) {
+    if (!node) return;
+    if (node->isLeaf) {
+        TerrainPatchDraw tp;
+        memcpy(tp.model, model, 64);
+        tp.planetRadius = planetRadius;
+        tp.maxElev = 25.f;
+        tp.time = time;
+        out.push_back(tp);
+    } else {
+        for (int i = 0; i < 4; i++)
+            _extractTerrainLeaves(out, node->children[i].get(), planetRadius, model, time);
+    }
+}
 
-    // 地球（球心在渲染空间原点的负方向）
-    float er = ctx.earth_r;    // ≈ 6371 render units
-    float ex = (float)(-ctx.ro_x);
-    float ey = (float)(-ctx.ro_y);
-    float ez = (float)(-ctx.ro_z);
+static void renderFlightSceneVulkan(VkCommandBuffer cmd, int frameSlot) {
+    SceneSnapshot snap = g_flightScene->extractRenderSnapshot();
 
-    float viewArr[16], projArr[16];
-    ctx.viewMat.toFloatArray(viewArr);
-    ctx.macroProjMat.toFloatArray(projArr);
+    // Block D: 从 OpenGL Renderer3D 提取 SVO/Terrain/Vegetation 数据
+    if (GameContext::getInstance().renderer3d) {
+        auto* r3d = GameContext::getInstance().renderer3d;
 
-    // Vec3::normalized() 对零向量返回 (0,0,0) 而非 NaN，
-    // 导致 lookAt(eye==target) 产生全零矩阵而非 NaN 矩阵。
-    // 用对角线检测：若 viewArr[0]/[5]/[10] 全为 0 或任意元素 NaN/Inf，切换降级相机。
-    {
-        bool degenerate = (fabsf(viewArr[0]) < 1e-6f && fabsf(viewArr[5]) < 1e-6f && fabsf(viewArr[10]) < 1e-6f)
-                       || !std::isfinite(viewArr[0]) || !std::isfinite(viewArr[5]);
-        if (degenerate) {
-            float aspect = (float)g_vkCtx.swapExtent.width / (float)g_vkCtx.swapExtent.height;
-            float cx = er * 0.5f, cy = er * 1.6f, cz = 0.0f;
-            VkMat4 fallView = mat4LookAt(cx, cy, cz, ex, ey, ez);
-            VkMat4 fallProj = mat4Perspective(0.785f, aspect, er * 0.001f, er * 30.0f);
-            memcpy(viewArr, fallView.m, 64);
-            memcpy(projArr, fallProj.m, 64);
+        // --- SVO ---
+        if (r3d->svoManager && r3d->svoManager->hasActiveChunks()) {
+            SVO::meshAllDirty(r3d->svoManager->chunks, r3d->svoManager->pool, r3d->svoManager->region);
+
+            // 计算 camera-relative VP 和本地坐标系轴（匹配 OpenGL drawPlanet 中 Earth 的逻辑）
+            // 需要从 celestial 获取地球的 model matrix
+            for (const auto& cd : snap.celestials) {
+                if (cd.bodyIdx != 3) continue; // 仅地球有 SVO
+
+                Vec3 planetCenter(cd.model[12], cd.model[13], cd.model[14]);
+                Vec3 planetCenterRel = planetCenter - Vec3(snap.camPos[0], snap.camPos[1], snap.camPos[2]);
+                Vec3 axisX(cd.model[0], cd.model[1], cd.model[2]);
+                Vec3 axisY(cd.model[4], cd.model[5], cd.model[6]);
+                Vec3 axisZ(cd.model[8], cd.model[9], cd.model[10]);
+                axisX = axisX.normalized(); axisY = axisY.normalized(); axisZ = axisZ.normalized();
+
+                Vec3 E = r3d->svoManager->region.east;
+                Vec3 U = r3d->svoManager->region.up;
+                Vec3 N = r3d->svoManager->region.north;
+                Vec3 OLocal = r3d->svoManager->region.centerNorm * r3d->svoManager->region.centerRadius;
+
+                Vec3 wE = axisX*E.x + axisY*E.y + axisZ*E.z;
+                Vec3 wU = axisX*U.x + axisY*U.y + axisZ*U.z;
+                Vec3 wN = axisX*N.x + axisY*N.y + axisZ*N.z;
+                Vec3 wO = axisX*OLocal.x + axisY*OLocal.y + axisZ*OLocal.z;
+                wE = wE.normalized(); wU = wU.normalized(); wN = wN.normalized();
+                Vec3 wOCamRel = wO + planetCenterRel;
+
+                SVOChunkDraw sc;
+                sc.svoMat[0]=wE.x;sc.svoMat[1]=wE.y;sc.svoMat[2]=wE.z;sc.svoMat[3]=0;
+                sc.svoMat[4]=wU.x;sc.svoMat[5]=wU.y;sc.svoMat[6]=wU.z;sc.svoMat[7]=0;
+                sc.svoMat[8]=wN.x;sc.svoMat[9]=wN.y;sc.svoMat[10]=wN.z;sc.svoMat[11]=0;
+                sc.svoMat[12]=wOCamRel.x;sc.svoMat[13]=wOCamRel.y;sc.svoMat[14]=wOCamRel.z;sc.svoMat[15]=1;
+                sc.indexCount = 0; // 所有 chunk 共用同一个 svoMat
+                snap.svoChunks.push_back(sc);
+                break;
+            }
+        }
+
+        // --- Terrain Quadtree 遍历 ---
+        if (r3d->terrain) {
+            // 构建本地相机位置（匹配 OpenGL drawPlanet 中的 camPosLocalRel 计算）
+            for (const auto& cd : snap.celestials) {
+                if (cd.bodyIdx != 3) continue;
+                Vec3 planetCenter(cd.model[12], cd.model[13], cd.model[14]);
+                Vec3 planetCenterRel = planetCenter - Vec3(snap.camPos[0], snap.camPos[1], snap.camPos[2]);
+                Vec3 axisX(cd.model[0], cd.model[1], cd.model[2]);
+                Vec3 axisY(cd.model[4], cd.model[5], cd.model[6]);
+                Vec3 axisZ(cd.model[8], cd.model[9], cd.model[10]);
+                axisX = axisX.normalized(); axisY = axisY.normalized(); axisZ = axisZ.normalized();
+                Vec3 camPosInertialRel = -planetCenterRel;
+                Vec3 camPosLocalRel(camPosInertialRel.dot(axisX),
+                                    camPosInertialRel.dot(axisY),
+                                    camPosInertialRel.dot(axisZ));
+
+                for (int i = 0; i < 6; i++) {
+                    r3d->terrain->updateSubdivision(r3d->terrain->roots[i].get(), camPosLocalRel, cd.radius);
+                    _extractTerrainLeaves(snap.terrainPatches, r3d->terrain->roots[i].get(),
+                                          cd.radius, cd.model, snap.time);
+                }
+
+                // --- Vegetation 实例 ---
+                float camAlt = (Vec3(snap.camPos[0], snap.camPos[1], snap.camPos[2]) - planetCenter).length() - cd.radius;
+                if (camAlt < 300.0f && r3d->terrain) {
+                    // 生成树下实例（简化：使用 hash 噪声代替完整 VegetationSystem）
+                    // 完整实现需要 VegetationSystem + instance VBO 管线
+                }
+                break;
+            }
         }
     }
 
-    // 归一化光照方向
-    float ldlen = sqrtf(ctx.lightVec.x*ctx.lightVec.x + ctx.lightVec.y*ctx.lightVec.y + ctx.lightVec.z*ctx.lightVec.z);
-    float ld[3];
-    if (ldlen > 1e-6f) { ld[0]=ctx.lightVec.x/ldlen; ld[1]=ctx.lightVec.y/ldlen; ld[2]=ctx.lightVec.z/ldlen; }
-    else               { ld[0]=0.577f; ld[1]=0.577f; ld[2]=0.577f; }
+    // 更新 TAA 重投影矩阵
+    g_vkTAA.updateMatrices(snap.view, snap.proj);
+    g_vkTAA.uploadMatrices(frameSlot);
 
-    // 相机世界位置（用于高光计算）
-    bool vpBad = !std::isfinite(ctx.camEye_rel.x) || !std::isfinite(ctx.camEye_rel.y);
-    float vp[3] = { vpBad ? ex + er * 0.5f : (float)ctx.camEye_rel.x,
-                    vpBad ? ey + er * 1.6f : (float)ctx.camEye_rel.y,
-                    vpBad ? ez              : (float)ctx.camEye_rel.z };
-
-    float t = (float)glfwGetTime();
-    g_vkR3D.beginFrame(cmd, frameIdx, viewArr, projArr, ld, vp, t);
-
-    float earthModel[16] = {
-        er, 0,  0,  0,
-        0,  er, 0,  0,
-        0,  0,  er, 0,
-        ex, ey, ez, 1
-    };
-    g_vkR3D.drawMesh(cmd, "earth", earthModel, 0.28f, 0.52f, 1.0f);
-
-    // 火箭在渲染原点（renderRocketBase ≈ 0）——用 earth_r 给出合理视觉尺寸
-    float rw = er * 0.0008f;   // 约 5 render units 宽
-    float rh = er * 0.005f;    // 约 32 render units 高
-    float bodyModel[16] = {
-        rw, 0,  0,  0,
-        0,  rh, 0,  0,
-        0,  0,  rw, 0,
-        0,  0,  0,  1
-    };
-    g_vkR3D.drawMesh(cmd, "rocketBody", bodyModel, 0.92f, 0.92f, 0.92f);
-
-    float noseModel[16] = {
-        rw,   0,        0,  0,
-        0,    rw * 2.f, 0,  0,
-        0,    0,        rw, 0,
-        0,    rh * 0.5f, 0, 1   // 圆锥基底接机体顶部
-    };
-    g_vkR3D.drawMesh(cmd, "rocketNose", noseModel, 0.88f, 0.88f, 0.88f);
+    g_vkR3D.render(cmd, 0, snap);
 }
 
 static void handleVkSwapchainResize(GLFWwindow* window) {
@@ -248,6 +267,49 @@ static void renderVulkanFrame(GLFWwindow* window) {
     VkFrameRenderer::setViewportScissor(frame.commandBuffer, g_vkCtx.swapExtent);
     g_vkTAA.drawResolve(frame.commandBuffer, 0.1f);
     g_vkTAA.endResolvePass(frame.commandBuffer, g_vkCtx.swapImages[imageIdx]);
+
+    // Pass 3: HUD 覆盖层 → swapchain image（alpha 混合）
+    if (g_flightScene) {
+        SceneSnapshot snapHUD = g_flightScene->extractRenderSnapshot();
+        // 基础遥测条
+        g_vkHUD.pushQuad(-0.95f, 0.85f, 0.30f, 0.06f, 0.1f, 0.9f, 0.3f, 0.85f);
+        g_vkHUD.pushQuad(-0.95f, 0.78f, 0.15f, 0.04f, 0.9f, 0.9f, 0.9f, 0.7f);
+        // Cloud Tuner 叠加层 (Block F)
+        if (snapHUD.cloudTuner.visible) {
+            // 半透明背景面板
+            g_vkHUD.pushQuad(-0.99f, 0.96f, 0.62f, 0.62f, 0.04f, 0.04f, 0.10f, 0.88f);
+            // 标题文字（简化：用色块代替）
+            g_vkHUD.pushQuad(-0.95f, 0.93f, 0.40f, 0.03f, 0.5f, 0.9f, 1.0f, 0.8f);
+            // 9 个滑块
+            auto& p = snapHUD.cloudTuner;
+            float sliders[9][4] = {
+                {p.covLo,0.10f,0.70f,0}, {p.covHi,0.30f,0.90f,0},
+                {p.threshLo,0.40f,0.92f,0}, {p.threshHi,0.05f,0.55f,0},
+                {p.erosion,0.00f,0.50f,0}, {p.density,0.50f,12.0f,0},
+                {p.extinction,0.01f,0.60f,0}, {p.minAlt,0.50f,6.00f,0},
+                {p.maxAlt,8.00f,22.0f,0}};
+            for (int i=0; i<9; i++) {
+                float y = 0.88f - 0.068f*i;
+                float t = (sliders[i][0]-sliders[i][1])/(sliders[i][2]-sliders[i][1]);
+                if (t<0)t=0; if(t>1)t=1;
+                g_vkHUD.pushQuad(-0.75f, y, 0.50f, 0.012f, 0.15f, 0.15f, 0.25f, 1.0f);
+                g_vkHUD.pushQuad(-0.75f + 0.50f*t*0.5f, y, 0.50f*t, 0.012f, 0.25f, 0.65f, 1.0f, 1.0f);
+            }
+        }
+    }
+    {
+        VkRenderingAttachmentInfo hudAI{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+        hudAI.imageView=g_vkCtx.swapImageViews[imageIdx];
+        hudAI.imageLayout=VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        hudAI.loadOp=VK_ATTACHMENT_LOAD_OP_LOAD; hudAI.storeOp=VK_ATTACHMENT_STORE_OP_STORE;
+        VkRenderingInfo ri{VK_STRUCTURE_TYPE_RENDERING_INFO};
+        ri.renderArea={{0,0},g_vkCtx.swapExtent}; ri.layerCount=1;
+        ri.colorAttachmentCount=1; ri.pColorAttachments=&hudAI;
+        vkCmdBeginRendering(frame.commandBuffer,&ri);
+        VkFrameRenderer::setViewportScissor(frame.commandBuffer,g_vkCtx.swapExtent);
+        g_vkHUD.flush(frame.commandBuffer);
+        vkCmdEndRendering(frame.commandBuffer);
+    }
 
     vkEndCommandBuffer(frame.commandBuffer);
 
@@ -384,14 +446,11 @@ int main() {
    || !g_vkCtx.initSwapchain(window)
    || !g_frameSync.init(g_vkCtx.device, g_vkCtx.commandPool)
    || !g_vkDesc.init(g_vkCtx)
-   || !g_meshPipe.init(g_vkCtx, g_vkDesc,
-                       VkTAA::kColorFmt, VkTAA::kDepthFmt,
-                       "src/render/shaders/spirv/mesh.vert.spv",
-                       "src/render/shaders/spirv/mesh.frag.spv")
+   || !g_vkR3D.init(g_vkCtx, g_vkDesc, VkTAA::kColorFmt, VkTAA::kDepthFmt)
    || !g_vkTAA.init(g_vkCtx, g_vkCtx.swapExtent, g_vkCtx.swapFormat,
                     "src/render/shaders/spirv/taa.vert.spv",
                     "src/render/shaders/spirv/taa.frag.spv")
-   || !g_vkR3D.init(g_vkCtx, g_meshPipe, g_vkDesc)
+   || !g_vkHUD.init(g_vkCtx, g_vkCtx.swapFormat)
    || !initVulkanFlight()) {
     fprintf(stderr, "[Vulkan] Fatal: initialization failed\n");
     glfwTerminate();
@@ -484,7 +543,6 @@ int main() {
   delete g_flightScene; g_flightScene = nullptr;
   g_vkR3D.shutdown(g_vkCtx);
   g_vkTAA.shutdown(g_vkCtx);
-  g_meshPipe.shutdown(g_vkCtx.device);
   g_vkDesc.shutdown(g_vkCtx);
   g_frameSync.shutdown(g_vkCtx.device);
   g_vkCtx.shutdown();
