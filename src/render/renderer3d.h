@@ -11,6 +11,7 @@
 #include <string>
 #include <map>
 #include <fstream>
+#include <sstream>
 #include "terrain_system.h"
 #include "vegetation_system.h"
 #include "svo_system.h"
@@ -21,6 +22,48 @@ inline void sendMat4(GLint loc, const Mat4& m) {
     float arr[16];
     m.toFloatArray(arr);
     glUniformMatrix4fv(loc, 1, GL_FALSE, arr);
+}
+
+// ==========================================================
+// GLSL #include 预处理 + 文件加载 (OpenGL 运行时用)
+// ==========================================================
+#ifndef SHADER_DIR
+#define SHADER_DIR "src/render/shaders/gl/"
+#endif
+
+static constexpr int kMaxIncludeDepth = 16;
+
+inline std::string readFile(const std::string& path) {
+    std::ifstream f(path);
+    if (!f.is_open()) { fprintf(stderr, "[shader] Cannot open: %s\n", path.c_str()); return ""; }
+    std::stringstream ss; ss << f.rdbuf(); return ss.str();
+}
+
+inline std::string resolveIncludes(const std::string& source,
+                                    const std::string& baseDir, int depth = 0) {
+    if (depth > kMaxIncludeDepth) return source;
+    std::string result;
+    std::istringstream ss(source);
+    std::string line;
+    while (std::getline(ss, line)) {
+        size_t p = line.find_first_not_of(" \t\r");
+        if (p != std::string::npos && line.compare(p, 8, "#include") == 0) {
+            size_t q = line.find('"', p + 8);
+            size_t r = (q != std::string::npos) ? line.find('"', q + 1) : std::string::npos;
+            if (q != std::string::npos && r != std::string::npos) {
+                std::string inc = readFile(baseDir + line.substr(q + 1, r - q - 1));
+                if (!inc.empty()) { result += resolveIncludes(inc, baseDir, depth + 1) + "\n"; continue; }
+            }
+        }
+        result += line + "\n";
+    }
+    return result;
+}
+
+inline std::string loadShaderFile(const std::string& filename) {
+    std::string src = readFile(std::string(SHADER_DIR) + filename);
+    if (src.empty()) return "";
+    return resolveIncludes(src, SHADER_DIR);
 }
 
 // ==========================================================
@@ -540,67 +583,11 @@ public:
   Renderer3D() {
     // --- 标准 3D 着色器 (Phong 光照模型) ---
     // 用于渲染火箭组件和其他普通 3D 物体。
-    const char* vertSrc = R"(
-      #version 330 core
-      layout(location=0) in vec3 aPos;
-      layout(location=1) in vec3 aNormal;
-      layout(location=2) in vec2 aUV;
-      layout(location=3) in vec4 aColor;
+    std::string vertSrc = loadShaderFile("mesh.vert");
 
-      uniform mat4 uMVP;     // 投影矩阵
-      uniform mat4 uModel;   // 模型变换矩阵
+    std::string fragSrc = loadShaderFile("mesh.frag");
 
-      out vec3 vWorldPos;
-      out vec3 vNormal;
-      out vec2 vUV;
-      out vec4 vColor;
-      out vec3 vLocalPos;
-
-      void main() {
-        vec4 worldPos = uModel * vec4(aPos, 1.0);
-        vWorldPos = worldPos.xyz;
-        vNormal = mat3(transpose(inverse(uModel))) * aNormal;
-        vUV = aUV;
-        vColor = aColor;
-        vLocalPos = aPos;
-        gl_Position = uMVP * vec4(aPos, 1.0);
-      }
-    )";
-
-    const char* fragSrc = R"(
-      #version 330 core
-      in vec3 vWorldPos;
-      in vec3 vNormal;
-      in vec2 vUV;
-      in vec4 vColor;
-
-      uniform vec3 uLightDir;
-      uniform vec3 uViewPos;
-      uniform vec4 uBaseColor;
-      uniform float uAmbientStr;
-      uniform sampler2D uSampler;
-      uniform bool uHasTexture;
-
-      out vec4 FragColor;
-
-      void main() {
-        vec3 N = normalize(vNormal);
-        vec3 L = normalize(uLightDir);
-        float ambient = uAmbientStr;
-        float diff = max(dot(N, L), 0.0);
-        vec3 V = normalize(uViewPos - vWorldPos);
-        vec3 H = normalize(L + V);
-        float spec = pow(max(dot(N, H), 0.0), 32.0);
-        
-        vec4 texColor = uHasTexture ? texture(uSampler, vUV) : vec4(1.0);
-        vec4 color = uBaseColor * vColor * texColor;
-        
-        vec3 result = color.rgb * (ambient + diff * 0.7 + spec * 0.3);
-        FragColor = vec4(result, color.a);
-      }
-    )";
-
-    program3d = compileProgram(vertSrc, fragSrc);
+    program3d = compileProgram(vertSrc.c_str(), fragSrc.c_str());
     u_mvp = glGetUniformLocation(program3d, "uMVP");
     u_model = glGetUniformLocation(program3d, "uModel");
     u_lightDir = glGetUniformLocation(program3d, "uLightDir");
@@ -612,235 +599,9 @@ public:
 
     // --- 地球着色器 (RSS-Reborn 级程序化渲染) ---
     // 这是最核心的着色器之一：它不需要外部纹理，而是通过数学噪声实时生成陆地、海洋和山脉。
-    const char* earthFragSrc = R"(
-      #version 330 core
-      in vec3 vWorldPos;
-      in vec3 vNormal;
-      in vec2 vUV;
-      in vec4 vColor;
-      in vec3 vLocalPos;
+    std::string earthFragSrc = loadShaderFile("earth.frag");
 
-      uniform vec3 uLightDir;
-      uniform vec3 uViewPos;
-      uniform float uTime;
-
-      out vec4 FragColor;
-
-      // ---- 噪声原语 (Noise Primitives) ----
-      // 使用三维哈希函数生成基础随机性
-      float hash(vec3 p) {
-        p = fract(p * vec3(443.897, 441.423, 437.195));
-        p += dot(p, p.yzx + 19.19);
-        return fract((p.x + p.y) * p.z);
-      }
-      float hash1(float n) { return fract(sin(n) * 43758.5453123); }
-
-      // 3D 噪声：在 3D 空间中进行三线性插值，生成平滑的连续噪声。
-      float noise3d(vec3 p) {
-        vec3 i = floor(p);
-        vec3 f = fract(p);
-        f = f * f * f * (f * (f * 6.0 - 15.0) + 10.0); // 五次平滑插值 (Quintic)
-        float n000 = hash(i); float n100 = hash(i + vec3(1,0,0));
-        float n010 = hash(i + vec3(0,1,0)); float n110 = hash(i + vec3(1,1,0));
-        float n001 = hash(i + vec3(0,0,1)); float n101 = hash(i + vec3(1,0,1));
-        float n011 = hash(i + vec3(0,1,1)); float n111 = hash(i + vec3(1,1,1));
-        float nx00 = mix(n000, n100, f.x); float nx10 = mix(n010, n110, f.x);
-        float nx01 = mix(n001, n101, f.x); float nx11 = mix(n011, n111, f.x);
-        float nxy0 = mix(nx00, nx10, f.y); float nxy1 = mix(nx01, nx11, f.y);
-        return mix(nxy0, nxy1, f.z);
-      }
-
-      // 分形布朗运动 (FBM)：通过叠加多个不同频率和振幅的噪声层来模拟自然界的自相似性（如山脉）。
-      float fbm(vec3 p, int octaves) {
-        float v = 0.0, amp = 0.5;
-        for (int i = 0; i < octaves; i++) {
-          v += noise3d(p) * amp;
-          p = p * 2.07 + vec3(0.131, -0.217, 0.344);
-          amp *= 0.48;
-        }
-        return v;
-      }
-
-      // 领域扭曲 (Domain-warped FBM)：用一个噪声去扭曲另一个噪声的输入，生成更自然的海岸线。
-      float warpedFbm(vec3 p) {
-        vec3 q = vec3(fbm(p, 4), fbm(p + vec3(5.2, 1.3, 2.8), 4), fbm(p + vec3(9.1, 4.7, 3.1), 4));
-        return fbm(p + q * 1.6, 8);
-      }
-
-      // 脊状噪声 (Ridge noise)：用于生成尖锐的山脉脊线。
-      float ridgeNoise(vec3 p, int octaves) {
-        float v = 0.0, amp = 0.5, prev = 1.0;
-        for (int i = 0; i < octaves; i++) {
-          float n = abs(noise3d(p));
-          n = 1.0 - n;  // 翻转以创建山脊
-          n = n * n;     // 加剧山脊的尖锐度
-          v += n * amp * prev;
-          prev = n;
-          p = p * 2.07 + vec3(0.131, -0.217, 0.344);
-          amp *= 0.48;
-        }
-        return v;
-      }
-
-      void main() {
-        vec3 N = normalize(vNormal);
-        vec3 L = normalize(uLightDir);
-        vec3 V = normalize(uViewPos - vWorldPos);
-        vec3 H = normalize(L + V);
-
-        // 3D 纹理坐标，从单位球体表面采样
-        vec3 sph = normalize(vLocalPos);
-        vec3 texCoord = sph * 3.5;
-        float lat = sph.y; // -1 到 1 (南极到北极)
-        float absLat = abs(lat);
-
-        // ---- 陆地生成 (地形) ----
-        // 使用 8 层分形噪声生成大陆轮廓
-        float continent = warpedFbm(texCoord * 1.2);
-
-        // 陆地/海洋阈值判断：地球表面约 71% 是海洋。
-        float seaLevel = 0.45;
-        bool isLand = continent > seaLevel;
-        float landHeight = isLand ? (continent - seaLevel) / (1.0 - seaLevel) : 0.0;
-
-        // ---- SURFACE COLOR ----
-        // Ocean palette
-        vec3 deepOcean   = vec3(0.012, 0.045, 0.14);
-        vec3 midOcean    = vec3(0.03, 0.10, 0.30);
-        vec3 shallowSea  = vec3(0.06, 0.22, 0.42);
-        vec3 coastWater  = vec3(0.08, 0.35, 0.50);
-
-        // Land palette
-        vec3 beach       = vec3(0.76, 0.70, 0.50);
-        vec3 lowland     = vec3(0.18, 0.42, 0.10);
-        vec3 forest      = vec3(0.08, 0.30, 0.06);
-        vec3 highland    = vec3(0.45, 0.38, 0.22);
-        vec3 mountain    = vec3(0.52, 0.46, 0.40);
-        vec3 peak        = vec3(0.78, 0.76, 0.74);
-        vec3 snow        = vec3(0.92, 0.94, 0.96);
-        vec3 desert      = vec3(0.72, 0.58, 0.32);
-        vec3 tundra      = vec3(0.55, 0.58, 0.50);
-
-        vec3 surfColor;
-        float specMask = 0.0; // 1.0 for water (enables specular)
-
-        if (!isLand) {
-          // 海洋深度渐变：根据高度场计算深浅，模拟大陆架。
-          float oceanDepth = (seaLevel - continent) / seaLevel;
-          if (oceanDepth < 0.05) surfColor = mix(coastWater, shallowSea, oceanDepth / 0.05);
-          else if (oceanDepth < 0.3) surfColor = mix(shallowSea, midOcean, (oceanDepth - 0.05) / 0.25);
-          else surfColor = mix(midOcean, deepOcean, min(1.0, (oceanDepth - 0.3) / 0.7));
-          specMask = 1.0; // 海洋启用高光反射
-        } else {
-          // 生物群系分布 (Biomes)：根据 纬度 + 海拔 + 湿度 动态决定。
-          float biomeNoise = noise3d(texCoord * 6.0);
-          float moisture = fbm(texCoord * 3.0 + vec3(42.0), 4); // 随机湿度梯度
-          float ridgeH = ridgeNoise(texCoord * 2.5, 6); // 山脉细节
-          float combinedH = landHeight * 0.7 + ridgeH * 0.3;
-
-          if (combinedH < 0.02) {
-            surfColor = beach;
-          } else if (absLat < 0.25 && moisture < 0.4 && combinedH < 0.3) {
-            // Tropical desert
-            vec3 sandDark = vec3(0.60, 0.45, 0.25);
-            surfColor = mix(desert, sandDark, biomeNoise * 0.5);
-          } else if (absLat < 0.20 && moisture > 0.45 && combinedH < 0.35) {
-            // Tropical rainforest
-            vec3 jungle = vec3(0.05, 0.25, 0.04);
-            surfColor = mix(forest, jungle, moisture);
-          } else if (absLat < 0.55 && combinedH < 0.4) {
-            // Temperate forests/grassland
-            float forestBlend = smoothstep(0.02, 0.15, combinedH);
-            vec3 grassland = vec3(0.25, 0.48, 0.12);
-            surfColor = mix(grassland, forest, forestBlend * moisture);
-            surfColor = mix(surfColor, lowland, biomeNoise * 0.3);
-          } else if (absLat > 0.65 && combinedH < 0.5) {
-            // Tundra / taiga
-            vec3 taiga = vec3(0.20, 0.32, 0.18);
-            surfColor = mix(tundra, taiga, moisture * (1.0 - absLat));
-          } else {
-            // Highland/mountain with ridge detail
-            if (combinedH < 0.3) surfColor = mix(lowland, highland, combinedH / 0.3);
-            else if (combinedH < 0.55) surfColor = mix(highland, mountain, (combinedH - 0.3) / 0.25);
-            else surfColor = mix(mountain, peak, (combinedH - 0.55) / 0.45);
-          }
-
-          // 高海拔雪线
-          float snowLine = 0.65 - absLat * 0.45;
-          if (combinedH > snowLine) {
-            float snowBlend = smoothstep(snowLine, snowLine + 0.12, combinedH);
-            snowBlend *= (0.7 + 0.3 * ridgeH); // 山脊处积雪更厚
-            surfColor = mix(surfColor, snow, snowBlend);
-          }
-        }
-
-        // ---- 极地冰盖 ----
-        float iceNoise = fbm(texCoord * 4.0 + vec3(100.0), 4);
-        float iceEdge = 0.82 - iceNoise * 0.08; // 锯齿状冰盖边缘
-        if (absLat > iceEdge) {
-          float ice = smoothstep(iceEdge, iceEdge + 0.06, absLat);
-          surfColor = mix(surfColor, snow, ice * 0.95);
-          specMask = mix(specMask, 0.3, ice); // 冰层也具有一定的反光度
-        }
-
-        // ---- CLOUD LAYERS REMOVED (Replaced by Volumetric Atmo Shader) ----
-
-        // ---- 光照计算 (Lighting) ----
-        float NdotL = dot(N, L);
-        float diff = max(NdotL, 0.0);
-        float ambient = 0.008; // 真空环境下的极暗环境光
-
-        // 晨昏线软化 (Terminator softening)：让昼夜交替更加自然。
-        float terminator = smoothstep(-0.1, 0.15, NdotL);
-
-        // 太阳反光 (Sun Glint)：海洋表面的高光。
-        float NdotH = max(dot(N, H), 0.0);
-        float specPower = 256.0; 
-        float spec = pow(NdotH, specPower) * specMask * 2.5;
-        // 菲涅尔反射 (Fresnel)：在掠射角处反光更强。
-        float fresnel = pow(1.0 - max(dot(N, V), 0.0), 4.0);
-        spec *= (1.0 + fresnel * 3.0);
-
-        // ---- 大气晕边 (Atmosphere Rim) ----
-        float rim = 1.0 - max(dot(N, V), 0.0);
-        float rimPow = pow(rim, 4.0);
-        // 日间蓝光，晨昏线处转为暖橘色
-        vec3 dayRim = vec3(0.25, 0.50, 1.0);
-        vec3 sunsetRim = vec3(1.0, 0.35, 0.08);
-        float rimSunsetZone = smoothstep(-0.05, 0.12, NdotL) * smoothstep(0.35, 0.0, NdotL);
-        vec3 atmosColor = mix(sunsetRim, dayRim, smoothstep(0.0, 0.3, NdotL));
-        atmosColor = atmosColor * rimPow * 0.65 * smoothstep(-0.15, 0.1, NdotL);
-        
-        vec3 result = surfColor * (ambient + diff * 0.92) + atmosColor;
-        result += vec3(1.0, 0.95, 0.85) * spec * diff; // 仅在光照面显示高光
-
-        // ---- 夜间城市灯光 (Night Side City Lights) ----
-        // 当半球进入黑夜时，根据地形特征（陆地、海拔、纬度）模拟人类城市的灯光。
-        if (NdotL < 0.03 && isLand) {
-          float nightFade = smoothstep(0.03, -0.08, NdotL);
-          // 多尺度噪声嵌套：模拟不同规模的城市集群
-          float city1 = noise3d(texCoord * 12.0);
-          float city2 = noise3d(texCoord * 25.0 + vec3(7.7));
-          float city3 = noise3d(texCoord * 50.0 + vec3(13.1));
-          // 栖息地权重：城市倾向于在沿海、低地分布，避开高山和极地。
-          float habitability = smoothstep(0.5, 0.0, landHeight) * smoothstep(0.0, 0.1, landHeight);
-          habitability *= (1.0 - smoothstep(0.6, 0.85, absLat)); 
-          float cityBrightness = 0.0;
-          if (city1 > 0.55) cityBrightness += (city1 - 0.55) * 4.0;
-          if (city2 > 0.6) cityBrightness += (city2 - 0.6) * 2.0;
-          if (city3 > 0.65) cityBrightness += (city3 - 0.65) * 1.0;
-          cityBrightness *= habitability * nightFade;
-          cityBrightness = min(cityBrightness, 1.2);
-          // 暖色调灯光 (类似高压钠灯)
-          vec3 cityColor = mix(vec3(1.0, 0.7, 0.2), vec3(1.0, 0.9, 0.6), city2);
-          result += cityColor * cityBrightness * 0.8;
-        }
-
-        FragColor = vec4(result, 1.0);
-      }
-    )";
-
-    earthProgram = compileProgram(vertSrc, earthFragSrc);
+    earthProgram = compileProgram(vertSrc.c_str(), earthFragSrc.c_str());
     ue_mvp = glGetUniformLocation(earthProgram, "uMVP");
     ue_model = glGetUniformLocation(earthProgram, "uModel");
     ue_lightDir = glGetUniformLocation(earthProgram, "uLightDir");
@@ -848,70 +609,8 @@ public:
     ue_time = glGetUniformLocation(earthProgram, "uTime");
 
     // --- Gas Giant Shader ---
-    const char* gasGiantFragSrc = R"(
-      #version 330 core
-      in vec3 vWorldPos;
-      in vec3 vNormal;
-      in vec2 vUV;
-      in vec3 vLocalPos;
-      uniform vec3 uLightDir;
-      uniform vec3 uViewPos;
-      uniform vec4 uBaseColor;
-      out vec4 FragColor;
-
-      float hash(vec3 p) {
-        p = fract(p * vec3(443.897, 441.423, 437.195));
-        p += dot(p, p.yzx + 19.19);
-        return fract((p.x + p.y) * p.z);
-      }
-      float noise3d(vec3 p) {
-        vec3 i = floor(p); vec3 f = fract(p);
-        f = f * f * (3.0 - 2.0 * f);
-        float n000 = hash(i); float n100 = hash(i + vec3(1,0,0));
-        float n010 = hash(i + vec3(0,1,0)); float n110 = hash(i + vec3(1,1,0));
-        float n001 = hash(i + vec3(0,0,1)); float n101 = hash(i + vec3(1,0,1));
-        float n011 = hash(i + vec3(0,1,1)); float n111 = hash(i + vec3(1,1,1));
-        float nx00 = mix(n000, n100, f.x); float nx10 = mix(n010, n110, f.x);
-        float nx01 = mix(n001, n101, f.x); float nx11 = mix(n011, n111, f.x);
-        float nxy0 = mix(nx00, nx10, f.y); float nxy1 = mix(nx01, nx11, f.y);
-        return mix(nxy0, nxy1, f.z);
-      }
-      float fbm(vec3 p) {
-        float v = 0.0; float amp = 0.5;
-        for (int i = 0; i < 5; i++) { v += noise3d(p) * amp; p *= 2.1; amp *= 0.5; }
-        return v;
-      }
-
-      void main() {
-        vec3 N = normalize(vNormal);
-        vec3 L = normalize(uLightDir);
-        vec3 V = normalize(uViewPos - vWorldPos);
-        vec3 texCoord = normalize(vLocalPos) * 5.0;
-        
-        float warp = fbm(texCoord + vec3(0, texCoord.y * 3.0, 0));
-        float bands = sin(texCoord.y * 15.0 + warp * 5.0);
-        bands = smoothstep(-1.0, 1.0, bands);
-        
-        vec3 color1 = uBaseColor.rgb;
-        vec3 color2 = uBaseColor.rgb * 0.4 + vec3(0.3);
-        vec3 surfColor = mix(color1, color2, bands);
-        
-        float storms = fbm(texCoord * 4.0);
-        if (storms > 0.7) {
-            surfColor = mix(surfColor, vec3(0.9, 0.8, 0.7), (storms - 0.7) * 3.3);
-        }
-
-        float diff = max(dot(N, L), 0.0);
-        float ambient = 0.15;
-        float rim = 1.0 - max(dot(N, V), 0.0);
-        rim = pow(rim, 3.0);
-        vec3 atmosColor = uBaseColor.rgb * rim * 0.5;
-
-        vec3 result = surfColor * (ambient + diff * 0.85) + atmosColor;
-        FragColor = vec4(result, 1.0);
-      }
-    )";
-    gasGiantProgram = compileProgram(vertSrc, gasGiantFragSrc);
+    std::string gasGiantFragSrc = loadShaderFile("gas_giant.frag");
+    gasGiantProgram = compileProgram(vertSrc.c_str(), gasGiantFragSrc.c_str());
     ugg_mvp = glGetUniformLocation(gasGiantProgram, "uMVP");
     ugg_model = glGetUniformLocation(gasGiantProgram, "uModel");
     ugg_lightDir = glGetUniformLocation(gasGiantProgram, "uLightDir");
@@ -919,56 +618,8 @@ public:
     ugg_baseColor = glGetUniformLocation(gasGiantProgram, "uBaseColor");
 
     // --- Barren/Crater Shader ---
-    const char* barrenFragSrc = R"(
-      #version 330 core
-      in vec3 vWorldPos;
-      in vec3 vNormal;
-      in vec3 vLocalPos;
-      uniform vec3 uLightDir;
-      uniform vec3 uViewPos;
-      uniform vec4 uBaseColor;
-      out vec4 FragColor;
-
-      float hash(vec3 p) {
-        p = fract(p * vec3(443.897, 441.423, 437.195));
-        p += dot(p, p.yzx + 19.19);
-        return fract((p.x + p.y) * p.z);
-      }
-      float noise3d(vec3 p) {
-        vec3 i = floor(p); vec3 f = fract(p);
-        f = f * f * (3.0 - 2.0 * f);
-        float n000 = hash(i); float n100 = hash(i + vec3(1,0,0));
-        float n010 = hash(i + vec3(0,1,0)); float n110 = hash(i + vec3(1,1,0));
-        float n001 = hash(i + vec3(0,0,1)); float n101 = hash(i + vec3(1,0,1));
-        float n011 = hash(i + vec3(0,1,1)); float n111 = hash(i + vec3(1,1,1));
-        float nx00 = mix(n000, n100, f.x); float nx10 = mix(n010, n110, f.x);
-        float nx01 = mix(n001, n101, f.x); float nx11 = mix(n011, n111, f.x);
-        float nxy0 = mix(nx00, nx10, f.y); float nxy1 = mix(nx01, nx11, f.y);
-        return mix(nxy0, nxy1, f.z);
-      }
-      float fbm(vec3 p) {
-        float v = 0.0; float amp = 0.5;
-        for (int i = 0; i < 5; i++) { v += noise3d(p) * amp; p *= 2.1; amp *= 0.5; }
-        return v;
-      }
-
-      void main() {
-        vec3 N = normalize(vNormal);
-        vec3 L = normalize(uLightDir);
-        vec3 texCoord = normalize(vLocalPos) * 8.0;
-        
-        float craters = fbm(texCoord * 4.0);
-        craters = abs(craters * 2.0 - 1.0);
-        
-        vec3 surfColor = uBaseColor.rgb * (0.5 + 0.5 * craters);
-        float diff = max(dot(N, L), 0.0);
-        float ambient = 0.05;
-
-        vec3 result = surfColor * (ambient + diff * 0.95);
-        FragColor = vec4(result, 1.0);
-      }
-    )";
-    barrenProgram = compileProgram(vertSrc, barrenFragSrc);
+    std::string barrenFragSrc = loadShaderFile("barren.frag");
+    barrenProgram = compileProgram(vertSrc.c_str(), barrenFragSrc.c_str());
     uba_mvp = glGetUniformLocation(barrenProgram, "uMVP");
     uba_model = glGetUniformLocation(barrenProgram, "uModel");
     uba_lightDir = glGetUniformLocation(barrenProgram, "uLightDir");
@@ -998,7 +649,7 @@ public:
         FragColor = vec4(result, alpha * uBaseColor.a);
       }
     )";
-    ringProgram = compileProgram(vertSrc, ringFragSrc);
+    ringProgram = compileProgram(vertSrc.c_str(), ringFragSrc);
     uri_mvp = glGetUniformLocation(ringProgram, "uMVP");
     uri_model = glGetUniformLocation(ringProgram, "uModel");
     uri_lightDir = glGetUniformLocation(ringProgram, "uLightDir");
@@ -1008,7 +659,7 @@ public:
 
     // ===== Helper: compile planet shader and fetch uniforms =====
     auto setupPlanetProg = [&](GLuint& prog, PlanetUniforms& u, const char* fragSrc) {
-        prog = compileProgram(vertSrc, fragSrc);
+        prog = compileProgram(vertSrc.c_str(), fragSrc);
         u.mvp = glGetUniformLocation(prog, "uMVP");
         u.model = glGetUniformLocation(prog, "uModel");
         u.lightDir = glGetUniformLocation(prog, "uLightDir");
@@ -1029,790 +680,57 @@ public:
     // ===== 1. MERCURY SHADER =====
     // Heavily cratered basalt, lobate scarps, color variation from dark gray to warm brown.
     // Very low albedo overall, numerous overlapping craters of varying sizes.
-    const char* mercuryFragSrc = R"(
-      #version 330 core
-      in vec3 vWorldPos; in vec3 vNormal; in vec3 vLocalPos;
-      uniform vec3 uLightDir; uniform vec3 uViewPos; uniform vec4 uBaseColor;
-      out vec4 FragColor;
-
-      float hash(vec3 p) { p=fract(p*vec3(443.897,441.423,437.195)); p+=dot(p,p.yzx+19.19); return fract((p.x+p.y)*p.z); }
-      float noise3d(vec3 p) {
-        vec3 i=floor(p); vec3 f=fract(p); f=f*f*f*(f*(f*6.0-15.0)+10.0);
-        float n000=hash(i),n100=hash(i+vec3(1,0,0)),n010=hash(i+vec3(0,1,0)),n110=hash(i+vec3(1,1,0));
-        float n001=hash(i+vec3(0,0,1)),n101=hash(i+vec3(1,0,1)),n011=hash(i+vec3(0,1,1)),n111=hash(i+vec3(1,1,1));
-        float nx00=mix(n000,n100,f.x),nx10=mix(n010,n110,f.x);
-        float nx01=mix(n001,n101,f.x),nx11=mix(n011,n111,f.x);
-        return mix(mix(nx00,nx10,f.y),mix(nx01,nx11,f.y),f.z);
-      }
-      float fbm(vec3 p, int oct) { float v=0.0,a=0.5; for(int i=0;i<oct;i++){v+=noise3d(p)*a;p=p*2.07+vec3(0.131,-0.217,0.344);a*=0.48;} return v; }
-
-      // Noise-based crater approximation (cheap, no loops)
-      float craterNoise(vec3 p, float freq) {
-        float n = noise3d(p * freq);
-        // Sharp circular-ish depressions from noise thresholding
-        float bowl = smoothstep(0.55, 0.35, n); // crater interior
-        float rim = smoothstep(0.55, 0.60, n) * smoothstep(0.68, 0.60, n); // raised rim
-        return bowl * 0.6 + rim * 0.25;
-      }
-
-      void main() {
-        vec3 N = normalize(vNormal); vec3 L = normalize(uLightDir);
-        vec3 sph = normalize(vLocalPos);
-        vec3 tc = sph * 6.0;
-
-        // Multi-scale noise-based cratering
-        float c1 = craterNoise(sph, 8.0);
-        float c2 = craterNoise(sph, 16.0) * 0.5;
-        float c3 = craterNoise(sph, 32.0) * 0.25;
-        float c4 = craterNoise(sph, 64.0) * 0.12;
-        float totalCrater = c1 + c2 + c3 + c4;
-
-        // Base terrain noise
-        float terrain = fbm(tc * 2.0, 6);
-
-        // Lobate scarps (ridge-like features)
-        float scarps = abs(noise3d(tc * 4.0 + vec3(100.0))) * abs(noise3d(tc * 8.0 + vec3(200.0)));
-        scarps = smoothstep(0.1, 0.4, scarps) * 0.15;
-
-        // Color: Mercury is very dark (albedo ~0.07-0.14)
-        vec3 darkBasalt = vec3(0.08, 0.07, 0.06);
-        vec3 warmBrown = vec3(0.14, 0.11, 0.08);
-        vec3 brightRay = vec3(0.20, 0.18, 0.16);
-
-        vec3 baseColor = mix(darkBasalt, warmBrown, terrain * 0.8 + 0.2);
-        baseColor *= (1.0 - totalCrater * 0.4);
-        float rayMask = smoothstep(0.3, 0.6, c1) * noise3d(tc * 20.0);
-        baseColor = mix(baseColor, brightRay, rayMask * 0.4);
-        baseColor += vec3(scarps);
-
-        float diff = max(dot(N, L), 0.0);
-        float ambient = 0.01;
-        vec3 result = baseColor * (ambient + diff * 0.99);
-        FragColor = vec4(result, 1.0);
-      }
-    )";
-    setupPlanetProg(mercuryProgram, u_mercury, mercuryFragSrc);
+    std::string mercuryFragSrc = loadShaderFile("mercury.frag");
+    setupPlanetProg(mercuryProgram, u_mercury, mercuryFragSrc.c_str());
 
     // ===== 2. VENUS SHADER =====
     // Thick multi-layer sulfuric acid cloud deck, atmospheric super-rotation,
     // subtle sub-surface glow (volcanism) visible through thin cloud gaps.
-    const char* venusFragSrc = R"(
-      #version 330 core
-      in vec3 vWorldPos; in vec3 vNormal; in vec3 vLocalPos;
-      uniform vec3 uLightDir; uniform vec3 uViewPos; uniform vec4 uBaseColor; uniform float uTime;
-      out vec4 FragColor;
-
-      float hash(vec3 p) { p=fract(p*vec3(443.897,441.423,437.195)); p+=dot(p,p.yzx+19.19); return fract((p.x+p.y)*p.z); }
-      float noise3d(vec3 p) {
-        vec3 i=floor(p); vec3 f=fract(p); f=f*f*f*(f*(f*6.0-15.0)+10.0);
-        float n000=hash(i),n100=hash(i+vec3(1,0,0)),n010=hash(i+vec3(0,1,0)),n110=hash(i+vec3(1,1,0));
-        float n001=hash(i+vec3(0,0,1)),n101=hash(i+vec3(1,0,1)),n011=hash(i+vec3(0,1,1)),n111=hash(i+vec3(1,1,1));
-        float nx00=mix(n000,n100,f.x),nx10=mix(n010,n110,f.x);
-        float nx01=mix(n001,n101,f.x),nx11=mix(n011,n111,f.x);
-        return mix(mix(nx00,nx10,f.y),mix(nx01,nx11,f.y),f.z);
-      }
-      float fbm(vec3 p, int oct) { float v=0.0,a=0.5; for(int i=0;i<oct;i++){v+=noise3d(p)*a;p=p*2.07+vec3(0.131,-0.217,0.344);a*=0.48;} return v; }
-
-      void main() {
-        vec3 N = normalize(vNormal); vec3 L = normalize(uLightDir);
-        vec3 V = normalize(uViewPos - vWorldPos);
-        vec3 sph = normalize(vLocalPos);
-        float lat = sph.y;
-        float timeOff = uTime * 0.00008; // Super-rotation (very slow)
-
-        // === Cloud layer 1: Thick sulfuric acid main deck ===
-        vec3 tc1 = sph * 3.0 + vec3(timeOff * 1.0, 0.0, timeOff * 0.5);
-        float cloud1 = fbm(tc1, 8);
-        // Banded structure (Venus has mild latitudinal banding in UV)
-        float bandWarp = fbm(sph * vec3(1.0, 5.0, 1.0) + vec3(timeOff * 0.3), 4) * 0.3;
-        float bands = sin(lat * 12.0 + bandWarp * 8.0) * 0.5 + 0.5;
-
-        // === Cloud layer 2: Higher altitude wispy streaks ===
-        vec3 tc2 = sph * 5.0 + vec3(-timeOff * 1.5, 50.0, timeOff * 0.8);
-        float cloud2 = fbm(tc2, 6) * 0.6;
-
-        // === Cloud layer 3: Dark UV absorber patches (mysterious!) ===
-        vec3 tc3 = sph * 2.0 + vec3(timeOff * 0.7, 100.0, -timeOff * 0.4);
-        float uvAbsorber = fbm(tc3, 5);
-        uvAbsorber = smoothstep(0.35, 0.6, uvAbsorber) * 0.3;
-
-        // Color palette: Venus appears yellow-white to pale cream
-        vec3 brightCloud = vec3(0.95, 0.90, 0.75);
-        vec3 midCloud = vec3(0.85, 0.78, 0.58);
-        vec3 darkCloud = vec3(0.65, 0.55, 0.35);
-        vec3 absorberTint = vec3(0.55, 0.45, 0.25); // Dark UV patches
-
-        float cloudMix = cloud1 * 0.6 + cloud2 * 0.3 + bands * 0.1;
-        vec3 surfColor = mix(darkCloud, brightCloud, cloudMix);
-        surfColor = mix(surfColor, midCloud, bands * 0.4);
-        surfColor = mix(surfColor, absorberTint, uvAbsorber);
-
-        // Subtle sub-cloud volcanic glow on night side
-        float NdotL = dot(N, L);
-        float nightMask = smoothstep(0.0, -0.15, NdotL);
-        float volcGlow = fbm(sph * 8.0, 4);
-        volcGlow = smoothstep(0.55, 0.75, volcGlow) * 0.15;
-        vec3 glowColor = vec3(1.0, 0.3, 0.05); // Deep orange-red
-        surfColor += glowColor * volcGlow * nightMask;
-
-        // Lighting
-        float diff = max(NdotL, 0.0);
-        float ambient = 0.03;
-
-        // Atmosphere rim
-        float rim = 1.0 - max(dot(N, V), 0.0);
-        float rimPow = pow(rim, 3.0);
-        vec3 atmosGlow = vec3(0.95, 0.82, 0.50) * rimPow * 0.5 * smoothstep(-0.1, 0.2, NdotL);
-
-        vec3 result = surfColor * (ambient + diff * 0.85) + atmosGlow;
-        FragColor = vec4(result, 1.0);
-      }
-    )";
-    setupPlanetProg(venusProgram, u_venus, venusFragSrc);
+    std::string venusFragSrc = loadShaderFile("venus.frag");
+    setupPlanetProg(venusProgram, u_venus, venusFragSrc.c_str());
 
     // ===== 3. MOON (Luna) SHADER =====
     // Maria (dark basalt plains) vs highlands, impact craters with ejecta rays,
     // regolith color variation gray-to-brown, very low albedo.
-    const char* moonFragSrc = R"(
-      #version 330 core
-      in vec3 vWorldPos; in vec3 vNormal; in vec3 vLocalPos;
-      uniform vec3 uLightDir; uniform vec3 uViewPos; uniform vec4 uBaseColor;
-      out vec4 FragColor;
-
-      float hash(vec3 p) { p=fract(p*vec3(443.897,441.423,437.195)); p+=dot(p,p.yzx+19.19); return fract((p.x+p.y)*p.z); }
-      float noise3d(vec3 p) {
-        vec3 i=floor(p); vec3 f=fract(p); f=f*f*f*(f*(f*6.0-15.0)+10.0);
-        float n000=hash(i),n100=hash(i+vec3(1,0,0)),n010=hash(i+vec3(0,1,0)),n110=hash(i+vec3(1,1,0));
-        float n001=hash(i+vec3(0,0,1)),n101=hash(i+vec3(1,0,1)),n011=hash(i+vec3(0,1,1)),n111=hash(i+vec3(1,1,1));
-        float nx00=mix(n000,n100,f.x),nx10=mix(n010,n110,f.x);
-        float nx01=mix(n001,n101,f.x),nx11=mix(n011,n111,f.x);
-        return mix(mix(nx00,nx10,f.y),mix(nx01,nx11,f.y),f.z);
-      }
-      float fbm(vec3 p, int oct) { float v=0.0,a=0.5; for(int i=0;i<oct;i++){v+=noise3d(p)*a;p=p*2.07+vec3(0.131,-0.217,0.344);a*=0.48;} return v; }
-
-      // Noise-based crater approximation
-      float craterNoise(vec3 p, float freq) {
-        float n = noise3d(p * freq);
-        float bowl = smoothstep(0.55, 0.35, n);
-        float rim = smoothstep(0.55, 0.60, n) * smoothstep(0.68, 0.60, n);
-        return bowl * 0.6 + rim * 0.25;
-      }
-
-      void main() {
-        vec3 N = normalize(vNormal); vec3 L = normalize(uLightDir);
-        vec3 sph = normalize(vLocalPos);
-        vec3 tc = sph * 5.0;
-
-        // Maria detection (large dark basalt plains)
-        vec3 warp = vec3(fbm(sph * 2.0, 3), fbm(sph * 2.0 + vec3(10.0), 3), fbm(sph * 2.0 + vec3(20.0), 3));
-        float maria = fbm(sph * 1.5 + warp * 0.8, 5);
-        bool isMare = maria < 0.42;
-
-        // Multi-scale noise-based cratering
-        float c1 = craterNoise(sph, 6.0);
-        float c2 = craterNoise(sph, 12.0) * 0.5;
-        float c3 = craterNoise(sph, 24.0) * 0.25;
-        float c4 = craterNoise(sph, 48.0) * 0.12;
-        float totalCrater = c1 + c2 + c3 + c4;
-
-        // Regolith fine detail
-        float regolith = fbm(tc * 8.0, 5) * 0.15;
-
-        // Colors
-        vec3 highlandColor = vec3(0.22, 0.21, 0.19);
-        vec3 mareColor = vec3(0.08, 0.08, 0.07);
-        vec3 rayColor = vec3(0.28, 0.27, 0.25);
-
-        vec3 baseColor;
-        if(isMare) {
-          float mareBlend = smoothstep(0.42, 0.30, maria);
-          baseColor = mix(highlandColor, mareColor, mareBlend);
-        } else {
-          baseColor = highlandColor;
-        }
-
-        baseColor *= (1.0 - totalCrater * 0.3);
-        baseColor += vec3(regolith);
-
-        float rayNoise = noise3d(sph * 30.0);
-        float rayMask = smoothstep(0.4, 0.7, c1) * smoothstep(0.5, 0.7, rayNoise);
-        baseColor = mix(baseColor, rayColor, rayMask * 0.5);
-
-        float diff = max(dot(N, L), 0.0);
-        float ambient = 0.005;
-        vec3 result = baseColor * (ambient + diff * 0.995);
-        FragColor = vec4(result, 1.0);
-      }
-    )";
-    setupPlanetProg(moonProgram, u_moon, moonFragSrc);
+    std::string moonFragSrc = loadShaderFile("moon.frag");
+    setupPlanetProg(moonProgram, u_moon, moonFragSrc.c_str());
 
     // ===== 4. MARS SHADER =====
     // Iron oxide red-orange terrain, polar CO2 ice caps, Olympus Mons volcanic shield,
     // Valles Marineris canyon, dust storms, thin atmosphere rim.
-    const char* marsFragSrc = R"(
-      #version 330 core
-      in vec3 vWorldPos; in vec3 vNormal; in vec3 vLocalPos;
-      uniform vec3 uLightDir; uniform vec3 uViewPos; uniform vec4 uBaseColor; uniform float uTime;
-      out vec4 FragColor;
-
-      float hash(vec3 p) { p=fract(p*vec3(443.897,441.423,437.195)); p+=dot(p,p.yzx+19.19); return fract((p.x+p.y)*p.z); }
-      float noise3d(vec3 p) {
-        vec3 i=floor(p); vec3 f=fract(p); f=f*f*f*(f*(f*6.0-15.0)+10.0);
-        float n000=hash(i),n100=hash(i+vec3(1,0,0)),n010=hash(i+vec3(0,1,0)),n110=hash(i+vec3(1,1,0));
-        float n001=hash(i+vec3(0,0,1)),n101=hash(i+vec3(1,0,1)),n011=hash(i+vec3(0,1,1)),n111=hash(i+vec3(1,1,1));
-        float nx00=mix(n000,n100,f.x),nx10=mix(n010,n110,f.x);
-        float nx01=mix(n001,n101,f.x),nx11=mix(n011,n111,f.x);
-        return mix(mix(nx00,nx10,f.y),mix(nx01,nx11,f.y),f.z);
-      }
-      float fbm(vec3 p, int oct) { float v=0.0,a=0.5; for(int i=0;i<oct;i++){v+=noise3d(p)*a;p=p*2.07+vec3(0.131,-0.217,0.344);a*=0.48;} return v; }
-      float ridgeNoise(vec3 p, int oct) {
-        float v=0.0,a=0.5,prev=1.0;
-        for(int i=0;i<oct;i++){float n=abs(noise3d(p));n=1.0-n;n=n*n;v+=n*a*prev;prev=n;p=p*2.07+vec3(0.131,-0.217,0.344);a*=0.48;}
-        return v;
-      }
-
-      void main() {
-        vec3 N = normalize(vNormal); vec3 L = normalize(uLightDir);
-        vec3 V = normalize(uViewPos - vWorldPos);
-        vec3 sph = normalize(vLocalPos);
-        vec3 tc = sph * 4.0;
-        float lat = sph.y;
-        float absLat = abs(lat);
-
-        // === Terrain elevation ===
-        // Domain-warped FBM for varied terrain
-        vec3 warp = vec3(fbm(tc, 3), fbm(tc + vec3(5.2), 3), fbm(tc + vec3(9.1), 3));
-        float elevation = fbm(tc * 1.5 + warp * 1.2, 8);
-
-        // Ridge/canyon features (Valles Marineris analog)
-        float ridges = ridgeNoise(tc * 2.0 + vec3(42.0, 13.0, 7.0), 6);
-        float canyons = 1.0 - ridgeNoise(tc * 1.5 + vec3(77.0, 21.0, 55.0), 5);
-
-        // Volcanic shield (large smooth elevated dome)
-        vec3 volcCenter = vec3(0.3, 0.2, 0.5); // Approximate Tharsis region
-        float volcDist = length(sph - volcCenter);
-        float volcano = smoothstep(0.5, 0.0, volcDist) * 0.3;
-
-        float combinedH = elevation * 0.5 + ridges * 0.25 + volcano;
-
-        // === Color palette ===
-        vec3 rustRed = vec3(0.55, 0.22, 0.08);
-        vec3 darkRust = vec3(0.35, 0.14, 0.06);
-        vec3 paleOchre = vec3(0.72, 0.45, 0.22);
-        vec3 darkBasalt = vec3(0.15, 0.10, 0.08);
-        vec3 dustBright = vec3(0.80, 0.55, 0.30);
-        vec3 iceCap = vec3(0.90, 0.92, 0.95);
-
-        // Base terrain color
-        float colorNoise = fbm(tc * 3.0, 4);
-        vec3 surfColor = mix(darkRust, rustRed, elevation);
-        surfColor = mix(surfColor, paleOchre, colorNoise * 0.4);
-
-        // Canyon floors are darker basalt
-        float canyonMask = smoothstep(0.4, 0.2, canyons);
-        surfColor = mix(surfColor, darkBasalt, canyonMask * 0.6);
-
-        // Volcanic regions are darker (basalt flows)
-        surfColor = mix(surfColor, darkBasalt, volcano);
-
-        // Bright dust deposits in lowlands
-        float dustMask = smoothstep(0.3, 0.5, elevation) * smoothstep(0.6, 0.45, absLat);
-        surfColor = mix(surfColor, dustBright, dustMask * colorNoise * 0.3);
-
-        // === Polar CO2 ice caps ===
-        float iceNoise = fbm(tc * 4.0 + vec3(200.0), 5);
-        float iceEdge = 0.75 - iceNoise * 0.08;
-        float southBias = (lat < 0.0) ? 0.05 : 0.0; // South cap is larger
-        if(absLat > iceEdge - southBias) {
-          float ice = smoothstep(iceEdge - southBias, iceEdge + 0.05 - southBias, absLat);
-          surfColor = mix(surfColor, iceCap, ice * 0.92);
-        }
-
-        // === Dust storm clouds (very thin, animated) ===
-        float stormTime = uTime * 0.00005;
-        float dust = fbm(sph * 2.5 + vec3(stormTime, 0.0, stormTime * 0.3), 5);
-        dust = smoothstep(0.48, 0.7, dust) * 0.25;
-        surfColor = mix(surfColor, dustBright, dust);
-
-        // === Lighting ===
-        float NdotL = dot(N, L);
-        float diff = max(NdotL, 0.0);
-        float ambient = 0.008;
-
-        // Thin atmospheric rim (Mars has a very thin atmosphere)
-        float rim = 1.0 - max(dot(N, V), 0.0);
-        float rimPow = pow(rim, 4.0);
-        vec3 marsAtmo = vec3(0.85, 0.55, 0.25) * rimPow * 0.25 * smoothstep(-0.1, 0.1, NdotL);
-
-        vec3 result = surfColor * (ambient + diff * 0.92) + marsAtmo;
-        FragColor = vec4(result, 1.0);
-      }
-    )";
-    setupPlanetProg(marsProgram, u_mars, marsFragSrc);
+    std::string marsFragSrc = loadShaderFile("mars.frag");
+    setupPlanetProg(marsProgram, u_mars, marsFragSrc.c_str());
 
     // ===== 5. JUPITER SHADER =====
     // Detailed alternating zonal bands, Great Red Spot anticyclone, turbulent eddies,
     // ammonia crystal storms, strong belt/zone color contrast.
-    const char* jupiterFragSrc = R"(
-      #version 330 core
-      in vec3 vWorldPos; in vec3 vNormal; in vec3 vLocalPos;
-      uniform vec3 uLightDir; uniform vec3 uViewPos; uniform vec4 uBaseColor; uniform float uTime;
-      out vec4 FragColor;
-
-      float hash(vec3 p) { p=fract(p*vec3(443.897,441.423,437.195)); p+=dot(p,p.yzx+19.19); return fract((p.x+p.y)*p.z); }
-      float noise3d(vec3 p) {
-        vec3 i=floor(p); vec3 f=fract(p); f=f*f*f*(f*(f*6.0-15.0)+10.0);
-        float n000=hash(i),n100=hash(i+vec3(1,0,0)),n010=hash(i+vec3(0,1,0)),n110=hash(i+vec3(1,1,0));
-        float n001=hash(i+vec3(0,0,1)),n101=hash(i+vec3(1,0,1)),n011=hash(i+vec3(0,1,1)),n111=hash(i+vec3(1,1,1));
-        float nx00=mix(n000,n100,f.x),nx10=mix(n010,n110,f.x);
-        float nx01=mix(n001,n101,f.x),nx11=mix(n011,n111,f.x);
-        return mix(mix(nx00,nx10,f.y),mix(nx01,nx11,f.y),f.z);
-      }
-      float fbm(vec3 p, int oct) { float v=0.0,a=0.5; for(int i=0;i<oct;i++){v+=noise3d(p)*a;p=p*2.07+vec3(0.131,-0.217,0.344);a*=0.48;} return v; }
-
-      void main() {
-        vec3 N = normalize(vNormal); vec3 L = normalize(uLightDir);
-        vec3 V = normalize(uViewPos - vWorldPos);
-        vec3 sph = normalize(vLocalPos);
-        vec3 tc = sph * 5.0;
-        float lat = sph.y;
-        float timeOff = uTime * 0.00003;
-
-        // === Zonal banding (primary visual feature) ===
-        // Multi-frequency band structure with turbulent boundaries
-        float bandWarp = fbm(sph * vec3(2.0, 1.0, 2.0) + vec3(timeOff * 0.5, 0.0, timeOff * 0.3), 5);
-        float bands1 = sin(lat * 22.0 + bandWarp * 4.0);
-        float bands2 = sin(lat * 44.0 + bandWarp * 2.0 + 1.5) * 0.3;
-        float bands3 = sin(lat * 88.0 + bandWarp * 1.0 + 3.0) * 0.1;
-        float bandPattern = bands1 + bands2 + bands3;
-        bandPattern = bandPattern * 0.5 + 0.5; // Normalize to 0-1
-
-        // === Turbulent eddies at band boundaries ===
-        float eddies = fbm(tc * 3.0 + vec3(timeOff, lat * 5.0, timeOff * 0.7), 7);
-        float edgeTurb = 1.0 - abs(bandPattern * 2.0 - 1.0); // Strongest at band edges
-        eddies *= edgeTurb;
-
-        // === Great Red Spot (GRS) ===
-        vec3 grsCenter = vec3(0.4, -0.35, 0.3); // South of equator
-        float grsDist = length(sph - normalize(grsCenter));
-        float grsAngle = atan(sph.z - grsCenter.z, sph.x - grsCenter.x);
-        float grsSpiral = fbm(vec3(grsAngle * 3.0, grsDist * 20.0, timeOff * 2.0), 4);
-        float grsMask = smoothstep(0.25, 0.0, grsDist);
-        grsMask *= (0.7 + 0.3 * grsSpiral);
-
-        // === Color palette ===
-        // Zones (bright, cream-white): high-altitude ammonia clouds
-        vec3 zoneColor = vec3(0.92, 0.88, 0.78);
-        // Belts (dark, rusty brown): lower-altitude, chromophore-rich
-        vec3 beltColor1 = vec3(0.55, 0.35, 0.18);
-        vec3 beltColor2 = vec3(0.70, 0.48, 0.25);
-        // GRS color
-        vec3 grsColor = vec3(0.75, 0.30, 0.12);
-        // Polar regions (darker, more subdued)
-        vec3 polarColor = vec3(0.35, 0.30, 0.28);
-
-        // Build surface color
-        vec3 beltMix = mix(beltColor1, beltColor2, noise3d(tc * 6.0));
-        vec3 surfColor = mix(beltMix, zoneColor, bandPattern);
-
-        // Add turbulent eddy details
-        vec3 eddyColor = mix(surfColor, zoneColor * 1.1, eddies * 0.4);
-        surfColor = mix(surfColor, eddyColor, edgeTurb * 0.6);
-
-        // Ammonia storm clusters (bright white spots in belts)
-        float storms = noise3d(tc * 8.0 + vec3(timeOff * 2.0));
-        float stormMask = smoothstep(0.72, 0.85, storms) * (1.0 - bandPattern) * 0.5;
-        surfColor = mix(surfColor, vec3(0.98, 0.95, 0.90), stormMask);
-
-        // Great Red Spot
-        surfColor = mix(surfColor, grsColor, grsMask * 0.85);
-        // GRS inner detail: swirling spiral
-        if(grsMask > 0.1) {
-          float spiral = fbm(vec3(grsAngle * 6.0 + timeOff * 4.0, grsDist * 40.0, 0.0), 5);
-          vec3 grsInner = mix(grsColor, vec3(0.90, 0.55, 0.30), spiral);
-          surfColor = mix(surfColor, grsInner, grsMask * 0.5);
-        }
-
-        // Polar darkening
-        float polarMask = smoothstep(0.6, 0.9, abs(lat));
-        surfColor = mix(surfColor, polarColor, polarMask);
-
-        // === Lighting ===
-        float diff = max(dot(N, L), 0.0);
-        float ambient = 0.06;
-        float rim = 1.0 - max(dot(N, V), 0.0);
-        float rimPow = pow(rim, 3.5);
-        float NdotL = dot(N, L);
-        vec3 atmosGlow = vec3(0.80, 0.65, 0.45) * rimPow * 0.35 * smoothstep(-0.1, 0.2, NdotL);
-
-        vec3 result = surfColor * (ambient + diff * 0.85) + atmosGlow;
-        FragColor = vec4(result, 1.0);
-      }
-    )";
-    setupPlanetProg(jupiterProgram, u_jupiter, jupiterFragSrc);
+    std::string jupiterFragSrc = loadShaderFile("jupiter.frag");
+    setupPlanetProg(jupiterProgram, u_jupiter, jupiterFragSrc.c_str());
 
     // ===== 6. SATURN SHADER =====
     // Muted gold/amber banding, hexagonal polar vortex, haze layer,
     // more subtle contrast than Jupiter.
-    const char* saturnFragSrc = R"(
-      #version 330 core
-      in vec3 vWorldPos; in vec3 vNormal; in vec3 vLocalPos;
-      uniform vec3 uLightDir; uniform vec3 uViewPos; uniform vec4 uBaseColor; uniform float uTime;
-      uniform float uRingInner; uniform float uRingOuter;
-      out vec4 FragColor;
-
-      float hash(vec3 p) { p=fract(p*vec3(443.897,441.423,437.195)); p+=dot(p,p.yzx+19.19); return fract((p.x+p.y)*p.z); }
-      float noise3d(vec3 p) {
-        vec3 i=floor(p); vec3 f=fract(p); f=f*f*f*(f*(f*6.0-15.0)+10.0);
-        float n000=hash(i),n100=hash(i+vec3(1,0,0)),n010=hash(i+vec3(0,1,0)),n110=hash(i+vec3(1,1,0));
-        float n001=hash(i+vec3(0,0,1)),n101=hash(i+vec3(1,0,1)),n011=hash(i+vec3(0,1,1)),n111=hash(i+vec3(1,1,1));
-        float nx00=mix(n000,n100,f.x),nx10=mix(n010,n110,f.x);
-        float nx01=mix(n001,n101,f.x),nx11=mix(n011,n111,f.x);
-        return mix(mix(nx00,nx10,f.y),mix(nx01,nx11,f.y),f.z);
-      }
-      float fbm(vec3 p, int oct) { float v=0.0,a=0.5; for(int i=0;i<oct;i++){v+=noise3d(p)*a;p=p*2.07+vec3(0.131,-0.217,0.344);a*=0.48;} return v; }
-
-      void main() {
-        vec3 N = normalize(vNormal); vec3 L = normalize(uLightDir);
-        vec3 V = normalize(uViewPos - vWorldPos);
-        vec3 sph = normalize(vLocalPos);
-        vec3 tc = sph * 5.0;
-        float lat = sph.y;
-        float timeOff = uTime * 0.00002;
-
-        // === Analytic Ring Shadow (Hardcore Realism) ===
-        float ringShadow = 1.0;
-        if (L.y != 0.0) {
-            float t = -vLocalPos.y / L.y;
-            if (t > 0.0) {
-                vec3 hit = vLocalPos + t * L;
-                float dist = length(hit.xz);
-                if (dist >= uRingInner && dist <= uRingOuter) {
-                    // Use NASA Optical Depth (tau) Profile for shadow mask
-                    float tau = 0.0;
-                    if (dist < 1.24) tau = 0.005;
-                    else if (dist < 1.53) tau = 0.1;
-                    else if (dist < 1.95) tau = 1.8;
-                    else if (dist < 2.03) tau = 0.05;
-                    else if (dist < 2.27) tau = 0.6;
-                    else if (dist < 2.35) tau = 0.1;
-                    
-                    float transmittance = exp(-tau / abs(L.y));
-                    ringShadow = transmittance;
-                }
-            }
-        }
-
-        // === Ring-Shine (Indirect Lighting from Rings) ===
-        // Sun hits rings -> Rings reflect back to planet night side
-        float ringShine = 0.0;
-        float ringAlbedo = 0.25; // Approximate average albedo of ice rings
-        // Shine is strongest when Sun is high above ring plane (abs(L.y)) 
-        // and surface faces the rings (abs(N.y))
-        // Northern hemisphere (N.y > 0) sees Northern ring-face (lit if L.y > 0)
-        // We use a simplified model for ambient bounce
-        if (dot(N, L) < 0.0) {
-            ringShine = abs(N.y) * abs(L.y) * ringAlbedo * 0.4;
-        }
-
-        // === Subtle banding structure ===
-        float bandWarp = fbm(sph * vec3(1.5, 0.5, 1.5) + vec3(timeOff * 0.3), 4);
-        float bands = sin(lat * 18.0 + bandWarp * 3.0) * 0.5 + 0.5;
-        float fineBands = sin(lat * 50.0 + bandWarp * 1.5 + 2.0) * 0.15;
-        bands = clamp(bands + fineBands, 0.0, 1.0);
-
-        float turb = fbm(tc * 2.5 + vec3(timeOff, lat * 3.0, timeOff * 0.5), 6) * 0.2;
-
-        float polarDist = length(sph - vec3(0.0, 1.0, 0.0));
-        float hexAngle = atan(sph.z, sph.x);
-        float hexPattern = cos(hexAngle * 6.0) * 0.5 + 0.5;
-        float hexMask = smoothstep(0.45, 0.15, polarDist) * hexPattern;
-
-        vec3 goldZone = vec3(0.90, 0.82, 0.60);
-        vec3 paleBelt = vec3(0.78, 0.70, 0.52);
-        vec3 warmBelt = vec3(0.65, 0.52, 0.32);
-        vec3 hexColor = vec3(0.55, 0.45, 0.30);
-        vec3 polarColor = vec3(0.50, 0.42, 0.28);
-
-        vec3 surfColor = mix(warmBelt, goldZone, bands);
-        surfColor = mix(surfColor, paleBelt, turb);
-
-        float storm = noise3d(tc * 6.0 + vec3(timeOff * 3.0));
-        float stormMask = smoothstep(0.78, 0.88, storm) * 0.4;
-        surfColor = mix(surfColor, vec3(0.95, 0.92, 0.85), stormMask);
-        surfColor = mix(surfColor, hexColor, hexMask * 0.5);
-
-        float polarMask = smoothstep(0.65, 0.85, abs(lat));
-        surfColor = mix(surfColor, polarColor, polarMask);
-
-        float haze = smoothstep(0.0, 0.4, abs(lat));
-        surfColor = mix(surfColor, goldZone * 1.05, (1.0 - haze) * 0.15);
-
-        float diff = max(dot(N, L), 0.0);
-        float ambient = 0.03;
-        float rim = 1.0 - max(dot(N, V), 0.0);
-        float rimPow = pow(rim, 3.0);
-        float NdotL = dot(N, L);
-        vec3 atmosGlow = vec3(0.88, 0.78, 0.55) * rimPow * 0.30 * smoothstep(-0.1, 0.2, NdotL);
-
-        vec3 coreLighting = surfColor * (ambient + diff * 0.85 * ringShadow + ringShine);
-        vec3 result = coreLighting + atmosGlow * ringShadow;
-        FragColor = vec4(result, 1.0);
-      }
-    )";
-    setupPlanetProg(saturnProgram, u_saturn, saturnFragSrc);
+    std::string saturnFragSrc = loadShaderFile("saturn.frag");
+    setupPlanetProg(saturnProgram, u_saturn, saturnFragSrc.c_str());
 
     // ===== 7. URANUS SHADER =====
     // Pale teal/cyan from methane absorption, subtle banding, polar brightening,
     // nearly featureless appearance with very faint cloud structures.
-    const char* uranusFragSrc = R"(
-      #version 330 core
-      in vec3 vWorldPos; in vec3 vNormal; in vec3 vLocalPos;
-      uniform vec3 uLightDir; uniform vec3 uViewPos; uniform vec4 uBaseColor;
-      out vec4 FragColor;
-
-      float hash(vec3 p) { p=fract(p*vec3(443.897,441.423,437.195)); p+=dot(p,p.yzx+19.19); return fract((p.x+p.y)*p.z); }
-      float noise3d(vec3 p) {
-        vec3 i=floor(p); vec3 f=fract(p); f=f*f*f*(f*(f*6.0-15.0)+10.0);
-        float n000=hash(i),n100=hash(i+vec3(1,0,0)),n010=hash(i+vec3(0,1,0)),n110=hash(i+vec3(1,1,0));
-        float n001=hash(i+vec3(0,0,1)),n101=hash(i+vec3(1,0,1)),n011=hash(i+vec3(0,1,1)),n111=hash(i+vec3(1,1,1));
-        float nx00=mix(n000,n100,f.x),nx10=mix(n010,n110,f.x);
-        float nx01=mix(n001,n101,f.x),nx11=mix(n011,n111,f.x);
-        return mix(mix(nx00,nx10,f.y),mix(nx01,nx11,f.y),f.z);
-      }
-      float fbm(vec3 p, int oct) { float v=0.0,a=0.5; for(int i=0;i<oct;i++){v+=noise3d(p)*a;p=p*2.07+vec3(0.131,-0.217,0.344);a*=0.48;} return v; }
-
-      void main() {
-        vec3 N = normalize(vNormal); vec3 L = normalize(uLightDir);
-        vec3 V = normalize(uViewPos - vWorldPos);
-        vec3 sph = normalize(vLocalPos);
-        float lat = sph.y;
-
-        // === Very subtle banding (Uranus appears almost featureless) ===
-        float bandWarp = fbm(sph * vec3(1.0, 0.3, 1.0), 3) * 0.3;
-        float bands = sin(lat * 12.0 + bandWarp * 2.0) * 0.5 + 0.5;
-
-        // Faint methane cloud features
-        float clouds = fbm(sph * 4.0, 5) * 0.08;
-
-        // === Color palette ===
-        vec3 paleTeal = vec3(0.58, 0.80, 0.85);
-        vec3 deepCyan = vec3(0.45, 0.72, 0.78);
-        vec3 brightPole = vec3(0.72, 0.88, 0.90);
-
-        vec3 surfColor = mix(deepCyan, paleTeal, bands * 0.6);
-        surfColor += vec3(clouds);
-
-        // Polar brightening (southern pole was sunlit during Voyager flyby)
-        float polarBright = smoothstep(0.5, 0.9, abs(lat));
-        surfColor = mix(surfColor, brightPole, polarBright * 0.4);
-
-        // === Lighting ===
-        float diff = max(dot(N, L), 0.0);
-        float ambient = 0.04;
-        float rim = 1.0 - max(dot(N, V), 0.0);
-        float rimPow = pow(rim, 3.5);
-        float NdotL = dot(N, L);
-        vec3 atmosGlow = vec3(0.55, 0.78, 0.85) * rimPow * 0.35 * smoothstep(-0.1, 0.2, NdotL);
-
-        vec3 result = surfColor * (ambient + diff * 0.82) + atmosGlow;
-        FragColor = vec4(result, 1.0);
-      }
-    )";
-    setupPlanetProg(uranusProgram, u_uranus, uranusFragSrc);
+    std::string uranusFragSrc = loadShaderFile("uranus.frag");
+    setupPlanetProg(uranusProgram, u_uranus, uranusFragSrc.c_str());
 
     // ===== 8. NEPTUNE SHADER =====
     // Deep azure blue (strongest methane absorption), Great Dark Spot analog,
     // bright methane cirrus streaks, vivid blue-to-indigo band contrast,
     // dynamic cloud features.
-    const char* neptuneFragSrc = R"(
-      #version 330 core
-      in vec3 vWorldPos; in vec3 vNormal; in vec3 vLocalPos;
-      uniform vec3 uLightDir; uniform vec3 uViewPos; uniform vec4 uBaseColor; uniform float uTime;
-      out vec4 FragColor;
-
-      float hash(vec3 p) { p=fract(p*vec3(443.897,441.423,437.195)); p+=dot(p,p.yzx+19.19); return fract((p.x+p.y)*p.z); }
-      float noise3d(vec3 p) {
-        vec3 i=floor(p); vec3 f=fract(p); f=f*f*f*(f*(f*6.0-15.0)+10.0);
-        float n000=hash(i),n100=hash(i+vec3(1,0,0)),n010=hash(i+vec3(0,1,0)),n110=hash(i+vec3(1,1,0));
-        float n001=hash(i+vec3(0,0,1)),n101=hash(i+vec3(1,0,1)),n011=hash(i+vec3(0,1,1)),n111=hash(i+vec3(1,1,1));
-        float nx00=mix(n000,n100,f.x),nx10=mix(n010,n110,f.x);
-        float nx01=mix(n001,n101,f.x),nx11=mix(n011,n111,f.x);
-        return mix(mix(nx00,nx10,f.y),mix(nx01,nx11,f.y),f.z);
-      }
-      float fbm(vec3 p, int oct) { float v=0.0,a=0.5; for(int i=0;i<oct;i++){v+=noise3d(p)*a;p=p*2.07+vec3(0.131,-0.217,0.344);a*=0.48;} return v; }
-
-      void main() {
-        vec3 N = normalize(vNormal); vec3 L = normalize(uLightDir);
-        vec3 V = normalize(uViewPos - vWorldPos);
-        vec3 sph = normalize(vLocalPos);
-        vec3 tc = sph * 5.0;
-        float lat = sph.y;
-        float timeOff = uTime * 0.00004;
-
-        // Apply wind rotation around Z-axis (poles are on Z)
-        float w1 = timeOff * -2.0; // Slow, uniform rotation
-        float s1 = sin(w1); float c1 = cos(w1);
-        vec3 windSph = vec3(sph.x * c1 - sph.y * s1, sph.x * s1 + sph.y * c1, sph.z);
-
-        // === Strong banding (Neptune has more visible features than Uranus) ===
-        float bandWarp = fbm(windSph * vec3(2.0, 1.0, 2.0), 5);
-        float bands = sin(lat * 16.0 + bandWarp * 3.5) * 0.5 + 0.5;
-        float fineBands = sin(lat * 40.0 + bandWarp * 1.5) * 0.1;
-        bands = clamp(bands + fineBands, 0.0, 1.0);
-
-        // === Great Dark Spot (GDS) analog ===
-        float gAngle = timeOff * -2.0;
-        float sg = sin(gAngle); float cg = cos(gAngle);
-        vec3 gCenter = vec3(-0.3, -0.3, 0.5);
-        vec3 gdsCenter = vec3(gCenter.x * cg - gCenter.z * sg, gCenter.y, gCenter.x * sg + gCenter.z * cg);
-        float gdsDist = length(sph - normalize(gdsCenter));
-        float gdsMask = smoothstep(0.2, 0.0, gdsDist);
-
-        // === Methane cirrus streaks (bright white wispy clouds) ===
-        // Slightly faster uniform wind for cirrus clouds (Z-axis rotation)
-        float w2 = timeOff * -4.0;
-        float s2 = sin(w2); float c2 = cos(w2);
-        vec3 windSph2 = vec3(sph.x * c2 - sph.y * s2, sph.x * s2 + sph.y * c2, sph.z);
-        float cirrus = fbm(windSph2 * vec3(8.0, 2.0, 8.0) + vec3(0.0, lat * 5.0, 0.0), 6);
-        float cirrusMask = smoothstep(0.55, 0.75, cirrus) * 0.6;
-
-        // === Color palette ===
-        vec3 deepBlue = vec3(0.10, 0.15, 0.55);
-        vec3 brightBlue = vec3(0.20, 0.35, 0.75);
-        vec3 indigo = vec3(0.12, 0.10, 0.45);
-        vec3 gdsColor = vec3(0.06, 0.08, 0.35); // Very dark blue
-        vec3 cirrusWhite = vec3(0.85, 0.88, 0.95);
-        vec3 polarDark = vec3(0.08, 0.10, 0.35);
-
-        vec3 surfColor = mix(deepBlue, brightBlue, bands);
-        surfColor = mix(surfColor, indigo, (1.0 - bands) * 0.3);
-
-        // Wind-driven streaky detail
-        float streaks = fbm(windSph * 20.0, 5) * 0.15;
-        surfColor += vec3(streaks * 0.3, streaks * 0.4, streaks);
-
-        // Great Dark Spot
-        surfColor = mix(surfColor, gdsColor, gdsMask * 0.7);
-
-        // Bright companion clouds near the GDS
-        float companion = smoothstep(0.18, 0.22, gdsDist) * smoothstep(0.30, 0.22, gdsDist);
-        companion *= fbm(windSph2 * 12.0, 4);
-        surfColor = mix(surfColor, cirrusWhite, companion * 0.5);
-
-        // Methane cirrus streaks
-        surfColor = mix(surfColor, cirrusWhite, cirrusMask);
-
-        // Polar darkening
-        float polarMask = smoothstep(0.6, 0.85, abs(lat));
-        surfColor = mix(surfColor, polarDark, polarMask * 0.5);
-
-        // === Lighting ===
-        float diff = max(dot(N, L), 0.0);
-        float ambient = 0.04;
-        float rim = 1.0 - max(dot(N, V), 0.0);
-        float rimPow = pow(rim, 3.0);
-        float NdotL = dot(N, L);
-        vec3 atmosGlow = vec3(0.20, 0.35, 0.80) * rimPow * 0.40 * smoothstep(-0.1, 0.2, NdotL);
-
-        vec3 result = surfColor * (ambient + diff * 0.82) + atmosGlow;
-        FragColor = vec4(result, 1.0);
-      }
-    )";
-    setupPlanetProg(neptuneProgram, u_neptune, neptuneFragSrc);
+    std::string neptuneFragSrc = loadShaderFile("neptune.frag");
+    setupPlanetProg(neptuneProgram, u_neptune, neptuneFragSrc.c_str());
 
     // ===== Enhanced Ring Shader (Cassini Division, A/B/C rings) =====
     // Overwrite ring program with upgraded version
-    const char* ringFragSrcV2 = R"(
-      #version 330 core
-      in vec3 vNormal; in vec3 vLocalPos; in vec3 vWorldPos;
-      uniform vec3 uLightDir; uniform vec3 uViewPos; uniform vec4 uBaseColor;
-      uniform float uPlanetRadius; 
-      out vec4 FragColor;
-
-      float henyeyGreenstein(float cosTheta, float g) {
-        float g2 = g * g;
-        return (1.0 - g2) / (4.0 * 3.14159 * pow(1.0 + g2 - 2.0 * g * cosTheta, 1.5));
-      }
-
-      // Exact Saturn Ring Optical Depth Profiles (NASA Voyager/Cassini)
-      float getRingOpticalDepth(float r) {
-        // D Ring: 1.11 - 1.24 (faint)
-        if (r < 1.11) return 0.0;
-        if (r < 1.24) return 0.005;
-        // C Ring: 1.24 - 1.53 (moderate)
-        if (r < 1.53) return mix(0.05, 0.15, smoothstep(1.24, 1.53, r));
-        // B Ring: 1.53 - 1.95 (brightest, densest)
-        if (r < 1.95) return mix(1.2, 2.5, sin(r * 40.0) * 0.2 + 0.8);
-        // Cassini Division: 1.95 - 2.03 (gap)
-        if (r < 2.03) return 0.02;
-        // A Ring: 2.03 - 2.27 (dense)
-        if (r < 2.27) {
-            float base = 0.5;
-            float encke = smoothstep(2.21, 2.22, r) * smoothstep(2.23, 2.22, r);
-            return mix(base, 0.01, encke);
-        }
-        // F Ring: ~2.33 (thin)
-        if (r < 2.31) return 0.0;
-        if (r < 2.34) return 0.1;
-        return 0.0;
-      }
-
-      void main() {
-        vec3 N = normalize(vNormal);
-        vec3 L = normalize(uLightDir);
-        vec3 V = normalize(uViewPos - vWorldPos);
-        float cosTheta = dot(V, -L);
-        float NdotV = abs(dot(N, V));
-        
-        // --- Physically Based Scattering ---
-        // Industrial Ice Particle Phase: Strong forward peak (diffraction) + backward lobe
-        float phaseForward = henyeyGreenstein(cosTheta, 0.85); // Cinematic diffraction
-        float phaseBack = henyeyGreenstein(cosTheta, -0.3);
-        float phase = mix(phaseForward, phaseBack, 0.4);
-        
-        // --- Hardcore Planet Shadow ---
-        float b = 2.0 * dot(vLocalPos, L);
-        float c = dot(vLocalPos, vLocalPos) - uPlanetRadius * uPlanetRadius;
-        float disc = b * b - 4.0 * c;
-        float shadow = 1.0;
-        if (disc > 0.0) {
-            float t1 = (-b + sqrt(disc)) / 2.0;
-            if (t1 > 0.0) shadow = 0.0; 
-        }
-
-        float r = length(vLocalPos.xz);
-        float tau = getRingOpticalDepth(r);
-        
-        // --- Physical Transparency Model ---
-        // Transmittance T = e^(-tau / cos(theta_view))
-        float transmittance = exp(-tau / max(NdotV, 0.001));
-        float alpha = 1.0 - transmittance;
-
-        // Apply high-frequency micro-structure (Cassini/Encke gaps)
-        float fineS = sin(r * 300.0) * 0.1 + sin(r * 800.0) * 0.05;
-        alpha *= (1.0 + fineS);
-        alpha = clamp(alpha, 0.0, 0.95);
-
-        vec3 iceWhite = vec3(0.92, 0.90, 0.88);
-        vec3 shadowColor = vec3(0.1, 0.08, 0.05); // Ambient ring tone
-        
-        // Multiple scattering approximation for albedo
-        vec3 albedo = mix(vec3(0.8, 0.7, 0.5), iceWhite, smoothstep(0.1, 1.0, tau));
-        
-        // Combine all components
-        vec3 result = albedo * (0.05 + 1.5 * phase * shadow);
-        
-        // Add "Interstellar" glow in backlighting
-        if (cosTheta > 0.95) {
-            result += iceWhite * pow(cosTheta, 64.0) * 4.0 * shadow;
-        }
-
-        FragColor = vec4(result, alpha);
-      }
-    )";
+    std::string ringFragSrcV2 = loadShaderFile("ring.frag");
     // Re-compile ring shader with enhanced version
-    ringProgram = compileProgram(vertSrc, ringFragSrcV2);
+    ringProgram = compileProgram(vertSrc.c_str(), ringFragSrcV2.c_str());
     uri_mvp = glGetUniformLocation(ringProgram, "uMVP");
     uri_model = glGetUniformLocation(ringProgram, "uModel");
     uri_lightDir = glGetUniformLocation(ringProgram, "uLightDir");
@@ -1835,42 +753,9 @@ public:
 
 
     // --- Billboard Shader (fire/glow particles, markers) ---
-    const char* bbVertSrc = R"(
-      #version 330 core
-      layout(location=0) in vec2 aOffset;
-      // Need View and Proj separately precisely for billboarding
-      uniform mat4 uView;
-      uniform mat4 uProj;
-      uniform vec3 uCenter;
-      uniform vec2 uSize;
-      out vec2 vUV;
-      void main() {
-        vUV = aOffset * 0.5 + 0.5;
-        // Exact spherical billboarding: extract camera right and up from View Matrix
-        // uView[0][0], uView[1][0], uView[2][0] is the right vector
-        // uView[0][1], uView[1][1], uView[2][1] is the up vector
-        vec3 right = vec3(uView[0][0], uView[1][0], uView[2][0]);
-        vec3 up    = vec3(uView[0][1], uView[1][1], uView[2][1]);
-        
-        // Compute world position of this vertex
-        vec3 worldPos = uCenter + right * aOffset.x * uSize.x + up * aOffset.y * uSize.y;
-        
-        // Project to screen
-        gl_Position = uProj * uView * vec4(worldPos, 1.0);
-      }
-    )";
-    const char* bbFragSrc = R"(
-      #version 330 core
-      in vec2 vUV;
-      uniform vec4 uColor;
-      out vec4 FragColor;
-      void main() {
-        float d = distance(vUV, vec2(0.5));
-        float alpha = smoothstep(0.5, 0.0, d);
-        FragColor = vec4(uColor.rgb, uColor.a * alpha);
-      }
-    )";
-    billboardProg = compileProgram(bbVertSrc, bbFragSrc);
+    std::string bbVertSrc = loadShaderFile("billboard.vert");
+    std::string bbFragSrc = loadShaderFile("billboard.frag");
+    billboardProg = compileProgram(bbVertSrc.c_str(), bbFragSrc.c_str());
     ub_vp = glGetUniformLocation(billboardProg, "uView"); // Actually uView now
     ub_proj = glGetUniformLocation(billboardProg, "uProj");
     ub_pos = glGetUniformLocation(billboardProg, "uCenter");
@@ -1889,165 +774,11 @@ public:
     glBindVertexArray(0);
 
     // --- 大气层顶点着色器 ---
-    const char* atmoVertSrc = R"(
-      #version 330 core
-      layout(location=0) in vec3 aPos;
-      uniform mat4 uMVP;
-      uniform mat4 uModel;
-      out vec3 vWorldPos;
-      void main() {
-        // 将球体顶点转换到世界空间，用于后续的光线步进计算。
-        vWorldPos = (uModel * vec4(aPos, 1.0)).xyz;
-        gl_Position = uMVP * vec4(aPos, 1.0);
-      }
-    )";
+    std::string atmoVertSrc = loadShaderFile("atmo.vert");
 
     // --- 大气层片段着色器 (核心：基于物理权重的分步光线步进) ---
     // 该着色器模拟了瑞利散射、米氏散射和臭氧吸收，实现了极其逼真的星球边缘和日落效果。
-    const char* s_atmoFrag1 = R"(
-      #version 330 core
-      in vec3 vWorldPos;
-      
-      uniform vec3 uCamPos;       // 摄像机位置
-      uniform vec3 uLightDir;     // 太阳光方向
-      uniform vec3 uPlanetCenter; // 星球中心点
-      uniform float uInnerRadius; // 星球表面半径 (km)
-      uniform float uOuterRadius; // 大气层外缘半径 (km)
-      uniform float uSurfaceRadius;
-      uniform float uTime;
-      uniform int uPlanetIdx;     // 星球索引（用于加载不同的物理参数）
-      
-      uniform float uSunVisibility;
-      uniform float uRingInner;
-      uniform float uRingOuter;
-      uniform sampler2D uDepthTex;
-      uniform vec2 uResolution;
-      uniform mat4 uInvProj;
-      uniform float uTuneMinAlt;
-      uniform float uTuneMaxAlt;
-      uniform float uTuneExtinction;
-
-      out vec4 FragColor;
-
-      #define PI 3.14159265359
-
-      const int PRIMARY_STEPS = 512; // covers 1024 km at 2 km/step (handles horizon rays from low altitude)
-      
-      // --- Dynamic Atmosphere Parameters ---
-      vec3 gRayleighCoeff;
-      float gMieCoeff;
-      float gHRayleigh;
-      float gHMie;
-      float gGMie;
-      vec3 gOzoneCoeff;
-      float gHOzoneCenter;
-      float gHOzoneWidth;
-
-      float gCloudMinAlt;
-      float gCloudMaxAlt;
-      vec3 gCloudExtinction;
-      vec3 gCloudScattering;
-
-      // 设置星球的大气物理属性
-      void setupPlanetProfile() {
-          if (uPlanetIdx == 3) {
-              // --- 地球 (Earth) ---
-              // 瑞利散射系数 (RGB)：蓝色分量最大，所以天空是蓝色的。
-              gRayleighCoeff = vec3(0.0058, 0.0135, 0.0331) * 1.2;
-              // 米氏散射系数 (尘埃/气溶胶)
-              gMieCoeff = 0.005; gHRayleigh = 8.0; gHMie = 1.0; gGMie = 0.8;
-              // 臭氧吸收系数 (吸收特定红色波段，增强蓝天的饱和度)
-              gOzoneCoeff = vec3(0.00035, 0.00085, 0.00009); gHOzoneCenter = 25.0; gHOzoneWidth = 15.0;
-              gCloudMinAlt = uTuneMinAlt; gCloudMaxAlt = uTuneMaxAlt;
-              gCloudExtinction = vec3(uTuneExtinction); gCloudScattering = vec3(0.70);
-          } else if (uPlanetIdx == 2) {
-              // --- 金星 (Venus) ---
-              // 极厚的大气层和硫酸云，天空呈现土黄色。
-              gRayleighCoeff = vec3(0.005, 0.012, 0.028);
-              gMieCoeff = 0.04; gHRayleigh = 15.0; gHMie = 5.0; gGMie = 0.76;
-              gOzoneCoeff = vec3(0.0005, 0.005, 0.02); gHOzoneCenter = 50.0; gHOzoneWidth = 20.0;
-              gCloudMinAlt = 45.0; gCloudMaxAlt = 65.0;
-              gCloudExtinction = vec3(0.08); gCloudScattering = vec3(0.15);
-          } else if (uPlanetIdx == 5) {
-              // --- 火星 (Mars) ---
-              // 稀薄的大气，红色尘埃导致傍晚的天空变蓝，白天是红色。
-              gRayleighCoeff = vec3(0.01, 0.005, 0.001);
-              gMieCoeff = 0.015; gHRayleigh = 11.0; gHMie = 3.0; gGMie = 0.85;
-              gOzoneCoeff = vec3(0.0); gHOzoneCenter = 1.0; gHOzoneWidth = 1.0;
-              gCloudMinAlt = 100.0; gCloudMaxAlt = 101.0;
-              gCloudExtinction = vec3(0.01); gCloudScattering = vec3(0.01);
-          } else if (uPlanetIdx == 6) {
-              // JUPITER
-              gRayleighCoeff = vec3(0.018, 0.015, 0.012);
-              gMieCoeff = 0.01; gHRayleigh = 27.0; gHMie = 10.0; gGMie = 0.8;
-              gOzoneCoeff = vec3(0.0); gHOzoneCenter = 1.0; gHOzoneWidth = 1.0;
-              gCloudMinAlt = 10.0; gCloudMaxAlt = 50.0;
-              gCloudExtinction = vec3(0.1); gCloudScattering = vec3(0.6);
-          } else if (uPlanetIdx == 7) {
-              // SATURN
-              gRayleighCoeff = vec3(0.015, 0.013, 0.009);
-              gMieCoeff = 0.01; gHRayleigh = 60.0; gHMie = 15.0; gGMie = 0.8;
-              gOzoneCoeff = vec3(0.0); gHOzoneCenter = 1.0; gHOzoneWidth = 1.0;
-              gCloudMinAlt = 10.0; gCloudMaxAlt = 50.0;
-              gCloudExtinction = vec3(0.1); gCloudScattering = vec3(0.6);
-          } else if (uPlanetIdx == 8) {
-              // URANUS
-              gRayleighCoeff = vec3(0.002, 0.015, 0.025);
-              gMieCoeff = 0.002; gHRayleigh = 28.0; gHMie = 5.0; gGMie = 0.8;
-              gOzoneCoeff = vec3(0.001, 0.0, 0.0); gHOzoneCenter = 20.0; gHOzoneWidth = 10.0;
-              gCloudMinAlt = 10.0; gCloudMaxAlt = 50.0;
-              gCloudExtinction = vec3(0.1); gCloudScattering = vec3(0.6);
-          } else if (uPlanetIdx == 9) {
-              // NEPTUNE
-              gRayleighCoeff = vec3(0.001, 0.008, 0.035);
-              gMieCoeff = 0.001; gHRayleigh = 20.0; gHMie = 5.0; gGMie = 0.8;
-              gOzoneCoeff = vec3(0.001, 0.0, 0.0); gHOzoneCenter = 20.0; gHOzoneWidth = 10.0;
-              gCloudMinAlt = 10.0; gCloudMaxAlt = 50.0;
-              gCloudExtinction = vec3(0.1); gCloudScattering = vec3(0.6);
-          } else {
-              // DEFAULT (fallback)
-              gRayleighCoeff = vec3(0.0058, 0.0135, 0.0331);
-              gMieCoeff = 0.005; gHRayleigh = 8.0; gHMie = 1.0; gGMie = 0.8;
-              gOzoneCoeff = vec3(0.0); gHOzoneCenter = 1.0; gHOzoneWidth = 1.0;
-              gCloudMinAlt = 100.0; gCloudMaxAlt = 101.0;
-              gCloudExtinction = vec3(0.0); gCloudScattering = vec3(0.0);
-          }
-      }
-
-      bool intersectSphere(vec3 ro, vec3 rd, float radius, out float t0, out float t1) {
-          // Stable geometric intersection to prevent precision loss and catastrophic cancellation
-          // (which causes concentric rings and missing atmosphere at >10,000 km)
-          vec3 L = ro - uPlanetCenter;
-          float tca = -dot(L, rd);
-          vec3 perp = L + tca * rd;
-          float d2 = dot(perp, perp);
-          float radius2 = radius * radius;
-          if (d2 > radius2) return false;
-          float thc = sqrt(radius2 - d2);
-          t0 = tca - thc;
-          t1 = tca + thc;
-          return true;
-      }
-
-      float rayleighPhase(float cosTheta) {
-          return 3.0 / (16.0 * PI) * (1.0 + cosTheta * cosTheta);
-      }
-
-      float miePhase(float cosTheta) {
-          // Cornette-Shanks phase function (improved Henyey-Greenstein)
-          float g2 = gGMie * gGMie;
-          float num = 3.0 * (1.0 - g2) * (1.0 + cosTheta * cosTheta);
-          float denom = 8.0 * PI * (2.0 + g2) * pow(1.0 + g2 - 2.0 * gGMie * cosTheta, 1.5);
-          return num / max(denom, 1e-6);
-      }
-
-      // Ozone density at altitude h (Gaussian profile around 25km)
-      float ozoneDensity(float h) {
-          float d = (h - gHOzoneCenter) / gHOzoneWidth;
-          return exp(-0.5 * d * d);
-      }
-
-)";
+    std::string s_atmoFrag1 = loadShaderFile("atmosphere_preamble.frag");
     cloudSystem.loadGLSL("src/render/shaders/cloud.glsl");
     std::string atmoFragSrc = std::string(s_atmoFrag1)
         + cloudSystem.glslSource()
@@ -2350,7 +1081,7 @@ R"(
           FragColor = vec4(color, opacity);
       }
     )";
-    atmoProg = compileProgram(atmoVertSrc, atmoFragSrc.c_str());
+    atmoProg = compileProgram(atmoVertSrc.c_str(), atmoFragSrc.c_str());
     ua_mvp = glGetUniformLocation(atmoProg, "uMVP");
     ua_model = glGetUniformLocation(atmoProg, "uModel");
     ua_camPos = glGetUniformLocation(atmoProg, "uCamPos");
@@ -2371,31 +1102,9 @@ R"(
     cloudSystem.init(atmoProg);
 
     // --- Ribbon Shader (Trajectory Trails) ---
-    const char* ribbonVertSrc = R"(
-      #version 330 core
-      layout(location=0) in vec3 aPos;
-      layout(location=1) in vec4 aColor;
-      layout(location=2) in float qSide; // -1 to 1
-      uniform mat4 uMVP;
-      out vec4 vColor;
-      out float vSide;
-      void main() {
-        vColor = aColor;
-        vSide = qSide;
-        gl_Position = uMVP * vec4(aPos, 1.0);
-      }
-    )";
-    const char* ribbonFragSrc = R"(
-      #version 330 core
-      in vec4 vColor;
-      in float vSide;
-      out vec4 FragColor;
-      void main() {
-        float alpha = 1.0 - smoothstep(0.7, 1.0, abs(vSide));
-        FragColor = vec4(vColor.rgb, vColor.a * alpha);
-      }
-    )";
-    ribbonProg = compileProgram(ribbonVertSrc, ribbonFragSrc);
+    std::string ribbonVertSrc = loadShaderFile("ribbon.vert");
+    std::string ribbonFragSrc = loadShaderFile("ribbon.frag");
+    ribbonProg = compileProgram(ribbonVertSrc.c_str(), ribbonFragSrc.c_str());
     ur_mvp = glGetUniformLocation(ribbonProg, "uMVP");
 
     glGenVertexArrays(1, &ribbonVAO);
@@ -2414,84 +1123,10 @@ R"(
     glBindVertexArray(0);
 
     // --- Lens Flare Shader (Procedural 2D Screen-Space) ---
-    const char* lfVertSrc = R"(
-      #version 330 core
-      layout(location=0) in vec2 aPos;
-      
-      uniform vec2 uSunScreenPos; // Position of sun in NDC (-1 to 1)
-      uniform float uAspect;      // Screen aspect ratio
-      uniform vec2 uScale;        // Scale of this specific flare element
-      uniform vec2 uOffset;       // Screen-space offset relative to sun or center
-      
-      out vec2 vUV;
-      
-      void main() {
-        vUV = aPos * 0.5 + 0.5;
-        vec2 pos = aPos * uScale;
-        pos.x /= uAspect;
-        // Output at the sun's actual screen-space depth to allow occlusion
-        gl_Position = vec4(pos + uOffset, uSunScreenPos.x > -2.0 ? 0.9999 : 0.0, 1.0);
-      }
-    )";
-    const char* lfFragSrc = R"(
-      #version 330 core
-      in vec2 vUV;
-      
-      uniform vec4 uColor;
-      uniform float uIntensity;
-      uniform int uShapeType; // 0=glow, 1=anamorphic, 2=ghost, 3=starburst
-      
-      out vec4 FragColor;
-      
-      void main() {
-        vec2 rUV = vUV * 2.0 - 1.0;
-        float d = length(rUV);
-        // Edge kill: smoothly fade to zero near quad boundary - prevents visible rectangle
-        float edgeFade = smoothstep(1.0, 0.65, d);
-        float alpha = 0.0;
-        
-        if (uShapeType == 0) {
-           // Clean circular glow with gaussian falloff
-           float core = exp(-d * d * 12.0) * 2.5;
-           float mid  = exp(-d * d * 3.0) * 0.6;
-           float wide = exp(-d * d * 0.8) * 0.15;
-           alpha = (core + mid + wide) * edgeFade;
-           
-           // 4-point diffraction spikes (like real camera lens)
-           float angle = atan(rUV.y, rUV.x);
-           float spike1 = pow(abs(cos(angle)), 300.0);
-           float spike2 = pow(abs(sin(angle)), 300.0);
-           float spikes = (spike1 + spike2) * exp(-d * 1.8) * 0.4;
-           alpha += spikes * edgeFade;
-           
-        } else if (uShapeType == 1) {
-           // Anamorphic horizontal streak - soft edges
-           float dx = abs(rUV.x);
-           float dy = abs(rUV.y);
-           float edgeFadeX = smoothstep(1.0, 0.7, dx);
-           alpha = exp(-dx * dx * 0.5) * exp(-dy * dy * 600.0) * edgeFadeX;
-           alpha += exp(-dx * dx * 1.5) * exp(-dy * dy * 2000.0) * 0.6 * edgeFadeX;
-           
-        } else if (uShapeType == 2) {
-           // Subtle ghost disk (not hard hexagon ring - those look fake)
-           float softDisk = exp(-d * d * 4.0) * 0.4;
-           float ring = smoothstep(0.95, 0.75, d) * smoothstep(0.55, 0.7, d) * 0.3;
-           alpha = (softDisk + ring) * edgeFade;
-           
-        } else if (uShapeType == 3) {
-           // Starburst: very subtle radial rays
-           float angle = atan(rUV.y, rUV.x);
-           float rays = pow(abs(sin(angle * 6.0)), 80.0) * 0.4;
-           rays += pow(abs(cos(angle * 8.0 + 0.3)), 120.0) * 0.2;
-           alpha = rays * exp(-d * d * 3.0) * edgeFade;
-           alpha += exp(-d * d * 10.0) * 0.2 * edgeFade;
-        }
-        
-        FragColor = vec4(uColor.rgb, uColor.a * alpha * uIntensity);
-      }
-    )";
+    std::string lfVertSrc = loadShaderFile("lens_flare.vert");
+    std::string lfFragSrc = loadShaderFile("lens_flare.frag");
     
-    lensFlareProg = compileProgram(lfVertSrc, lfFragSrc);
+    lensFlareProg = compileProgram(lfVertSrc.c_str(), lfFragSrc.c_str());
     ulf_sunScreenPos = glGetUniformLocation(lensFlareProg, "uSunScreenPos");
     ulf_aspect = glGetUniformLocation(lensFlareProg, "uAspect");
     ulf_color = glGetUniformLocation(lensFlareProg, "uColor");
@@ -2502,156 +1137,9 @@ R"(
     lfVBO = billboardVBO;
 
     // --- Skybox Shader (Procedural Starfield + Milky Way) ---
-    const char* skyboxVertSrc = R"(
-      #version 330 core
-      layout(location=0) in vec2 aPos;
-      uniform mat4 uInvViewProj;
-      out vec3 vRayDir;
-      void main() {
-        gl_Position = vec4(aPos, 0.999, 1.0);
-        // Reconstruct world-space ray direction from NDC
-        vec4 worldPos = uInvViewProj * vec4(aPos, 1.0, 1.0);
-        vRayDir = worldPos.xyz / worldPos.w;
-      }
-    )";
-    const char* skyboxFragSrc = R"(
-      #version 330 core
-      in vec3 vRayDir;
-      out vec4 FragColor;
-
-      uniform float uSkyVibrancy; // 1.0 = full space visibility, 0.0 = washed out by atmosphere
-
-      // --- High quality noise ---
-      float hash13(vec3 p) {
-        p = fract(p * vec3(443.897, 441.423, 437.195));
-        p += dot(p, p.yzx + 19.19);
-        return fract((p.x + p.y) * p.z);
-      }
-
-      float noise3d(vec3 p) {
-        vec3 i = floor(p); vec3 f = fract(p);
-        f = f*f*f*(f*(f*6.0-15.0)+10.0);
-        float a = hash13(i), b = hash13(i+vec3(1,0,0));
-        float c = hash13(i+vec3(0,1,0)), d = hash13(i+vec3(1,1,0));
-        float e = hash13(i+vec3(0,0,1)), f1 = hash13(i+vec3(1,0,1));
-        float g = hash13(i+vec3(0,1,1)), h = hash13(i+vec3(1,1,1));
-        return mix(mix(mix(a,b,f.x),mix(c,d,f.x),f.y),
-                   mix(mix(e,f1,f.x),mix(g,h,f.x),f.y),f.z);
-      }
-
-      float fbm(vec3 p, int oct) {
-        float v = 0.0, a = 0.5;
-        for(int i=0; i<oct; i++) { v += noise3d(p)*a; p = p*2.03+vec3(.31,-.17,.44); a *= 0.49; }
-        return v;
-      }
-
-      void main() {
-        vec3 rd = normalize(vRayDir);
-        vec3 col = vec3(0.0);
-
-        if (uSkyVibrancy < 0.01) {
-            FragColor = vec4(0.0, 0.0, 0.0, 1.0);
-            return;
-        }
-
-        // === STAR FIELD (4 density layers) ===
-        for (int layer = 0; layer < 4; layer++) {
-          float cellSize = 60.0 + float(layer) * 100.0;
-          vec3 cell = floor(rd * cellSize);
-          vec3 localPos = fract(rd * cellSize) - 0.5;
-
-          float sx = hash13(cell + vec3(0,0,float(layer)*17.0)) - 0.5;
-          float sy = hash13(cell + vec3(1,0,float(layer)*17.0)) - 0.5;
-          float sz = hash13(cell + vec3(0,1,float(layer)*17.0)) - 0.5;
-          vec3 starPos = vec3(sx, sy, sz) * 0.8;
-          float dist = length(localPos - starPos);
-          float mag = hash13(cell + vec3(2,3,float(layer)*7.0));
-
-          if (mag > 0.65) {
-            float brt = (mag - 0.65) / 0.35;
-            brt = brt * brt * brt * 8.0; // Boosted brightness
-            float sz2 = 0.006 + brt * 0.015;
-            float star = smoothstep(sz2, sz2 * 0.1, dist);
-
-            // Spectral class coloring (O B A F G K M)
-            float temp = hash13(cell + vec3(5,7,float(layer)));
-            vec3 sc;
-            if (temp < 0.10) sc = vec3(0.5, 0.7, 1.0);       // O/B bright blue
-            else if (temp < 0.30) sc = vec3(0.8, 0.9, 1.0);   // A white-blue
-            else if (temp < 0.55) sc = vec3(1.0, 1.0, 0.95);  // F/G pure white
-            else if (temp < 0.80) sc = vec3(1.0, 0.95, 0.8);  // K warm white
-            else sc = vec3(1.0, 0.7, 0.5);                    // M red-orange
-
-            // Diffraction cross for brightest stars
-            float cross = 0.0;
-            if (brt > 0.8) {
-              float dx = abs(localPos.x - starPos.x);
-              float dy = abs(localPos.y - starPos.y);
-              // Bolder spikes
-              cross = exp(-dx*60.0)*exp(-dy*250.0) + exp(-dy*60.0)*exp(-dx*250.0);
-              cross *= (brt - 0.8) * 3.0; // Boosted spikes
-            }
-
-            col += sc * (star * brt + cross * 0.6);
-          }
-        }
-
-        // === MILKY WAY (smooth noise-based) ===
-        // Galactic coordinate transform (tilted 62.87° from equatorial)
-        float sinGal = 0.8829; float cosGal = 0.4695;
-        float galLat = rd.y * cosGal - (rd.x * 0.6 + rd.z * 0.35) * sinGal;
-        float galLon = atan(rd.z, rd.x);
-
-        // Gaussian band with varying width
-        float bandWidth = 0.10 + 0.05 * sin(galLon * 2.0);
-        float band = exp(-galLat * galLat / (2.0 * bandWidth * bandWidth));
-
-        // Smooth nebulosity using FBM noise
-        vec3 galCoord = rd * 4.0;
-        float neb = fbm(galCoord * 1.5, 6);
-        float nebDetail = fbm(galCoord * 4.0 + vec3(100.0), 5);
-
-        // Dark dust lanes (absorption)
-        float dust = fbm(galCoord * 3.5 + vec3(50.0, -30.0, 20.0), 5);
-        float dustAbsorption = smoothstep(0.3, 0.7, dust) * band;
-
-        // Milky Way emission
-        float galEmission = neb * band * 0.8; // Boosted
-        galEmission += nebDetail * band * 0.4; // Boosted
-        galEmission *= (1.0 - dustAbsorption * 0.75);
-
-        // Color: warm brown core with amber nebulae
-        vec3 galCore = vec3(0.35, 0.25, 0.15) * galEmission; // More saturated/bright
-        vec3 warmNeb = vec3(1.2, 0.6, 0.2) * nebDetail * band * 0.4; // Intense amber
-        vec3 blueNeb = vec3(0.2, 0.3, 0.8) * smoothstep(0.4, 0.9, neb) * band * 0.3; // More vivid blue
-
-        // Dense star clusters within the band
-        for (int cl = 0; cl < 3; cl++) {
-          float cs = 250.0 + float(cl) * 150.0;
-          vec3 cc = floor(rd * cs);
-          float cm = hash13(cc + vec3(99.0 + float(cl)*50.0));
-          if (cm > 0.88 && band > 0.1) {
-            vec3 lp = fract(rd * cs) - 0.5;
-            float cd = length(lp);
-            col += vec3(1.0, 0.95, 0.8) * smoothstep(0.012, 0.0, cd) * (cm-0.88)*15.0 * band;
-          }
-        }
-
-        col += galCore + warmNeb + blueNeb;
-
-        // Very subtle cosmic background
-        col += vec3(0.002, 0.003, 0.006);
-
-        // Apply vibrancy (atmosphere washout)
-        col *= uSkyVibrancy;
-
-        // Tone mapping for HDR stars - adjusted for punchier highlights
-        col = col / (col + 0.5);
-
-        FragColor = vec4(col, 1.0);
-      }
-    )";
-    skyboxProg = compileProgram(skyboxVertSrc, skyboxFragSrc);
+    std::string skyboxVertSrc = loadShaderFile("skybox.vert");
+    std::string skyboxFragSrc = loadShaderFile("skybox.frag");
+    skyboxProg = compileProgram(skyboxVertSrc.c_str(), skyboxFragSrc.c_str());
     us_invViewProj = glGetUniformLocation(skyboxProg, "uInvViewProj");
     us_skyVibrancy = glGetUniformLocation(skyboxProg, "uSkyVibrancy");
 
@@ -2667,173 +1155,9 @@ R"(
     glBindVertexArray(0);
 
     // --- Volumetric Exhaust Shader (Mach Diamonds & Expansion) ---
-    const char* exVertSrc = R"(
-      #version 330 core
-      layout(location=0) in vec3 aPos;
-      uniform mat4 uMVP;
-      uniform mat4 uModel;
-      out vec3 vLocalPos;
-      out vec3 vWorldPos;
-      void main() {
-        vLocalPos = aPos; // Box from -0.5 to 0.5
-        vWorldPos = (uModel * vec4(aPos, 1.0)).xyz;
-        gl_Position = uMVP * vec4(aPos, 1.0);
-      }
-    )";
-    const char* exFragSrc = R"(
-      #version 330 core
-      in vec3 vLocalPos;
-      in vec3 vWorldPos;
-      uniform vec3 uViewPos;
-      uniform mat4 uInvModel;
-      uniform float uTime;
-      uniform float uThrottle;
-      uniform float uExpansion;
-      uniform float uGroundDist;
-      uniform float uPlumeLen;
-      out vec4 FragColor;
-
-      float hash(float n) { return fract(sin(n) * 43758.5453123); }
-      float noise(vec3 x) {
-        vec3 p = floor(x); vec3 f = fract(x);
-        f = f*f*(3.0-2.0*f);
-        float n = p.x + p.y*57.0 + 113.0*p.z;
-        return mix(mix(mix(hash(n+0.0),hash(n+1.0),f.x),mix(hash(n+57.0),hash(n+58.0),f.x),f.y),
-                   mix(mix(hash(n+113.0),hash(n+114.0),f.x),mix(hash(n+170.0),hash(n+171.0),f.x),f.y),f.z);
-      }
-      
-      float fbm(vec3 p) {
-        float v = 0.0;
-        float a = 0.5;
-        for (int i=0; i<3; i++) {
-          v += a * noise(p);
-          p *= 2.0;
-          a *= 0.5;
-        }
-        return v;
-      }
-
-      vec2 rayBoxInter(vec3 ro, vec3 rd, vec3 boxMin, vec3 boxMax) {
-        vec3 t0 = (boxMin - ro) / rd;
-        vec3 t1 = (boxMax - ro) / rd;
-        vec3 tmin = min(t0, t1);
-        vec3 tmax = max(t0, t1);
-        float dNear = max(max(tmin.x, tmin.y), tmin.z);
-        float dFar = min(min(tmax.x, tmax.y), tmax.z);
-        return vec2(dNear, dFar);
-      }
-
-      void main() {
-        vec3 viewDirWorld = normalize(vWorldPos - uViewPos);
-        vec3 ro = (uInvModel * vec4(uViewPos, 1.0)).xyz;
-        vec3 rd = normalize((uInvModel * vec4(viewDirWorld, 0.0)).xyz);
-        
-        vec2 bounds = rayBoxInter(ro, rd, vec3(-0.5), vec3(0.5));
-        if (bounds.x > bounds.y || bounds.y < 0.0) discard;
-        
-        float start = max(0.0, bounds.x);
-        float end = bounds.y;
-        
-        // High-frequency jitter
-        float dither = hash(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 0.015;
-        float t = start + dither;
-        
-        vec4 finalCol = vec4(0.0);
-        int steps = 60; // Slightly more steps for thin splash precision
-        float stepSize = (end - start) / float(steps);
-
-        // Ground collision normalized height (0 at end of box, 1 at nozzle)
-        float zGround = 1.0 - uGroundDist / uPlumeLen;
-
-        for (int i=0; i<steps; i++) {
-          vec3 p = ro + rd * t;
-          float z = p.y + 0.5; // 0 (end) to 1 (nozzle)
-          
-          // GROUND CLIP
-          if (z < zGround) {
-             t += stepSize;
-             continue;
-          }
-
-          float distToGround = z - zGround;
-          // TIGHT LOCALIZED SPLASH: Only within few % of plume length near ground
-          float splashZone = smoothstep(0.06, 0.0, distToGround) * smoothstep(-0.2, 0.05, zGround);
-          
-          float r = length(p.xz) * 2.0; 
-          
-          // Waterfall-style Flare: Multi-stage expansion
-          float coreFlare = mix(0.35, 1.0 + uExpansion * 4.0, pow(1.0 - z, 1.4));
-          
-          // PROPORTIONAL RADIAL SPLASH
-          // Radius is proportional to the depth of truncated plume (zGround)
-          float truncDepth = max(0.0, zGround);
-          float radAngle = atan(p.x, p.z);
-          float radialWildness = 0.7 + 0.6 * noise(vec3(radAngle * 4.0, uTime * 18.0, zGround * 8.0));
-          // splashRadiusBoost covers more of the local box radius (0.5-0.7)
-          float splashRadiusBoost = truncDepth * 1.6 * splashZone * radialWildness;
-          
-          coreFlare += splashRadiusBoost;
-          
-          float sheathFlare = coreFlare * (1.1 + uExpansion * 2.0);
-          
-          if (r < sheathFlare) {
-            float normR = r / coreFlare;
-            
-            // 1. Base Physic-Informed Density (Solid Core Focus)
-            float d = exp(-normR * 6.0) * pow(z, 0.45) * (1.1 - normR);
-            
-            // Splash Density Boost: Make the splash feel thick/viscous
-            // Density falloff is flatter horizontally
-            d += splashZone * 0.7 * exp(-normR * 2.0) * (1.0 - normR * 0.95);
-
-            // Tail Billowing: High-frequency radial distortion at the dissipation zone
-            float billowValue = noise(vec3(p.xz * 12.0, uTime * 20.0)) * (1.0 - z) * 0.15;
-            float taperedR = normR + billowValue;
-            
-            // Tail Tapering: Smooth falloff at the bottom/ground
-            float tailTaper = (zGround > -0.2) ? smoothstep(-0.01, 0.04, distToGround) : smoothstep(0.0, 0.2, z);
-            d *= tailTaper * (1.0 / (1.0 + billowValue * 5.0));
-            d = max(0.0, d);
-
-            // 2. High-Velocity Dynamics & FBM Turbulence
-            float gasSpeed = uTime * (40.0 + uThrottle * 20.0);
-            float streaks = noise(vec3(atan(p.x, p.z) * 8.0, p.y * 50.0, gasSpeed * 0.8)); 
-            float turb = fbm(p * 18.0 - vec3(0, gasSpeed, 0)); 
-            d *= (0.4 + 0.5 * turb + 0.35 * streaks);
-            
-            // 3. View-Dependent Alpha Falloff (Improved Side-View)
-            float edgeSoftness = smoothstep(0.0, 0.4, 1.0 - taperedR);
-            d *= (0.2 + 0.8 * edgeSoftness);
-            
-            // 4. Dynamic Pulse/Flicker (Synced with Throttle)
-            float flicker = 0.94 + 0.12 * hash(uTime * 150.0 * uThrottle); 
-            float pulse = 1.0 + 0.08 * sin(uTime * 100.0) * uThrottle; 
-            d *= (flicker * pulse);
-
-            // 5. High-Dynamic Color Profiling (Aggressive Glow)
-            vec3 core = vec3(1.2, 1.2, 1.1);
-            vec3 mid = vec3(1.0, 0.5, 0.05);
-            vec3 outer = vec3(0.6, 0.12, 0.04);
-            
-            // Splash color shift: brighter near the ground impact
-            mid = mix(mid, vec3(1.3, 1.0, 0.4), splashZone * 0.8);
-
-            vec3 col = mix(outer, mid, smoothstep(0.05, 0.4, d));
-            col = mix(col, core, smoothstep(0.4, 0.9, d));
-            
-            float alpha = d * stepSize * 65.0; 
-            finalCol.rgb += (1.0 - finalCol.a) * col * alpha;
-            finalCol.a += (1.0 - finalCol.a) * alpha;
-          }
-          
-          t += stepSize;
-          if (finalCol.a > 0.99) break;
-        }
-
-        FragColor = vec4(finalCol.rgb * uThrottle * 5.0, finalCol.a * uThrottle);
-      }
-    )";
-    exhaustProg = compileProgram(exVertSrc, exFragSrc);
+    std::string exVertSrc = loadShaderFile("exhaust.vert");
+    std::string exFragSrc = loadShaderFile("exhaust.frag");
+    exhaustProg = compileProgram(exVertSrc.c_str(), exFragSrc.c_str());
     uex_mvp = glGetUniformLocation(exhaustProg, "uMVP");
     uex_model = glGetUniformLocation(exhaustProg, "uModel");
     uex_invModel = glGetUniformLocation(exhaustProg, "uInvModel");
@@ -2845,588 +1169,17 @@ R"(
     uex_plumeLen = glGetUniformLocation(exhaustProg, "uPlumeLen");
 
     // --- TAA Resolve Shader ---
-    const char* taaVertSrc = R"(
-      #version 330 core
-      layout(location=0) in vec2 aPos;
-      out vec2 vUV;
-      void main() {
-        vUV = aPos * 0.5 + 0.5;
-        gl_Position = vec4(aPos, 0.0, 1.0);
-      }
-    )";
-    const char* taaFragSrc = R"(
-      #version 330 core
-      in vec2 vUV;
-      uniform sampler2D uCurrentFrame;
-      uniform sampler2D uHistoryFrame;
-      uniform sampler2D uDepthTex;
-      uniform float uBlendFactor;
-      uniform mat4 uInvViewProj;
-      uniform mat4 uPrevViewProj;
-      out vec4 FragColor;
-
-      void main() {
-        vec4 current = texture(uCurrentFrame, vUV);
-
-        // 3x3 variance clipping (tighter gamma=1.0 vs old 1.5)
-        vec2 texelSize = 1.0 / vec2(textureSize(uCurrentFrame, 0));
-        vec3 m1 = vec3(0.0), m2 = vec3(0.0);
-        for (int x = -1; x <= 1; x++) {
-          for (int y = -1; y <= 1; y++) {
-            vec3 s = texture(uCurrentFrame, vUV + vec2(float(x), float(y)) * texelSize).rgb;
-            m1 += s; m2 += s * s;
-          }
-        }
-        vec3 mu = m1 / 9.0;
-        vec3 sigma = sqrt(max(vec3(0.0), m2 / 9.0 - mu * mu));
-        float gamma = 1.0;
-        vec3 cMin = mu - gamma * sigma;
-        vec3 cMax = mu + gamma * sigma;
-
-        // Depth-based reprojection
-        float depth = texture(uDepthTex, vUV).r;
-        bool isSkyPixel = depth >= 0.9999;
-
-        float blend = uBlendFactor;
-        vec2 historyUV = vUV;
-
-        if (!isSkyPixel) {
-          // Surface/geometry: reproject to previous frame UV
-          vec4 clipPos = vec4(vUV * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
-          vec4 worldPos = uInvViewProj * clipPos;
-          worldPos /= worldPos.w;
-          vec4 prevClip = uPrevViewProj * worldPos;
-          prevClip /= prevClip.w;
-          vec2 prevUV = prevClip.xy * 0.5 + 0.5;
-          bool valid = all(greaterThan(prevUV, vec2(0.01))) && all(lessThan(prevUV, vec2(0.99)));
-          if (valid) {
-            historyUV = prevUV;
-            float motion = length(prevUV - vUV);
-            blend = clamp(blend + motion * 4.0, blend, 0.9);
-          } else {
-            blend = 1.0;
-          }
-        } else {
-          // Sky / atmosphere pixel: camera rotation moves these everywhere,
-          // use higher blend so current frame dominates and ghosting is suppressed.
-          blend = max(blend, 0.4);
-        }
-
-        vec4 history = texture(uHistoryFrame, historyUV);
-        history.rgb = clamp(history.rgb, cMin, cMax);
-        FragColor = mix(history, current, blend);
-      }
-    )";
-    taaProg = compileProgram(taaVertSrc, taaFragSrc);
+    std::string taaVertSrc = loadShaderFile("taa.vert");
+    std::string taaFragSrc = loadShaderFile("taa.frag");
+    taaProg = compileProgram(taaVertSrc.c_str(), taaFragSrc.c_str());
     taaVAO = skyboxVAO; // Reuse the fullscreen quad
 
     // --- Terrain Shader (High-res displacement mapping) ---
-    const char* terrainVertSrc = R"(
-      #version 330 core
-      layout(location=0) in vec3 aPos;
-      layout(location=1) in vec3 aNormal;
-      layout(location=2) in vec2 aUV;
-      
-      uniform mat4 uMVP;
-      uniform mat4 uModel;
-      uniform vec3 uCamPos;
-      uniform vec3 uPlanetCenterRel; 
-      uniform float uPlanetRadius;
-      uniform float uMaxElevation;
-      uniform float uTime;
-      uniform int uNodeLevel;
+    std::string terrainVertSrc = loadShaderFile("terrain.vert");
 
-      uniform vec3 uNodePos;
-      uniform vec3 uNodeSide;
-      uniform vec3 uNodeUp;
-      
-      uniform sampler2D uTectonicMap;
-      uniform sampler2D uHydroMap; 
-      uniform sampler2D uLocalHydroMap;
-      uniform int uHasLocalHydro;
+    std::string terrainFragSrc = loadShaderFile("terrain.frag");
 
-      out vec3 vRelViewPos; 
-      out vec3 vNormal;
-      out vec2 vUV;
-      out vec2 vLocalUV;
-      out vec3 vLocalPos;
-      out float vElevation;
-      out float vWaterDepth;
-      out float vSlope;
-
-      // --- INDUSTRIAL BICUBIC FILTERING ---
-      float w0(float a) { return (1.0/6.0)*(a*(a*(-a + 3.0) - 3.0) + 1.0); }
-      float w1(float a) { return (1.0/6.0)*(a*a*(3.0*a - 6.0) + 4.0); }
-      float w2(float a) { return (1.0/6.0)*(a*a*(-3.0*a + 3.0) + 3.0*a + 1.0); }
-      float w3(float a) { return (1.0/6.0)*(a*a*a); }
-      float g0(float a) { return w0(a) + w1(a); }
-      float g1(float a) { return w2(a) + w3(a); }
-      float h0(float a) { return -1.0 + w1(a) / (w0(a) + w1(a)); }
-      float h1(float a) { return 1.0 + w3(a) / (w2(a) + w3(a)); }
-
-      vec4 textureBicubic(sampler2D tex, vec2 uv) {
-        vec2 res = vec2(textureSize(tex, 0));
-        vec2 p = uv * res - 0.5;
-        vec2 f = fract(p); p -= f;
-        float x_h0 = h0(f.x), x_h1 = h1(f.x);
-        float y_h0 = h0(f.y), y_h1 = h1(f.y);
-        float x_g0 = g0(f.x), x_g1 = g1(f.x);
-        float y_g0 = g0(f.y), y_g1 = g1(f.y);
-        return (texture(tex, (p + vec2(x_h0, y_h0) + 0.5) / res) * x_g0 * y_g0 +
-                texture(tex, (p + vec2(x_h1, y_h0) + 0.5) / res) * x_g1 * y_g0 +
-                texture(tex, (p + vec2(x_h0, y_h1) + 0.5) / res) * x_g0 * y_g1 +
-                texture(tex, (p + vec2(x_h1, y_h1) + 0.5) / res) * x_g1 * y_g1);
-      }
-
-      vec4 sampleHydroSmooth(vec2 uv) {
-          return textureBicubic(uHydroMap, uv);
-      }
-
-      vec3 hash33(vec3 p) {
-        p = fract(p * vec3(443.897, 441.423, 437.195));
-        p += dot(p, p.yzx + 19.19);
-        return fract((p.xxy + p.yzz) * p.zyx);
-      }
-      
-      float worley(vec3 p) {
-        vec3 i = floor(p); vec3 f = fract(p);
-        float minDist = 1.0;
-        for (int z = -1; z <= 1; z++) {
-          for (int y = -1; y <= 1; y++) {
-            for (int x = -1; x <= 1; x++) {
-              vec3 neighbor = vec3(float(x), float(y), float(z));
-              vec3 point = hash33(i + neighbor);
-              vec3 diff = neighbor + point - f;
-              minDist = min(minDist, length(diff));
-            }
-          }
-        }
-        return minDist;
-      }
-
-      float hash(vec3 p) {
-        p = fract(p * vec3(443.897, 441.423, 437.195));
-        p += dot(p, p.yzx + 19.19);
-        return fract((p.x + p.y) * p.z);
-      }
-
-      float noise3d(vec3 p) {
-        vec3 i = floor(p); vec3 f = fract(p);
-        f = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
-        return mix(mix(mix(hash(i), hash(i+vec3(1,0,0)), f.x), 
-                       mix(hash(i+vec3(0,1,0)), hash(i+vec3(1,1,0)), f.x), f.y),
-                   mix(mix(hash(i+vec3(0,0,1)), hash(i+vec3(1,0,1)), f.x), 
-                       mix(hash(i+vec3(0,1,1)), hash(i+vec3(1,1,1)), f.x), f.y), f.z);
-      }
-      float fbm(vec3 p, int oct) {
-        float v = 0.0, a = 0.5;
-        for(int i=0; i<oct; ++i) {
-          v += noise3d(p) * a;
-          p = p * 2.15 + vec3(0.13, -0.21, 0.34);
-          a *= 0.47;
-        }
-        return v;
-      }
-      float ridgedFbm(vec3 p, int oct) {
-        float v = 0.0, a = 0.5, f = 1.05;
-        for(int i=0; i<oct; ++i) {
-          float n = 1.0 - abs(noise3d(p * f) * 2.0 - 1.0);
-          v += n * n * a;
-          f *= 2.07; a *= 0.48;
-        }
-        return v;
-      }
-      float mountainNoise(vec3 p) {
-        vec3 off = vec3(fbm(p*2.0, 3), fbm(p*2.0+5.2, 3), fbm(p*2.0+2.7, 3));
-        return ridgedFbm(p + off * 0.15, 6);
-      }
-      float detail10m(vec3 p) {
-        // High frequency micro-cells (approx 10m scale)
-        float n = noise3d(p * 2500000.0);
-        n += noise3d(p * 5000000.0) * 0.5;
-        return n * 0.0000015; // ~10m on 6000km sphere
-      }
-
-      float gullyNoise(vec3 p, float angle) {
-        float ca = cos(angle), sa = sin(angle);
-        float sU = p.x * ca - p.z * sa;
-        float sV = p.x * sa + p.z * ca;
-        // Stretch in sV direction (aligned with gradient/slope)
-        vec3 pS = vec3(sU * 1500000.0, p.y * 1500000.0, sV * 40000.0);
-        return ridgedFbm(pS, 3);
-      }
-
-      float sampleTectonic(vec2 uv) {
-          vec2 res = vec2(512.0, 256.0);
-          vec2 st = uv * res - 0.5;
-          vec2 i = floor(st);
-          vec2 f = fract(st);
-          float h00 = texture(uTectonicMap, i/res).r;
-          float h10 = texture(uTectonicMap, (i+vec2(1,0))/res).r;
-          float h01 = texture(uTectonicMap, (i+vec2(0,1))/res).r;
-          float h11 = texture(uTectonicMap, (i+vec2(1,1))/res).r;
-          float base = mix(mix(h00, h10, f.x), mix(h01, h11, f.x), f.y);
-          float tGrad = length(vec2(h10-h00, h01-h00));
-          if (tGrad > 0.05) {
-              float sx = f.x * f.x * (3.0 - 2.0 * f.x);
-              float sy = f.y * f.y * (3.0 - 2.0 * f.y);
-              float sharp = mix(mix(h00, h10, sx), mix(h01, h11, sx), sy);
-              base = mix(base, sharp, 0.45);
-          }
-          return base;
-      }
-
-      void main() {
-        vLocalUV = aPos.xz + 0.5;
-        vec3 cubePos = uNodePos + aPos.x * uNodeSide + aPos.z * uNodeUp;
-        vec3 normPos = normalize(cubePos);
-        float fV_phi = acos(clamp(normPos.y, -1.0, 1.0));
-        float fV_theta = atan(normPos.z, normPos.x);
-        vec2 geoUV = vec2(fV_theta / (2.0 * 3.14159) + 0.5, fV_phi / 3.14159);
-        
-        float plateBase = sampleTectonic(geoUV);
-        float hRefined = plateBase;
-        
-        float mMask = smoothstep(0.55, 0.75, plateBase);
-        float pMask = 1.0 - smoothstep(0.40, 0.62, plateBase);
-        float cMask = smoothstep(0.435, 0.445, plateBase) * (1.0 - smoothstep(0.455, 0.465, plateBase));
-
-        // 1.1 Mountain Folding + Thermal Erosion
-        if (mMask > 0.01) {
-            float epsG = 0.005;
-            float hX = (sampleTectonic(geoUV + vec2(epsG, 0.0)) - sampleTectonic(geoUV - vec2(epsG, 0.0)));
-            float hY = (sampleTectonic(geoUV + vec2(0.0, epsG)) - sampleTectonic(geoUV - vec2(0.0, epsG)));
-            float sAngle = atan(-hX, hY);
-            float ca = cos(sAngle), sa = sin(sAngle);
-            float sU = normPos.x * ca - normPos.z * sa;
-            float sV = normPos.x * sa + normPos.z * ca;
-            vec3 pS = vec3(sU * 0.72, normPos.y, sV * 1.28); 
-            float ridges = mountainNoise(pS * 6.5);
-            hRefined += ridges * 0.18 * mMask;
-            if (hRefined > 0.78) hRefined -= smoothstep(0.78, 0.96, hRefined) * 0.045;
-        }
-
-        // 1.2 Biome Features (Cliffs)
-        float cliffNoise = 1.0 - abs(noise3d(normPos * 180.0) * 1.5 - 0.5);
-        hRefined += smoothstep(0.6, 0.9, cliffNoise) * 0.007 * cMask;
-
-        // 2.1 River Valley Carving (V-to-U shaped)
-        vec4 hydro = sampleHydroSmooth(geoUV);
-        if (uHasLocalHydro == 1) {
-            hydro.r = textureBicubic(uLocalHydroMap, vLocalUV).r;
-        }
-
-        // Corrected Strahler scaling: B channel is order / 255.0f
-        float actualStrahler = hydro.b * 255.0; 
-        if (actualStrahler >= 2.0 && plateBase > 0.445) {
-            float vNoise = noise3d(normPos * 250.0 + noise3d(normPos * 120.0) * 0.004);
-            // River carving depth: Order 7 ~ 50 meters
-            float depth = 0.000008 * (actualStrahler / 7.0); 
-            float isLow = 1.0 - smoothstep(0.45, 0.55, plateBase);
-            float profile = mix(abs(vNoise * 2.0 - 1.0), pow(abs(vNoise * 2.0 - 1.0), 0.4), isLow);
-            hRefined -= (1.0 - profile) * depth;
-        }
-
-        // float hydroMask = smoothstep(0.0001, 0.01, hydro.r - plateBase);
-        // hRefined = mix(hRefined, hydro.r, hydroMask * 0.97);
-
-        float sLevel = 0.45;
-        float hydroDiff = hydro.r - hRefined;
-        float hydroMask = smoothstep(0.000001, 0.00002, hydroDiff);
-        hRefined = mix(hRefined, hydro.r, hydroMask * 1.0);
-
-        if (hRefined < sLevel && hRefined > 0.38) {
-            float shelfT = (hRefined - 0.38) / (sLevel - 0.38);
-            hRefined = mix(0.395, sLevel - 0.001, smoothstep(0.0, 1.0, shelfT));
-        }
-
-        float finalH = (hRefined < sLevel) ? 0.0 : (hRefined - sLevel) / (1.0 - sLevel) * uMaxElevation / uPlanetRadius;
-        
-        // 10m Scale detail (Land Only)
-        float currentSlope = 0.0;
-        if (hRefined >= sLevel) {
-            float epsS = 0.0015;
-            float hX = (sampleTectonic(geoUV + vec2(epsS, 0.0)) - sampleTectonic(geoUV - vec2(epsS, 0.0)));
-            float hY = (sampleTectonic(geoUV + vec2(0.0, epsS)) - sampleTectonic(geoUV - vec2(0.0, epsS)));
-            currentSlope = length(vec2(hX, hY)) * 100.0;
-            float sAngle = atan(-hX, hY);
-            
-            float d10 = detail10m(normPos);
-            
-            // Slope-based high frequency details
-            float rockCracks = (1.0 - worley(normPos * 1800000.0)) * 0.000003;
-            float gullies = gullyNoise(normPos, sAngle) * 0.000002;
-            float baseNoise = (noise3d(normPos * 4000000.0) - 0.5) * 0.0000005;
-            
-            float sHigh = smoothstep(0.12, 0.25, currentSlope);
-            float sMid = smoothstep(0.04, 0.12, currentSlope) * (1.0 - sHigh);
-            float sLow = 1.0 - smoothstep(0.04, 0.12, currentSlope);
-            
-            finalH += (rockCracks * sHigh + gullies * sMid + baseNoise * sLow);
-            finalH += d10;
-        }
-        vec3 kscPos = vec3(0.1436, 0.478, 0.866);
-        float distToKSC = length(normPos - kscPos);
-        float kscMask = smoothstep(0.12, 0.04, distToKSC); 
-        
-        // Boost hRefined within KSC radius to ensure land-based coloring
-        hRefined = mix(hRefined, sLevel + 0.015, kscMask);
-        
-        // Final displacement (5m above sea level)
-        finalH = mix(finalH, 0.005 / uPlanetRadius, smoothstep(0.08, 0.02, distToKSC)); 
-        
-        mat3 localRotScale = mat3(uModel); 
-        vRelViewPos = uPlanetCenterRel + localRotScale * (normPos * (1.0 + finalH));
-        vElevation = hRefined; 
-        vNormal = localRotScale * normPos; 
-        vUV = aUV;
-        vLocalPos = normPos;
-        vWaterDepth = max(0.0, hydro.r - hRefined);
-        vSlope = currentSlope;
-        gl_Position = uMVP * vec4(vRelViewPos, 1.0);
-      }
-    )";
-
-    const char* terrainFragSrc = R"(
-      #version 330 core
-      in vec3 vRelViewPos; 
-      in vec3 vNormal;
-      in vec2 vUV;
-      in vec3 vLocalPos;
-      in float vElevation;
-      in float vWaterDepth;
-      in vec2 vLocalUV;
-      in float vSlope;
-
-      uniform sampler2D uHydroMap;
-      uniform sampler2D uLocalHydroMap;
-      uniform int uHasLocalHydro;
-      uniform int uViewMode; 
-      uniform vec3 uLightDir;
-      uniform vec3 uCamPos;
-      uniform float uTime;
-      uniform sampler2D uTectonicMap;
-      uniform sampler2D uClimateMap;
-      out vec4 FragColor;
-
-      // --- BICUBIC FILTERING ---
-      float w0(float a) { return (1.0/6.0)*(a*(a*(-a + 3.0) - 3.0) + 1.0); }
-      float w1(float a) { return (1.0/6.0)*(a*a*(3.0*a - 6.0) + 4.0); }
-      float w2(float a) { return (1.0/6.0)*(a*a*(-3.0*a + 3.0) + 3.0*a + 1.0); }
-      float w3(float a) { return (1.0/6.0)*(a*a*a); }
-      float g0(float a) { return w0(a) + w1(a); }
-      float g1(float a) { return w2(a) + w3(a); }
-      float h0(float a) { return -1.0 + w1(a) / (w0(a) + w1(a)); }
-      float h1(float a) { return 1.0 + w3(a) / (w2(a) + w3(a)); }
-
-      vec4 textureBicubic(sampler2D tex, vec2 uv) {
-        vec2 res = vec2(textureSize(tex, 0));
-        vec2 p = uv * res - 0.5;
-        vec2 f = fract(p); p -= f;
-        float x_h0 = h0(f.x), x_h1 = h1(f.x);
-        float y_h0 = h0(f.y), y_h1 = h1(f.y);
-        float x_g0 = g0(f.x), x_g1 = g1(f.x);
-        float y_g0 = g0(f.y), y_g1 = g1(f.y);
-        return (texture(tex, (p + vec2(x_h0, y_h0) + 0.5) / res) * x_g0 * y_g0 +
-                texture(tex, (p + vec2(x_h1, y_h0) + 0.5) / res) * x_g1 * y_g0 +
-                texture(tex, (p + vec2(x_h0, y_h1) + 0.5) / res) * x_g0 * y_g1 +
-                texture(tex, (p + vec2(x_h1, y_h1) + 0.5) / res) * x_g1 * y_g1);
-      }
-
-      vec4 sampleHydroSmooth(vec2 uv) {
-          return textureBicubic(uHydroMap, uv);
-      }
-
-      float hash(vec3 p) {
-        p = fract(p * vec3(443.897, 441.423, 437.195));
-        p += dot(p, p.yzx + 19.19);
-        return fract((p.x + p.y) * p.z);
-      }
-
-      float noise3d(vec3 p) {
-        vec3 i = floor(p); vec3 f = fract(p);
-        f = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
-        return mix(mix(mix(hash(i), hash(i+vec3(1,0,0)), f.x), 
-                       mix(hash(i+vec3(0,1,0)), hash(i+vec3(1,1,0)), f.x), f.y),
-                   mix(mix(hash(i+vec3(0,0,1)), hash(i+vec3(1,0,1)), f.x), 
-                       mix(hash(i+vec3(0,1,1)), hash(i+vec3(1,1,1)), f.x), f.y), f.z);
-      }
-      
-      float getMicroHeight(vec3 p, float distFade) {
-          float h = noise3d(p * 800.0) * 0.5;
-          h += noise3d(p * 8000.0) * 0.15 * clamp(1.0 - distFade * 0.2, 0.0, 1.0);
-          return h;
-      }
-
-      float warpedNoise(vec3 p) {
-          vec3 q = vec3(noise3d(p + vec3(0.0, 0.0, 0.0)),
-                        noise3d(p + vec3(5.2, 1.3, 0.7)),
-                        noise3d(p + vec3(2.7, 8.4, 3.1)));
-          return noise3d(p + q * 0.5);
-      }
-
-      void main() {
-        vec3 L = normalize(uLightDir);
-        vec3 V = normalize(-vRelViewPos); 
-        float distToCam = length(vRelViewPos); 
-        float detailFade = distToCam / 1000.0; 
-        
-        vec3 fV_normPos = normalize(vLocalPos);
-        float fV_phi = acos(clamp(fV_normPos.y, -1.0, 1.0));
-        float fV_theta = atan(fV_normPos.z, fV_normPos.x);
-        vec2 fV_geoUV = vec2(fV_theta / (2.0 * 3.14159) + 0.5, fV_phi / 3.14159);
-
-        // --- Shader Layer: Micro-Details ---
-        float hRefined = vElevation; 
-        float mMask = smoothstep(0.55, 0.75, hRefined);
-        float pMask = 1.0 - smoothstep(0.40, 0.62, hRefined);
-        
-        // --- Normal Calculation with Micro-Perturbation ---
-        vec3 N = normalize(vNormal);
-        if (vWaterDepth < 0.0001 && distToCam < 8.0) {
-            float nScale = 1500.0 * (1.0 + mMask * 2.0); 
-            float nAmp = 0.05 * (1.0 - smoothstep(1.0, 8.0, distToCam));
-            
-            // 10m level split
-            float d10 = noise3d(vLocalPos * 3000000.0) * 0.4;
-            
-            vec3 pMic = vLocalPos * nScale;
-            float h0 = noise3d(pMic) + d10;
-            float h1 = noise3d(pMic + vec3(0.005, 0, 0)) + d10;
-            float h2 = noise3d(pMic + vec3(0, 0.005, 0)) + d10;
-            
-            vec3 microN = normalize(vec3(h0 - h1, h0 - h2, 1.0));
-            vec3 TN = normalize(cross(N, vec3(0,1,0)));
-            if (abs(N.y) > 0.99) TN = normalize(cross(N, vec3(0,0,1)));
-            vec3 BN = cross(N, TN);
-            N = normalize(N + (TN * microN.x + BN * microN.y) * nAmp * 2.0);
-        }
-
-        // --- Colors & Lighting: Silk Smooth Base with Albedo Variation ---
-        vec3 deepWater = vec3(0.01, 0.06, 0.15);
-        vec3 shallowWater = vec3(0.05, 0.35, 0.45);
-        vec3 beach = vec3(0.72, 0.68, 0.52);
-        vec3 lowland = vec3(0.12, 0.32, 0.10);
-        vec3 forest = vec3(0.06, 0.22, 0.05);
-        vec3 mountainColor = vec3(0.42, 0.38, 0.35);
-        vec3 snow = vec3(0.92, 0.94, 1.0);
-        vec3 concrete = vec3(0.45, 0.45, 0.48); // Industrial gray
-        
-        vec3 surfColor;
-        float sLevel = 0.45;
-        
-        // Water rendering detection: 0.000001 is roughly 6 meters depth
-        if (hRefined < sLevel || vWaterDepth > 0.000001) {
-            float depth = (hRefined < sLevel) ? (sLevel - hRefined) : vWaterDepth * 2.0;
-            surfColor = mix(shallowWater, deepWater, smoothstep(0.0, 0.15, depth));
-        } else {
-            float landH = (hRefined - sLevel) / (1.0 - sLevel);
-            // Albedo Variation (Subtle, no black spots)
-            float albedoVar = noise3d(vLocalPos * 120.0) * 0.1 + 0.95;
-            
-            vec3 cMid = mix(beach, lowland, smoothstep(0.0, 0.1, landH));
-            cMid = mix(cMid, forest, smoothstep(0.1, 0.45, landH));
-            cMid = mix(cMid, mountainColor, smoothstep(0.45, 0.8, landH));
-            
-            float snowMask = smoothstep(0.8, 0.95, landH);
-            // Reduce snow on steep slopes (vSlope ranges ~0.0 to 0.5+)
-            snowMask *= (1.0 - smoothstep(0.08, 0.22, vSlope)); 
-            
-            surfColor = mix(cMid, snow, snowMask) * albedoVar;
-            
-            // Apply Concrete for KSC
-            vec3 kscPos = vec3(0.1436, 0.478, 0.866);
-            float distToKSC = length(fV_normPos - kscPos);
-            // Concrete pad: sharp circle with slight fade
-            float concreteMask = smoothstep(0.015, 0.008, distToKSC); 
-            surfColor = mix(surfColor, concrete, concreteMask);
-        }
-
-        float diff = max(dot(N, L), 0.0);
-        float ambient = 0.18; 
-        vec3 result = surfColor * (ambient + diff * (1.1 - ambient));
-        
-        if (uViewMode > 0) {
-            vec4 climate = texture(uClimateMap, fV_geoUV);
-            vec3 vColor = vec3(0.0);
-            if (uViewMode == 1) {
-                float t = (climate.r + 30.0) / 70.0;
-                vColor = mix(vec3(0,0,1), vec3(1,0,0), smoothstep(0.0, 1.0, t));
-            } else if (uViewMode == 2) {
-                float p = climate.g / 3000.0;
-                vColor = mix(vec3(0.9, 0.9, 0.8), vec3(0.1, 0.4, 0.9), smoothstep(0.0, 1.0, p));
-            } else if (uViewMode == 4) {
-                vec4 hydroData = sampleHydroSmooth(fV_geoUV);
-                vColor = mix(vec3(0.9, 0.8, 0.7), vec3(0.0, 0.4, 0.9), smoothstep(1.0, 7.0, hydroData.b));
-                if (vWaterDepth > 0.0001) vColor = vec3(0.0, 0.5, 1.0);
-            }
-            FragColor = vec4(vColor * (0.6 + 0.4 * diff), 1.0);
-            return;
-        }
-
-        // --- River Overlay (Segment-based Distance Field) ---
-        {
-            vec2 res = vec2(512.0, 256.0);
-            vec2 pixelPos = fV_geoUV * res;
-            vec2 cellCoords = floor(pixelPos);
-            vec2 localPos = fract(pixelPos); 
-            
-            float minDist = 1.0;
-            float maxStrahler = 0.0;
-            
-            const vec2 deltas[8] = vec2[](
-                vec2(1,0), vec2(1,1), vec2(0,1), vec2(-1,1),
-                vec2(-1,0), vec2(-1,-1), vec2(0,-1), vec2(1,-1)
-            );
-
-            // Search 3x3 for any cell (including current) that belongs to a river
-            for (int dy = -1; dy <= 1; dy++) {
-                for (int dx = -1; dx <= 1; dx++) {
-                    vec2 nCoord = cellCoords + vec2(dx, dy);
-                    vec2 nUV = (nCoord + 0.5) / res;
-                    nUV.x = fract(nUV.x); // Global wrap
-                    // Use discrete sample for logic
-                    vec4 nData = texture(uHydroMap, nUV);
-                    
-                    if (nData.b >= 4.0) {
-                        // Outflow segment from this neighbor to its target
-                        int dir = int(nData.a);
-                        if (dir >= 0 && dir < 8) {
-                            vec2 p1 = nCoord + 0.5;
-                            vec2 p2 = nCoord + 0.5 + deltas[dir];
-                            
-                            // Segment distance
-                            vec2 pa = pixelPos - p1, ba = p2 - p1;
-                            float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
-                            float d = length(pa - ba * h);
-                            
-                            if (d < minDist) {
-                                minDist = d;
-                                maxStrahler = nData.b;
-                            }
-                        }
-                    }
-                }
-            }
-
-            if (minDist < 2.0) {
-                float simPixelScale = length(fwidth(pixelPos));
-                float screenRadius = minDist / max(simPixelScale, 0.0001);
-                float targetWidth = (maxStrahler >= 5.0) ? 1.5 : 0.8; 
-                
-                if (screenRadius < targetWidth) {
-                    float edge = smoothstep(targetWidth, targetWidth - 0.5, screenRadius);
-                    result = mix(result, vec3(0.01, 0.08, 0.25), 0.7 * edge);
-                }
-            }
-        }
-
-        FragColor = vec4(result, 1.0);
-      }
-
-    )";
-
-    terrainProg = compileProgram(terrainVertSrc, terrainFragSrc);
+    terrainProg = compileProgram(terrainVertSrc.c_str(), terrainFragSrc.c_str());
     ut_mvp = glGetUniformLocation(terrainProg, "uMVP");
     ut_model = glGetUniformLocation(terrainProg, "uModel");
     ut_camPos = glGetUniformLocation(terrainProg, "uCamPos");
@@ -3446,62 +1199,11 @@ R"(
     ut_hasLocalHydro = glGetUniformLocation(terrainProg, "uHasLocalHydro");
 
     // --- Vegetation Shader (Instanced) ---
-    const char* vegVertSrc = R"(
-      #version 330 core
-      layout(location=0) in vec3 aPos;
-      layout(location=1) in vec3 aNormal;
-      layout(location=4) in vec3 iPos;     // Instance position
-      layout(location=5) in float iScale;  // Instance scale
-      layout(location=6) in float iRot;    // Instance Y-rotation
+    std::string vegVertSrc = loadShaderFile("vegetation.vert");
 
-      uniform mat4 uView;
-      uniform mat4 uProj;
-      uniform vec3 uPlanetCenter;
+    std::string vegFragSrc = loadShaderFile("vegetation.frag");
 
-      out vec3 vNormal;
-      out vec3 vWorldPos;
-
-      void main() {
-        // Construct instance rotation matrix (Y-axis)
-        float s = sin(iRot);
-        float c = cos(iRot);
-        mat3 rot = mat3(c, 0, s,  0, 1, 0, -s, 0, c);
-        
-        // Transform local position
-        vec3 pos = (rot * aPos) * iScale;
-        
-        // Orient to planet surface
-        vec3 up = normalize(iPos);
-        vec3 right = normalize(cross(vec3(0,1,0), up));
-        if (length(right) < 0.01) right = normalize(cross(vec3(1,0,0), up));
-        vec3 forward = cross(up, right);
-        mat3 orient = mat3(right, up, forward);
-        
-        vec3 worldPos = orient * pos + iPos;
-        vWorldPos = worldPos;
-        vNormal = orient * (rot * aNormal);
-        
-        gl_Position = uProj * uView * vec4(worldPos, 1.0);
-      }
-    )";
-
-    const char* vegFragSrc = R"(
-      #version 330 core
-      in vec3 vNormal;
-      in vec3 vWorldPos;
-      uniform vec3 uLightDir;
-      uniform vec3 uViewPos;
-      out vec4 FragColor;
-      void main() {
-        vec3 N = normalize(vNormal);
-        vec3 L = normalize(uLightDir);
-        float diff = max(dot(N, L), 0.0);
-        vec3 color = vec3(0.1, 0.4, 0.05); // Standard forest green
-        FragColor = vec4(color * (0.2 + 0.8 * diff), 1.0);
-      }
-    )";
-
-    vegProg = compileProgram(vegVertSrc, vegFragSrc);
+    vegProg = compileProgram(vegVertSrc.c_str(), vegFragSrc.c_str());
     uv_vp = glGetUniformLocation(vegProg, "uView");
     uv_proj = glGetUniformLocation(vegProg, "uProj");
     uv_lightDir = glGetUniformLocation(vegProg, "uLightDir");
@@ -3531,103 +1233,9 @@ R"(
     vegSystem = new Vegetation::VegetationSystem();
 
     // --- SVO Shader (Camera-Relative, Vertex-Colored Phong) ---
-    const char* svoVertSrc = R"(
-      #version 330 core
-      layout(location=0) in vec3 aPos;
-      layout(location=1) in vec3 aNormal;
-      layout(location=2) in vec2 aUV;
-      layout(location=3) in vec4 aColor;
-
-      uniform mat4 uMVP;
-      uniform mat4 uSvoMat; // Transforms SVO local to Camera-Relative World
-
-      out vec3 vRelPos;
-      out vec3 vNormal;
-      out vec4 vColor;
-
-      void main() {
-        vec4 relPos = uSvoMat * vec4(aPos, 1.0);
-        vRelPos = relPos.xyz;
-        
-        // As SvoMat's upper 3x3 is pure rotation (orthonormal), 
-        // we can just multiply directly to transform normals:
-        vNormal = mat3(uSvoMat) * aNormal;
-        
-        vColor = aColor;
-        gl_Position = uMVP * relPos;
-      }
-    )";
-    const char* svoFragSrc = R"(
-      #version 330 core
-      in vec3 vRelPos;
-      in vec3 vNormal;
-      in vec4 vColor;
-
-      uniform float uTime;
-      uniform vec3 uLightDir;
-
-      out vec4 FragColor;
-
-      // Simple hash for terrain detail noise
-      float hash3(vec3 p) {
-        p = fract(p * vec3(443.897, 441.423, 437.195));
-        p += dot(p, p.yzx + 19.19);
-        return fract((p.x + p.y) * p.z);
-      }
-      float noise3d(vec3 p) {
-        vec3 i = floor(p); vec3 f = fract(p);
-        f = f * f * (3.0 - 2.0 * f);
-        float n000 = hash3(i), n100 = hash3(i + vec3(1,0,0));
-        float n010 = hash3(i + vec3(0,1,0)), n110 = hash3(i + vec3(1,1,0));
-        float n001 = hash3(i + vec3(0,0,1)), n101 = hash3(i + vec3(1,0,1));
-        float n011 = hash3(i + vec3(0,1,1)), n111 = hash3(i + vec3(1,1,1));
-        float nx00 = mix(n000, n100, f.x), nx10 = mix(n010, n110, f.x);
-        float nx01 = mix(n001, n101, f.x), nx11 = mix(n011, n111, f.x);
-        return mix(mix(nx00, nx10, f.y), mix(nx01, nx11, f.y), f.z);
-      }
-
-      void main() {
-        vec3 N = normalize(vNormal);
-        vec3 L = normalize(uLightDir);
-        vec3 V = normalize(-vRelPos);
-        vec3 H = normalize(L + V);
-
-        // Triplanar blending weights for natural texture detail
-        vec3 blendW = abs(N);
-        blendW = pow(blendW, vec3(4.0));
-        blendW /= (blendW.x + blendW.y + blendW.z + 0.001);
-
-        // Multi-scale noise for surface micro-detail
-        vec3 wp = vRelPos * 500.0; // Scale to meters
-        float n1 = noise3d(wp * 0.5) * blendW.x
-                 + noise3d(wp.yzx * 0.5) * blendW.y
-                 + noise3d(wp.zxy * 0.5) * blendW.z;
-        float n2 = noise3d(wp * 2.0) * blendW.x
-                 + noise3d(wp.yzx * 2.0) * blendW.y
-                 + noise3d(wp.zxy * 2.0) * blendW.z;
-        float detail = n1 * 0.6 + n2 * 0.4;
-
-        // Material color with noise variation
-        vec3 baseColor = vColor.rgb * (0.85 + 0.3 * detail);
-
-        // Phong lighting (terrain-consistent)
-        float ambient = 0.12;
-        float diff = max(dot(N, L), 0.0);
-        float spec = pow(max(dot(N, H), 0.0), 48.0) * 0.15;
-
-        // Soft shadow via terminator smoothstep
-        float terminator = smoothstep(-0.05, 0.15, dot(N, L));
-
-        vec3 result = baseColor * (ambient + diff * 0.85 * terminator) + vec3(spec * terminator);
-
-        // Subtle AO approximation from normal dot up
-        float ao = 0.85 + 0.15 * max(N.y, 0.0);
-        result *= ao;
-
-        FragColor = vec4(result, 1.0);
-      }
-    )";
-    svoProg = compileProgram(svoVertSrc, svoFragSrc);
+    std::string svoVertSrc = loadShaderFile("svo.vert");
+    std::string svoFragSrc = loadShaderFile("svo.frag");
+    svoProg = compileProgram(svoVertSrc.c_str(), svoFragSrc.c_str());
     usvo_mvp = glGetUniformLocation(svoProg, "uMVP");
     usvo_lightDir = glGetUniformLocation(svoProg, "uLightDir");
     usvo_viewPos = glGetUniformLocation(svoProg, "uViewPos");

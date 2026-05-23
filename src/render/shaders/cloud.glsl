@@ -240,9 +240,13 @@ float cloudDensity(vec3 p, float h, bool highDetail) {
 
             vec3 tc = windSph1 * (80.0 + h * 0.45) + vec3(t * 0.6, t * 0.4, t * 0.15);
             float n = 0.0;
+            float viewDist = length(uCamPos - p);  // hoisted: used by LOD details + turbulence gate
             if (highDetail) {
                 float warp = texture(uNoiseTex3D, tc * 0.0375).b;
                 vec3 warpedTc = tc + vec3(warp * 0.4, warp * 0.4, warp * 0.2) + vec3(t * 0.02);
+                // 3 octaves: avoids 10km-wavelength 4th-octave boiling at close range.
+                // The mesoscale modulation + LOD detail levels already provide
+                // sufficient frequency diversity without the 4th FBM octave.
                 n = fbm(warpedTc, 3);
                 float wInv = 1.0 - texture(uNoiseTex3D, warpedTc * 0.125).g;
                 n = n + (wInv - 0.5) * (1.0 - n) * 0.50;
@@ -256,7 +260,6 @@ float cloudDensity(vec3 p, float h, bool highDetail) {
                     float c2 = 1.0 - texture(uNoiseTex3D, pW * 0.00975 + vec3(0.039, 0.440 + t * 0.00275, 0.091)).g;
                     n += (c1 * (0.4 + 0.6 * c2)) * 0.30 - 0.16;
                 }
-                float viewDist = length(uCamPos - p);
                 float maskLoVal = min(uTuneThreshLo, uTuneThreshHi);
                 float cloudExists = smoothstep(maskLoVal + 0.02, maskLoVal + 0.10, n);
                 if (viewDist < 250.0) {
@@ -315,35 +318,59 @@ float cloudDensity(vec3 p, float h, bool highDetail) {
                 }
             }
 
-            // ── Turbulent updraft cores ──────────────────────────────────────
-            // Approximate TKE (turbulent kinetic energy) from curl noise divergence.
-            // Strong TKE → distinct updraft columns with higher density cores.
-            {
+            // ── Turbulent updraft cores (close-range only: invisible from orbit) ─
+            // curlSph + worley3d is ~35% of per-sample cost. Only activate
+            // within 40 km where individual updraft columns are resolvable.
+            if (viewDist < 40.0) {
                 float edgeMaskLo = min(uTuneThreshLo, uTuneThreshHi);
                 vec3 curlVec = curlSph(windSph1 * 4.0, 3.0, t * 0.3);
                 float tke = abs(dot(curlVec, windSph1)) * 2.5;
                 float tkeThreshold = smoothstep(0.35, 0.75, tke);
-
-                // Updraft core: discrete columnar structures where TKE is high
                 float distToCore = 1.0 - worley3d(windSph1 * 14.0 + t * 0.12);
                 float coreStrength = exp(-distToCore * distToCore * 18.0) * tkeThreshold;
-                // Only boost density near cloud surface (not deep interior or empty space)
                 float surfaceZone = smoothstep(edgeMaskLo - 0.06, edgeMaskLo + 0.02, n)
                                   * (1.0 - smoothstep(edgeMaskLo + 0.18, edgeMaskLo + 0.35, n));
                 n += coreStrength * 0.12 * surfaceZone * (0.4 + 0.6 * altNorm);
 
-                // ── Entrainment mixing fingers ───────────────────────────────
-                // At cloud edges, dry-air intrusion creates finger-like structures
-                float edgeZone = smoothstep(edgeMaskLo - 0.04, edgeMaskLo + 0.04, n)
-                               * (1.0 - smoothstep(edgeMaskLo + 0.08, edgeMaskLo + 0.20, n));
-                float fingers = fbm(p * 24.0 + vec3(t * 0.09, t * 0.06, 0.0), 3);
-                n += edgeZone * (fingers - 0.5) * 0.18 * (0.5 + 0.5 * tke);
+                // ── Entrainment mixing fingers (close-range, additive only) ──
+                if (viewDist < 25.0) {
+                    float edgeZone = smoothstep(edgeMaskLo - 0.04, edgeMaskLo + 0.04, n)
+                                   * (1.0 - smoothstep(edgeMaskLo + 0.08, edgeMaskLo + 0.20, n));
+                    float fingers = fbm(p * 24.0 + vec3(t * 0.09, t * 0.06, 0.0), 3);
+                    n += edgeZone * fingers * 0.10 * tke;
+                }
             }
 
+            // ── Coverage-driven percolation threshold ────────────────────────
+            // Architecture fix: instead of coverage being a scalar density
+            // multiplier (which just dims clouds without changing their shape),
+            // coverage modulates the noise threshold itself — creating a
+            // percolation transition:
+            //   high coverage → low threshold → most FBM passes → connected sheets
+            //   low coverage → high threshold → only FBM peaks pass → sparse fragments
+            //   below critical coverage → no cloud can form (percolation cutoff)
             float maskLo = min(uTuneThreshLo, uTuneThreshHi);
             float maskHi = max(uTuneThreshLo, uTuneThreshHi);
-            float mask = smoothstep(maskLo, maskHi, n) * altShape;
-            density = max(density, mask * uTuneDensity * coverage);
+            float formPotential = smoothstep(0.18, 0.42, coverage);
+            float localMaskLo = mix(0.58, maskLo, formPotential);
+            float localMaskHi = mix(0.76, maskHi, formPotential);
+
+            // ── Mesoscale thickness modulation (~100-300km) ─────────────────
+            // Without this layer, the FBM's ~20-80km dominant frequency creates
+            // regularly-spaced "Swiss cheese" holes within cloud sheets.
+            // A separate low-frequency FBM varies the effective threshold across
+            // the cloud sheet, producing natural thick/thin mesoscale regions.
+            float mesoField = texture(uCoverTex3D, 
+                (windSph1 * 1.2 + vec3(71.3, 39.7, 14.2 + t * 0.002)) * INV8).r;
+            float thickVar = (mesoField - 0.45) * 0.28;
+            float mesoLo = localMaskLo + thickVar;
+            float mesoHi = localMaskHi + thickVar * 0.5;
+
+            float mask = smoothstep(mesoLo, mesoHi, n) * altShape;
+            // Percolation threshold (above) controls WHERE cloud exists.
+            // Coverage multiplier (below) controls HOW DENSE the existing cloud is —
+            // producing natural density gradation from cloud-core to cloud-periphery.
+            density = max(density, mask * uTuneDensity * (0.30 + 0.70 * coverage));
         }
 
         if (h >= 8.0 && h <= gCloudMaxAlt) {
@@ -490,9 +517,10 @@ void marchClouds(
 
     float camAlt_cloud = length(uCamPos - uPlanetCenter) - uSurfaceRadius;
     bool inCloudLayer  = (camAlt_cloud < gCloudMaxAlt + 5.0);
-    // Fixed step sizes — 200 m fine step resolves ~70 samples across the 14 km cloud layer,
-    // sufficient to capture all 6 LOD detail levels in cloudDensity().
-    float fineStep = 0.20;
+    // Step sizes: 300 m balances detail capture (~47 samples / 14 km) with
+    // performance. 200 m gave ~70 samples but was too expensive after the
+    // percolation + mesoscale additions to cloudDensity().
+    float fineStep = 0.30;
     float bigStep  = inCloudLayer ? 2.50 : 4.0;
 
     // Per-row golden-ratio jitter, same rationale as atmosphere primary march:
@@ -525,8 +553,6 @@ void marchClouds(
 
         vec3 probeSph = normalize(cPos - uPlanetCenter);
         float dC = cloudDensity(cPos, ch, true) * fineStep;
-        float tangFrac = 1.0 - abs(dot(rayDir, probeSph));
-        dC *= 1.0 - smoothstep(0.82, 0.97, tangFrac);
         if (dC < 0.0001) { tPos += fineStep; continue; }
 
         optDepthC += dC;
@@ -534,7 +560,9 @@ void marchClouds(
         float cLightR, cLightM, cLightO, cLightC;
         getOpticalDepth(cPos, uLightDir, cLightR, cLightM, cLightO, cLightC);
 
-        vec3 sunTint = exp(-(gRayleighCoeff * cLightR + gMieCoeff * 1.1 * cLightM + gOzoneCoeff * cLightO));
+        vec3 cloudShadow = exp(-gCloudExtinction * cLightC);
+        vec3 sunTint = exp(-(gRayleighCoeff * cLightR + gMieCoeff * 1.1 * cLightM + gOzoneCoeff * cLightO))
+                     * cloudShadow;
 
         // ── Spectral multi-scatter (RGB wavelength-dependent) ─────────────────
         // Blue scatters more in Rayleigh regime → longer path → redder clouds at depth.
@@ -554,16 +582,17 @@ void marchClouds(
         vec3 cloudAtt = msRgb * (vec3(1.0) + powderEdge * silverMask * 0.65);
         prevDC = dC;
 
-        // ── Ambient occlusion: height-based + cone-traced (every 4th step) ──
-        // Height AO provides the baseline bottom→top gradient (free).
-        // Cone-traced AO adds spatial surrounding-occlusion (3 probes × 3 distances).
+        // ── Ambient occlusion: height-based + cone-traced ──────────────────
+        // Height AO: free baseline bottom→top gradient.
+        // Cone-traced AO: spatial surrounding-occlusion, only at close range
+        // (<60 km, every 8th step) where the effect is visually resolvable.
         float layerBase = (ch < 7.5) ? gCloudMinAlt : 8.0;
         float layerTop  = (ch < 7.5) ? 7.0 : gCloudMaxAlt;
         float heightInBand = clamp((ch - layerBase) / max(layerTop - layerBase, 0.1), 0.0, 1.0);
         float aoHeight = pow(heightInBand, 0.55);
-        float aoCone   = aoHeight;  // default: fall back to height-only
-        if ((ci & 3) == 0) {
-            // Cone trace every 4th step → amortised ~3 extra fbm_pw calls per step
+        float aoCone   = aoHeight;
+        float cloudDist = length(uCamPos - cPos);
+        if (cloudDist < 60.0 && (ci & 7) == 0) {
             float aoConeSample = coneAO(cPos, probeSph, ch);
             aoCone = aoHeight * 0.35 + aoConeSample * 0.65;
         }
