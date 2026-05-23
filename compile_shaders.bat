@@ -111,7 +111,7 @@ if %ERRORLEVEL% neq 0 goto :fail
 %GLSLC% %SHADER_DIR%\taa.frag -o %OUT_DIR%\taa.frag.spv
 if %ERRORLEVEL% neq 0 goto :fail
 
-echo [SVO/Atmo/Veg/Terrain] svo.vert + svo.frag + atmo.vert + atmo.frag + vegetation.vert + vegetation.frag + terrain.vert + terrain.frag
+echo [SVO/Atmo/Veg/Terrain/HUD] svo.vert + svo.frag + atmo.vert + atmo.frag + vegetation.vert + vegetation.frag + terrain.vert + terrain.frag + hud2d.vert + hud2d.frag
 %GLSLC% %SHADER_DIR%\svo.vert -o %OUT_DIR%\svo.vert.spv
 if %ERRORLEVEL% neq 0 goto :fail
 %GLSLC% %SHADER_DIR%\svo.frag -o %OUT_DIR%\svo.frag.spv
@@ -127,6 +127,10 @@ if %ERRORLEVEL% neq 0 goto :fail
 %GLSLC% %SHADER_DIR%\terrain.vert -o %OUT_DIR%\terrain.vert.spv
 if %ERRORLEVEL% neq 0 goto :fail
 %GLSLC% %SHADER_DIR%\terrain.frag -o %OUT_DIR%\terrain.frag.spv
+if %ERRORLEVEL% neq 0 goto :fail
+%GLSLC% %SHADER_DIR%\hud2d.vert -o %OUT_DIR%\hud2d.vert.spv
+if %ERRORLEVEL% neq 0 goto :fail
+%GLSLC% %SHADER_DIR%\hud2d.frag -o %OUT_DIR%\hud2d.frag.spv
 if %ERRORLEVEL% neq 0 goto :fail
 
 echo.

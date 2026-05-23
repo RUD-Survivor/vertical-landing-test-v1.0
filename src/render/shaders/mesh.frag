@@ -15,6 +15,7 @@ layout(set = 1, binding = 0) uniform sampler2D uSampler;
 layout(push_constant) uniform PC {
     mat4  model;
     vec4  baseColor;
+    vec4  planetCenter;  // 与 mesh.vert 保持一致（mesh 管线中未使用）
     float ambientStr;
     int   hasTexture;
 } pc;

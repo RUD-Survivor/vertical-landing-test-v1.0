@@ -108,6 +108,10 @@ public:
         float rocket_vis_scale = 1.0f;
         rh = (float)rocket_config.height * (float)ws_d * rocket_vis_scale;
         rw_3d = (float)rocket_config.diameter * (float)ws_d * 0.5f * rocket_vis_scale;
+        // 防止空火箭配置（Vulkan 模式下 skip_builder=true, 组装为空）导致 rh=0
+        // 致使 camera orbit_dist=0 → lookAt(eye==target) → NaN 视图矩阵 → 什么都渲染不出来
+        // fallback 给 earth_r*0.25 → orbit_dist = earth_r*2，相机在地球外 2 倍半径处，视野正常
+        if (rh < 1e-4f) rh = earth_r * 0.25f;
 
         // ===============================================================
         // --- CameraDirector: 计算浮动原点 + 视图矩阵 ---
@@ -153,6 +157,6 @@ public:
         int ww, wh;
         glfwGetFramebufferSize(GameContext::getInstance().window, &ww, &wh);
         aspect = (float)ww / (float)wh;
-        macroProjMat = Mat4::perspective(80.0f, aspect, 10.0f, 10000000000.0f);
+        macroProjMat = Mat4::perspective(80.0f, aspect, 0.01f, 10000000000.0f);  // near=0.01 render unit≈10m，避免近距剪裁火箭
     }
 };

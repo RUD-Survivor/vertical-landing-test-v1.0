@@ -35,6 +35,7 @@ struct VkRenderer3D {
     }
 
     void shutdown(VulkanContext& ctx) {
+        effects.shutdownRibbonRing();
         effects.shutdown(ctx.device);
         sky.shutdown(ctx.device);
         scene.shutdown(ctx);
@@ -109,8 +110,9 @@ struct VkRenderer3D {
     void drawTerrainPatch(VkCommandBuffer cmd,
                           VkBuffer patchVbo, VkBuffer patchIbo, uint32_t indexCount,
                           const TerrainPushConstants& pc,
+                          const TerrainDataUBO& td,
                           VkDescriptorSet texSet) {
-        scene.drawTerrainPatch(cmd, patchVbo, patchIbo, indexCount, pc, texSet);
+        scene.drawTerrainPatch(cmd, patchVbo, patchIbo, indexCount, pc, td, texSet);
     }
 
     // -----------------------------------------------------------------------
@@ -174,18 +176,19 @@ struct VkRenderer3D {
     // 调用方需已设置好 TAA geometry pass（beginGeometryPass + setViewportScissor）
     // 此方法只负责提交 draw call，不管理 render pass / swapchain
     // ========================================================================
-    void render(VkCommandBuffer cmd, int frameIdx, const SceneSnapshot& snap) {
+    void render(VkCommandBuffer cmd, int frameIdx, const SceneSnapshot& snap, VkExtent2D extent = {1920, 1080}) {
         (void)frameIdx; // 当前未使用（如有需要可用于 per-frame noise jitter）
+        _extent = extent;
+
+        // ---- 1. 帧开始（更新 UBO，绑定 mesh 管线为默认状态） ----
+        beginFrame(cmd, snap.frameIndex % 2,
+                   snap.view, snap.proj,
+                   snap.lightDir, snap.camPos, snap.time);
 
         // ---- 0. 太阳物理球体 (Block E, 全景模式) ----
         if (snap.drawSunBody && hasMesh("earth")) {
             drawMesh(cmd, "earth", snap.sunBody.model, 1.0f, 0.95f, 0.9f, 1.0f, 2.0f);
         }
-
-        // ---- 1. 帧开始（更新 UBO） ----
-        beginFrame(cmd, snap.frameIndex % 2,
-                   snap.view, snap.proj,
-                   snap.lightDir, snap.camPos, snap.time);
 
         // ---- 2. 行星表面（不透明，共用 "earth" unit sphere mesh） ----
         for (const auto& cd : snap.celestials) {
@@ -206,7 +209,7 @@ struct VkRenderer3D {
             VkClearAttachment clearAttach{};
             clearAttach.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
             clearAttach.clearValue.depthStencil.depth = 1.0f;
-            VkClearRect cr{ {{0,0},{0,0}}, 1, 1 }; // full extent — caller sets viewport/scissor
+            VkClearRect cr{ {{0,0},{_extent.width,_extent.height}}, 0, 1 };
             vkCmdClearAttachments(cmd, 1, &clearAttach, 1, &cr);
         }
         if (snap.rocketParts.empty()) {
@@ -230,7 +233,7 @@ struct VkRenderer3D {
             apc.planetCenter[1] = cd.center[1];
             apc.planetCenter[2] = cd.center[2];
             apc.innerRadius    = cd.radius * 0.9995f;  // 匹配 OpenGL 的 tighter shadow sphere
-            apc.outerRadius    = cd.radius + 160.0f;   // 所有天体统一 160km 大气高度
+            apc.outerRadius    = cd.radius + 0.16f;    // 160km 大气高度（render units：1 unit = 1000km）
             apc.surfaceRadius  = cd.radius;
             apc.planetIdx      = cd.atmoIdx;
             apc.sunVisibility  = sunVis;
@@ -366,9 +369,10 @@ struct VkRenderer3D {
     }
 
 private:
-    float _view[16]{};
-    float _proj[16]{};
-    int   _frameIdx = 0;
+    float      _view[16]{};
+    float      _proj[16]{};
+    int        _frameIdx = 0;
+    VkExtent2D _extent   = {1920, 1080};
 
     // 构建 OpenGL 兼容的稳定投影矩阵（列主序）
     static void _buildStableProj(float out[16], float aspect) {

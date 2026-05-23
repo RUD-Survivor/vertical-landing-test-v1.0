@@ -45,7 +45,7 @@ struct VkEffectsSystem {
                                 "src/render/shaders/spirv/billboard.frag.spv")) {
             fprintf(stderr, "[VkEffects] Failed: billboard\n"); return false;
         }
-        if (!lensFlarePipe.init(ctx, colorFmt,
+        if (!lensFlarePipe.init(ctx, colorFmt, depthFmt,
                                 "src/render/shaders/spirv/lens_flare.vert.spv",
                                 "src/render/shaders/spirv/lens_flare.frag.spv")) {
             fprintf(stderr, "[VkEffects] Failed: lens_flare\n"); return false;
@@ -140,8 +140,8 @@ struct VkEffectsSystem {
             Vec3 right = fwd.cross(toCam).normalized();
             if (right.length()<0.001f) right=Vec3(1,0,0);
             float hw=width*0.5f;
-            v[i*2]  ={pts[i].x+right.x*hw,pts[i].y+right.y*hw,pts[i].z+right.z*hw, col.x,col.y,col.z,col.w, 1.f};
-            v[i*2+1]={pts[i].x-right.x*hw,pts[i].y-right.y*hw,pts[i].z-right.z*hw, col.x,col.y,col.z,col.w,-1.f};
+            v[i*2]  ={(float)(pts[i].x+right.x*hw),(float)(pts[i].y+right.y*hw),(float)(pts[i].z+right.z*hw), (float)col.x,(float)col.y,(float)col.z,(float)col.w, 1.f};
+            v[i*2+1]={(float)(pts[i].x-right.x*hw),(float)(pts[i].y-right.y*hw),(float)(pts[i].z-right.z*hw), (float)col.x,(float)col.y,(float)col.z,(float)col.w,-1.f};
         }
         vmaUnmapMemory(ribbonAllocator, ribbonRingAlloc);
 
@@ -158,6 +158,7 @@ struct VkEffectsSystem {
 
     VkBuffer      ribbonRingVbo   = VK_NULL_HANDLE;
     VmaAllocation ribbonRingAlloc = VK_NULL_HANDLE;
+    VmaAllocator  ribbonAllocator = VK_NULL_HANDLE;
     size_t        ribbonRingMax   = 0;
 
     // -----------------------------------------------------------------------

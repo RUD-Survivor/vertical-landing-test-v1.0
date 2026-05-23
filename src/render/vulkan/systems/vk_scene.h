@@ -258,6 +258,7 @@ struct VkSceneSystem {
                   float r=1.f, float g=1.f, float b=1.f, float a=1.f, float ambient=0.15f) {
         auto it = meshCache.find(id);
         if (it == meshCache.end()) return;
+        _bindMeshPipe(cmd);  // 确保管线+描述符集已绑定
         MeshPushConstants pc{};
         memcpy(pc.model, model, 64);
         pc.baseColor[0]=r; pc.baseColor[1]=g; pc.baseColor[2]=b; pc.baseColor[3]=a;

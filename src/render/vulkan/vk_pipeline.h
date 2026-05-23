@@ -271,8 +271,8 @@ struct VkPlanetPipeline {
 
         VkPipelineRasterizationStateCreateInfo rasState{ VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
         rasState.polygonMode = VK_POLYGON_MODE_FILL;
-        rasState.cullMode    = VK_CULL_MODE_BACK_BIT;  // 地球球体启用背面剔除
-        rasState.frontFace   = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+        rasState.cullMode    = VK_CULL_MODE_BACK_BIT;
+        rasState.frontFace   = VK_FRONT_FACE_COUNTER_CLOCKWISE;  // 球体索引在 Y-flip 后外面是 CCW
         rasState.lineWidth   = 1.0f;
 
         VkPipelineMultisampleStateCreateInfo msState{ VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
@@ -587,20 +587,19 @@ struct VkBillboardPipeline {
 // -----------------------------------------------------------------------
 struct VkLensFlarePipeline {
     VkPipelineLayout layout=VK_NULL_HANDLE; VkPipeline pipeline=VK_NULL_HANDLE;
-    bool init(VulkanContext& ctx, VkFormat colorFmt, const char* vertSpv, const char* fragSpv) {
+    bool init(VulkanContext& ctx, VkFormat colorFmt, VkFormat depthFmt, const char* vertSpv, const char* fragSpv) {
         auto vc=loadSPIRV(vertSpv); auto fc=loadSPIRV(fragSpv);
         if(vc.empty()||fc.empty()) return false;
         VkShaderModule vm=createShaderModule(ctx.device,vc), fm=createShaderModule(ctx.device,fc);
         if(!vm||!fm){if(vm)vkDestroyShaderModule(ctx.device,vm,nullptr);if(fm)vkDestroyShaderModule(ctx.device,fm,nullptr);return false;}
         VkVertexInputBindingDescription   bind{0,8,VK_VERTEX_INPUT_RATE_VERTEX};
         VkVertexInputAttributeDescription attr{0,0,VK_FORMAT_R32G32_SFLOAT,0};
-        VkFormat noDepth=VK_FORMAT_UNDEFINED;
         PipelineInitParams p{}; p.bindings=&bind; p.bindingCount=1; p.attrs=&attr; p.attrCount=1;
         p.blendEnable=true; p.srcColor=VK_BLEND_FACTOR_ONE; p.dstColor=VK_BLEND_FACTOR_ONE; // Additive
         p.srcAlpha=VK_BLEND_FACTOR_ONE; p.dstAlpha=VK_BLEND_FACTOR_ONE;
         p.depthTest=VK_FALSE; p.depthWrite=VK_FALSE; p.cullMode=VK_CULL_MODE_NONE;
         p.pcSize=sizeof(LensFlarePushConstants); p.setLayouts=nullptr; p.setCount=0;
-        p.colorFmt=colorFmt; p.depthFmt=noDepth; p.name="LensFlare";
+        p.colorFmt=colorFmt; p.depthFmt=depthFmt; p.name="LensFlare";
         bool ok=buildPipeline(ctx.device,vm,fm,p,layout,pipeline);
         vkDestroyShaderModule(ctx.device,vm,nullptr); vkDestroyShaderModule(ctx.device,fm,nullptr); return ok;
     }
@@ -721,37 +720,47 @@ struct VkTerrainPipeline {
         if(vc.empty()||fc.empty()) return false;
         VkShaderModule vm=createShaderModule(ctx.device,vc), fm=createShaderModule(ctx.device,fc);
         if(!vm||!fm){if(vm)vkDestroyShaderModule(ctx.device,vm,nullptr);if(fm)vkDestroyShaderModule(ctx.device,fm,nullptr);return false;}
-        VkDescriptorSetLayoutBinding b0[2]={{0,VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,1,VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT,nullptr},{1,VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,1,VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT,nullptr}};
-        VkDescriptorSetLayoutCreateInfo s0{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,nullptr,0,2,b0};
-        if(vkCreateDescriptorSetLayout(ctx.device,&s0,nullptr,&set0Layout)!=VK_SUCCESS) goto fail;
-        VkDescriptorSetLayoutBinding b1[4];
-        for(int i=0;i<4;i++) b1[i]={(uint32_t)i,VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,1,VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT,nullptr};
-        VkDescriptorSetLayoutCreateInfo s1{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,nullptr,0,4,b1};
-        if(vkCreateDescriptorSetLayout(ctx.device,&s1,nullptr,&set1Layout)!=VK_SUCCESS) goto fail;
-        VkPushConstantRange pc{VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT,0,sizeof(TerrainPushConstants)};
-        VkDescriptorSetLayout sl[]={set0Layout,set1Layout};
-        VkPipelineLayoutCreateInfo pl{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,nullptr,0,2,sl,1,&pc};
-        if(vkCreatePipelineLayout(ctx.device,&pl,nullptr,&layout)!=VK_SUCCESS) goto fail;
-        VkPipelineShaderStageCreateInfo ss[2]={{VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,nullptr,0,VK_SHADER_STAGE_VERTEX_BIT,vm,"main",nullptr},{VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,nullptr,0,VK_SHADER_STAGE_FRAGMENT_BIT,fm,"main",nullptr}};
-        VkVertexInputBindingDescription vb{0,48,VK_VERTEX_INPUT_RATE_VERTEX};
-        VkVertexInputAttributeDescription va[4]={{0,0,VK_FORMAT_R32G32B32_SFLOAT,0},{1,0,VK_FORMAT_R32G32B32_SFLOAT,12},{2,0,VK_FORMAT_R32G32_SFLOAT,24},{3,0,VK_FORMAT_R32G32B32A32_SFLOAT,32}};
-        VkPipelineVertexInputStateCreateInfo vi{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,nullptr,0,1,&vb,4,va};
-        VkPipelineInputAssemblyStateCreateInfo ia{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,nullptr,0,VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,VK_FALSE};
-        VkPipelineViewportStateCreateInfo vp{VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,nullptr,0,1,nullptr,1,nullptr};
-        VkPipelineRasterizationStateCreateInfo rs{VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,nullptr,0,VK_FALSE,VK_FALSE,VK_POLYGON_MODE_FILL,VK_CULL_MODE_NONE,VK_FRONT_FACE_COUNTER_CLOCKWISE,VK_FALSE,0,0,0,1.f};
-        VkPipelineMultisampleStateCreateInfo ms{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,nullptr,0,VK_SAMPLE_COUNT_1_BIT,VK_FALSE,0,nullptr,nullptr,nullptr};
-        VkPipelineDepthStencilStateCreateInfo ds{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,nullptr,0,VK_TRUE,VK_TRUE,VK_COMPARE_OP_LESS,VK_FALSE,VK_FALSE,{},{},0,0,0,0};
-        VkPipelineColorBlendAttachmentState ba{VK_FALSE,VK_BLEND_FACTOR_ZERO,VK_BLEND_FACTOR_ZERO,VK_BLEND_OP_ADD,VK_BLEND_FACTOR_ZERO,VK_BLEND_FACTOR_ZERO,VK_BLEND_OP_ADD,0xF};
-        VkPipelineColorBlendStateCreateInfo bs{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,nullptr,0,VK_FALSE,VK_LOGIC_OP_COPY,1,&ba,{}};
-        VkDynamicState dyn[]={VK_DYNAMIC_STATE_VIEWPORT,VK_DYNAMIC_STATE_SCISSOR};
-        VkPipelineDynamicStateCreateInfo dsi{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,nullptr,0,2,dyn};
-        VkPipelineRenderingCreateInfo rci{VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,nullptr,0,1,&cf,df,df};
-        VkGraphicsPipelineCreateInfo pci{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,&rci,0,2,ss,&vi,&ia,nullptr,&vp,&rs,&ms,&ds,&bs,&dsi,layout,VK_NULL_HANDLE,0,VK_NULL_HANDLE,-1};
-        VkResult r=vkCreateGraphicsPipelines(ctx.device,VK_NULL_HANDLE,1,&pci,nullptr,&pipeline);
-        vkDestroyShaderModule(ctx.device,vm,nullptr); vkDestroyShaderModule(ctx.device,fm,nullptr);
-        if(r!=VK_SUCCESS){fprintf(stderr,"[Terrain] pipeline failed\n");return false;}
+        auto destroySMs=[&]{vkDestroyShaderModule(ctx.device,vm,nullptr);vkDestroyShaderModule(ctx.device,fm,nullptr);};
+
+        // lambda 封装管线创建，避免 goto 跳过初始化引起的 C2362
+        bool ok = [&]() -> bool {
+            VkDescriptorSetLayoutBinding b0[2]={
+                {0,VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,1,VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT,nullptr},
+                {1,VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,1,VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT,nullptr}};
+            VkDescriptorSetLayoutCreateInfo s0{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,nullptr,0,2,b0};
+            if(vkCreateDescriptorSetLayout(ctx.device,&s0,nullptr,&set0Layout)!=VK_SUCCESS) return false;
+            VkDescriptorSetLayoutBinding b1[4];
+            for(int i=0;i<4;i++) b1[i]={(uint32_t)i,VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,1,VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT,nullptr};
+            VkDescriptorSetLayoutCreateInfo s1{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,nullptr,0,4,b1};
+            if(vkCreateDescriptorSetLayout(ctx.device,&s1,nullptr,&set1Layout)!=VK_SUCCESS) return false;
+            VkPushConstantRange pc{VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT,0,sizeof(TerrainPushConstants)};
+            VkDescriptorSetLayout sl[]={set0Layout,set1Layout};
+            VkPipelineLayoutCreateInfo pl{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,nullptr,0,2,sl,1,&pc};
+            if(vkCreatePipelineLayout(ctx.device,&pl,nullptr,&layout)!=VK_SUCCESS) return false;
+            VkPipelineShaderStageCreateInfo ss[2]={
+                {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,nullptr,0,VK_SHADER_STAGE_VERTEX_BIT,  vm,"main",nullptr},
+                {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,nullptr,0,VK_SHADER_STAGE_FRAGMENT_BIT,fm,"main",nullptr}};
+            VkVertexInputBindingDescription vb{0,48,VK_VERTEX_INPUT_RATE_VERTEX};
+            VkVertexInputAttributeDescription va[4]={{0,0,VK_FORMAT_R32G32B32_SFLOAT,0},{1,0,VK_FORMAT_R32G32B32_SFLOAT,12},{2,0,VK_FORMAT_R32G32_SFLOAT,24},{3,0,VK_FORMAT_R32G32B32A32_SFLOAT,32}};
+            VkPipelineVertexInputStateCreateInfo vi{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,nullptr,0,1,&vb,4,va};
+            VkPipelineInputAssemblyStateCreateInfo ia{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,nullptr,0,VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,VK_FALSE};
+            VkPipelineViewportStateCreateInfo vp{VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,nullptr,0,1,nullptr,1,nullptr};
+            VkPipelineRasterizationStateCreateInfo rs{VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,nullptr,0,VK_FALSE,VK_FALSE,VK_POLYGON_MODE_FILL,VK_CULL_MODE_NONE,VK_FRONT_FACE_COUNTER_CLOCKWISE,VK_FALSE,0,0,0,1.f};
+            VkPipelineMultisampleStateCreateInfo ms{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,nullptr,0,VK_SAMPLE_COUNT_1_BIT,VK_FALSE,0.f,nullptr,VK_FALSE,VK_FALSE};
+            VkPipelineDepthStencilStateCreateInfo ds{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,nullptr,0,VK_TRUE,VK_TRUE,VK_COMPARE_OP_LESS,VK_FALSE,VK_FALSE,{},{},0.f,0.f};
+            VkPipelineColorBlendAttachmentState ba{VK_FALSE,VK_BLEND_FACTOR_ZERO,VK_BLEND_FACTOR_ZERO,VK_BLEND_OP_ADD,VK_BLEND_FACTOR_ZERO,VK_BLEND_FACTOR_ZERO,VK_BLEND_OP_ADD,0xF};
+            VkPipelineColorBlendStateCreateInfo bs{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,nullptr,0,VK_FALSE,VK_LOGIC_OP_COPY,1,&ba,{}};
+            VkDynamicState dyn[]={VK_DYNAMIC_STATE_VIEWPORT,VK_DYNAMIC_STATE_SCISSOR};
+            VkPipelineDynamicStateCreateInfo dsi{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,nullptr,0,2,dyn};
+            VkPipelineRenderingCreateInfo rci{VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,nullptr,0,1,&cf,df,VK_FORMAT_UNDEFINED};
+            VkGraphicsPipelineCreateInfo pci{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,&rci,0,2,ss,&vi,&ia,nullptr,&vp,&rs,&ms,&ds,&bs,&dsi,layout,VK_NULL_HANDLE,0,VK_NULL_HANDLE,-1};
+            VkResult r=vkCreateGraphicsPipelines(ctx.device,VK_NULL_HANDLE,1,&pci,nullptr,&pipeline);
+            if(r!=VK_SUCCESS){fprintf(stderr,"[Terrain] pipeline failed\n");return false;}
+            return true;
+        }();
+        destroySMs();
+        if(!ok) return false;
         printf("[Terrain] Pipeline created\n"); return true;
-    fail: vkDestroyShaderModule(ctx.device,vm,nullptr); vkDestroyShaderModule(ctx.device,fm,nullptr); return false;
     }
     void bind(VkCommandBuffer cmd) const{vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,pipeline);}
     void shutdown(VkDevice d){

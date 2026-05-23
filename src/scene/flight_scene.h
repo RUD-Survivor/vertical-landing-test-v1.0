@@ -434,7 +434,6 @@ else {
 
         // ---- 1. 相机 ----
         ctx.viewMat.toFloatArray(snap.view);
-        ctx.macroProjMat.toFloatArray(snap.proj);
         snap.camPos[0] = (float)ctx.camEye_rel.x;
         snap.camPos[1] = (float)ctx.camEye_rel.y;
         snap.camPos[2] = (float)ctx.camEye_rel.z;
@@ -457,6 +456,35 @@ else {
         int ww, wh;
         glfwGetFramebufferSize(GameContext::getInstance().window, &ww, &wh);
         snap.aspect = (float)ww / (float)wh;
+
+        // ---- 投影矩阵（匹配 celestialRenderer 的 smart near/far，覆盖 ctx.macroProjMat 的 FOV 错误） ----
+        {
+            double _ws_d = ws_d, _ro_x = ctx.ro_x, _ro_y = ctx.ro_y, _ro_z = ctx.ro_z;
+            float far_plane = 1000.0f * 149597870.0f;
+            float closest_dist = far_plane;
+            auto& ss = UniverseModel::getInstance().solar_system;
+            for (size_t i = 1; i < ss.size(); i++) {
+                float px=(float)(ss[i].px*_ws_d-_ro_x), py=(float)(ss[i].py*_ws_d-_ro_y), pz=(float)(ss[i].pz*_ws_d-_ro_z);
+                float br = (float)(ss[i].radius * _ws_d);
+                float d = sqrtf((px-snap.camPos[0])*(px-snap.camPos[0])+
+                                (py-snap.camPos[1])*(py-snap.camPos[1])+
+                                (pz-snap.camPos[2])*(pz-snap.camPos[2])) - br;
+                if (d < closest_dist) closest_dist = d;
+            }
+            {
+                float d = sqrtf((ctx.renderSun.x-snap.camPos[0])*(ctx.renderSun.x-snap.camPos[0])+
+                                (ctx.renderSun.y-snap.camPos[1])*(ctx.renderSun.y-snap.camPos[1])+
+                                (ctx.renderSun.z-snap.camPos[2])*(ctx.renderSun.z-snap.camPos[2]))
+                          - (float)ctx.sun_radius;
+                if (d < closest_dist) closest_dist = d;
+            }
+            float macro_near = fmaxf(0.00001f, closest_dist * 0.05f);
+            macro_near = fminf(macro_near, 1.0f);
+            if (closest_dist < 1.0f) macro_near = fminf(macro_near, 0.0001f);
+            macro_near = fmaxf(macro_near, (float)ctx.cam_dist * 0.0001f);
+            Mat4 projMat = Mat4::perspective(0.8, snap.aspect, (double)macro_near, (double)far_plane);
+            projMat.toFloatArray(snap.proj);
+        }
 
         // ---- 4. 天体（行星/卫星，跳过太阳） ----
         auto& ss = UniverseModel::getInstance().solar_system;

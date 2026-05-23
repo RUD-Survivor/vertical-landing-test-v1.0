@@ -98,6 +98,9 @@ static bool initVulkanFlight() {
     g_flightScene->onEnter();
 
     // 将 CPU 网格数据注册到 Vulkan
+    printf("[Vulkan] Checking meshes: earth.v=%zu i=%zu body.v=%zu i=%zu\n",
+        g_flightScene->earthMesh.cpuVerts.size(), g_flightScene->earthMesh.cpuIndices.size(),
+        g_flightScene->rocketBody.cpuVerts.size(), g_flightScene->rocketBody.cpuIndices.size());
     auto reg = [](const char* id, const Mesh& m) -> bool {
         if (m.cpuIndices.empty()) return true;
         return g_vkR3D.registerMesh(g_vkCtx, id,
@@ -115,11 +118,22 @@ static bool initVulkanFlight() {
 static void renderFlightSceneVulkan(VkCommandBuffer cmd, int frameSlot) {
     SceneSnapshot snap = g_flightScene->extractRenderSnapshot();
 
+    // Debug: print first-frame matrices
+    static int dbg = 0;
+    if (dbg < 2) {
+        printf("[VkFrame] frame=%d view[0]=%.2f proj[0]=%.2f camPos=(%.0f,%.0f,%.0f)\n",
+            snap.frameIndex, snap.view[0], snap.proj[0],
+            snap.camPos[0], snap.camPos[1], snap.camPos[2]);
+        printf("[VkFrame] celestials=%zu plumes=%zu ribbons=%zu\n",
+            snap.celestials.size(), snap.plumes.size(), snap.ribbons.size());
+        dbg++;
+    }
+
     // 更新 TAA 重投影矩阵
     g_vkTAA.updateMatrices(snap.view, snap.proj);
     g_vkTAA.uploadMatrices(frameSlot);
 
-    g_vkR3D.render(cmd, 0, snap);
+    g_vkR3D.render(cmd, 0, snap, g_vkCtx.swapExtent);
 }
 
 static void handleVkSwapchainResize(GLFWwindow* window) {
@@ -204,6 +218,14 @@ static void renderVulkanFrame(GLFWwindow* window) {
         }
     }
     {
+        // endResolvePass 已将 swapchain 转为 PRESENT_SRC_KHR，HUD 需要 COLOR_ATTACHMENT_OPTIMAL
+        transitionImage(frame.commandBuffer, g_vkCtx.swapImages[imageIdx],
+            VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,          VK_ACCESS_2_NONE,
+            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+            VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT);
+
         VkRenderingAttachmentInfo hudAI{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
         hudAI.imageView=g_vkCtx.swapImageViews[imageIdx];
         hudAI.imageLayout=VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
@@ -215,6 +237,9 @@ static void renderVulkanFrame(GLFWwindow* window) {
         VkFrameRenderer::setViewportScissor(frame.commandBuffer,g_vkCtx.swapExtent);
         g_vkHUD.flush(frame.commandBuffer);
         vkCmdEndRendering(frame.commandBuffer);
+
+        // HUD 结束后转为 PRESENT_SRC_KHR 供呈现
+        transitionToPresent(frame.commandBuffer, g_vkCtx.swapImages[imageIdx]);
     }
 
     vkEndCommandBuffer(frame.commandBuffer);
@@ -430,7 +455,8 @@ int main() {
       if (glfwWindowShouldClose(window)) break;
 
 #ifdef USE_VULKAN
-      if (g_flightScene) g_flightScene->render();  // ctx.update() → 相机矩阵，然后早退
+      if (g_flightScene) g_flightScene->update(real_dt);  // 物理模拟 + 相机输入
+      if (g_flightScene) g_flightScene->render();          // ctx.update() → 相机矩阵，然后早退
       renderVulkanFrame(window);
 #else
       SceneManager::getInstance().render();
@@ -449,6 +475,7 @@ int main() {
   delete g_flightScene; g_flightScene = nullptr;
   g_vkR3D.shutdown(g_vkCtx);
   g_vkTAA.shutdown(g_vkCtx);
+  g_vkHUD.shutdown(g_vkCtx);
   g_vkDesc.shutdown(g_vkCtx);
   g_frameSync.shutdown(g_vkCtx.device);
   g_vkCtx.shutdown();

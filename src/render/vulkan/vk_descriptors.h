@@ -26,14 +26,15 @@ struct FrameUBO {
 
 // -----------------------------------------------------------------------
 // MeshPushConstants — must match push_constant block in mesh.vert / mesh.frag
-// std430: mat4(64) + vec4(16) + float(4) + int(4) = 88 bytes
-// -----------------------------------------------------------------------
+// 现在与 PlanetPushConstants 统一为 104 bytes（mesh.vert 包含 planetCenter 以兼容星球管线）
+// std430: mat4(64) + vec4 baseColor(16) + vec4 planetCenter(16) + float(4) + int(4) = 104
 struct MeshPushConstants {
-    float model[16];    // 64 bytes — world transform
-    float baseColor[4]; // 16 bytes — tint color
-    float ambientStr;   //  4 bytes
-    int   hasTexture;   //  4 bytes — 0 = no texture, 1 = sample uSampler
-};
+    float model[16];       // 64 bytes — offset   0
+    float baseColor[4];    // 16 bytes — offset  64
+    float planetCenter[4]; // 16 bytes — offset  80（mesh 管线中未使用，填 0）
+    float ambientStr;      //  4 bytes — offset  96
+    int   hasTexture;      //  4 bytes — offset 100
+};                         //           total: 104 bytes
 
 // -----------------------------------------------------------------------
 // PlanetPushConstants — 行星着色器扩展（在 MeshPushConstants 基础上追加
@@ -241,12 +242,14 @@ private:
     }
 
     bool createPool(VulkanContext& ctx) {
+        // UBO count: FRAMES_IN_FLIGHT (FrameUBO sets) + FRAMES_IN_FLIGHT*2 (terrain set0: 2 bindings each)
+        // Image sampler: 64 (textures) + extra headroom
         VkDescriptorPoolSize sizes[2] = {
-            { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,         FRAMES_IN_FLIGHT },
+            { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,         FRAMES_IN_FLIGHT * 4 },
             { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 64 },
         };
         VkDescriptorPoolCreateInfo ci{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
-        ci.maxSets       = FRAMES_IN_FLIGHT + 64;
+        ci.maxSets       = FRAMES_IN_FLIGHT * 4 + 64;
         ci.poolSizeCount = 2;
         ci.pPoolSizes    = sizes;
         if (vkCreateDescriptorPool(ctx.device, &ci, nullptr, &pool) != VK_SUCCESS) {
