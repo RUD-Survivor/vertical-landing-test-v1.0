@@ -52,6 +52,11 @@ public:
         r_py = trans.abs_py * ws_d;
         r_pz = trans.abs_pz * ws_d;
         
+        // NaN 防御：防止物理 NaN 污染渲染
+        if (std::isnan(r_px) || std::isnan(r_py) || std::isnan(r_pz)) {
+            r_px = 0.0; r_py = EARTH_RADIUS * ws_d; r_pz = 0.0;
+        }
+        
         CelestialBody& sun_body = UniverseModel::getInstance().solar_system[0];
         sun_px = sun_body.px * ws_d;
         sun_py = sun_body.py * ws_d;
@@ -112,6 +117,7 @@ public:
         // 致使 camera orbit_dist=0 → lookAt(eye==target) → NaN 视图矩阵 → 什么都渲染不出来
         // fallback 给 earth_r*0.25 → orbit_dist = earth_r*2，相机在地球外 2 倍半径处，视野正常
         if (rh < 1e-4f) rh = earth_r * 0.25f;
+        if (rw_3d < 1e-4f) rw_3d = earth_r * 0.0008f;
 
         // ===============================================================
         // --- CameraDirector: 计算浮动原点 + 视图矩阵 ---

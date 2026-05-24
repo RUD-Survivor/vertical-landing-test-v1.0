@@ -533,13 +533,17 @@ else {
         float er = ctx.earth_r;
         float rh = (ctx.rh    > 0.f) ? ctx.rh    : er * 0.005f;
         float rw = (ctx.rw_3d > 0.f) ? ctx.rw_3d : er * 0.0008f;
+        float rx = (float)ctx.renderRocketBase.x, ry = (float)ctx.renderRocketBase.y, rz = (float)ctx.renderRocketBase.z;
 
+        // Body: translate * scale（Y 轴圆柱）
         snap.rocketBodyModel[0] = rw; snap.rocketBodyModel[5] = rh;
         snap.rocketBodyModel[10]= rw; snap.rocketBodyModel[15]= 1.0f;
+        snap.rocketBodyModel[12]= rx; snap.rocketBodyModel[13]= ry; snap.rocketBodyModel[14]= rz;
 
+        // Nose: translate * scale（上半部锥体）
         snap.rocketNoseModel[0] = rw; snap.rocketNoseModel[5] = rw * 2.f;
-        snap.rocketNoseModel[10]= rw; snap.rocketNoseModel[13]= rh * 0.5f;
-        snap.rocketNoseModel[15]= 1.0f;
+        snap.rocketNoseModel[10]= rw; snap.rocketNoseModel[15]= 1.0f;
+        snap.rocketNoseModel[12]= rx; snap.rocketNoseModel[13]= ry + rh * 0.5f; snap.rocketNoseModel[14]= rz;
 
         // ---- 6. 排气羽流 ----
         auto& prop   = world.get<PropulsionComponent>(rocket_entity);
@@ -617,9 +621,11 @@ else {
         float cy = vp.m[1]*sunWorld.x + vp.m[5]*sunWorld.y + vp.m[9]*sunWorld.z + vp.m[13];
         float cz = vp.m[2]*sunWorld.x + vp.m[6]*sunWorld.y + vp.m[10]*sunWorld.z + vp.m[14];
         float cw = vp.m[3]*sunWorld.x + vp.m[7]*sunWorld.y + vp.m[11]*sunWorld.z + vp.m[15];
-        if (cw > 0.0f) {
+        if (cw > 0.0f && fabsf(cx/cw) < 3.5f && fabsf(cy/cw) < 3.5f) {
             snap.sunScreen[0] =  cx / cw;
             snap.sunScreen[1] = -(cy / cw); // Vulkan NDC Y 向下，取反映射到屏幕 UV
+        } else {
+            snap.sunScreen[0] = -3.0f; // 哨兵值：太阳在屏幕外/背后，镜头光晕隐藏
         }
         float sunDist = (sunWorld - ctx.camEye_rel).length();
         snap.sunIntensity = 149597.87f / fmaxf(1.0f, sunDist); // 1 AU in render units (ws_d=0.001)
@@ -628,6 +634,7 @@ else {
         // ---- 8. 天空 + 大气 ----
         snap.skyVibrancy = (float)environmentSystem.day_blend;
         snap.dayBlend = (float)environmentSystem.day_blend;
+        snap.cameraMode = cam.mode;
 
         // ---- 9. 镜头光晕遮挡体（每个星球中心+半径） ----
         for (size_t i = 1; i < ss.size(); i++) {

@@ -142,6 +142,7 @@ struct SceneSnapshot {
     float sunWorldPos[3];  // 镜头光晕遮挡测试用
     float aspect;
     float dayBlend;         // 大气 sunVisibility（含遮挡）
+    int   cameraMode;       // 0=Orbit 1=Chase 2=Panorama 3=Free
 
     // ---- 镜头光晕遮挡（每个星球中心+半径） ----
     struct Occluder { float cx, cy, cz, radius; };
@@ -184,6 +185,7 @@ struct SceneSnapshot {
         memset(rocketBodyModel, 0, sizeof(rocketBodyModel));
         memset(rocketNoseModel, 0, sizeof(rocketNoseModel));
         memset(sunScreen, 0, sizeof(sunScreen));
+        sunScreen[0] = -3.0f; // 哨兵：默认隐藏光晕，直到计算出有效屏幕坐标
         memset(sunWorldPos, 0, sizeof(sunWorldPos));
         time=0; skyVibrancy=1.f; frameIndex=0; sunIntensity=1.f; aspect=1.f; dayBlend=1.f;
         rocketBodyModel[0]=rocketBodyModel[5]=rocketBodyModel[10]=rocketBodyModel[15]=1.f;

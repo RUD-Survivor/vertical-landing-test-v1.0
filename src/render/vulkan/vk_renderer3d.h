@@ -214,14 +214,7 @@ struct VkRenderer3D {
         scene.updateLightDir(snap.frameIndex % 2,
             snap.lightDir[0], snap.lightDir[1], snap.lightDir[2]);
 
-        // ---- 3. 火箭（全零件渲染，先清深度确保始终在最前层） ----
-        {
-            VkClearAttachment clearAttach{};
-            clearAttach.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-            clearAttach.clearValue.depthStencil.depth = 1.0f;
-            VkClearRect cr{ {{0,0},{_extent.width,_extent.height}}, 0, 1 };
-            vkCmdClearAttachments(cmd, 1, &clearAttach, 1, &cr);
-        }
+        // ---- 3. 火箭（全零件渲染，保留物理深度遮挡） ----
         if (snap.rocketParts.empty()) {
             drawMesh(cmd, "rocketBody", snap.rocketBodyModel, 0.92f, 0.92f, 0.92f);
             drawMesh(cmd, "rocketNose", snap.rocketNoseModel, 0.88f, 0.88f, 0.88f);
@@ -260,6 +253,53 @@ struct VkRenderer3D {
 
         // ---- 5. 天空盒（跳过——debug 测试） ----
         // drawSkybox(cmd, snap.skyVibrancy, snap.aspect);
+
+        // ---- 6. 镜头光晕（太阳光晕 + 辉光 + 条纹） ----
+        if (scene.billboardQuadVbo != VK_NULL_HANDLE
+            && snap.sunScreen[0] > -2.0f && snap.sunIntensity > 0.001f) {
+            // 动态强度/缩放（匹配 OpenGL 距离衰减）
+            float refDist = 149597.87f; // 1 AU in render units
+            float sunDx = snap.sunWorldPos[0] - snap.camPos[0];
+            float sunDy = snap.sunWorldPos[1] - snap.camPos[1];
+            float sunDz = snap.sunWorldPos[2] - snap.camPos[2];
+            float curDist = sqrtf(sunDx*sunDx + sunDy*sunDy + sunDz*sunDz);
+            float distFactor = refDist / fmaxf(1.0f, curDist);
+            float intensityScale = powf(distFactor, 1.25f);
+            intensityScale = fminf(fmaxf(intensityScale, 0.15f), 8.0f);
+            float sizeScale = fminf(fmaxf(distFactor, 0.2f), 10.0f);
+
+            float sx = snap.sunScreen[0], sy = snap.sunScreen[1];
+            float asp = snap.aspect;
+
+            // 热白核心（太阳位置）— 极小尺寸 + 高强度，永不超出 NDC
+            drawLensFlare(cmd, scene.billboardQuadVbo, sx, sy, asp, 2250.f * intensityScale,
+                          0.04f*sizeScale, 0.04f*sizeScale, sx, sy,
+                          1.0f, 0.98f, 0.95f, 1.0f, 0);
+            // 暖色光晕
+            drawLensFlare(cmd, scene.billboardQuadVbo, sx, sy, asp, 750.f * intensityScale,
+                          0.08f*sizeScale, 0.08f*sizeScale, sx, sy,
+                          1.0f, 0.92f, 0.75f, 1.0f, 0);
+            // 淡暖色散开
+            drawLensFlare(cmd, scene.billboardQuadVbo, sx, sy, asp, 200.f * intensityScale,
+                          0.15f*sizeScale, 0.15f*sizeScale, sx, sy,
+                          0.9f, 0.75f, 0.55f, 1.0f, 0);
+            // 蓝色变形条纹（穿过太阳）— 窄条不会超 NDC
+            drawLensFlare(cmd, scene.billboardQuadVbo, sx, sy, asp, 300.f * intensityScale,
+                          0.5f*sizeScale, 0.005f*sizeScale, sx, sy,
+                          0.7f, 0.8f, 1.0f, 1.0f, 1);
+            // 白色核心条纹
+            drawLensFlare(cmd, scene.billboardQuadVbo, sx, sy, asp, 450.f * intensityScale,
+                          0.3f*sizeScale, 0.003f*sizeScale, sx, sy,
+                          1.0f, 0.95f, 0.9f, 1.0f, 1);
+            // 衍射条纹
+            drawLensFlare(cmd, scene.billboardQuadVbo, sx, sy, asp, 150.f * intensityScale,
+                          0.10f*sizeScale, 0.10f*sizeScale, sx, sy,
+                          0.6f, 0.85f, 1.0f, 1.0f, 2);
+            // 星芒
+            drawLensFlare(cmd, scene.billboardQuadVbo, sx, sy, asp, 250.f * intensityScale,
+                          0.12f*sizeScale, 0.12f*sizeScale, sx, sy,
+                          1.0f, 0.97f, 0.9f, 1.0f, 3);
+        }
 
         // ---- 8. 发射台 (Block C) ----
         if (snap.hasLaunchPad && hasMesh("rocketBox")) {

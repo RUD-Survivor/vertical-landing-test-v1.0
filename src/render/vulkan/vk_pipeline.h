@@ -597,7 +597,7 @@ struct VkLensFlarePipeline {
         PipelineInitParams p{}; p.bindings=&bind; p.bindingCount=1; p.attrs=&attr; p.attrCount=1;
         p.blendEnable=true; p.srcColor=VK_BLEND_FACTOR_ONE; p.dstColor=VK_BLEND_FACTOR_ONE; // Additive
         p.srcAlpha=VK_BLEND_FACTOR_ONE; p.dstAlpha=VK_BLEND_FACTOR_ONE;
-        p.depthTest=VK_FALSE; p.depthWrite=VK_FALSE; p.cullMode=VK_CULL_MODE_NONE;
+        p.depthTest=VK_TRUE; p.depthWrite=VK_FALSE; p.depthOp=VK_COMPARE_OP_LESS_OR_EQUAL; p.cullMode=VK_CULL_MODE_NONE;
         p.pcSize=sizeof(LensFlarePushConstants); p.setLayouts=nullptr; p.setCount=0;
         p.colorFmt=colorFmt; p.depthFmt=depthFmt; p.name="LensFlare";
         bool ok=buildPipeline(ctx.device,vm,fm,p,layout,pipeline);

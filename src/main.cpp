@@ -94,12 +94,12 @@ static bool initVulkanFlight() {
     rs.abs_px = earth.px;
     rs.abs_py = earth.py + EARTH_RADIUS + ALT;
     rs.abs_pz = earth.pz;
-    // 相对地球坐标
+    // 相对地球坐标（地表+100km，surf 也设为同值防止 FastGravityUpdate 覆盖）
     rs.px  = 0.0;
     rs.py  = EARTH_RADIUS + ALT;
     rs.pz  = 0.0;
     rs.surf_px = 0.0;
-    rs.surf_py = EARTH_RADIUS;
+    rs.surf_py = EARTH_RADIUS + ALT;  // 保持和 py 一致，防止地面锁定回落
     rs.surf_pz = 0.0;
     rs.altitude = ALT;
     rs.fuel = 50000.0;
@@ -109,8 +109,25 @@ static bool initVulkanFlight() {
     // Vulkan 模式：skip_builder=true → 无火箭组件，从地球全景视角开始
     g_flightScene->cam.mode         = CameraDirector::PANORAMA;
     g_flightScene->cam.focus_target = 3; // Earth (solar_system[3])
-    // 初始旋转：让相机面朝太阳（地球→太阳 = +X 方向）
-    g_flightScene->cam.quat = Quat::fromAxisAngle(Vec3(0, 1, 0), 3.141592653589793 / 2.0);
+    // 初始旋转：让相机朝向太阳（计算太阳→地球方向，让相机从太阳侧观察）
+    {
+        double sx = 0.0, sy = 0.0, sz = 0.0;  // 太阳在原点
+        double ex = earth.px, ey = earth.py, ez = earth.pz;
+        Vec3 sunDir((float)(sx - ex), (float)(sy - ey), (float)(sz - ez));
+        sunDir = sunDir.normalized();
+        // 构造 quat 使 Z+（默认后拉方向）旋转到 sunDir
+        Vec3 zAxis(0, 0, 1);
+        Vec3 rotAxis = zAxis.cross(sunDir);
+        float dotVal = zAxis.dot(sunDir);
+        if (rotAxis.length() < 1e-6f) {
+            // 平行：不需要旋转或正好相反
+            g_flightScene->cam.quat = (dotVal > 0) ? Quat() : Quat::fromAxisAngle(Vec3(0,1,0), 3.141592653589793f);
+        } else {
+            rotAxis = rotAxis.normalized();
+            float angle = acosf(dotVal);
+            g_flightScene->cam.quat = Quat::fromAxisAngle(rotAxis, angle);
+        }
+    }
 
     // 将 CPU 网格数据注册到 Vulkan
     auto reg = [](const char* id, const Mesh& m) -> bool {
@@ -129,18 +146,6 @@ static bool initVulkanFlight() {
 
 static void renderFlightSceneVulkan(VkCommandBuffer cmd, int frameSlot) {
     SceneSnapshot snap = g_flightScene->extractRenderSnapshot();
-
-
-    // Debug: print first-frame matrices
-    static int dbg = 0;
-    if (dbg < 2) {
-        printf("[VkFrame] frame=%d view[0]=%.2f proj[0]=%.2f camPos=(%.0f,%.0f,%.0f)\n",
-            snap.frameIndex, snap.view[0], snap.proj[0],
-            snap.camPos[0], snap.camPos[1], snap.camPos[2]);
-        printf("[VkFrame] celestials=%zu plumes=%zu ribbons=%zu\n",
-            snap.celestials.size(), snap.plumes.size(), snap.ribbons.size());
-        dbg++;
-    }
 
     // 更新 TAA 重投影矩阵
     g_vkTAA.updateMatrices(snap.view, snap.proj);

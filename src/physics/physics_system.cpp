@@ -456,6 +456,11 @@ void CheckSOI_Transitions(entt::registry& registry, entt::entity entity) {
     trans.abs_py = current_body.py + trans.py;
     trans.abs_pz = current_body.pz + trans.pz;
     
+    // NaN 防御：如果绝对坐标出现 NaN，跳过 SOI 检查
+    if (std::isnan(trans.abs_px) || std::isnan(trans.abs_py) || std::isnan(trans.abs_pz)) {
+        return;
+    }
+    
     // 检查我们是否进入了任何星球的 SOI
     int best_soi = 0; // 默认退回到太阳 (太阳是最终的兜底 SOI)
     for (size_t i = 1; i < UniverseModel::getInstance().solar_system.size(); i++) {
@@ -468,10 +473,22 @@ void CheckSOI_Transitions(entt::registry& registry, entt::entity entity) {
         if (dist < b.soi_radius) {
             best_soi = i;
         }
+        // DEBUG: log Earth check
+        if (i == 3) {
+            static int soi_dbg=0;
+            if(soi_dbg<20){ printf("[SOI] Earth: dist=%.0f soi=%.0f best=%d cur=%d\n",
+                dist, b.soi_radius, best_soi, UniverseModel::getInstance().current_soi_index); soi_dbg++; }
+        }
     }
     
     // 如果 SOI 发生了变化，我们需要进行坐标原点的平滑切换
     if (best_soi != UniverseModel::getInstance().current_soi_index) {
+        printf("[SOI] TRANSITION %d->%d dist_to_earth=%.0f soi=%.0f\n",
+            UniverseModel::getInstance().current_soi_index, best_soi,
+            sqrt((trans.abs_px-UniverseModel::getInstance().solar_system[3].px)*(trans.abs_px-UniverseModel::getInstance().solar_system[3].px)+
+                 (trans.abs_py-UniverseModel::getInstance().solar_system[3].py)*(trans.abs_py-UniverseModel::getInstance().solar_system[3].py)+
+                 (trans.abs_pz-UniverseModel::getInstance().solar_system[3].pz)*(trans.abs_pz-UniverseModel::getInstance().solar_system[3].pz)),
+            UniverseModel::getInstance().solar_system[3].soi_radius);
         CelestialBody& new_body = UniverseModel::getInstance().solar_system[best_soi];
         // 计算当前在日心系下的绝对速度
         double h_vx = current_body.vx + vel.vx;
@@ -696,6 +713,8 @@ void Update(entt::registry& registry, entt::entity entity, double dt) {
     // 5. 受力分析 (Force Analysis)
     // 飞船的总质量 = 结构质量 + 当前燃料质量 + 后方级段的质量
     double total_mass = config.dry_mass + prop.fuel + config.upper_stages_mass;
+    // NaN 防御（skip_builder 空配置下可能产生 NaN fuel）
+    if (std::isnan(total_mass) || total_mass <= 0.0) total_mass = 1.0;
 
     // 6. 推力计算 (Thrust Calculation)
     prop.thrust_power = 0;
@@ -712,7 +731,10 @@ void Update(entt::registry& registry, entt::entity entity, double dt) {
 
         // 计算质量流量 (m_dot)：每秒消耗多少燃料
         // m_dot = F / (Isp * g0)
-        double m_dot = prop.thrust_power / (config.specific_impulse * std::max(1e-6, G0));
+        double m_dot = 0.0;
+        if (prop.thrust_power > 0.0 && config.specific_impulse > 0.0) {
+            m_dot = prop.thrust_power / (config.specific_impulse * G0);
+        }
         prop.fuel -= m_dot * dt;
         
         // 分级燃料同步
@@ -869,9 +891,9 @@ void Update(entt::registry& registry, entt::entity entity, double dt) {
             Fdy = -drag_mag * (rel_vy / temp_v_mag);
             Fdz = -drag_mag * (rel_vz / temp_v_mag);
         }
-        out_ax = (Fgx + Ft_x + Fdx) / total_mass;
-        out_ay = (Fgy + Ft_y + Fdy) / total_mass;
-        out_az = (Fgz + Ft_z + Fdz) / total_mass;
+        out_ax = (Fgx + Ft_x + Fdx) / std::max(total_mass, 1.0);
+        out_ay = (Fgy + Ft_y + Fdy) / std::max(total_mass, 1.0);
+        out_az = (Fgz + Ft_z + Fdz) / std::max(total_mass, 1.0);
     };
 
     // --- 11. 核心算法：RK4 (Runge-Kutta 4th Order) 积分 ---
@@ -910,6 +932,12 @@ void Update(entt::registry& registry, entt::entity entity, double dt) {
     trans.px += (dt / 6.0) * (k1_px + 2.0 * k2_px + 2.0 * k3_px + k4_px);
     trans.py += (dt / 6.0) * (k1_py + 2.0 * k2_py + 2.0 * k3_py + k4_py);
     trans.pz += (dt / 6.0) * (k1_pz + 2.0 * k2_pz + 2.0 * k3_pz + k4_pz);
+    
+    // NaN 检测：RK4 后位置/速度（静默恢复，避免 NaN 传播到渲染）
+    if (std::isnan(trans.px) || std::isnan(vel.vx)) {
+        trans.px = 0; trans.py = current_body.radius + 100000.0; trans.pz = 0;
+        vel.vx = 0; vel.vy = 0; vel.vz = 0;
+    }
     
     // 12. 更新派生物理量
     vel.acceleration = std::sqrt(k4_vx * k4_vx + k4_vy * k4_vy + k4_vz * k4_vz); 
@@ -1073,9 +1101,14 @@ void FastGravityUpdate(entt::registry& registry, entt::entity entity, double dt_
         
         Vec3 local_pos((float)trans.surf_px, (float)trans.surf_py, (float)trans.surf_pz);
         Vec3 world_pos = full_rot.rotate(local_pos);
-        trans.px = (double)world_pos.x;
-        trans.py = (double)world_pos.y;
-        trans.pz = (double)world_pos.z;
+        if (std::isnan(world_pos.x) || std::isnan(world_pos.y) || std::isnan(world_pos.z)) {
+            // NaN 防御：旋转失败时保留原坐标
+            printf("[SOI] NaN from FastGravity rot, skipping\n");
+        } else {
+            trans.px = (double)world_pos.x;
+            trans.py = (double)world_pos.y;
+            trans.pz = (double)world_pos.z;
+        }
         
         double omega = (2.0 * PI) / current_body.rotation_period;
         Vec3 ang_vel_world = full_rot.rotate(Vec3(0, 0, (float)omega));

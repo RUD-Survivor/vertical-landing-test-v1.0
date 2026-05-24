@@ -77,10 +77,9 @@ public:
             action.was_pressed = is_pressed;
         }
 
-        // Special Ignition Trigger (Space or LMB)
-        bool lmb = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+        // Special Ignition Trigger (Space only — LMB 留给相机/SVO)
         bool space = glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS;
-        bool ignition_now = lmb || space;
+        bool ignition_now = space;
         
         if (ignition_now && !space_or_lmb_pressed) {
             if (on_ignition) on_ignition();

@@ -27,11 +27,7 @@ public:
         auto& prop = registry.get<PropulsionComponent>(entity);
         auto& config = registry.get<RocketConfig>(entity);
         // 微观近景火箭专用的相机矩阵 (极近裁剪面，用于精确绘制 40米的火箭)
-        if (cam.mode != 2) {
-            // 在近景模式下，清空深度缓存，将火箭置于绝对顶层，杜绝共用一套深度衰减。这里有点问题，被地形遮挡也能显示
-            // 全景模式下不清空，保留真实的物理穿模(躲在地球后面会被遮挡)的正确视角。
-            glClear(GL_DEPTH_BUFFER_BIT);
-        }
+        // 近景模式不做深度清理，保持物理正确遮挡
         float micro_near = fmaxf(rh * 0.05f, cam_dist * 0.002f);
         float micro_far = fmaxf(cam_dist * 10.0f, 15000.0f);
         Mat4 microProjMat = Mat4::perspective(0.8f, aspect, micro_near, micro_far);
