@@ -180,18 +180,25 @@ struct VkRenderer3D {
         (void)frameIdx; // 当前未使用（如有需要可用于 per-frame noise jitter）
         _extent = extent;
 
-        // ---- 1. 帧开始（更新 UBO，绑定 mesh 管线为默认状态） ----
-        beginFrame(cmd, snap.frameIndex % 2,
-                   snap.view, snap.proj,
-                   snap.lightDir, snap.camPos, snap.time);
+        // ---- 1. 帧开始 ----
+        beginFrame(cmd, snap.frameIndex % 2, snap.view, snap.proj, snap.lightDir, snap.camPos, snap.time);
 
-        // ---- 0. 太阳物理球体 (Block E, 全景模式) ----
+        // ---- 星空（先于行星，匹配 OpenGL 顺序） ----
+        drawSkybox(cmd, snap.skyVibrancy, snap.aspect);
+
+        // ---- 2. 太阳 ----
         if (snap.drawSunBody && hasMesh("earth")) {
             drawMesh(cmd, "earth", snap.sunBody.model, 1.0f, 0.95f, 0.9f, 1.0f, 2.0f);
         }
 
         // ---- 2. 行星表面（不透明，共用 "earth" unit sphere mesh） ----
+        // 逐行星更新光照方向（匹配 OpenGL per-planet lightDir）
         for (const auto& cd : snap.celestials) {
+            float lx = snap.sunWorldPos[0] - cd.center[0];
+            float ly = snap.sunWorldPos[1] - cd.center[1];
+            float lz = snap.sunWorldPos[2] - cd.center[2];
+            scene.updateLightDir(snap.frameIndex % 2, lx, ly, lz);
+
             drawPlanet(cmd, "earth", cd.model,
                        cd.center[0], cd.center[1], cd.center[2],
                        cd.r, cd.g, cd.b, cd.shaderKey);
@@ -203,6 +210,9 @@ struct VkRenderer3D {
                          cd.radius);
             }
         }
+        // 恢复全局光照方向（火箭/发射台等用）
+        scene.updateLightDir(snap.frameIndex % 2,
+            snap.lightDir[0], snap.lightDir[1], snap.lightDir[2]);
 
         // ---- 3. 火箭（全零件渲染，先清深度确保始终在最前层） ----
         {
@@ -248,70 +258,8 @@ struct VkRenderer3D {
             drawAtmosphere(cmd, apc);
         }
 
-        // ---- 5. 天空盒 ----
-        drawSkybox(cmd, snap.skyVibrancy, snap.aspect);
-
-        // ---- 6. 排气羽流（加法混合） ----
-        for (const auto& ed : snap.plumes) {
-            drawExhaust(cmd, ed.model, ed.throttle, ed.expansion,
-                        ed.groundDist, ed.plumeLen);
-        }
-
-        // ---- 7. 镜头光晕（含遮挡测试，匹配 OpenGL drawSunAndFlare） ----
-        if (fabsf(snap.sunScreen[0]) < 3.5f && fabsf(snap.sunScreen[1]) < 3.5f
-            && scene.billboardQuadVbo != VK_NULL_HANDLE) {
-            // --- Ray-sphere occlusion test ---
-            float occFade = 1.f;
-            for (const auto& oc : snap.occluders) {
-                Vec3 ocPos(oc.cx, oc.cy, oc.cz);
-                Vec3 toSun(snap.sunWorldPos[0]-snap.camPos[0],
-                           snap.sunWorldPos[1]-snap.camPos[1],
-                           snap.sunWorldPos[2]-snap.camPos[2]);
-                float sunDist = sqrtf(toSun.x*toSun.x+toSun.y*toSun.y+toSun.z*toSun.z);
-                if (sunDist<1e-6f) continue;
-                Vec3 rayDir = toSun * (1.f/sunDist);
-                Vec3 ocv = Vec3(snap.camPos[0],snap.camPos[1],snap.camPos[2]) - ocPos;
-                float b = 2.f * ocv.dot(rayDir);
-                float c = ocv.dot(ocv) - oc.radius*oc.radius;
-                float disc = b*b - 4.f*c;
-                float tClosest = -ocv.dot(rayDir);
-                if (tClosest >= 0.f) {
-                    if (disc > 0.f) {
-                        float t1 = tClosest - sqrtf(disc)*0.5f;
-                        if (t1 > 0.f && t1 < sunDist) { occFade = 0.f; break; }
-                    } else {
-                        float passDist = ocv.cross(rayDir).length();
-                        float distToLimb = passDist - oc.radius;
-                        if (distToLimb >= 0.f && distToLimb < oc.radius*0.05f)
-                            occFade *= distToLimb / (oc.radius*0.05f);
-                    }
-                }
-                if (occFade <= 0.01f) break;
-            }
-            if (occFade > 0.01f) {
-                float sx=snap.sunScreen[0], sy=snap.sunScreen[1], asp=snap.aspect, si=snap.sunIntensity*occFade;
-                // 距离缩放因子（匹配 OpenGL）
-                float currentDist = sqrtf(
-                    (snap.sunWorldPos[0]-snap.camPos[0])*(snap.sunWorldPos[0]-snap.camPos[0])+
-                    (snap.sunWorldPos[1]-snap.camPos[1])*(snap.sunWorldPos[1]-snap.camPos[1])+
-                    (snap.sunWorldPos[2]-snap.camPos[2])*(snap.sunWorldPos[2]-snap.camPos[2]));
-                float distFactor = 149597870.f / fmaxf(1.f, currentDist);
-                float iScale = fminf(fmaxf(powf(distFactor, 1.25f), 0.15f), 8.f);
-                float sScale = fminf(fmaxf(distFactor, 0.2f), 10.f);
-                auto df = [&](int shape, float scX, float scY, float offM, float cr, float cg, float cb, float a) {
-                    effects.drawLensFlare(cmd, scene.billboardQuadVbo, sx, sy, asp, si*a*iScale,
-                        scX*sScale, scY*sScale, sx*offM, sy*offM, cr, cg, cb, 1, shape);
-                };
-                df(0, 0.12f,0.12f, 1.0f,  1.0f,0.98f,0.95f, 2.5f); // Hot core
-                df(0, 0.30f,0.30f, 1.0f,  1.0f,0.92f,0.75f, 0.8f); // Warm halo
-                df(0, 0.65f,0.65f, 1.0f,  0.9f,0.75f,0.55f, 0.2f); // Faint bloom
-                df(1, 3.0f,0.025f,1.0f,  0.7f,0.8f,1.0f,  0.35f);  // Anamorphic blue
-                df(1, 1.5f,0.01f, 1.0f,  1.0f,0.95f,0.9f,  0.5f);  // White core streak
-                df(2, 0.08f,0.08f,-0.35f,0.7f,0.85f,1.0f, 0.08f);   // Ghost 1
-                df(2, 0.12f,0.12f,-0.65f,1.0f,0.8f,0.6f,  0.05f);   // Ghost 2
-                df(2, 0.05f,0.05f,-1.0f, 0.6f,0.7f,1.0f,  0.06f);   // Ghost 3
-            }
-        }
+        // ---- 5. 天空盒（跳过——debug 测试） ----
+        // drawSkybox(cmd, snap.skyVibrancy, snap.aspect);
 
         // ---- 8. 发射台 (Block C) ----
         if (snap.hasLaunchPad && hasMesh("rocketBox")) {

@@ -116,7 +116,7 @@ struct VkMeshPipeline {
         VkPipelineRasterizationStateCreateInfo rasState{ VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
         rasState.polygonMode = VK_POLYGON_MODE_FILL;
         rasState.cullMode    = VK_CULL_MODE_NONE;  // match OpenGL default (cull disabled)
-        rasState.frontFace   = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+        rasState.frontFace   = VK_FRONT_FACE_CLOCKWISE;  // CW=正面（MeshGen 生成 CW 外面）
         rasState.lineWidth   = 1.0f;
 
         // --- Multisampling (MSAA disabled; Phase 4 may enable 4x) ---
@@ -272,7 +272,7 @@ struct VkPlanetPipeline {
         VkPipelineRasterizationStateCreateInfo rasState{ VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
         rasState.polygonMode = VK_POLYGON_MODE_FILL;
         rasState.cullMode    = VK_CULL_MODE_BACK_BIT;
-        rasState.frontFace   = VK_FRONT_FACE_COUNTER_CLOCKWISE;  // 球体索引在 Y-flip 后外面是 CCW
+        rasState.frontFace   = VK_FRONT_FACE_CLOCKWISE;  // CW=正面（MeshGen::sphere 是 CW 外面）
         rasState.lineWidth   = 1.0f;
 
         VkPipelineMultisampleStateCreateInfo msState{ VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
@@ -393,7 +393,7 @@ inline bool buildPipeline(VkDevice device,
 
     VkPipelineRasterizationStateCreateInfo rasState{VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
     rasState.polygonMode=VK_POLYGON_MODE_FILL; rasState.cullMode=p.cullMode;
-    rasState.frontFace=VK_FRONT_FACE_COUNTER_CLOCKWISE; rasState.lineWidth=1.0f;
+    rasState.frontFace=VK_FRONT_FACE_CLOCKWISE; rasState.lineWidth=1.0f;
 
     VkPipelineMultisampleStateCreateInfo msState{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
     msState.rasterizationSamples=VK_SAMPLE_COUNT_1_BIT;

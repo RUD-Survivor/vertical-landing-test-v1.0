@@ -49,5 +49,5 @@ void main() {
         alpha += exp(-d * d * 10.0) * 0.2 * edgeFade;
     }
 
-    FragColor = vec4(pc.color.rgb, pc.color.a * alpha * pc.intensity);
+    FragColor = vec4(pc.color.rgb * pc.intensity * alpha, 1.0);
 }

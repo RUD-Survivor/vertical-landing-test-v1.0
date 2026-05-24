@@ -86,21 +86,33 @@ static bool initVulkanFlight() {
     gc.skip_builder = true;
     gc.vkRenderer3d = &g_vkR3D;
 
-    // 初始位置：地表 + 100km，避免 RenderContext 零除
+    // 初始位置：地表 + 100km（以地球为中心，绝对坐标 = 地球轨道位置 + 地表偏移）
     constexpr double ALT = 100000.0;
+    CelestialBody& earth = UniverseModel::getInstance().solar_system[3];
     RocketState& rs = gc.loaded_rocket_state;
+    // 绝对坐标 = 地球轨道位置 + 地表位置（地球北极上方 100km）
+    rs.abs_px = earth.px;
+    rs.abs_py = earth.py + EARTH_RADIUS + ALT;
+    rs.abs_pz = earth.pz;
+    // 相对地球坐标
+    rs.px  = 0.0;
     rs.py  = EARTH_RADIUS + ALT;
-    rs.abs_py = EARTH_RADIUS + ALT;
+    rs.pz  = 0.0;
+    rs.surf_px = 0.0;
     rs.surf_py = EARTH_RADIUS;
+    rs.surf_pz = 0.0;
     rs.altitude = ALT;
     rs.fuel = 50000.0;
 
     g_flightScene->onEnter();
 
+    // Vulkan 模式：skip_builder=true → 无火箭组件，从地球全景视角开始
+    g_flightScene->cam.mode         = CameraDirector::PANORAMA;
+    g_flightScene->cam.focus_target = 3; // Earth (solar_system[3])
+    // 初始旋转：让相机面朝太阳（地球→太阳 = +X 方向）
+    g_flightScene->cam.quat = Quat::fromAxisAngle(Vec3(0, 1, 0), 3.141592653589793 / 2.0);
+
     // 将 CPU 网格数据注册到 Vulkan
-    printf("[Vulkan] Checking meshes: earth.v=%zu i=%zu body.v=%zu i=%zu\n",
-        g_flightScene->earthMesh.cpuVerts.size(), g_flightScene->earthMesh.cpuIndices.size(),
-        g_flightScene->rocketBody.cpuVerts.size(), g_flightScene->rocketBody.cpuIndices.size());
     auto reg = [](const char* id, const Mesh& m) -> bool {
         if (m.cpuIndices.empty()) return true;
         return g_vkR3D.registerMesh(g_vkCtx, id,
@@ -117,6 +129,7 @@ static bool initVulkanFlight() {
 
 static void renderFlightSceneVulkan(VkCommandBuffer cmd, int frameSlot) {
     SceneSnapshot snap = g_flightScene->extractRenderSnapshot();
+
 
     // Debug: print first-frame matrices
     static int dbg = 0;
@@ -185,7 +198,10 @@ static void renderVulkanFrame(GLFWwindow* window) {
         g_vkCtx.swapImageViews[imageIdx],
         g_vkCtx.swapExtent);
     VkFrameRenderer::setViewportScissor(frame.commandBuffer, g_vkCtx.swapExtent);
-    g_vkTAA.drawResolve(frame.commandBuffer, 0.1f);
+    // 前 60 帧用 blend=1.0（仅当前帧，无历史混合），之后 TAA
+    static int warmup = 0;
+    float taaBlend = (++warmup < 60) ? 1.0f : 0.1f;
+    g_vkTAA.drawResolve(frame.commandBuffer, taaBlend);
     g_vkTAA.endResolvePass(frame.commandBuffer, g_vkCtx.swapImages[imageIdx]);
 
     // Pass 3: HUD 覆盖层 → swapchain image（alpha 混合）

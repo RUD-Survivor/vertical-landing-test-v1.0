@@ -253,6 +253,16 @@ struct VkSceneSystem {
         _bindMeshPipe(cmd);
     }
 
+    // 仅更新 UBO 中的光照方向（逐行星切换，匹配 OpenGL per-planet lightDir）
+    void updateLightDir(int frameIdx, float lx, float ly, float lz) {
+        float ld = sqrtf(lx*lx + ly*ly + lz*lz);
+        if (ld > 1e-6f) { lx /= ld; ly /= ld; lz /= ld; }
+        float* ptr = (float*)desc->uboMapped[frameIdx];
+        memcpy(ptr + 32, &lx, 4);  // lightDir.x at float offset 32 (byte offset 128)
+        memcpy(ptr + 33, &ly, 4);
+        memcpy(ptr + 34, &lz, 4);
+    }
+
     // -----------------------------------------------------------------------
     void drawMesh(VkCommandBuffer cmd, const std::string& id, const float model[16],
                   float r=1.f, float g=1.f, float b=1.f, float a=1.f, float ambient=0.15f) {

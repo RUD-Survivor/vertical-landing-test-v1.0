@@ -44,40 +44,42 @@ vec3  gOzoneCoeff;
 float gHOzoneCenter;
 float gHOzoneWidth;
 
+// All spatial constants below are in render units (1 rU = 1000 km).
+// Scale heights: physical km ÷ 1000.  Scattering coefficients: physical km⁻¹ × 1000.
 void setupPlanetProfile() {
     int idx = pc.planetIdx;
     if (idx == 3) {         // Earth
-        gRayleighCoeff = vec3(0.0058, 0.0135, 0.0331) * 1.2;
-        gMieCoeff = 0.005; gHRayleigh = 8.0; gHMie = 1.0; gGMie = 0.8;
-        gOzoneCoeff = vec3(0.00035, 0.00085, 0.00009); gHOzoneCenter = 25.0; gHOzoneWidth = 15.0;
+        gRayleighCoeff = vec3(5.8, 13.5, 33.1) * 1.2;
+        gMieCoeff = 5.0; gHRayleigh = 0.008; gHMie = 0.001; gGMie = 0.8;
+        gOzoneCoeff = vec3(0.35, 0.85, 0.09); gHOzoneCenter = 0.025; gHOzoneWidth = 0.015;
     } else if (idx == 2) {  // Venus
-        gRayleighCoeff = vec3(0.005, 0.012, 0.028);
-        gMieCoeff = 0.04; gHRayleigh = 15.0; gHMie = 5.0; gGMie = 0.76;
-        gOzoneCoeff = vec3(0.0005, 0.005, 0.02); gHOzoneCenter = 50.0; gHOzoneWidth = 20.0;
+        gRayleighCoeff = vec3(5.0, 12.0, 28.0);
+        gMieCoeff = 40.0; gHRayleigh = 0.015; gHMie = 0.005; gGMie = 0.76;
+        gOzoneCoeff = vec3(0.5, 5.0, 20.0); gHOzoneCenter = 0.05; gHOzoneWidth = 0.02;
     } else if (idx == 5) {  // Mars
-        gRayleighCoeff = vec3(0.01, 0.005, 0.001);
-        gMieCoeff = 0.015; gHRayleigh = 11.0; gHMie = 3.0; gGMie = 0.85;
-        gOzoneCoeff = vec3(0.0); gHOzoneCenter = 1.0; gHOzoneWidth = 1.0;
+        gRayleighCoeff = vec3(10.0, 5.0, 1.0);
+        gMieCoeff = 15.0; gHRayleigh = 0.011; gHMie = 0.003; gGMie = 0.85;
+        gOzoneCoeff = vec3(0.0); gHOzoneCenter = 0.001; gHOzoneWidth = 0.001;
     } else if (idx == 6) {  // Jupiter
-        gRayleighCoeff = vec3(0.018, 0.015, 0.012);
-        gMieCoeff = 0.01; gHRayleigh = 27.0; gHMie = 10.0; gGMie = 0.8;
-        gOzoneCoeff = vec3(0.0); gHOzoneCenter = 1.0; gHOzoneWidth = 1.0;
+        gRayleighCoeff = vec3(18.0, 15.0, 12.0);
+        gMieCoeff = 10.0; gHRayleigh = 0.027; gHMie = 0.01; gGMie = 0.8;
+        gOzoneCoeff = vec3(0.0); gHOzoneCenter = 0.001; gHOzoneWidth = 0.001;
     } else if (idx == 7) {  // Saturn
-        gRayleighCoeff = vec3(0.015, 0.013, 0.009);
-        gMieCoeff = 0.01; gHRayleigh = 60.0; gHMie = 15.0; gGMie = 0.8;
-        gOzoneCoeff = vec3(0.0); gHOzoneCenter = 1.0; gHOzoneWidth = 1.0;
+        gRayleighCoeff = vec3(15.0, 13.0, 9.0);
+        gMieCoeff = 10.0; gHRayleigh = 0.06; gHMie = 0.015; gGMie = 0.8;
+        gOzoneCoeff = vec3(0.0); gHOzoneCenter = 0.001; gHOzoneWidth = 0.001;
     } else if (idx == 8) {  // Uranus
-        gRayleighCoeff = vec3(0.002, 0.015, 0.025);
-        gMieCoeff = 0.002; gHRayleigh = 28.0; gHMie = 5.0; gGMie = 0.8;
-        gOzoneCoeff = vec3(0.001, 0.0, 0.0); gHOzoneCenter = 20.0; gHOzoneWidth = 10.0;
+        gRayleighCoeff = vec3(2.0, 15.0, 25.0);
+        gMieCoeff = 2.0; gHRayleigh = 0.028; gHMie = 0.005; gGMie = 0.8;
+        gOzoneCoeff = vec3(1.0, 0.0, 0.0); gHOzoneCenter = 0.02; gHOzoneWidth = 0.01;
     } else if (idx == 9) {  // Neptune
-        gRayleighCoeff = vec3(0.001, 0.008, 0.035);
-        gMieCoeff = 0.001; gHRayleigh = 20.0; gHMie = 5.0; gGMie = 0.8;
-        gOzoneCoeff = vec3(0.001, 0.0, 0.0); gHOzoneCenter = 20.0; gHOzoneWidth = 10.0;
+        gRayleighCoeff = vec3(1.0, 8.0, 35.0);
+        gMieCoeff = 1.0; gHRayleigh = 0.02; gHMie = 0.005; gGMie = 0.8;
+        gOzoneCoeff = vec3(1.0, 0.0, 0.0); gHOzoneCenter = 0.02; gHOzoneWidth = 0.01;
     } else {                // Default (fallback)
-        gRayleighCoeff = vec3(0.0058, 0.0135, 0.0331);
-        gMieCoeff = 0.005; gHRayleigh = 8.0; gHMie = 1.0; gGMie = 0.8;
-        gOzoneCoeff = vec3(0.0); gHOzoneCenter = 1.0; gHOzoneWidth = 1.0;
+        gRayleighCoeff = vec3(5.8, 13.5, 33.1);
+        gMieCoeff = 5.0; gHRayleigh = 0.008; gHMie = 0.001; gGMie = 0.8;
+        gOzoneCoeff = vec3(0.0); gHOzoneCenter = 0.001; gHOzoneWidth = 0.001;
     }
 }
 

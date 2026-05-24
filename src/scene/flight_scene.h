@@ -608,18 +608,21 @@ else {
         }
 
         // ---- 7. 太阳屏幕坐标（镜头光晕） ----
+        // 用 snap.proj（正确 FOV）而非 ctx.macroProjMat（80.0 弧度 FOV）
         Vec3 sunWorld(ctx.renderSun.x, ctx.renderSun.y, ctx.renderSun.z);
-        Mat4 vp = ctx.macroProjMat * ctx.viewMat;
+        Mat4 snapProj;
+        for (int i = 0; i < 16; i++) snapProj.m[i] = snap.proj[i];
+        Mat4 vp = snapProj * ctx.viewMat;
         float cx = vp.m[0]*sunWorld.x + vp.m[4]*sunWorld.y + vp.m[8]*sunWorld.z + vp.m[12];
         float cy = vp.m[1]*sunWorld.x + vp.m[5]*sunWorld.y + vp.m[9]*sunWorld.z + vp.m[13];
         float cz = vp.m[2]*sunWorld.x + vp.m[6]*sunWorld.y + vp.m[10]*sunWorld.z + vp.m[14];
         float cw = vp.m[3]*sunWorld.x + vp.m[7]*sunWorld.y + vp.m[11]*sunWorld.z + vp.m[15];
         if (cw > 0.0f) {
-            snap.sunScreen[0] = cx / cw;
-            snap.sunScreen[1] = cy / cw;
+            snap.sunScreen[0] =  cx / cw;
+            snap.sunScreen[1] = -(cy / cw); // Vulkan NDC Y 向下，取反映射到屏幕 UV
         }
         float sunDist = (sunWorld - ctx.camEye_rel).length();
-        snap.sunIntensity = 149597870.0f / fmaxf(1.0f, sunDist);
+        snap.sunIntensity = 149597.87f / fmaxf(1.0f, sunDist); // 1 AU in render units (ws_d=0.001)
         snap.sunWorldPos[0] = sunWorld.x; snap.sunWorldPos[1] = sunWorld.y; snap.sunWorldPos[2] = sunWorld.z;
 
         // ---- 8. 天空 + 大气 ----
