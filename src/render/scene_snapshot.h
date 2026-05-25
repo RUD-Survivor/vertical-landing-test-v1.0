@@ -62,7 +62,8 @@ struct BillboardDraw {
 // 发射台渲染数据
 // ============================================================================
 struct LaunchPadDraw {
-    float model[16];    // TRS 矩阵
+    float model[16];       // TRS 矩阵
+    bool  useObjMesh = false;  // true=使用 "launchPad" OBJ 网格；false=使用 rocketBox 程序网格
 };
 
 // ============================================================================
@@ -107,7 +108,8 @@ struct TerrainPatchDraw {
 struct RocketPartDraw {
     float model[16];      // TRS 矩阵
     float r, g, b;        // 颜色
-    int   meshType;       // 0=body cylinder, 1=nose cone, 2=box
+    int   meshType;       // 0=body cylinder, 1=nose cone, 2=box（meshId 为空时使用）
+    std::string meshId;   // 非空时优先使用此 Vulkan mesh ID（OBJ 模型路径）
 };
 
 // ============================================================================

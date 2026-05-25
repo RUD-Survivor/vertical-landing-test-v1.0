@@ -338,6 +338,7 @@ private:
 
 public:
     void bake() {
+#ifndef USE_VULKAN
         if (textureID == 0) glGenTextures(1, &textureID);
         glBindTexture(GL_TEXTURE_2D, textureID);
         
@@ -355,6 +356,7 @@ public:
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+#endif
     }
 
     GLuint textureID = 0;

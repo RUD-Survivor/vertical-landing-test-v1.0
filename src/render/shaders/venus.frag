@@ -39,7 +39,7 @@ void main() {
     vec3 N = normalize(vNormal); vec3 L = normalize(frame.lightDir);
     vec3 V = normalize(frame.viewPos - vWorldPos);
     vec3 sph = normalize(vWorldPos - pc.planetCenter.xyz);
-    float lat = sph.y;
+    float lat = sph.z;
     float timeOff = frame.time * 0.00008;
 
     vec3 tc1 = sph * 3.0 + vec3(timeOff, 0.0, timeOff * 0.5);

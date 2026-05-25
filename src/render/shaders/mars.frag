@@ -45,7 +45,7 @@ void main() {
     vec3 V = normalize(frame.viewPos - vWorldPos);
     vec3 sph = normalize(vWorldPos - pc.planetCenter.xyz);
     vec3 tc = sph * 4.0;
-    float lat = sph.y;
+    float lat = sph.z;
     float absLat = abs(lat);
 
     vec3 warp = vec3(fbm(tc, 3), fbm(tc + vec3(5.2), 3), fbm(tc + vec3(9.1), 3));

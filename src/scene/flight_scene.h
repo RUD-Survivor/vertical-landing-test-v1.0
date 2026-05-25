@@ -28,6 +28,7 @@
 #include "environment_system.h"
 #include "hud_manager.h"
 #include "render_context.h"
+#include "orbit_system_vulkan.h"
 class FlightScene : public IScene {
 public:
     // === Core Members ===
@@ -47,6 +48,10 @@ public:
     Mesh rocketBody;
     Mesh rocketNose;
     Mesh rocketBox;
+    // OBJ 外部模型（Vulkan 路径加载后填充）
+    Mesh launchPadMesh;
+    bool hasLaunchPadOBJ = false;
+    std::map<std::string, Mesh> partObjMeshes;  // OBJ 路径 → 已加载 Mesh（空 cpuIndices = 未找到）
     SimulationController sim_ctrl;
     double dt = 0.02;
     double real_dt = 0.02;
@@ -67,6 +72,10 @@ public:
     int last_soi = -1;
     bool show_clouds = true;
     CloudTuner cloudTuner;
+    // Vulkan 轨道缓存（update 中计算，extractRenderSnapshot 中消费）
+    KepOrbitCache     vkKepCache;
+    AdvOrbitCache     vkAdvCache;
+    RocketMarkerCache vkRktCache;
     void onEnter() override {
 
 
@@ -311,6 +320,8 @@ else {
         // --- Simulation & Physics Update ---
         sim_ctrl.handleInput(GameContext::getInstance().window, world, rocket_entity);
         sim_ctrl.update(real_dt, world, rocket_entity, hudManager.hud, GameContext::getInstance().window, cam.mode);
+        // 轨迹记录（Vulkan 兼容：每帧采样火箭位置用于轨道丝带）
+        orbitSystem.recordTrajectory(world, rocket_entity, ctx.earth_r);
         // Update mouse state for HUD
         {
             double mx_raw, my_raw;
@@ -346,6 +357,15 @@ else {
             // === 1. 构建本帧渲染参考系上下文 (浮动原点、物理变换、投影矩阵) ===
             ctx.update(trans, vel, att, tele, guid, rocket_config, UniverseModel::getInstance().current_soi_index, last_soi, comma_prev, period_prev, cam, ws_d, dt);
 #ifdef USE_VULKAN
+            // 必须在 early-return 前更新 day_blend / alt_factor，
+            // 否则 extractRenderSnapshot() 中 snap.skyVibrancy / snap.dayBlend 永远是构造默认值 1.0
+            environmentSystem.updateAndApply(ctx.camEye_rel, ctx.ro_x, ctx.ro_y, ctx.ro_z, ws_d, cam.mode);
+            // 轨道计算（仅 Panorama 模式，匹配 OpenGL 行为）
+            if (cam.mode == 2) {
+                computeOrbitDataVK(orbitSystem, world, rocket_entity, hudManager.hud, cam,
+                    ws_d, ctx.ro_x, ctx.ro_y, ctx.ro_z, ctx.earth_r, ctx.cam_dist,
+                    ctx.renderRocketBase, ctx.camEye_rel, vkKepCache, vkAdvCache, vkRktCache);
+            }
             return;
 #endif
             // 相机设置 (TAA 与 GL 状态清理)
@@ -482,6 +502,10 @@ else {
             macro_near = fminf(macro_near, 1.0f);
             if (closest_dist < 1.0f) macro_near = fminf(macro_near, 0.0001f);
             macro_near = fmaxf(macro_near, (float)ctx.cam_dist * 0.0001f);
+            // Orbit/Chase: 相机紧贴火箭，近平面必须小于火箭距离，防止火箭被裁
+            if (cam.mode <= 1) {
+                macro_near = fminf(macro_near, (float)ctx.cam_dist * 0.1f);
+            }
             Mat4 projMat = Mat4::perspective(0.8, snap.aspect, (double)macro_near, (double)far_plane);
             projMat.toFloatArray(snap.proj);
         }
@@ -527,12 +551,38 @@ else {
             cd.hasRing   = (b.type == RINGED_GAS_GIANT);
             cd.showClouds = show_clouds;
             snap.celestials.push_back(cd);
+
+            // 行星轨道 ribbon（仅 Panorama 模式）
+            if (cam.mode == 2 && i < 10) {
+                double a = b.sma_base, e = b.ecc_base, inc = b.inc_base;
+                double lan = b.lan_base, argP = b.arg_peri_base;
+                int segs = 90;
+                double cO = cos(lan), sO = sin(lan);
+                double cw = cos(argP), sw = sin(argP);
+                double ci = cos(inc), si = sin(inc);
+                std::vector<Vec3> opts; std::vector<Vec4> ocols;
+                for (int k = 0; k < segs; k++) {
+                    double Ek = (double)k / (segs-1) * 2.0 * kPI;
+                    double nuk = 2.0 * atan2(sqrt(1.0+e)*sin(Ek/2.0), sqrt(1.0-e)*cos(Ek/2.0));
+                    double rk = a * (1.0 - e*cos(Ek));
+                    double ox = rk*cos(nuk), oy = rk*sin(nuk);
+                    double wx = (cO*cw - sO*sw*ci)*ox + (-cO*sw - sO*cw*ci)*oy;
+                    double wy = (sO*cw + cO*sw*ci)*ox + (-sO*sw + cO*cw*ci)*oy;
+                    double wz = (sw*si)*ox + (cw*si)*oy;
+                    if (i == 4) { wx+=ss[3].px; wy+=ss[3].py; wz+=ss[3].pz; }
+                    opts.push_back(Vec3((float)(wx*ws_d-ro_x),(float)(wy*ws_d-ro_y),(float)(wz*ws_d-ro_z)));
+                    ocols.push_back(Vec4(b.r*0.6f+0.3f, b.g*0.6f+0.3f, b.b*0.6f+0.3f, 0.7f));
+                }
+                float orbW = fmaxf(ctx.earth_r*0.008f, fmaxf((ctx.camEye_rel-Vec3(px,py,pz)).length(), ctx.camEye_rel.length())*0.0035f);
+                if (i==4) orbW*=0.5f;
+                snap.ribbons.push_back({opts, ocols, orbW});
+            }
         }
 
         // ---- 5. 火箭 ----
         float er = ctx.earth_r;
-        float rh = (ctx.rh    > 0.f) ? ctx.rh    : er * 0.005f;
-        float rw = (ctx.rw_3d > 0.f) ? ctx.rw_3d : er * 0.0008f;
+        float rh = (ctx.rh    > 0.f) ? ctx.rh    : er * 0.00008f;
+        float rw = (ctx.rw_3d > 0.f) ? ctx.rw_3d : er * 0.000008f;
         float rx = (float)ctx.renderRocketBase.x, ry = (float)ctx.renderRocketBase.y, rz = (float)ctx.renderRocketBase.z;
 
         // Body: translate * scale（Y 轴圆柱）
@@ -632,7 +682,10 @@ else {
         snap.sunWorldPos[0] = sunWorld.x; snap.sunWorldPos[1] = sunWorld.y; snap.sunWorldPos[2] = sunWorld.z;
 
         // ---- 8. 天空 + 大气 ----
-        snap.skyVibrancy = (float)environmentSystem.day_blend;
+        // 匹配 OpenGL CelestialRenderer: sky_vibrancy = 1.0 - day_blend * (1 - alt_factor)
+        // day_blend=1/alt_factor=1(太空) → vibrancy=1(满星空)
+        // day_blend=1/alt_factor=0(地面白天) → vibrancy=0(蓝天遮星)
+        snap.skyVibrancy = 1.0f - (float)environmentSystem.day_blend * (1.0f - environmentSystem.alt_factor);
         snap.dayBlend = (float)environmentSystem.day_blend;
         snap.cameraMode = cam.mode;
 
@@ -659,6 +712,19 @@ else {
             for (int pi = render_start; pi < (int)assembly.parts.size(); pi++) {
                 const PlacedPart& pp = assembly.parts[pi];
                 const PartDef& def = PART_CATALOG[pp.def_id];
+                // 查找 OBJ 模型
+                std::string objPath;
+                if (def.model_path) {
+                    objPath = def.model_path;
+                } else {
+                    std::string tmp = def.name;
+                    for (char& c : tmp) { c=(char)tolower((unsigned char)c); if(c==' ')c='_'; }
+                    objPath = "assets/models/" + tmp + ".obj";
+                }
+                auto oit = partObjMeshes.find(objPath);
+                const Mesh* objMesh = (oit != partObjMeshes.end() && !oit->second.cpuIndices.empty())
+                                    ? &oit->second : nullptr;
+
                 for (int s = 0; s < pp.symmetry; s++) {
                     float symAngle = (s * k2Pi) / pp.symmetry;
                     Vec3 localPos = pp.pos;
@@ -673,11 +739,25 @@ else {
                     Vec3 wp = rb + rq.rotate(localPos * (float)ws_d);
                     Quat wr = rq * pp.rot * Quat::fromAxisAngle(Vec3(0,1,0), symAngle);
                     RocketPartDraw rp;
-                    float h=def.height*(float)ws_d, d=def.diameter*(float)ws_d;
-                    Mat4 m=Mat4::TRS(wp, wr, Vec3(d,h,d));
-                    m.toFloatArray(rp.model);
-                    rp.r=0.9f; rp.g=0.9f; rp.b=0.9f;
-                    rp.meshType=(def.category==CAT_NOSE_CONE||def.category==CAT_COMMAND_POD)?1:0;
+                    if (objMesh) {
+                        // OBJ 模型：按物理尺寸缩放 + 中心偏移对齐
+                        float sx = (def.diameter / objMesh->width)  * (float)ws_d;
+                        float sy = (def.height   / objMesh->height) * (float)ws_d;
+                        float sz = (def.diameter / objMesh->depth)  * (float)ws_d;
+                        Mat4 m = Mat4::translate(wp) * Mat4::fromQuat(wr)
+                               * Mat4::scale(Vec3(sx,sy,sz))
+                               * Mat4::translate(Vec3(-objMesh->centerX, -objMesh->minY, -objMesh->centerZ));
+                        m.toFloatArray(rp.model);
+                        rp.r = def.r; rp.g = def.g; rp.b = def.b;
+                        rp.meshType = 0;
+                        rp.meshId = objPath;
+                    } else {
+                        float h=def.height*(float)ws_d, d=def.diameter*(float)ws_d;
+                        Mat4 m=Mat4::TRS(wp, wr, Vec3(d,h,d));
+                        m.toFloatArray(rp.model);
+                        rp.r=0.9f; rp.g=0.9f; rp.b=0.9f;
+                        rp.meshType=(def.category==CAT_NOSE_CONE||def.category==CAT_COMMAND_POD)?1:0;
+                    }
                     snap.rocketParts.push_back(rp);
                 }
             }
@@ -713,6 +793,7 @@ else {
             Vec3 correctedPos = padCenter - padUp * (8.f * ps);
             Mat4 padModel = Mat4::translate(correctedPos) * padRot * Mat4::scale(Vec3(ps,ps,ps));
             padModel.toFloatArray(snap.launchPad.model);
+            snap.launchPad.useObjMesh = hasLaunchPadOBJ;
             snap.hasLaunchPad = true;
         }
 
@@ -726,15 +807,16 @@ else {
             snap.drawSunBody = true;
         }
 
-        // ---- 13. 轨道线 + 变轨节点 (Block A) ----
+        // ---- 13. 轨道线 + 变轨节点 + Ap/Pe + 火箭标记 (Block A, 仅 Panorama) ----
         if (cam.mode == 2) {
-            // 轨迹历史 (orbitSystem 使用 drawRibbon 的封装)
             orbitSystem.extractRibbons(snap.ribbons, world, rocket_entity, hudManager.hud, mnvManager,
                 cam, ctx.viewMat, ctx.aspect, ws_d, ctx.ro_x, ctx.ro_y, ctx.ro_z, dt,
                 UniverseModel::getInstance().current_soi_index, ctx.earth_r, ctx.cam_dist, ctx.renderRocketBase, ctx.camEye_rel);
-            // 变轨节点 (广告牌)
+            extractKepRibbons(vkKepCache, ctx.earth_r, ctx.cam_dist, snap.ribbons);
+            extractAdvRibbons(vkAdvCache, ctx.earth_r, ctx.cam_dist, snap.ribbons);
             mnvManager.extractBillboards(snap.billboards, world, rocket_entity, hudManager.hud,
                 ctx.viewMat, ctx.aspect, ctx.earth_r, ctx.cam_dist, ws_d, ctx.ro_x, ctx.ro_y, ctx.ro_z, dt);
+            extractOrbitMarkers(vkKepCache, vkRktCache, snap.billboards);
         }
 
         // ---- 14. 云调试面板 (Block F) ----

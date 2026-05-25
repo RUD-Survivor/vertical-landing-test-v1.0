@@ -220,22 +220,31 @@ struct VkRenderer3D {
             drawMesh(cmd, "rocketNose", snap.rocketNoseModel, 0.88f, 0.88f, 0.88f);
         } else {
             for (const auto& rp : snap.rocketParts) {
-                const char* mid = rp.meshType == 1 ? "rocketNose" :
-                                  rp.meshType == 2 ? "rocketBox" : "rocketBody";
-                drawMesh(cmd, mid, rp.model, rp.r, rp.g, rp.b);
+                if (!rp.meshId.empty() && hasMesh(rp.meshId)) {
+                    drawMesh(cmd, rp.meshId, rp.model, rp.r, rp.g, rp.b);
+                } else {
+                    const char* mid = rp.meshType == 1 ? "rocketNose" :
+                                      rp.meshType == 2 ? "rocketBox" : "rocketBody";
+                    drawMesh(cmd, mid, rp.model, rp.r, rp.g, rp.b);
+                }
             }
         }
 
         // ---- 4. 大气层 ----
         for (const auto& cd : snap.celestials) {
             if (cd.atmoIdx == 0) continue;
+            // 更新为该行星的光照方向（太阳→行星）
+            float alx = snap.sunWorldPos[0] - cd.center[0];
+            float aly = snap.sunWorldPos[1] - cd.center[1];
+            float alz = snap.sunWorldPos[2] - cd.center[2];
+            scene.updateLightDir(snap.frameIndex % 2, alx, aly, alz);
             float sunVis = snap.dayBlend;  // 使用预计算的 day_blend（含行星遮挡）
 
             AtmoPushConstants apc{};
             apc.planetCenter[0] = cd.center[0];
             apc.planetCenter[1] = cd.center[1];
             apc.planetCenter[2] = cd.center[2];
-            apc.innerRadius    = cd.radius * 0.9995f;  // 匹配 OpenGL 的 tighter shadow sphere
+            apc.innerRadius    = cd.radius;  // 与表面半径一致，防止光穿透行星
             apc.outerRadius    = cd.radius + 0.16f;    // 160km 大气高度（render units：1 unit = 1000km）
             apc.surfaceRadius  = cd.radius;
             apc.planetIdx      = cd.atmoIdx;
@@ -250,6 +259,9 @@ struct VkRenderer3D {
 
             drawAtmosphere(cmd, apc);
         }
+        // 恢复全局光照方向
+        scene.updateLightDir(snap.frameIndex % 2,
+            snap.lightDir[0], snap.lightDir[1], snap.lightDir[2]);
 
         // ---- 5. 天空盒（跳过——debug 测试） ----
         // drawSkybox(cmd, snap.skyVibrancy, snap.aspect);
@@ -271,42 +283,47 @@ struct VkRenderer3D {
             float sx = snap.sunScreen[0], sy = snap.sunScreen[1];
             float asp = snap.aspect;
 
-            // 热白核心（太阳位置）— 极小尺寸 + 高强度，永不超出 NDC
-            drawLensFlare(cmd, scene.billboardQuadVbo, sx, sy, asp, 2250.f * intensityScale,
-                          0.04f*sizeScale, 0.04f*sizeScale, sx, sy,
+            // 热白核心（太阳位置）
+            drawLensFlare(cmd, scene.billboardQuadVbo, sx, sy, asp, 3.5f * intensityScale,
+                          0.10f*sizeScale, 0.10f*sizeScale, sx, sy,
                           1.0f, 0.98f, 0.95f, 1.0f, 0);
             // 暖色光晕
-            drawLensFlare(cmd, scene.billboardQuadVbo, sx, sy, asp, 750.f * intensityScale,
-                          0.08f*sizeScale, 0.08f*sizeScale, sx, sy,
+            drawLensFlare(cmd, scene.billboardQuadVbo, sx, sy, asp, 1.2f * intensityScale,
+                          0.22f*sizeScale, 0.22f*sizeScale, sx, sy,
                           1.0f, 0.92f, 0.75f, 1.0f, 0);
             // 淡暖色散开
-            drawLensFlare(cmd, scene.billboardQuadVbo, sx, sy, asp, 200.f * intensityScale,
-                          0.15f*sizeScale, 0.15f*sizeScale, sx, sy,
+            drawLensFlare(cmd, scene.billboardQuadVbo, sx, sy, asp, 0.35f * intensityScale,
+                          0.50f*sizeScale, 0.50f*sizeScale, sx, sy,
                           0.9f, 0.75f, 0.55f, 1.0f, 0);
-            // 蓝色变形条纹（穿过太阳）— 窄条不会超 NDC
-            drawLensFlare(cmd, scene.billboardQuadVbo, sx, sy, asp, 300.f * intensityScale,
-                          0.5f*sizeScale, 0.005f*sizeScale, sx, sy,
+            // 蓝色变形条纹（穿过太阳，窄条不长）
+            drawLensFlare(cmd, scene.billboardQuadVbo, sx, sy, asp, 0.5f * intensityScale,
+                          0.8f*sizeScale, 0.012f*sizeScale, sx, sy,
                           0.7f, 0.8f, 1.0f, 1.0f, 1);
             // 白色核心条纹
-            drawLensFlare(cmd, scene.billboardQuadVbo, sx, sy, asp, 450.f * intensityScale,
-                          0.3f*sizeScale, 0.003f*sizeScale, sx, sy,
+            drawLensFlare(cmd, scene.billboardQuadVbo, sx, sy, asp, 0.7f * intensityScale,
+                          0.5f*sizeScale, 0.006f*sizeScale, sx, sy,
                           1.0f, 0.95f, 0.9f, 1.0f, 1);
             // 衍射条纹
-            drawLensFlare(cmd, scene.billboardQuadVbo, sx, sy, asp, 150.f * intensityScale,
-                          0.10f*sizeScale, 0.10f*sizeScale, sx, sy,
+            drawLensFlare(cmd, scene.billboardQuadVbo, sx, sy, asp, 0.25f * intensityScale,
+                          0.35f*sizeScale, 0.35f*sizeScale, sx, sy,
                           0.6f, 0.85f, 1.0f, 1.0f, 2);
             // 星芒
-            drawLensFlare(cmd, scene.billboardQuadVbo, sx, sy, asp, 250.f * intensityScale,
-                          0.12f*sizeScale, 0.12f*sizeScale, sx, sy,
+            drawLensFlare(cmd, scene.billboardQuadVbo, sx, sy, asp, 0.4f * intensityScale,
+                          0.40f*sizeScale, 0.40f*sizeScale, sx, sy,
                           1.0f, 0.97f, 0.9f, 1.0f, 3);
         }
 
         // ---- 8. 发射台 (Block C) ----
-        if (snap.hasLaunchPad && hasMesh("rocketBox")) {
-            drawMesh(cmd, "rocketBox", snap.launchPad.model, 0.6f, 0.6f, 0.65f);
+        if (snap.hasLaunchPad) {
+            if (snap.launchPad.useObjMesh && hasMesh("launchPad")) {
+                drawMesh(cmd, "launchPad", snap.launchPad.model, 1.0f, 1.0f, 1.0f);
+            } else if (hasMesh("rocketBox")) {
+                drawMesh(cmd, "rocketBox", snap.launchPad.model, 0.6f, 0.6f, 0.65f);
+            }
         }
 
         // ---- 9. 轨道丝带 (Block A) ----
+        effects.beginRibbonFrame();
         for (const auto& rib : snap.ribbons) {
             effects.drawRibbonData(cmd, snap.frameIndex % 2,
                 rib.points, rib.colors, rib.width,

@@ -40,7 +40,7 @@ void main() {
     vec3 V = normalize(frame.viewPos - vWorldPos);
     vec3 sph = normalize(vWorldPos - pc.planetCenter.xyz);
     vec3 tc = sph * 5.0;
-    float lat = sph.y;
+    float lat = sph.z;
     float timeOff = frame.time * 0.00004;
 
     float w1 = timeOff * -2.0;

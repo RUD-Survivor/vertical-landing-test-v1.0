@@ -368,6 +368,7 @@ struct PipelineInitParams {
     uint32_t                     setCount   = 0;
     VkFormat colorFmt = VK_FORMAT_UNDEFINED;
     VkFormat depthFmt = VK_FORMAT_UNDEFINED;
+    VkPrimitiveTopology topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     const char* name = "Pipeline";
 };
 
@@ -386,7 +387,7 @@ inline bool buildPipeline(VkDevice device,
     viState.vertexAttributeDescriptionCount=p.attrCount;  viState.pVertexAttributeDescriptions=p.attrs;
 
     VkPipelineInputAssemblyStateCreateInfo iaState{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
-    iaState.topology=VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    iaState.topology=p.topology;
 
     VkPipelineViewportStateCreateInfo vpState{VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
     vpState.viewportCount=1; vpState.scissorCount=1;
@@ -545,6 +546,7 @@ struct VkRibbonPipeline {
         p.blendEnable=true; p.srcColor=VK_BLEND_FACTOR_SRC_ALPHA; p.dstColor=VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
         p.srcAlpha=VK_BLEND_FACTOR_ONE; p.dstAlpha=VK_BLEND_FACTOR_ZERO;
         p.depthTest=VK_TRUE; p.depthWrite=VK_FALSE; p.depthOp=VK_COMPARE_OP_LESS; p.cullMode=VK_CULL_MODE_NONE;
+        p.topology=VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
         p.pcSize=sizeof(RibbonPushConstants); p.setLayouts=&desc.set0Layout; p.setCount=1;
         p.colorFmt=colorFmt; p.depthFmt=depthFmt; p.name="Ribbon";
         bool ok=buildPipeline(ctx.device,vm,fm,p,layout,pipeline);
@@ -572,6 +574,7 @@ struct VkBillboardPipeline {
         p.blendEnable=true; p.srcColor=VK_BLEND_FACTOR_SRC_ALPHA; p.dstColor=VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
         p.srcAlpha=VK_BLEND_FACTOR_ONE; p.dstAlpha=VK_BLEND_FACTOR_ZERO;
         p.depthTest=VK_TRUE; p.depthWrite=VK_FALSE; p.depthOp=VK_COMPARE_OP_LESS; p.cullMode=VK_CULL_MODE_NONE;
+        p.topology=VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
         p.pcSize=sizeof(BillboardPushConstants); p.setLayouts=&desc.set0Layout; p.setCount=1;
         p.colorFmt=colorFmt; p.depthFmt=depthFmt; p.name="Billboard";
         bool ok=buildPipeline(ctx.device,vm,fm,p,layout,pipeline);
@@ -598,6 +601,7 @@ struct VkLensFlarePipeline {
         p.blendEnable=true; p.srcColor=VK_BLEND_FACTOR_ONE; p.dstColor=VK_BLEND_FACTOR_ONE; // Additive
         p.srcAlpha=VK_BLEND_FACTOR_ONE; p.dstAlpha=VK_BLEND_FACTOR_ONE;
         p.depthTest=VK_TRUE; p.depthWrite=VK_FALSE; p.depthOp=VK_COMPARE_OP_LESS_OR_EQUAL; p.cullMode=VK_CULL_MODE_NONE;
+        p.topology=VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
         p.pcSize=sizeof(LensFlarePushConstants); p.setLayouts=nullptr; p.setCount=0;
         p.colorFmt=colorFmt; p.depthFmt=depthFmt; p.name="LensFlare";
         bool ok=buildPipeline(ctx.device,vm,fm,p,layout,pipeline);
@@ -655,10 +659,18 @@ struct VkAtmoPipeline {
         VkVertexInputAttributeDescription attr{0,0,VK_FORMAT_R32G32B32_SFLOAT,0};
         PipelineInitParams p{}; p.bindings=&bind; p.bindingCount=1; p.attrs=&attr; p.attrCount=1;
         p.blendEnable=true;
-        p.srcColor=VK_BLEND_FACTOR_SRC_ALPHA; p.dstColor=VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-        p.srcAlpha=VK_BLEND_FACTOR_ONE;       p.dstAlpha=VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-        p.depthTest=VK_TRUE; p.depthWrite=VK_FALSE; p.depthOp=VK_COMPARE_OP_LESS_OR_EQUAL;
-        p.cullMode=VK_CULL_MODE_BACK_BIT;
+        // Premultiplied alpha: matches OpenGL glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA)
+        // Result = scatter_color * 1 + background * (1 - opacity)  [physically correct]
+        p.srcColor=VK_BLEND_FACTOR_ONE;  p.dstColor=VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        p.srcAlpha=VK_BLEND_FACTOR_ONE;  p.dstAlpha=VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        // No depth test: matches OpenGL glDisable(GL_DEPTH_TEST).
+        // Shader handles ray termination at surface via intersectSphere internally.
+        p.depthTest=VK_FALSE; p.depthWrite=VK_FALSE; p.depthOp=VK_COMPARE_OP_LESS_OR_EQUAL;
+        // Hemisphere selection is done in the fragment shader via tFrag test.
+        // Hardware culling is disabled: Y-flip + VK_FRONT_FACE_CLOCKWISE inverts the
+        // effective cull sense relative to OpenGL, making BACK_BIT keep the wrong hemisphere.
+        // The fragment shader discards near-hemisphere fragments (tFrag < midpoint).
+        p.cullMode=VK_CULL_MODE_NONE;
         p.pcSize=sizeof(AtmoPushConstants); p.setLayouts=&desc.set0Layout; p.setCount=1;
         p.colorFmt=colorFmt; p.depthFmt=depthFmt; p.name="Atmosphere";
         bool ok=buildPipeline(ctx.device,vm,fm,p,layout,pipeline);

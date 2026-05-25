@@ -184,6 +184,7 @@ public:
             for (int x = 0; x < width; x++) {
                 int idx = y * width + x;
                 int p1 = gridPlate[idx];
+                if (p1 < 0 || p1 >= (int)plates.size()) continue;  // 防御无效板块
                 Vec3 pPos = getSphericalPos(x, y);
                 Vec3 v1 = plates[p1].eulerPole.cross(pPos) * plates[p1].omega;
 
@@ -398,10 +399,15 @@ public:
         int totalGens = 80; 
         
         for (int gen = 0; gen < totalGens; gen++) {
+            if (gen == 0) fprintf(stderr, "[Tect] gen0: rotate plates...\n");
             for (auto& p : plates) p.pos = rotateVector(p.pos, p.eulerPole, p.omega * dt);
+            if (gen == 0) fprintf(stderr, "[Tect] gen0: advect...\n");
             advectHeight(dt);
+            if (gen == 0) fprintf(stderr, "[Tect] gen0: warp map...\n");
             updatePlateMapWithWarping((float)gen);
+            if (gen == 0) fprintf(stderr, "[Tect] gen0: forces...\n");
             updateHeightFromForces(dt * 3.5f, gen); 
+            if (gen == 0) fprintf(stderr, "[Tect] gen0: hotspots...\n");
             applyHotspots(dt * 2.5f, gen); 
             
             // Global Tectonic Sinking / Erosion (Age-based shrinkage)

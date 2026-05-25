@@ -210,37 +210,34 @@ public:
     std::unique_ptr<TerrainNode> roots[6];
     
     QuadtreeTerrain(float radius) : planetRadius(radius) {
-        // Reduced simulation resolution (512x256) for massive performance boost
-        sim = new Tectonic::TectonicSimulator(512, 256);
-        sim->simulate(80); // 80 generations of tectonic evolution
-
-        // Run Climate Simulation on finalized terrain
-        climateSim = new Climate::ClimateSimulator(512, 256);
+        fprintf(stderr, "[Terrain] Tectonic 256x128...\n");
+        sim = new Tectonic::TectonicSimulator(256, 128);
+        fprintf(stderr, "[Terrain] Simulating...\n");
+        sim->simulate(40);
+        fprintf(stderr, "[Terrain] Climate...\n");
+        climateSim = new Climate::ClimateSimulator(256, 128);
         climateSim->simulate(sim->gridHeight);
-
-        // Run Hydrology Simulation (Rivers/Lakes)
-        hydroSim = new Hydro::HydroSimulator(512, 256);
+        fprintf(stderr, "[Terrain] Hydro...\n");
+        hydroSim = new Hydro::HydroSimulator(256, 128);
         hydroSim->simulate(sim->gridHeight, climateSim->data.precipitation, climateSim->data.temperature);
-        
-        // Final Sync: Inject hydrology data back into climate map for GPU visualization
-        // Pack Strahler Order (Integer) and Log-Accumulation (Fraction) into ALPHA channel
-        for (int i = 0; i < 512 * 256; i++) {
+        fprintf(stderr, "[Terrain] Final sync...\n");
+        for (int i = 0; i < 256 * 128; i++) {
             float s = (float)hydroSim->data.strahler[i];
             float acc = hydroSim->data.accumulation[i];
             float logAcc = acc > 0.0f ? std::min(0.95f, log10f(1.0f + acc) / 6.0f) : 0.0f;
             climateSim->data.moisture[i] = s + logAcc;
         }
         climateSim->bake(); 
-        hydroSim->bake(); // Dedicated hydro texture for vertex-side height correction
+        hydroSim->bake();
+        fprintf(stderr, "[Terrain] Cube faces...\n");
 
-        // Initialize 6 faces of the cube
-        // +X, -X, +Y, -Y, +Z, -Z
         roots[0] = std::make_unique<TerrainNode>(Vec3( 1, 0, 0), Vec3( 0, 0,-2), Vec3( 0, 2, 0), 1.0f, 0);
         roots[1] = std::make_unique<TerrainNode>(Vec3(-1, 0, 0), Vec3( 0, 0, 2), Vec3( 0, 2, 0), 1.0f, 0);
         roots[2] = std::make_unique<TerrainNode>(Vec3( 0, 1, 0), Vec3( 2, 0, 0), Vec3( 0, 0,-2), 1.0f, 0);
         roots[3] = std::make_unique<TerrainNode>(Vec3( 0,-1, 0), Vec3( 2, 0, 0), Vec3( 0, 0, 2), 1.0f, 0);
         roots[4] = std::make_unique<TerrainNode>(Vec3( 0, 0, 1), Vec3( 2, 0, 0), Vec3( 0, 2, 0), 1.0f, 0);
         roots[5] = std::make_unique<TerrainNode>(Vec3( 0, 0,-1), Vec3(-2, 0, 0), Vec3( 0, 2, 0), 1.0f, 0);
+        fprintf(stderr, "[Terrain] Done!\n");
     }
 
     // camPosRel: Camera position relative to the planet center (Kilometers)

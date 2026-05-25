@@ -465,7 +465,7 @@ private:
 
     // 生成 UV sphere（24×24 格，pos-only stride=12），上传到 CPU_TO_GPU 缓冲
     bool _buildAtmoSphere(VulkanContext& ctx) {
-        const int R = 24, S = 24;
+        const int R = 128, S = 128;
         std::vector<float> pts;
         pts.reserve(R * S * 6 * 3);
 

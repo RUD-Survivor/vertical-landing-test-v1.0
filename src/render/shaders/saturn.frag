@@ -48,7 +48,7 @@ void main() {
     vec3 localPos = vWorldPos - pc.planetCenter.xyz;
     vec3 sph = normalize(localPos);
     vec3 tc = sph * 5.0;
-    float lat = sph.y;
+    float lat = sph.z;
     float timeOff = frame.time * 0.00002;
     float pr = pc.ambientStr; // planet radius in render units
 

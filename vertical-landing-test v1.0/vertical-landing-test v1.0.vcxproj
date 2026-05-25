@@ -30,6 +30,12 @@
     <ClCompile Include="..\src\render\stb_impl.cpp" />
     <ClCompile Include="..\src\render\cloud_system.cpp" />
     <ClCompile Include="..\src\render\vulkan\vk_allocator.cpp" />
+    <ClCompile Include="..\vendor\imgui\imgui.cpp" />
+    <ClCompile Include="..\vendor\imgui\imgui_draw.cpp" />
+    <ClCompile Include="..\vendor\imgui\imgui_tables.cpp" />
+    <ClCompile Include="..\vendor\imgui\imgui_widgets.cpp" />
+    <ClCompile Include="..\vendor\imgui\backends\imgui_impl_glfw.cpp" />
+    <ClCompile Include="..\vendor\imgui\backends\imgui_impl_vulkan.cpp" />
     <ClCompile Include="testECS.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -159,7 +165,7 @@
       <PreprocessorDefinitions>USE_VULKAN;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <AdditionalIncludeDirectories>..\src;..\vendor;..\dependencires\include;$(VULKAN_SDK)\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\src;..\vendor;..\vendor\imgui;..\dependencires\include;$(VULKAN_SDK)\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/utf-8</AdditionalOptions>
     </ClCompile>
     <Link>
@@ -178,7 +184,7 @@
       <PreprocessorDefinitions>USE_VULKAN;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <AdditionalIncludeDirectories>..\src;..\vendor;..\dependencires\include;$(VULKAN_SDK)\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\src;..\vendor;..\vendor\imgui;..\dependencires\include;$(VULKAN_SDK)\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/utf-8</AdditionalOptions>
     </ClCompile>
     <Link>

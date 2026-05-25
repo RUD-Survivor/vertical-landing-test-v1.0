@@ -70,6 +70,9 @@ static void scroll_callback(GLFWwindow* /*w*/, double /*xoffset*/, double yoffse
 #include "render/vulkan/vk_texture.h"
 #include "render/vulkan/vk_renderer3d.h"
 #include "render/vulkan/systems/vk_hud.h"
+// ImGui Vulkan 仪表板
+#include "render/vulkan/vk_imgui.h"
+#include "render/vulkan/systems/vk_game_ui.h"
 #include "render/scene_snapshot.h"
 static VulkanContext       g_vkCtx;
 static FrameSync           g_frameSync;
@@ -77,56 +80,54 @@ static VkDescriptorManager g_vkDesc;
 static VkTAA               g_vkTAA;
 static VkRenderer3D        g_vkR3D;
 static VkHUDSystem         g_vkHUD;
+static VkImGuiSystem       g_vkImGui;
+static VkGameUI            g_gameUI;
 static FlightScene*        g_flightScene = nullptr;
 static bool                g_vkSwapchainDirty = false;
+static int                 warmup = 0;  // TAA 预热帧计数（飞行开始时重置）
+static bool                g_workshopMeshesReady = false;
 
-static bool initVulkanFlight() {
+// skipBuilder=true  → 从 loaded_rocket_state 恢复存档，全景相机模式
+// skipBuilder=false → 从 GameContext::launch_assembly 组装发射，地面发射台
+static bool initVulkanFlight(bool skipBuilder = false) {
+    delete g_flightScene;
     g_flightScene = new FlightScene();
     GameContext& gc = GameContext::getInstance();
-    gc.skip_builder = true;
+    gc.skip_builder = skipBuilder;
     gc.vkRenderer3d = &g_vkR3D;
 
-    // 初始位置：地表 + 100km（以地球为中心，绝对坐标 = 地球轨道位置 + 地表偏移）
-    constexpr double ALT = 100000.0;
-    CelestialBody& earth = UniverseModel::getInstance().solar_system[3];
-    RocketState& rs = gc.loaded_rocket_state;
-    // 绝对坐标 = 地球轨道位置 + 地表位置（地球北极上方 100km）
-    rs.abs_px = earth.px;
-    rs.abs_py = earth.py + EARTH_RADIUS + ALT;
-    rs.abs_pz = earth.pz;
-    // 相对地球坐标（地表+100km，surf 也设为同值防止 FastGravityUpdate 覆盖）
-    rs.px  = 0.0;
-    rs.py  = EARTH_RADIUS + ALT;
-    rs.pz  = 0.0;
-    rs.surf_px = 0.0;
-    rs.surf_py = EARTH_RADIUS + ALT;  // 保持和 py 一致，防止地面锁定回落
-    rs.surf_pz = 0.0;
-    rs.altitude = ALT;
-    rs.fuel = 50000.0;
+    if (skipBuilder) {
+        // 全景视角初始位置（地球上方 100km）
+        constexpr double ALT = 100000.0;
+        CelestialBody& earth = UniverseModel::getInstance().solar_system[3];
+        RocketState& rs = gc.loaded_rocket_state;
+        rs.abs_px = earth.px; rs.abs_py = earth.py + EARTH_RADIUS + ALT; rs.abs_pz = earth.pz;
+        rs.px = 0.0; rs.py = EARTH_RADIUS + ALT; rs.pz = 0.0;
+        rs.surf_px = 0.0; rs.surf_py = EARTH_RADIUS + ALT; rs.surf_pz = 0.0;
+        rs.altitude = ALT; rs.fuel = 50000.0;
+    }
 
     g_flightScene->onEnter();
 
-    // Vulkan 模式：skip_builder=true → 无火箭组件，从地球全景视角开始
-    g_flightScene->cam.mode         = CameraDirector::PANORAMA;
-    g_flightScene->cam.focus_target = 3; // Earth (solar_system[3])
-    // 初始旋转：让相机朝向太阳（计算太阳→地球方向，让相机从太阳侧观察）
-    {
-        double sx = 0.0, sy = 0.0, sz = 0.0;  // 太阳在原点
-        double ex = earth.px, ey = earth.py, ez = earth.pz;
-        Vec3 sunDir((float)(sx - ex), (float)(sy - ey), (float)(sz - ez));
+    if (skipBuilder) {
+        // 全景相机，朝向太阳方向
+        CelestialBody& earth = UniverseModel::getInstance().solar_system[3];
+        g_flightScene->cam.mode         = CameraDirector::PANORAMA;
+        g_flightScene->cam.focus_target = 3;
+        Vec3 sunDir(-(float)earth.px, -(float)earth.py, -(float)earth.pz);
         sunDir = sunDir.normalized();
-        // 构造 quat 使 Z+（默认后拉方向）旋转到 sunDir
-        Vec3 zAxis(0, 0, 1);
+        Vec3 zAxis(0,0,1);
         Vec3 rotAxis = zAxis.cross(sunDir);
         float dotVal = zAxis.dot(sunDir);
         if (rotAxis.length() < 1e-6f) {
-            // 平行：不需要旋转或正好相反
             g_flightScene->cam.quat = (dotVal > 0) ? Quat() : Quat::fromAxisAngle(Vec3(0,1,0), 3.141592653589793f);
         } else {
             rotAxis = rotAxis.normalized();
-            float angle = acosf(dotVal);
-            g_flightScene->cam.quat = Quat::fromAxisAngle(rotAxis, angle);
+            g_flightScene->cam.quat = Quat::fromAxisAngle(rotAxis, acosf(dotVal));
         }
+    } else {
+        // 发射台相机：聚焦火箭
+        g_flightScene->cam.mode = CameraDirector::CHASE;
     }
 
     // 将 CPU 网格数据注册到 Vulkan
@@ -136,21 +137,62 @@ static bool initVulkanFlight() {
             m.cpuVerts.data(),   m.cpuVerts.size() * sizeof(Vertex3D),
             m.cpuIndices.data(), (uint32_t)m.cpuIndices.size());
     };
-    // "earth" mesh 用于所有星球（unit sphere），"ring" 用于土星环
-    return reg("earth",      g_flightScene->earthMesh)
-        && reg("ring",       g_flightScene->ringMesh)
-        && reg("rocketBody", g_flightScene->rocketBody)
-        && reg("rocketNose", g_flightScene->rocketNose)
-        && reg("rocketBox",  g_flightScene->rocketBox);
+    bool ok = reg("earth",      g_flightScene->earthMesh)
+           && reg("ring",       g_flightScene->ringMesh)
+           && reg("rocketBody", g_flightScene->rocketBody)
+           && reg("rocketNose", g_flightScene->rocketNose)
+           && reg("rocketBox",  g_flightScene->rocketBox);
+    if (!ok) return false;
+
+    // ---- 外部 OBJ 模型加载 ----
+    // 发射台 OBJ
+    {
+        g_flightScene->launchPadMesh = ModelLoader::loadOBJ("assets/launch_pad.obj");
+        g_flightScene->hasLaunchPadOBJ = !g_flightScene->launchPadMesh.cpuIndices.empty();
+        if (g_flightScene->hasLaunchPadOBJ) {
+            auto& m = g_flightScene->launchPadMesh;
+            if (!g_vkR3D.registerMesh(g_vkCtx, "launchPad",
+                    m.cpuVerts.data(), m.cpuVerts.size() * sizeof(Vertex3D),
+                    m.cpuIndices.data(), (uint32_t)m.cpuIndices.size())) {
+                g_flightScene->hasLaunchPadOBJ = false;
+                fprintf(stderr, "[Vulkan] Failed to register launchPad OBJ\n");
+            } else {
+                printf("[Vulkan] Loaded launch_pad.obj (%zu verts)\n", m.cpuVerts.size());
+            }
+        }
+    }
+    // 零件 OBJ 模型（预加载 PART_CATALOG 全部条目，供飞行 + 工坊共享）
+    {
+        auto resolveObjPath = [](const PartDef& def) -> std::string {
+            if (def.model_path) return def.model_path;
+            std::string tmp = def.name;
+            for (char& c : tmp) { c=(char)std::tolower((unsigned char)c); if(c==' ')c='_'; }
+            return "assets/models/" + tmp + ".obj";
+        };
+        for (int i = 0; i < PART_CATALOG_SIZE; i++) {
+            const PartDef& def = PART_CATALOG[i];
+            std::string path = resolveObjPath(def);
+            if (g_flightScene->partObjMeshes.count(path)) continue;
+            Mesh m = ModelLoader::loadOBJ(path);
+            if (!m.cpuIndices.empty()) {
+                if (g_vkR3D.registerMesh(g_vkCtx, path.c_str(),
+                        m.cpuVerts.data(), m.cpuVerts.size() * sizeof(Vertex3D),
+                        m.cpuIndices.data(), (uint32_t)m.cpuIndices.size())) {
+                    printf("[Vulkan] Loaded OBJ part: %s (%zu verts)\n", path.c_str(), m.cpuVerts.size());
+                }
+                g_flightScene->partObjMeshes[path] = std::move(m);
+            } else {
+                g_flightScene->partObjMeshes[path] = Mesh();  // 标记为已尝试但未找到
+            }
+        }
+    }
+    return true;
 }
 
 static void renderFlightSceneVulkan(VkCommandBuffer cmd, int frameSlot) {
     SceneSnapshot snap = g_flightScene->extractRenderSnapshot();
-
-    // 更新 TAA 重投影矩阵
     g_vkTAA.updateMatrices(snap.view, snap.proj);
     g_vkTAA.uploadMatrices(frameSlot);
-
     g_vkR3D.render(cmd, 0, snap, g_vkCtx.swapExtent);
 }
 
@@ -166,8 +208,6 @@ static void renderVulkanFrame(GLFWwindow* window) {
     if (g_vkSwapchainDirty) { handleVkSwapchainResize(window); return; }
 
     auto& frame = g_frameSync.current();
-
-    // acquire 信号量从独立池取（不与 frame slot 绑定，避免 MAILBOX 下的重用冲突）
     VkSemaphore acquireSem = g_frameSync.nextAcquireSem();
 
     vkWaitForFences(g_vkCtx.device, 1, &frame.inFlightFence, VK_TRUE, UINT64_MAX);
@@ -176,12 +216,10 @@ static void renderVulkanFrame(GLFWwindow* window) {
     VkResult result = vkAcquireNextImageKHR(g_vkCtx.device, g_vkCtx.swapchain,
         UINT64_MAX, acquireSem, VK_NULL_HANDLE, &imageIdx);
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
-        handleVkSwapchainResize(window);
-        return;
+        handleVkSwapchainResize(window); return;
     }
     if (result != VK_SUCCESS) return;
 
-    // renderFinished 按 swapchain image index 取（避免 present 未消费就被再次发射）
     VkSemaphore renderSem = g_frameSync.renderSems[imageIdx];
 
     vkResetFences(g_vkCtx.device, 1, &frame.inFlightFence);
@@ -191,77 +229,43 @@ static void renderVulkanFrame(GLFWwindow* window) {
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(frame.commandBuffer, &beginInfo);
 
-    // Pass 1: 几何渲染 → RGBA16F ping-pong 缓冲
+    int ww = (int)g_vkCtx.swapExtent.width;
+    int wh = (int)g_vkCtx.swapExtent.height;
+
+    // Pass 1 & 2: 几何 + TAA resolve
+    bool inFlight   = (g_gameUI.state == VkGameState::FLIGHT) && (g_flightScene != nullptr);
+    bool inWorkshop = (g_gameUI.state == VkGameState::WORKSHOP) && g_workshopMeshesReady;
     g_vkTAA.beginGeometryPass(frame.commandBuffer, g_vkCtx.swapExtent);
     VkFrameRenderer::setViewportScissor(frame.commandBuffer, g_vkCtx.swapExtent);
-    if (g_flightScene) renderFlightSceneVulkan(frame.commandBuffer, g_frameSync.currentFrame);
+    if (inFlight) {
+        renderFlightSceneVulkan(frame.commandBuffer, g_frameSync.currentFrame);
+    } else if (inWorkshop) {
+        SceneSnapshot snap = g_gameUI.buildWorkshopSnapshot(ww, wh, g_flightScene);
+        g_vkTAA.updateMatrices(snap.view, snap.proj);
+        g_vkTAA.uploadMatrices(g_frameSync.currentFrame);
+        g_vkR3D.render(frame.commandBuffer, 0, snap, g_vkCtx.swapExtent);
+    }
     g_vkTAA.endGeometryPass(frame.commandBuffer);
 
-    // Pass 2: TAA resolve → swapchain image
     g_vkTAA.beginResolvePass(frame.commandBuffer,
         g_vkCtx.swapImages[imageIdx],
         g_vkCtx.swapImageViews[imageIdx],
         g_vkCtx.swapExtent);
     VkFrameRenderer::setViewportScissor(frame.commandBuffer, g_vkCtx.swapExtent);
-    // 前 60 帧用 blend=1.0（仅当前帧，无历史混合），之后 TAA
-    static int warmup = 0;
     float taaBlend = (++warmup < 60) ? 1.0f : 0.1f;
     g_vkTAA.drawResolve(frame.commandBuffer, taaBlend);
     g_vkTAA.endResolvePass(frame.commandBuffer, g_vkCtx.swapImages[imageIdx]);
+    // swapchain 现在处于 PRESENT_SRC_KHR
 
-    // Pass 3: HUD 覆盖层 → swapchain image（alpha 混合）
-    if (g_flightScene) {
-        SceneSnapshot snapHUD = g_flightScene->extractRenderSnapshot();
-        // 基础遥测条
-        g_vkHUD.pushQuad(-0.95f, 0.85f, 0.30f, 0.06f, 0.1f, 0.9f, 0.3f, 0.85f);
-        g_vkHUD.pushQuad(-0.95f, 0.78f, 0.15f, 0.04f, 0.9f, 0.9f, 0.9f, 0.7f);
-        // Cloud Tuner 叠加层 (Block F)
-        if (snapHUD.cloudTuner.visible) {
-            // 半透明背景面板
-            g_vkHUD.pushQuad(-0.99f, 0.96f, 0.62f, 0.62f, 0.04f, 0.04f, 0.10f, 0.88f);
-            // 标题文字（简化：用色块代替）
-            g_vkHUD.pushQuad(-0.95f, 0.93f, 0.40f, 0.03f, 0.5f, 0.9f, 1.0f, 0.8f);
-            // 9 个滑块
-            auto& p = snapHUD.cloudTuner;
-            float sliders[9][4] = {
-                {p.covLo,0.10f,0.70f,0}, {p.covHi,0.30f,0.90f,0},
-                {p.threshLo,0.40f,0.92f,0}, {p.threshHi,0.05f,0.55f,0},
-                {p.erosion,0.00f,0.50f,0}, {p.density,0.50f,12.0f,0},
-                {p.extinction,0.01f,0.60f,0}, {p.minAlt,0.50f,6.00f,0},
-                {p.maxAlt,8.00f,22.0f,0}};
-            for (int i=0; i<9; i++) {
-                float y = 0.88f - 0.068f*i;
-                float t = (sliders[i][0]-sliders[i][1])/(sliders[i][2]-sliders[i][1]);
-                if (t<0)t=0; if(t>1)t=1;
-                g_vkHUD.pushQuad(-0.75f, y, 0.50f, 0.012f, 0.15f, 0.15f, 0.25f, 1.0f);
-                g_vkHUD.pushQuad(-0.75f + 0.50f*t*0.5f, y, 0.50f*t, 0.012f, 0.25f, 0.65f, 1.0f, 1.0f);
-            }
-        }
-    }
-    {
-        // endResolvePass 已将 swapchain 转为 PRESENT_SRC_KHR，HUD 需要 COLOR_ATTACHMENT_OPTIMAL
-        transitionImage(frame.commandBuffer, g_vkCtx.swapImages[imageIdx],
-            VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-            VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,          VK_ACCESS_2_NONE,
-            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-            VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT);
-
-        VkRenderingAttachmentInfo hudAI{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
-        hudAI.imageView=g_vkCtx.swapImageViews[imageIdx];
-        hudAI.imageLayout=VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        hudAI.loadOp=VK_ATTACHMENT_LOAD_OP_LOAD; hudAI.storeOp=VK_ATTACHMENT_STORE_OP_STORE;
-        VkRenderingInfo ri{VK_STRUCTURE_TYPE_RENDERING_INFO};
-        ri.renderArea={{0,0},g_vkCtx.swapExtent}; ri.layerCount=1;
-        ri.colorAttachmentCount=1; ri.pColorAttachments=&hudAI;
-        vkCmdBeginRendering(frame.commandBuffer,&ri);
-        VkFrameRenderer::setViewportScissor(frame.commandBuffer,g_vkCtx.swapExtent);
-        g_vkHUD.flush(frame.commandBuffer);
-        vkCmdEndRendering(frame.commandBuffer);
-
-        // HUD 结束后转为 PRESENT_SRC_KHR 供呈现
-        transitionToPresent(frame.commandBuffer, g_vkCtx.swapImages[imageIdx]);
-    }
+    // Pass 3: ImGui UI / HUD（覆盖在 TAA 结果之上）
+    g_vkImGui.newFrame();
+    g_gameUI.draw(inFlight ? g_flightScene : nullptr, ww, wh);
+    ImGui::Render();
+    g_vkImGui.renderToSwapchain(frame.commandBuffer,
+        g_vkCtx.swapImages[imageIdx],
+        g_vkCtx.swapImageViews[imageIdx],
+        g_vkCtx.swapExtent);
+    // swapchain 已由 renderToSwapchain 转回 PRESENT_SRC_KHR
 
     vkEndCommandBuffer(frame.commandBuffer);
 
@@ -403,11 +407,13 @@ int main() {
                     "src/render/shaders/spirv/taa.vert.spv",
                     "src/render/shaders/spirv/taa.frag.spv")
    || !g_vkHUD.init(g_vkCtx, g_vkCtx.swapFormat)
-   || !initVulkanFlight()) {
+   || !g_vkImGui.init(g_vkCtx, window, g_vkCtx.swapFormat)) {
     fprintf(stderr, "[Vulkan] Fatal: initialization failed\n");
     glfwTerminate();
     return -1;
   }
+  // Vulkan 模式从主菜单启动（不立即进入飞行）
+  g_gameUI.state = VkGameState::MENU;
 #else
   glfwMakeContextCurrent(window);
   if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
@@ -476,8 +482,50 @@ int main() {
       if (glfwWindowShouldClose(window)) break;
 
 #ifdef USE_VULKAN
-      if (g_flightScene) g_flightScene->update(real_dt);  // 物理模拟 + 相机输入
-      if (g_flightScene) g_flightScene->render();          // ctx.update() → 相机矩阵，然后早退
+      // --- 状态机转换 ---
+      if (g_gameUI.goToExit) {
+          glfwSetWindowShouldClose(window, true);
+      }
+      if (g_gameUI.goToAgency) {
+          g_gameUI.goToAgency = false;
+          g_gameUI.state = VkGameState::AGENCY;
+      }
+      if (g_gameUI.goToWorkshop) {
+          g_gameUI.goToWorkshop = false;
+          g_gameUI.beginWorkshop();
+          // 注册基础网格（用于 Workshop 3D 预览）
+          if (!g_workshopMeshesReady) {
+              if (initVulkanFlight(true)) {
+                  g_workshopMeshesReady = true;
+              }
+          }
+          g_gameUI.state = VkGameState::WORKSHOP;
+          warmup = 0;
+      }
+      if (g_gameUI.goToFlight) {
+          g_gameUI.goToFlight = false;
+          bool skip = GameContext::getInstance().skip_builder;
+          if (!initVulkanFlight(skip)) {
+              fprintf(stderr, "[Vulkan] initVulkanFlight failed\n");
+          } else {
+              g_workshopMeshesReady = true;  // Flight 初始化也注册了网格
+              g_gameUI.state = VkGameState::FLIGHT;
+              warmup = 0;  // 重置 TAA 预热
+          }
+      }
+      // --- Workshop 输入更新（ImGui 帧之前）---
+      if (g_gameUI.state == VkGameState::WORKSHOP) {
+          g_gameUI.updateWorkshopInput(window);
+          if (g_scroll_y != 0.0f) {
+              g_gameUI.handleWorkshopScroll(g_scroll_y);
+              g_scroll_y = 0.0f;
+          }
+      }
+      // --- 场景更新（仅飞行状态） ---
+      if (g_gameUI.state == VkGameState::FLIGHT && g_flightScene) {
+          g_flightScene->update(real_dt);
+          g_flightScene->render();  // ctx.update() → 相机矩阵，然后早退（USE_VULKAN 下）
+      }
       renderVulkanFrame(window);
 #else
       SceneManager::getInstance().render();
@@ -494,6 +542,7 @@ int main() {
 #ifdef USE_VULKAN
   vkDeviceWaitIdle(g_vkCtx.device);
   delete g_flightScene; g_flightScene = nullptr;
+  g_vkImGui.shutdown(g_vkCtx.device);
   g_vkR3D.shutdown(g_vkCtx);
   g_vkTAA.shutdown(g_vkCtx);
   g_vkHUD.shutdown(g_vkCtx);

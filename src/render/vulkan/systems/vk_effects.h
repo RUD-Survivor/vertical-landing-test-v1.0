@@ -88,7 +88,7 @@ struct VkEffectsSystem {
     // 尾迹带。vbo 顶点格式: vec3 pos + vec4 color + float qSide（stride=32）。
     void drawRibbon(VkCommandBuffer cmd, int frameIdx,
                     VkBuffer vbo, uint32_t vertCount,
-                    const float model[16]) {
+                    const float model[16], VkDeviceSize vboOffset = 0) {
         if (ribbonPipe.pipeline == VK_NULL_HANDLE) return;
         ribbonPipe.bind(cmd);
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -98,8 +98,7 @@ struct VkEffectsSystem {
         vkCmdPushConstants(cmd, ribbonPipe.layout,
             VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
             0, sizeof(RibbonPushConstants), &pc);
-        VkDeviceSize off = 0;
-        vkCmdBindVertexBuffers(cmd, 0, 1, &vbo, &off);
+        vkCmdBindVertexBuffers(cmd, 0, 1, &vbo, &vboOffset);
         vkCmdDraw(cmd, vertCount, 1, 0, 0);
     }
 
@@ -126,11 +125,11 @@ struct VkEffectsSystem {
         struct RibV { float px,py,pz, cr,cg,cb,ca, side; };
         size_t n = pts.size();
         size_t total = n*2;
-        if (total > ribbonRingMax) return; // 超过环形缓冲容量
+        if (ringOffset + total > ribbonRingMax) return; // 超出环形缓冲
 
         void* data;
         vmaMapMemory(ribbonAllocator, ribbonRingAlloc, &data);
-        auto* v = (RibV*)data;
+        auto* v = (RibV*)data + ringOffset;
         for (size_t i=0; i<n; i++) {
             Vec4 col = (i<cols.size())?cols[i]:Vec4(1,1,1,1);
             Vec3 fwd;
@@ -146,8 +145,12 @@ struct VkEffectsSystem {
         vmaUnmapMemory(ribbonAllocator, ribbonRingAlloc);
 
         float idMat[16]={1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
-        drawRibbon(cmd, frameIdx, ribbonRingVbo, (uint32_t)total, idMat);
+        VkDeviceSize voff = ringOffset * 32; // 当前段在 VBO 中的字节偏移
+        drawRibbon(cmd, frameIdx, ribbonRingVbo, (uint32_t)total, idMat, voff);
+        ringOffset += total; // 推进偏移，下一条 ribbon 写到后面
     }
+
+    void beginRibbonFrame() { ringOffset = 0; } // 每帧开始时重置
 
     void shutdownRibbonRing() {
         if (ribbonRingVbo!=VK_NULL_HANDLE && ribbonAllocator!=VK_NULL_HANDLE) {
@@ -160,6 +163,7 @@ struct VkEffectsSystem {
     VmaAllocation ribbonRingAlloc = VK_NULL_HANDLE;
     VmaAllocator  ribbonAllocator = VK_NULL_HANDLE;
     size_t        ribbonRingMax   = 0;
+    size_t        ringOffset      = 0;  // 当前帧写入偏移
 
     // -----------------------------------------------------------------------
     // 广告牌精灵。vbo 为 4 个 vec2 顶点（quad，stride=8）。

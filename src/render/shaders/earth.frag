@@ -86,7 +86,7 @@ void main() {
     // 从世界空间位置重建单位球面坐标（等价于 GL 版的 vLocalPos）
     vec3 sph = normalize(vWorldPos - pc.planetCenter.xyz);
     vec3 texCoord = sph * 3.5;
-    float lat    = sph.y;
+    float lat    = sph.z;
     float absLat = abs(lat);
 
     float continent = warpedFbm(texCoord * 1.2);

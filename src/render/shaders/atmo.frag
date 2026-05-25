@@ -4,7 +4,7 @@
 // Cloud and depth-buffer sampling deferred (requires 3D textures and depth pass).
 
 #define PI 3.14159265359
-#define PRIMARY_STEPS 512
+#define PRIMARY_STEPS 96
 
 layout(set = 0, binding = 0) uniform FrameUBO {
     mat4  view;
@@ -168,19 +168,34 @@ void main() {
     float tNear, tFar;
     if (!intersectSphere(camPos, rayDir, pc.outerRadius, tNear, tFar)) discard;
 
+    // Keep far hemisphere only (matches OpenGL GL_BACK cull on a CW-outside sphere).
+    // Near hemisphere: vWorldPos is at the FIRST intersection → tFrag ≈ tNear (small).
+    // Far  hemisphere: vWorldPos is at the SECOND intersection → tFrag ≈ tFar  (large).
+    // From inside: tNear < 0, so midpoint < tFar/2 < tFrag → condition never fires, all kept.
+    // Y-flip + VK_FRONT_FACE_CLOCKWISE inverts the cull sense, so hardware culling can't
+    // replicate OpenGL GL_BACK here — the shader tFrag test is the reliable equivalent.
+    {
+        float tFrag = length(vWorldPos - camPos);
+        if (tFrag < (tNear + tFar) * 0.5) discard;
+    }
+
+    tNear = max(tNear, 0.0);
+
     // Clip at planet surface (analytical sphere — no LOD banding)
     float tS0, tS1;
     if (intersectSphere(camPos, rayDir, pc.surfaceRadius, tS0, tS1) && tS0 > 0.0)
         tFar = min(tFar, tS0);
 
-    tNear = max(tNear, 0.0);
     if (tFar - tNear <= 0.0) discard;
 
-    // Fixed 2 km step + 2D IGN jitter (eliminates banding)
-    const float STEP_KM = 2.0;
+    // Adaptive step: divides the FULL ray segment into PRIMARY_STEPS equal parts.
+    // Fixed 2 km step capped coverage at ~1024 km, which is far too short for
+    // atmosphere limb rays (~2870 km) — the dense lower layers were never reached,
+    // making the limb appear transparent and the disc visually smaller than the planet.
+    float STEP  = (tFar - tNear) / float(PRIMARY_STEPS);
     float ign    = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
     float jitter = fract(ign + float(pc.frameIndex % 64) * 0.6180339887);
-    float tCur   = tNear + jitter * STEP_KM;
+    float tCur   = tNear + jitter * STEP;
 
     vec3  sumRayleigh = vec3(0.0);
     vec3  sumMie      = vec3(0.0);
@@ -189,7 +204,7 @@ void main() {
 
     for (int i = 0; i < PRIMARY_STEPS; i++) {
         if (tCur >= tFar) break;
-        float dt  = min(STEP_KM, tFar - tCur);
+        float dt  = min(STEP, tFar - tCur);
         vec3  pos = camPos + rayDir * (tCur + dt * 0.5);
         float h   = max(length(pos - pc.planetCenter.xyz) - pc.surfaceRadius, 0.0);
 
@@ -208,7 +223,7 @@ void main() {
 
         sumRayleigh += dR * atten;
         sumMie      += dM * atten;
-        tCur        += STEP_KM;
+        tCur        += STEP;
 
         if (max(atten.x, max(atten.y, atten.z)) < 0.01) break;
     }

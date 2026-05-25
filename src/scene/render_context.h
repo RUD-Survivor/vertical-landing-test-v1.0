@@ -115,9 +115,9 @@ public:
         rw_3d = (float)rocket_config.diameter * (float)ws_d * 0.5f * rocket_vis_scale;
         // 防止空火箭配置（Vulkan 模式下 skip_builder=true, 组装为空）导致 rh=0
         // 致使 camera orbit_dist=0 → lookAt(eye==target) → NaN 视图矩阵 → 什么都渲染不出来
-        // fallback 给 earth_r*0.25 → orbit_dist = earth_r*2，相机在地球外 2 倍半径处，视野正常
-        if (rh < 1e-4f) rh = earth_r * 0.25f;
-        if (rw_3d < 1e-4f) rw_3d = earth_r * 0.0008f;
+        // fallback 给合理的小型火箭尺寸（~500m 视觉高度，相机在 ~4km 外）
+        if (rh < 1e-4f) rh = earth_r * 0.00008f;
+        if (rw_3d < 1e-4f) rw_3d = earth_r * 0.000008f;
 
         // ===============================================================
         // --- CameraDirector: 计算浮动原点 + 视图矩阵 ---

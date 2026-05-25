@@ -27,6 +27,26 @@ public:
     /**
      * 执行轨道预测和渲染的主方法
      */
+    // ---- 轨迹记录 + 轨道计算（每帧调用，与渲染分离，Vulkan 兼容） ----
+    void recordTrajectory(entt::registry& registry, entt::entity entity, float earth_r) {
+        auto& trans = registry.get<TransformComponent>(entity);
+        double r_px = trans.px, r_py = trans.py, r_pz = trans.pz;
+        double sun_px = UniverseModel::getInstance().solar_system[0].px;
+        double sun_py = UniverseModel::getInstance().solar_system[0].py;
+        double sun_pz = UniverseModel::getInstance().solar_system[0].pz;
+        DVec3 curPos = { r_px, r_py, r_pz };
+        if (traj_history.empty()) {
+            traj_history.push_back({ curPos, {r_px - sun_px, r_py - sun_py, r_pz - sun_pz} });
+        } else {
+            DVec3 bk = traj_history.back().e;
+            double move_dist = sqrt((r_px - bk.x)*(r_px - bk.x) + (r_py - bk.y)*(r_py - bk.y) + (r_pz - bk.z)*(r_pz - bk.z));
+            if (move_dist > (double)earth_r * 0.002) {
+                traj_history.push_back({ curPos, {r_px - sun_px, r_py - sun_py, r_pz - sun_pz} });
+                if (traj_history.size() > 800) traj_history.erase(traj_history.begin());
+            }
+        }
+    }
+
     void render(entt::registry& registry, entt::entity entity, FlightHUD& hud, ManeuverManager& mnvManager,
         Renderer3D* r3d, CameraDirector& cam,
         const Mat4& viewMat, const Mat4& macroProjMat,
@@ -412,27 +432,30 @@ public:
 
         // --- 轨迹历史 ribbon ---
         if (!traj_history.empty()) {
+            CelestialBody& body = UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index];
             std::vector<Vec3> pts; std::vector<Vec4> cols;
             pts.reserve(traj_history.size()); cols.reserve(traj_history.size());
             float macro_fade = 1.0f;
             for (size_t i = 0; i < traj_history.size(); i++) {
-                float wx = (float)(traj_history[i].e.x * ws_d - ro_x);
-                float wy = (float)(traj_history[i].e.y * ws_d - ro_y);
-                float wz = (float)(traj_history[i].e.z * ws_d - ro_z);
+                // e 是 body-relative 米制 → absolute → render units → 减 floating origin
+                float wx = (float)((body.px + traj_history[i].e.x) * ws_d - ro_x);
+                float wy = (float)((body.py + traj_history[i].e.y) * ws_d - ro_y);
+                float wz = (float)((body.pz + traj_history[i].e.z) * ws_d - ro_z);
                 pts.push_back(Vec3(wx,wy,wz));
                 cols.push_back(Vec4(0.4f, 1.0f, 0.3f, 0.8f * macro_fade));
             }
             if (pts.size() >= 2) {
-                float hist_w = fmaxf(earth_r * 0.006f, cam_dist * 0.001f);
+                float hist_w = fminf(fmaxf(earth_r * 0.006f, cam_dist * 0.001f), cam_dist * 0.5f);
                 out.push_back({pts, cols, hist_w});
             }
         }
 
         // --- 缓存轨道预测点 ribbon ---
         if (!cached_rel_pts.empty()) {
-            Vec3 ref((float)(trans.px * ws_d - ro_x),
-                     (float)(trans.py * ws_d - ro_y),
-                     (float)(trans.pz * ws_d - ro_z));
+            CelestialBody& body = UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index];
+            Vec3 ref((float)((body.px + trans.px) * ws_d - ro_x),
+                     (float)((body.py + trans.py) * ws_d - ro_y),
+                     (float)((body.pz + trans.pz) * ws_d - ro_z));
             std::vector<Vec3> pts; std::vector<Vec4> cols;
             pts.reserve(cached_rel_pts.size()); cols.reserve(cached_rel_pts.size());
             for (auto& rp : cached_rel_pts) {
@@ -441,7 +464,7 @@ public:
                 cols.push_back(Vec4(0.4f, 0.8f, 1.0f, 0.85f));
             }
             if (pts.size() >= 2) {
-                float ribbon_w = fmaxf(earth_r * 0.006f, cam_dist * 0.001f);
+                float ribbon_w = fminf(fmaxf(earth_r * 0.006f, cam_dist * 0.001f), cam_dist * 0.5f);
                 out.push_back({pts, cols, ribbon_w});
             }
         }
@@ -468,7 +491,7 @@ public:
                 cols.push_back(Vec4(1.0f, 0.4f, 0.1f, 0.7f));
             }
             if (pts.size() >= 2) {
-                float ribbon_w = fmaxf(earth_r * 0.006f, cam_dist * 0.001f);
+                float ribbon_w = fminf(fmaxf(earth_r * 0.006f, cam_dist * 0.001f), cam_dist * 0.5f);
                 out.push_back({pts, cols, ribbon_w});
             }
         }

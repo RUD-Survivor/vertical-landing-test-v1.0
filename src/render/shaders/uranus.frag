@@ -39,7 +39,7 @@ void main() {
     vec3 N = normalize(vNormal); vec3 L = normalize(frame.lightDir);
     vec3 V = normalize(frame.viewPos - vWorldPos);
     vec3 sph = normalize(vWorldPos - pc.planetCenter.xyz);
-    float lat = sph.y;
+    float lat = sph.z;
 
     float bandWarp = fbm(sph * vec3(1.0, 0.3, 1.0), 3) * 0.3;
     float bands = sin(lat * 12.0 + bandWarp * 2.0) * 0.5 + 0.5;

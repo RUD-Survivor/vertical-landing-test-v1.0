@@ -40,7 +40,7 @@ void main() {
     vec3 V = normalize(frame.viewPos - vWorldPos);
     vec3 sph = normalize(vWorldPos - pc.planetCenter.xyz);
     vec3 tc = sph * 5.0;
-    float lat = sph.y;
+    float lat = sph.z;
     float timeOff = frame.time * 0.00003;
 
     float bandWarp = fbm(sph * vec3(2.0, 1.0, 2.0) + vec3(timeOff * 0.5, 0.0, timeOff * 0.3), 5);
