@@ -105,35 +105,7 @@ float ozoneDensity(float h) {
     return exp(-0.5 * d * d);
 }
 
-// ── Atmospheric optical depth (includes cloud contribution via dC) ───────────
-void getOpticalDepth(vec3 p, vec3 lDir, out float dR, out float dM, out float dO, out float dC) {
-    dR = 0.0; dM = 0.0; dO = 0.0; dC = 0.0;
-    float tS0, tS1;
-    if (intersectSphere(p, lDir, pc.innerRadius, tS0, tS1) && tS0 > 0.0) {
-        dR = dM = dO = 1e6; return;
-    }
-    float t0, t1;
-    if (!intersectSphere(p, lDir, pc.outerRadius, t0, t1) || t1 <= 0.0) return;
-    float start = max(t0, 0.0);
-    float stepSz = (t1 - start) / float(max(cloud.uLightSteps, 4));
-    for (int i = 0; i < 64; i++) {
-        if (i >= cloud.uLightSteps) break;
-        vec3  pos = p + lDir * (start + (float(i) + 0.5) * stepSz);
-        float h = length(pos - pc.planetCenter.xyz) - pc.surfaceRadius;
-        if (h < -1.0) { dR = dM = dO = 1e6; return; }
-        dR += exp(-h / gHRayleigh) * stepSz;
-        dM += exp(-h / gHMie)      * stepSz;
-        dO += ozoneDensity(h)       * stepSz;
-    }
-}
-
-// ── Screen-space dither ─────────────────────────────────────────────────────
-float screenHash(vec2 uv) {
-    float ign = fract(52.9829189 * fract(dot(uv, vec2(0.06711056, 0.00583715))));
-    return fract(ign + float(pc.frameIndex % 32) * 0.6180339887);
-}
-
-// ── Noise helpers ────────────────────────────────────────────────────────────
+// ── Noise helpers (must be before getOpticalDepth for cloud shadow) ──────────
 vec3 hashGrad(vec3 p) {
     vec3 q = vec3(dot(p, vec3(127.1, 311.7, 74.7)),
                   dot(p, vec3(269.5, 183.3, 246.1)),
@@ -161,6 +133,55 @@ float fbm(vec3 p, int octaves) {
     }
     return v;
 }
+
+// ── Atmospheric optical depth (includes cloud contribution via dC) ───────────
+void getOpticalDepth(vec3 p, vec3 lDir, out float dR, out float dM, out float dO, out float dC) {
+    dR = 0.0; dM = 0.0; dO = 0.0; dC = 0.0;
+    float tS0, tS1;
+    if (intersectSphere(p, lDir, pc.innerRadius, tS0, tS1) && tS0 > 0.0) {
+        dR = dM = dO = 1e6; return;
+    }
+    float t0, t1;
+    if (!intersectSphere(p, lDir, pc.outerRadius, t0, t1) || t1 <= 0.0) return;
+    float start = max(t0, 0.0);
+    float stepSz = (t1 - start) / float(max(cloud.uLightSteps, 4));
+    for (int i = 0; i < 64; i++) {
+        if (i >= cloud.uLightSteps) break;
+        vec3  pos = p + lDir * (start + (float(i) + 0.5) * stepSz);
+        float h = length(pos - pc.planetCenter.xyz) - pc.surfaceRadius;
+        if (h < -1.0) { dR = dM = dO = 1e6; return; }
+        dR += exp(-h / gHRayleigh) * stepSz;
+        dM += exp(-h / gHMie)      * stepSz;
+        dO += ozoneDensity(h)       * stepSz;
+    }
+
+    // ── Cloud self-shadow: cheap procedural density along light path ─────
+    float cloudInnerR = pc.surfaceRadius + gCloudMinAlt;
+    float cloudOuterR = pc.surfaceRadius + gCloudMaxAlt;
+    float ct0, ct1;
+    if (intersectSphere(p, lDir, cloudOuterR, ct0, ct1) && ct1 > 0.0) {
+        float cStart = max(ct0, 0.0);
+        float cStep = max((ct1 - cStart) / 6.0, 0.05);
+        for (int j = 0; j < 6; j++) {
+            vec3 cp = p + lDir * (cStart + (float(j) + 0.5) * cStep);
+            float ch = length(cp - pc.planetCenter.xyz) - pc.surfaceRadius;
+            if (ch >= gCloudMinAlt && ch <= gCloudMaxAlt) {
+                vec3 cs = normalize(cp - pc.planetCenter.xyz);
+                float altN = clamp((ch - gCloudMinAlt) / max(gCloudMaxAlt - gCloudMinAlt, 0.1), 0.0, 1.0);
+                float profile = smoothstep(0.0, 0.05, altN) * smoothstep(1.0, 0.85, altN);
+                float cheapDensity = fbm(cs * 6.0 + cloud.uTime * 0.001, 2) * profile * cloud.uDensity * 0.01;
+                dC += cheapDensity * cStep;
+            }
+        }
+    }
+}
+
+// ── Screen-space dither ─────────────────────────────────────────────────────
+float screenHash(vec2 uv) {
+    float ign = fract(52.9829189 * fract(dot(uv, vec2(0.06711056, 0.00583715))));
+    return fract(ign + float(pc.frameIndex % 32) * 0.6180339887);
+}
+
 float worley3d(vec3 p) {
     vec3 i = floor(p); vec3 f = fract(p); float md = 1.0;
     for (int x=-1; x<=1; x++) for (int y=-1; y<=1; y++) for (int z=-1; z<=1; z++) {
@@ -491,7 +512,7 @@ void main() {
         vec3 sunTint=exp(-(gRayleighCoeff*cLR+gMieCoeff*1.1*cLM+gOzoneCoeff*cLO))*cloudShadow;
 
         vec3 tauRgb=gCloudExtinction.x*(optDepthC+cLC)*vec3(1.0,1.04,1.10);
-        vec3 msRgb=(exp(-tauRgb)+exp(-tauRgb*0.5)*0.5+exp(-tauRgb*0.25)*0.25+exp(-tauRgb*0.125)*0.125)/3.0;
+        vec3 msRgb=(exp(-tauRgb)+exp(-tauRgb*0.5)*0.5+exp(-tauRgb*0.25)*0.25+exp(-tauRgb*0.125)*0.125)/6.0;
 
         float tauLight=gCloudExtinction.x*cLC;
         float powder=1.0-exp(-tauLight*2.0);
@@ -525,7 +546,7 @@ void main() {
         float atmLum=dot(atmTransAtCloud,vec3(0.299,0.587,0.114));
         vec3 directContrib=atmLum*sunTint*cloudAtt*aoDirect;
         float shadowStrength=1.0-dot(cloudShadow,vec3(0.333));
-        vec3 ambientContrib=atmLum*skyAmbColor*0.85*aoAmbient*(1.0-shadowStrength*0.5);
+        vec3 ambientContrib=atmLum*skyAmbColor*1.2*aoAmbient*(1.0-shadowStrength*0.5);
         sumCloud+=dC*(directContrib+ambientContrib)*viewTrans;
         viewTrans*=exp(-dC);  // accumulate view-ray extinction for self-occlusion
 

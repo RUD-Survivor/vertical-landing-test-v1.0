@@ -569,10 +569,9 @@ void marchClouds(
         // Simple vectorised Jimenez 4-term with wavelength bias.
         vec3 tauRgb = gCloudExtinction.x * (optDepthC + cLightC)
                     * vec3(1.0, 1.04, 1.10);  // R preserved, G slightly, B most attenuated
-        // ── Multi-scatter (reduced normalization for stronger contrast) ─────
-        // Jimenez 4-term: lower divisor = less brightening of cloud interiors.
+        // Jimenez 4-term: higher divisor → less brightening of cloud tops.
         vec3 msRgb = (exp(-tauRgb) + exp(-tauRgb * 0.5) * 0.5
-                   + exp(-tauRgb * 0.25) * 0.25 + exp(-tauRgb * 0.125) * 0.125) / 3.0;
+                   + exp(-tauRgb * 0.25) * 0.25 + exp(-tauRgb * 0.125) * 0.125) / 6.0;
 
         // ── Core darkening + silver-lining ────────────────────────────────────
         // powder: 0=edge(near sun), 1=deep inside cloud (matches cloud.frag logic)
@@ -613,7 +612,7 @@ void marchClouds(
         vec3 directContrib  = atmLum * sunTint  * cloudAtt * aoDirect;
         // Ambient darkens where cloud is self-shadowed (matches cloud.frag logic)
         float shadowStrength = 1.0 - dot(cloudShadow, vec3(0.333));  // 0=lit, 1=shadowed
-        vec3 ambientContrib = atmLum * skyAmbColor * 0.85 * aoAmbient
+        vec3 ambientContrib = atmLum * skyAmbColor * 1.2 * aoAmbient;
                             * (1.0 - shadowStrength * 0.5);
         sumCloud += dC * (directContrib + ambientContrib);
 
