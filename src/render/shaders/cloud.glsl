@@ -569,17 +569,21 @@ void marchClouds(
         // Simple vectorised Jimenez 4-term with wavelength bias.
         vec3 tauRgb = gCloudExtinction.x * (optDepthC + cLightC)
                     * vec3(1.0, 1.04, 1.10);  // R preserved, G slightly, B most attenuated
+        // ── Multi-scatter (reduced normalization for stronger contrast) ─────
+        // Jimenez 4-term: lower divisor = less brightening of cloud interiors.
         vec3 msRgb = (exp(-tauRgb) + exp(-tauRgb * 0.5) * 0.5
-                   + exp(-tauRgb * 0.25) * 0.25 + exp(-tauRgb * 0.125) * 0.125) / 1.875;
+                   + exp(-tauRgb * 0.25) * 0.25 + exp(-tauRgb * 0.125) * 0.125) / 3.0;
 
-        // ── Silver-lining with edge detection ────────────────────────────────
+        // ── Core darkening + silver-lining ────────────────────────────────────
+        // powder: 0=edge(near sun), 1=deep inside cloud (matches cloud.frag logic)
         float tauLight  = gCloudExtinction.x * cLightC;
         float powder = 1.0 - exp(-tauLight * 2.0);
+        float coreDark = 1.0 - powder * 0.72;  // dense interior → darker core
         // Edge gradient: previous-step density drop → cloud boundary
         float edgeSharpness = smoothstep(0.002, 0.018, abs(dC - prevDC) / max(fineStep, 0.0001));
         float powderEdge = powder * (1.0 + edgeSharpness * 0.7);
         float silverMask = max(0.0, cosTheta);
-        vec3 cloudAtt = msRgb * (vec3(1.0) + powderEdge * silverMask * 0.65);
+        vec3 cloudAtt = msRgb * (coreDark + powderEdge * silverMask * 0.65);
         prevDC = dC;
 
         // ── Ambient occlusion: height-based + cone-traced ──────────────────
@@ -607,7 +611,10 @@ void marchClouds(
 
         float atmLum = dot(atmTransAtCloud, vec3(0.299, 0.587, 0.114));
         vec3 directContrib  = atmLum * sunTint  * cloudAtt * aoDirect;
-        vec3 ambientContrib = atmLum * skyAmbColor * 0.85 * aoAmbient;
+        // Ambient darkens where cloud is self-shadowed (matches cloud.frag logic)
+        float shadowStrength = 1.0 - dot(cloudShadow, vec3(0.333));  // 0=lit, 1=shadowed
+        vec3 ambientContrib = atmLum * skyAmbColor * 0.85 * aoAmbient
+                            * (1.0 - shadowStrength * 0.5);
         sumCloud += dC * (directContrib + ambientContrib);
 
         // ── Early termination ─────────────────────────────────────────────────
@@ -618,4 +625,9 @@ void marchClouds(
         if (dot(cloudAtt, vec3(0.333)) < 0.006) break;
         tPos += fineStep;
     }
+
+    // ── Terminator fade: dim clouds at night (matches cloud.frag nightFade) ──
+    // uSunVisibility is declared in atmosphere_preamble.frag, available here.
+    float nightFade = smoothstep(0.0, 0.12, uSunVisibility);
+    sumCloud *= nightFade;
 }
