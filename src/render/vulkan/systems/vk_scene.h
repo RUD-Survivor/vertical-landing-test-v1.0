@@ -23,6 +23,7 @@ struct VkSceneSystem {
     VkSVOPipeline        svoPipe;
     VkRingPipeline       ringPipe;
     VkAtmoPipeline       atmoPipe;
+    VkCloudPipeline      cloudPipe;
     VkVegetationPipeline vegPipe;
     VkTerrainPipeline    terrainPipe;
 
@@ -105,6 +106,11 @@ struct VkSceneSystem {
                 "src/render/shaders/spirv/atmo.vert.spv",
                 "src/render/shaders/spirv/atmo.frag.spv")) {
             fprintf(stderr, "[VkScene] Failed: atmo pipeline\n"); return false;
+        }
+        if (!cloudPipe.init(ctx, d, colorFmt, depthFmt,
+                "src/render/shaders/spirv/cloud.vert.spv",
+                "src/render/shaders/spirv/cloud.frag.spv")) {
+            fprintf(stderr, "[VkScene] Failed: cloud pipeline\n"); return false;
         }
         if (!vegPipe.init(ctx, d, colorFmt, depthFmt,
                 "src/render/shaders/spirv/vegetation.vert.spv",
@@ -223,6 +229,7 @@ struct VkSceneSystem {
         planetPipes.clear();
         vegPipe.shutdown(ctx.device);
         terrainPipe.shutdown(ctx.device);
+        cloudPipe.shutdown(ctx.device);
         atmoPipe.shutdown(ctx.device);
         ringPipe.shutdown(ctx.device);
         svoPipe.shutdown(ctx.device);
@@ -370,6 +377,22 @@ struct VkSceneSystem {
             VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
             0, sizeof(AtmoPushConstants), &pc);
         vkCmdDraw(cmd, 3, 1, 0, 0);  // fullscreen triangle — no VBO
+        _bindMeshPipe(cmd);
+    }
+
+    // -----------------------------------------------------------------------
+    // Cloud — fullscreen triangle, pre-multiplied alpha blend.
+    // Uses same AtmoPushConstants layout; showClouds/planetIdx gate in shader.
+    void drawCloud(VkCommandBuffer cmd, const AtmoPushConstants& pc) {
+        if (cloudPipe.pipeline == VK_NULL_HANDLE) return;
+
+        cloudPipe.bind(cmd);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+            cloudPipe.layout, 0, 1, &desc->set0[_frameIdx], 0, nullptr);
+        vkCmdPushConstants(cmd, cloudPipe.layout,
+            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+            0, sizeof(AtmoPushConstants), &pc);
+        vkCmdDraw(cmd, 3, 1, 0, 0);
         _bindMeshPipe(cmd);
     }
 

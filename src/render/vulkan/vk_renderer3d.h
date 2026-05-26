@@ -95,6 +95,11 @@ struct VkRenderer3D {
         scene.drawAtmosphere(cmd, pc);
     }
 
+    // Cloud — 全屏三角形体积云，复用 AtmoPushConstants，地形之后大气之前调用
+    void drawCloud(VkCommandBuffer cmd, const AtmoPushConstants& pc) {
+        scene.drawCloud(cmd, pc);
+    }
+
     static bool isGasGiant(int atmoIdx) {
         return atmoIdx == 6 || atmoIdx == 7 || atmoIdx == 8 || atmoIdx == 9;
     }
@@ -261,7 +266,8 @@ struct VkRenderer3D {
             }
         }
 
-        // ---- 4. 大气层 ----
+        // ---- 4. 体积云（地形之后、大气之前；预乘 alpha 混合）----
+        // ---- 5. 大气层 ----
         for (const auto& cd : snap.celestials) {
             if (cd.atmoIdx == 0) continue;
             // 更新为该行星的光照方向（太阳→行星）
@@ -276,18 +282,26 @@ struct VkRenderer3D {
             apc.planetCenter[1] = cd.center[1];
             apc.planetCenter[2] = cd.center[2];
             apc.innerRadius    = cd.radius;
-            apc.outerRadius    = cd.radius + 160.0f;   // 160 km 大气高度（1 rU = 1 km）
+            apc.outerRadius    = cd.radius + 160.0f;
             apc.surfaceRadius  = cd.radius;
             apc.planetIdx      = cd.atmoIdx;
             apc.sunVisibility  = sunVis;
             apc.ringInner      = cd.hasRing ? cd.radius * 1.11f : 0.f;
             apc.ringOuter      = cd.hasRing ? cd.radius * 2.35f : 0.f;
             apc.frameIndex     = snap.frameIndex;
+            apc.tuneMinAlt     = 2.0f;    // 云层底 2 km
+            apc.tuneMaxAlt     = 14.0f;   // 云层顶 14 km
+            apc.tuneExtinction = 1.2f;    // 云密度
+            apc.showClouds     = cd.showClouds ? 1.f : 0.f;
+
+            // 云：仅地球（planetIdx==3），且开启云显示时渲染
+            if (cd.atmoIdx == 3 && cd.showClouds)
+                drawCloud(cmd, apc);
+
+            // 大气散射
             apc.tuneMinAlt     = 0.f;
             apc.tuneMaxAlt     = 25.f;
             apc.tuneExtinction = 1.f;
-            apc.showClouds     = cd.showClouds ? 1.f : 0.f;
-
             drawAtmosphere(cmd, apc);
         }
         // 恢复全局光照方向
