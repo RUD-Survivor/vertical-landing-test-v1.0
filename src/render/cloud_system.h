@@ -27,16 +27,16 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 struct CloudTuneParams {
-    float covLo      = 0.150f; // coverage linear ramp low  (below → density=0)
-    float covHi      = 0.720f; // coverage linear ramp high (above → density=full)
-    float threshLo   = 0.150f; // shape noise mask low  — lowered from 0.260 to reduce fragmentation
-    float threshHi   = 0.480f; // shape noise mask high
-    float erosion    = 0.155f; // reduced from 0.217 — too much erosion breaks cloud continuity
-    float density    = 2.200f; // boosted to compensate for wider coverage ramp
-    float extinction = 0.300f; // reduced from 0.380 — more internal light transmission
-    float minAlt     = 1.5f;   // cloud layer base altitude (km)
-    float maxAlt     = 15.0f;  // cloud layer top altitude (km) — slightly higher for CB tops
-    int   debugMode  = 0;      // 0=off 1=coverage grayscale 2=curl field
+    float covLo      = 0.150f;
+    float covHi      = 0.720f;
+    float threshLo   = 0.100f; // lowered to reduce percolation cutoff
+    float threshHi   = 0.400f;
+    float erosion    = 0.100f;
+    float density    = 8.000f; // boosted for visibility
+    float extinction = 0.800f;
+    float minAlt     = 1.5f;
+    float maxAlt     = 15.0f;
+    int   debugMode  = 0;      // 0=off 1=force density for debug
 };
 
 class CloudSystem {

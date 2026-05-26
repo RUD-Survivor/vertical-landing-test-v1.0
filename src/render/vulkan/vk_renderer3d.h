@@ -27,6 +27,7 @@ struct VkRenderer3D {
     bool init(VulkanContext& ctx, VkDescriptorManager& desc,
               VkFormat colorFmt, VkFormat depthFmt) {
         if (!scene.init(ctx, desc, colorFmt, depthFmt))   return false;
+        if (!scene.initCloudTextures(ctx))                 return false;
         if (!sky.init(ctx, desc, colorFmt, depthFmt))     return false;
         if (!effects.init(ctx, desc, colorFmt, depthFmt)) return false;
         effects.initRibbonRing(ctx);  // 环形 VBO 用于丝带渲染
@@ -96,8 +97,8 @@ struct VkRenderer3D {
     }
 
     // Cloud — 全屏三角形体积云，复用 AtmoPushConstants，地形之后大气之前调用
-    void drawCloud(VkCommandBuffer cmd, const AtmoPushConstants& pc) {
-        scene.drawCloud(cmd, pc);
+    void drawCloud(VkCommandBuffer cmd, const AtmoPushConstants& pc, double simTime, float camAlt) {
+        scene.drawCloud(cmd, pc, simTime, camAlt);
     }
 
     static bool isGasGiant(int atmoIdx) {
@@ -250,22 +251,6 @@ struct VkRenderer3D {
             }
         }
 
-        // ---- 4. 火箭（全零件渲染，保留物理深度遮挡） ----
-        if (snap.rocketParts.empty()) {
-            drawMesh(cmd, "rocketBody", snap.rocketBodyModel, 0.92f, 0.92f, 0.92f);
-            drawMesh(cmd, "rocketNose", snap.rocketNoseModel, 0.88f, 0.88f, 0.88f);
-        } else {
-            for (const auto& rp : snap.rocketParts) {
-                if (!rp.meshId.empty() && hasMesh(rp.meshId)) {
-                    drawMesh(cmd, rp.meshId, rp.model, rp.r, rp.g, rp.b);
-                } else {
-                    const char* mid = rp.meshType == 1 ? "rocketNose" :
-                                      rp.meshType == 2 ? "rocketBox" : "rocketBody";
-                    drawMesh(cmd, mid, rp.model, rp.r, rp.g, rp.b);
-                }
-            }
-        }
-
         // ---- 4. 体积云（地形之后、大气之前；预乘 alpha 混合）----
         // ---- 5. 大气层 ----
         for (const auto& cd : snap.celestials) {
@@ -289,26 +274,48 @@ struct VkRenderer3D {
             apc.ringInner      = cd.hasRing ? cd.radius * 1.11f : 0.f;
             apc.ringOuter      = cd.hasRing ? cd.radius * 2.35f : 0.f;
             apc.frameIndex     = snap.frameIndex;
-            apc.tuneMinAlt     = 2.0f;    // 云层底 2 km
-            apc.tuneMaxAlt     = 14.0f;   // 云层顶 14 km
-            apc.tuneExtinction = 1.2f;    // 云密度
-            apc.showClouds     = cd.showClouds ? 1.f : 0.f;
-
-            // 云：仅地球（planetIdx==3），且开启云显示时渲染
-            if (cd.atmoIdx == 3 && cd.showClouds)
-                drawCloud(cmd, apc);
-
-            // 大气散射
-            apc.tuneMinAlt     = 0.f;
+            apc.tuneMinAlt     = 0.f;     // atmosphere params (overridden for clouds later)
             apc.tuneMaxAlt     = 25.f;
             apc.tuneExtinction = 1.f;
+            apc.showClouds     = cd.showClouds ? 1.f : 0.f;
+
+            // 大气散射（先渲染，让云层能遮挡后方的大气光）
             drawAtmosphere(cmd, apc);
+
+            // 云：仅地球（planetIdx==3），且开启云显示时渲染（在大气之后，遮挡大气）
+            if (cd.atmoIdx == 3 && cd.showClouds) {
+                apc.tuneMinAlt     = 2.0f;
+                apc.tuneMaxAlt     = 14.0f;
+                apc.tuneExtinction = 1.2f;
+                apc.showClouds     = 1.f;
+                float dx = snap.camPos[0] - apc.planetCenter[0];
+                float dy = snap.camPos[1] - apc.planetCenter[1];
+                float dz = snap.camPos[2] - apc.planetCenter[2];
+                float camAltKm = sqrtf(dx*dx+dy*dy+dz*dz) - apc.surfaceRadius;
+                drawCloud(cmd, apc, (double)snap.time, camAltKm);
+            }
         }
         // 恢复全局光照方向
         scene.updateLightDir(snap.frameIndex % 2,
             snap.lightDir[0], snap.lightDir[1], snap.lightDir[2]);
 
-        // ---- 5. 天空盒（跳过——debug 测试） ----
+        // ---- 5. 火箭（云和大气之后渲染，确保火箭不被远处的云/大气遮挡）----
+        if (snap.rocketParts.empty()) {
+            drawMesh(cmd, "rocketBody", snap.rocketBodyModel, 0.92f, 0.92f, 0.92f);
+            drawMesh(cmd, "rocketNose", snap.rocketNoseModel, 0.88f, 0.88f, 0.88f);
+        } else {
+            for (const auto& rp : snap.rocketParts) {
+                if (!rp.meshId.empty() && hasMesh(rp.meshId)) {
+                    drawMesh(cmd, rp.meshId, rp.model, rp.r, rp.g, rp.b);
+                } else {
+                    const char* mid = rp.meshType == 1 ? "rocketNose" :
+                                      rp.meshType == 2 ? "rocketBox" : "rocketBody";
+                    drawMesh(cmd, mid, rp.model, rp.r, rp.g, rp.b);
+                }
+            }
+        }
+
+        // ---- 6. 天空盒（跳过——debug 测试） ----
         // drawSkybox(cmd, snap.skyVibrancy, snap.aspect);
 
         // ---- 6. 镜头光晕（太阳光晕 + 辉光 + 条纹） ----

@@ -152,7 +152,7 @@ float cloudDensity(vec3 p, float h, bool highDetail) {
     if (uPlanetIdx == 3) {
         if (h >= gCloudMinAlt && h <= 7.0) {
             float altNorm = (h - gCloudMinAlt) / (7.0 - gCloudMinAlt);
-            float altBase = smoothstep(0.0, 0.07, altNorm);
+            float altBase = smoothstep(0.0, 0.02, altNorm);
 
             float latWarp = sph.z * sph.z * sph.z * 0.3;
             float sB = sin(latWarp); float cB = cos(latWarp);
@@ -600,8 +600,8 @@ void marchClouds(
             float aoConeSample = coneAO(cPos, probeSph, ch);
             aoCone = aoHeight * 0.35 + aoConeSample * 0.65;
         }
-        float aoDirect  = mix(0.04, 1.0, aoCone);
-        float aoAmbient = mix(0.16, 1.0, aoCone);
+        float aoDirect  = mix(0.30, 1.0, aoCone);
+        float aoAmbient = mix(0.30, 1.0, aoCone);
 
         float sunElev = dot(probeSph, uLightDir);
         float skyPathKm = min(8.0 / max(sunElev, 0.02), 60.0);

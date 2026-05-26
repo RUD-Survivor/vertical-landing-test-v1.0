@@ -136,11 +136,26 @@ struct TerrainDataUBO {
 };
 
 // -----------------------------------------------------------------------
+// CloudParamsUBO — GLSL std140 layout (matches cloud.frag Set 0 Binding 1)
+// -----------------------------------------------------------------------
+struct CloudParamsUBO {
+    float uTime;
+    float uPhaseSin, uPhaseCos;
+    float uCovLo, uCovHi, uThreshLo, uThreshHi;
+    float uErosion, uDensity, uExtinction;
+    float uMinAlt, uMaxAlt;
+    int   uCloudSteps, uLightSteps, uDebug;
+    float _pad1;
+};
+
+// -----------------------------------------------------------------------
 // VkDescriptorManager — owns layouts, pool, and per-frame UBO resources
 // -----------------------------------------------------------------------
 struct VkDescriptorManager {
-    VkDescriptorSetLayout set0Layout = VK_NULL_HANDLE;  // FrameUBO
-    VkDescriptorSetLayout set1Layout = VK_NULL_HANDLE;  // sampler2D
+    VkDescriptorSetLayout set0Layout = VK_NULL_HANDLE;
+    VkDescriptorSetLayout set1Layout = VK_NULL_HANDLE;
+    VkDescriptorSetLayout cloudSet0Layout = VK_NULL_HANDLE; // FrameUBO+CloudParams
+    VkDescriptorSetLayout cloudTexLayout  = VK_NULL_HANDLE; // 4 cloud textures
 
     VkDescriptorPool pool = VK_NULL_HANDLE;
 
@@ -152,11 +167,21 @@ struct VkDescriptorManager {
     // Pre-allocated Set 0 descriptor sets (one per frame in flight)
     VkDescriptorSet set0[FRAMES_IN_FLIGHT]{};
 
+    // Cloud UBO buffers + descriptor sets
+    VkBuffer      cloudUbo[FRAMES_IN_FLIGHT]{};
+    VmaAllocation cloudUboAlloc[FRAMES_IN_FLIGHT]{};
+    void*         cloudUboMapped[FRAMES_IN_FLIGHT]{};
+    VkDescriptorSet cloudSet0[FRAMES_IN_FLIGHT]{};
+    VkDescriptorSet cloudTexSet = VK_NULL_HANDLE;
+
     bool init(VulkanContext& ctx) {
-        if (!createLayouts(ctx))    return false;
-        if (!createPool(ctx))       return false;
-        if (!createUBOBuffers(ctx)) return false;
-        if (!createSet0(ctx))       return false;
+        if (!createLayouts(ctx))      return false;
+        if (!createPool(ctx))         return false;
+        if (!createUBOBuffers(ctx))   return false;
+        if (!createSet0(ctx))         return false;
+        if (!createCloudLayouts(ctx)) return false;
+        if (!createCloudUBOs(ctx))    return false;
+        if (!createCloudSet0(ctx))    return false;
         return true;
     }
 
@@ -166,10 +191,16 @@ struct VkDescriptorManager {
                 vmaDestroyBuffer(ctx.allocator, uboBuffers[i], uboAllocs[i]);
                 uboBuffers[i] = VK_NULL_HANDLE;
             }
+            if (cloudUbo[i] != VK_NULL_HANDLE) {
+                vmaDestroyBuffer(ctx.allocator, cloudUbo[i], cloudUboAlloc[i]);
+                cloudUbo[i] = VK_NULL_HANDLE;
+            }
         }
-        if (pool       != VK_NULL_HANDLE) { vkDestroyDescriptorPool      (ctx.device, pool,       nullptr); pool       = VK_NULL_HANDLE; }
-        if (set0Layout != VK_NULL_HANDLE) { vkDestroyDescriptorSetLayout (ctx.device, set0Layout, nullptr); set0Layout = VK_NULL_HANDLE; }
-        if (set1Layout != VK_NULL_HANDLE) { vkDestroyDescriptorSetLayout (ctx.device, set1Layout, nullptr); set1Layout = VK_NULL_HANDLE; }
+        if (pool != VK_NULL_HANDLE) { vkDestroyDescriptorPool(ctx.device, pool, nullptr); pool = VK_NULL_HANDLE; }
+        if (set0Layout != VK_NULL_HANDLE) { vkDestroyDescriptorSetLayout(ctx.device, set0Layout, nullptr); set0Layout = VK_NULL_HANDLE; }
+        if (set1Layout != VK_NULL_HANDLE) { vkDestroyDescriptorSetLayout(ctx.device, set1Layout, nullptr); set1Layout = VK_NULL_HANDLE; }
+        if (cloudSet0Layout != VK_NULL_HANDLE) { vkDestroyDescriptorSetLayout(ctx.device, cloudSet0Layout, nullptr); cloudSet0Layout = VK_NULL_HANDLE; }
+        if (cloudTexLayout != VK_NULL_HANDLE) { vkDestroyDescriptorSetLayout(ctx.device, cloudTexLayout, nullptr); cloudTexLayout = VK_NULL_HANDLE; }
     }
 
     // Call once per frame before recording draw commands
@@ -202,6 +233,21 @@ struct VkDescriptorManager {
         write.descriptorCount = 1;
         write.pImageInfo      = &imgInfo;
         vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
+        return ds;
+    }
+
+    void updateCloudUBO(int frameIndex, const CloudParamsUBO& data) {
+        memcpy(cloudUboMapped[frameIndex], &data, sizeof(CloudParamsUBO));
+    }
+
+    VkDescriptorSet allocateCloudTexSet(VkDevice device) {
+        VkDescriptorSetAllocateInfo ai{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+        ai.descriptorPool = pool; ai.descriptorSetCount = 1;
+        ai.pSetLayouts = &cloudTexLayout;
+        VkDescriptorSet ds = VK_NULL_HANDLE;
+        if (vkAllocateDescriptorSets(device, &ai, &ds) != VK_SUCCESS) {
+            fprintf(stderr, "[VkDesc] Failed cloud tex set\n"); return VK_NULL_HANDLE;
+        }
         return ds;
     }
 
@@ -301,6 +347,73 @@ private:
             write.descriptorCount = 1;
             write.pBufferInfo     = &bufInfo;
             vkUpdateDescriptorSets(ctx.device, 1, &write, 0, nullptr);
+        }
+        return true;
+    }
+
+    // ── Cloud-specific ───────────────────────────────────────────────────────
+    bool createCloudLayouts(VulkanContext& ctx) {
+        // Cloud Set 0: binding 0=FrameUBO, binding 1=CloudParamsUBO
+        VkDescriptorSetLayoutBinding cb[2]{};
+        cb[0].binding = 0; cb[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        cb[0].descriptorCount = 1; cb[0].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        cb[1].binding = 1; cb[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        cb[1].descriptorCount = 1; cb[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        VkDescriptorSetLayoutCreateInfo ci0{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+        ci0.bindingCount = 2; ci0.pBindings = cb;
+        if (vkCreateDescriptorSetLayout(ctx.device, &ci0, nullptr, &cloudSet0Layout) != VK_SUCCESS) {
+            fprintf(stderr, "[VkDesc] Failed cloud Set0 layout\n"); return false;
+        }
+        // Cloud Texture Set: 3×sampler3D + 1×sampler2D
+        VkDescriptorSetLayoutBinding tb[4]{};
+        for (int j = 0; j < 3; j++) {
+            tb[j].binding = (uint32_t)j; tb[j].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            tb[j].descriptorCount = 1; tb[j].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        }
+        tb[3].binding = 3; tb[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        tb[3].descriptorCount = 1; tb[3].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        VkDescriptorSetLayoutCreateInfo ci1{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+        ci1.bindingCount = 4; ci1.pBindings = tb;
+        if (vkCreateDescriptorSetLayout(ctx.device, &ci1, nullptr, &cloudTexLayout) != VK_SUCCESS) {
+            fprintf(stderr, "[VkDesc] Failed cloud tex layout\n"); return false;
+        }
+        return true;
+    }
+
+    bool createCloudUBOs(VulkanContext& ctx) {
+        VkBufferCreateInfo bci{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+        bci.size = sizeof(CloudParamsUBO); bci.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+        VmaAllocationCreateInfo aci{}; aci.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
+        aci.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
+        for (int i = 0; i < FRAMES_IN_FLIGHT; i++) {
+            VmaAllocationInfo info;
+            if (vmaCreateBuffer(ctx.allocator, &bci, &aci, &cloudUbo[i], &cloudUboAlloc[i], &info) != VK_SUCCESS) {
+                fprintf(stderr, "[VkDesc] Failed cloud UBO %d\n", i); return false;
+            }
+            cloudUboMapped[i] = info.pMappedData;
+        }
+        return true;
+    }
+
+    bool createCloudSet0(VulkanContext& ctx) {
+        for (int i = 0; i < FRAMES_IN_FLIGHT; i++) {
+            VkDescriptorSetAllocateInfo ai{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+            ai.descriptorPool = pool; ai.descriptorSetCount = 1;
+            ai.pSetLayouts = &cloudSet0Layout;
+            if (vkAllocateDescriptorSets(ctx.device, &ai, &cloudSet0[i]) != VK_SUCCESS) {
+                fprintf(stderr, "[VkDesc] Failed cloud Set0[%d]\n", i); return false;
+            }
+            VkDescriptorBufferInfo bi[2]{};
+            bi[0].buffer = uboBuffers[i]; bi[0].offset = 0; bi[0].range = sizeof(FrameUBO);
+            bi[1].buffer = cloudUbo[i];   bi[1].offset = 0; bi[1].range = sizeof(CloudParamsUBO);
+            VkWriteDescriptorSet w[2]{};
+            w[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; w[0].dstSet = cloudSet0[i];
+            w[0].dstBinding = 0; w[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            w[0].descriptorCount = 1; w[0].pBufferInfo = &bi[0];
+            w[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; w[1].dstSet = cloudSet0[i];
+            w[1].dstBinding = 1; w[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            w[1].descriptorCount = 1; w[1].pBufferInfo = &bi[1];
+            vkUpdateDescriptorSets(ctx.device, 2, w, 0, nullptr);
         }
         return true;
     }

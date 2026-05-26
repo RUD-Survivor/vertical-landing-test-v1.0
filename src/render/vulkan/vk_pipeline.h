@@ -674,24 +674,29 @@ struct VkAtmoPipeline {
 
 // -----------------------------------------------------------------------
 // VkCloudPipeline — 体积云全屏三角形（预乘 alpha 混合，无深度写入）
-// 与 VkAtmoPipeline 布局相同：Set 0 only, Push: AtmoPushConstants (64 bytes).
+// Set 0: FrameUBO(b0) + CloudParamsUBO(b1)
+// Set 1: 3×sampler3D + 1×sampler2D
+// Push: AtmoPushConstants (64 bytes).
 // -----------------------------------------------------------------------
 struct VkCloudPipeline {
     VkPipelineLayout layout=VK_NULL_HANDLE; VkPipeline pipeline=VK_NULL_HANDLE;
     bool init(VulkanContext& ctx, VkDescriptorManager& desc,
-              VkFormat colorFmt, VkFormat depthFmt, const char* vertSpv, const char* fragSpv) {
+              VkFormat colorFmt, VkFormat depthFmt,
+              const char* vertSpv, const char* fragSpv,
+              VkDescriptorSetLayout set0, VkDescriptorSetLayout set1) {
         auto vc=loadSPIRV(vertSpv); auto fc=loadSPIRV(fragSpv);
         if(vc.empty()||fc.empty()) return false;
         VkShaderModule vm=createShaderModule(ctx.device,vc), fm=createShaderModule(ctx.device,fc);
         if(!vm||!fm){if(vm)vkDestroyShaderModule(ctx.device,vm,nullptr);if(fm)vkDestroyShaderModule(ctx.device,fm,nullptr);return false;}
         PipelineInitParams p{}; p.bindings=nullptr; p.bindingCount=0; p.attrs=nullptr; p.attrCount=0;
-        // Pre-multiplied alpha: src=ONE dst=1-SrcA (same as atmosphere)
         p.blendEnable=true;
-        p.srcColor=VK_BLEND_FACTOR_ONE;             p.dstColor=VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-        p.srcAlpha=VK_BLEND_FACTOR_ONE;             p.dstAlpha=VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-        p.depthTest=VK_FALSE; p.depthWrite=VK_FALSE; p.depthOp=VK_COMPARE_OP_LESS_OR_EQUAL;
+        p.srcColor=VK_BLEND_FACTOR_ONE; p.dstColor=VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        p.srcAlpha=VK_BLEND_FACTOR_ONE; p.dstAlpha=VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        p.depthTest=VK_FALSE; p.depthWrite=VK_FALSE;
         p.cullMode=VK_CULL_MODE_NONE;
-        p.pcSize=sizeof(AtmoPushConstants); p.setLayouts=&desc.set0Layout; p.setCount=1;
+        p.pcSize=sizeof(AtmoPushConstants);
+        VkDescriptorSetLayout sets[2]={set0, set1};
+        p.setLayouts=sets; p.setCount=2;
         p.colorFmt=colorFmt; p.depthFmt=depthFmt; p.name="Cloud";
         bool ok=buildPipeline(ctx.device,vm,fm,p,layout,pipeline);
         vkDestroyShaderModule(ctx.device,vm,nullptr); vkDestroyShaderModule(ctx.device,fm,nullptr); return ok;

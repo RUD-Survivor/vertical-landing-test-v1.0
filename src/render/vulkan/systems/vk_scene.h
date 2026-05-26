@@ -10,6 +10,7 @@
 #include "../vk_descriptors.h"
 #include "../vk_pipeline.h"
 #include "../vk_texture.h"
+#include "../../cloud_system.h"  // CloudTuneParams
 
 #include <unordered_map>
 #include <string>
@@ -67,8 +68,15 @@ struct VkSceneSystem {
     // Terrain 全局纹理（Set1: tectonic/hydro/climate/null）
     VkTexture2D     terrainTectonicTex;
     VkTexture2D     terrainHydroTex;
-    VkTexture2D     terrainNullTex2;      // climate + localHydro 占位
+    VkTexture2D     terrainNullTex2;
     VkDescriptorSet terrainGlobalTexSet = VK_NULL_HANDLE;
+
+    // Cloud textures (4: noise 128³, cover 128³, detail 32³, weather 2048×1024)
+    VkTexture3D     cloudNoiseTex;
+    VkTexture3D     cloudCoverTex;
+    VkTexture3D     cloudDetailTex;
+    VkTexture2D     cloudWeatherTex;
+    CloudTuneParams cloudTune;  // from cloud_system.h
 
     // Vegetation 实例 VBO + 环形缓冲
     VkBuffer      vegInstanceVbo      = VK_NULL_HANDLE;
@@ -109,7 +117,8 @@ struct VkSceneSystem {
         }
         if (!cloudPipe.init(ctx, d, colorFmt, depthFmt,
                 "src/render/shaders/spirv/cloud.vert.spv",
-                "src/render/shaders/spirv/cloud.frag.spv")) {
+                "src/render/shaders/spirv/cloud.frag.spv",
+                d.cloudSet0Layout, d.cloudTexLayout)) {
             fprintf(stderr, "[VkScene] Failed: cloud pipeline\n"); return false;
         }
         if (!vegPipe.init(ctx, d, colorFmt, depthFmt,
@@ -234,6 +243,12 @@ struct VkSceneSystem {
         ringPipe.shutdown(ctx.device);
         svoPipe.shutdown(ctx.device);
         meshPipe.shutdown(ctx.device);
+
+        // Cloud textures
+        cloudNoiseTex.destroy(ctx);
+        cloudCoverTex.destroy(ctx);
+        cloudDetailTex.destroy(ctx);
+        cloudWeatherTex.destroy(ctx);
     }
 
     // -----------------------------------------------------------------------
@@ -382,18 +397,229 @@ struct VkSceneSystem {
 
     // -----------------------------------------------------------------------
     // Cloud — fullscreen triangle, pre-multiplied alpha blend.
-    // Uses same AtmoPushConstants layout; showClouds/planetIdx gate in shader.
-    void drawCloud(VkCommandBuffer cmd, const AtmoPushConstants& pc) {
+    void drawCloud(VkCommandBuffer cmd, const AtmoPushConstants& pc,
+                   double simTime, float camAltKm) {
         if (cloudPipe.pipeline == VK_NULL_HANDLE) return;
+        if (desc->cloudTexSet == VK_NULL_HANDLE) return;
+
+        // Update CloudParamsUBO
+        CloudParamsUBO cpubo{};
+        float wrappedTime = (float)std::fmod(simTime, 10000.0);
+        cpubo.uTime = wrappedTime;
+        double phase = simTime * 0.004 * -0.2;
+        cpubo.uPhaseSin = (float)std::sin(phase);
+        cpubo.uPhaseCos = (float)std::cos(phase);
+        cpubo.uCovLo    = cloudTune.covLo;
+        cpubo.uCovHi    = cloudTune.covHi;
+        cpubo.uThreshLo = cloudTune.threshLo;
+        cpubo.uThreshHi = cloudTune.threshHi;
+        cpubo.uErosion  = cloudTune.erosion;
+        cpubo.uDensity  = cloudTune.density;
+        cpubo.uExtinction = cloudTune.extinction;
+        cpubo.uMinAlt   = cloudTune.minAlt;
+        cpubo.uMaxAlt   = cloudTune.maxAlt;
+        cpubo.uDebug    = cloudTune.debugMode;
+
+        if (camAltKm < 20.f)      { cpubo.uCloudSteps = 128; cpubo.uLightSteps = 16; }
+        else if (camAltKm < 500.f) { cpubo.uCloudSteps = 48;  cpubo.uLightSteps = 12; }
+        else if (camAltKm < 5000.f){ cpubo.uCloudSteps = 32;  cpubo.uLightSteps = 8; }
+        else                       { cpubo.uCloudSteps = 16;  cpubo.uLightSteps = 4; }
+
+        desc->updateCloudUBO(_frameIdx, cpubo);
 
         cloudPipe.bind(cmd);
+        VkDescriptorSet sets[2] = { desc->cloudSet0[_frameIdx], desc->cloudTexSet };
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-            cloudPipe.layout, 0, 1, &desc->set0[_frameIdx], 0, nullptr);
+            cloudPipe.layout, 0, 2, sets, 0, nullptr);
         vkCmdPushConstants(cmd, cloudPipe.layout,
             VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
             0, sizeof(AtmoPushConstants), &pc);
         vkCmdDraw(cmd, 3, 1, 0, 0);
         _bindMeshPipe(cmd);
+    }
+
+    // -----------------------------------------------------------------------
+    // Bake + upload 4 cloud textures (noise 128³, cover 128³, detail 32³, weather 2048×1024)
+    // Must be called once after VulkanContext is initialized.
+    // Uses CPU noise helpers ported from cloud_system.cpp.
+    bool initCloudTextures(VulkanContext& ctx) {
+        printf("[VkScene] Baking cloud textures...\n");
+
+        // ── CPU noise helpers ────────────────────────────────────────────
+        auto cpuFract = [](float x) { return x - floorf(x); };
+        auto cpuHash = [&](float px, float py, float pz) {
+            px=cpuFract(px*443.897f); py=cpuFract(py*441.423f); pz=cpuFract(pz*437.195f);
+            float d=px*(py+19.19f)+py*(pz+19.19f)+pz*(px+19.19f);
+            px+=d; py+=d; pz+=d;
+            return cpuFract((px+py)*pz);
+        };
+        auto cpuNoise3d = [&](float px, float py, float pz) {
+            float ix=floorf(px),iy=floorf(py),iz=floorf(pz);
+            float fx=px-ix,fy=py-iy,fz=pz-iz;
+            fx=fx*fx*fx*(fx*(fx*6-15)+10); fy=fy*fy*fy*(fy*(fy*6-15)+10); fz=fz*fz*fz*(fz*(fz*6-15)+10);
+            float n000=cpuHash(ix,iy,iz),n100=cpuHash(ix+1,iy,iz),n010=cpuHash(ix,iy+1,iz),n110=cpuHash(ix+1,iy+1,iz);
+            float n001=cpuHash(ix,iy,iz+1),n101=cpuHash(ix+1,iy,iz+1),n011=cpuHash(ix,iy+1,iz+1),n111=cpuHash(ix+1,iy+1,iz+1);
+            float nx00=n000+fx*(n100-n000),nx10=n010+fx*(n110-n010),nx01=n001+fx*(n101-n001),nx11=n011+fx*(n111-n011);
+            return (nx00+fy*(nx10-nx00))+fz*((nx01+fy*(nx11-nx01))-(nx00+fy*(nx10-nx00)));
+        };
+        auto cpuFbm = [&](float px, float py, float pz, int oct) {
+            float v=0,amp=0.5f;
+            for(int i=0;i<oct;i++){v+=cpuNoise3d(px,py,pz)*amp;px=px*2.07f+0.131f;py=py*2.07f-0.217f;pz=pz*2.07f+0.344f;amp*=0.48f;}
+            return v;
+        };
+        auto cpuWorley = [&](float px,float py,float pz) {
+            float ix=floorf(px),iy=floorf(py),iz=floorf(pz),fx=px-ix,fy=py-iy,fz=pz-iz,md=1.0f;
+            for(int x=-1;x<=1;x++)for(int y=-1;y<=1;y++)for(int z=-1;z<=1;z++){
+                float bx=ix+x,by=iy+y,bz=iz+z;
+                float hx=cpuFract(sinf(bx*127.1f+by*311.7f+bz*74.7f)*43758.5453f);
+                float hy=cpuFract(sinf(bx*269.5f+by*183.3f+bz*246.1f)*43758.5453f);
+                float hz=cpuFract(sinf(bx*113.5f+by*271.9f+bz*124.6f)*43758.5453f);
+                float dx=fx-(x+hx),dy=fy-(y+hy),dz=fz-(z+hz);
+                float dd=dx*dx+dy*dy+dz*dz; if(dd<md)md=dd;
+            }
+            return sqrtf(md);
+        };
+        auto cpuWorleyTile = [&](float px,float py,float pz) {
+            const float T=8.0f;
+            float wpx=px-floorf(px/T)*T,wpy=py-floorf(py/T)*T,wpz=pz-floorf(pz/T)*T;
+            float ix=floorf(wpx),iy=floorf(wpy),iz=floorf(wpz),fx=wpx-ix,fy=wpy-iy,fz=wpz-iz,md=1.0f;
+            for(int x=-1;x<=1;x++)for(int y=-1;y<=1;y++)for(int z=-1;z<=1;z++){
+                float bx=ix+x,by=iy+y,bz=iz+z;
+                float wbx=bx-floorf(bx/T)*T,wby=by-floorf(by/T)*T,wbz=bz-floorf(bz/T)*T;
+                float hx=cpuFract(sinf(wbx*127.1f+wby*311.7f+wbz*74.7f)*43758.5453f);
+                float hy=cpuFract(sinf(wbx*269.5f+wby*183.3f+wbz*246.1f)*43758.5453f);
+                float hz=cpuFract(sinf(wbx*113.5f+wby*271.9f+wbz*124.6f)*43758.5453f);
+                float dx=fx-(x+hx),dy=fy-(y+hy),dz=fz-(z+hz);
+                float dd=dx*dx+dy*dy+dz*dz; if(dd<md)md=dd;
+            }
+            return sqrtf(md);
+        };
+        auto clampU8 = [](float v) { int i=(int)(v*255+0.5f); return (uint8_t)(i<0?0:i>255?255:i); };
+
+        // ── 1) Noise 128³ ────────────────────────────────────────────────
+        {
+            const int N=128; std::vector<uint8_t> data(N*N*N*4);
+            for(int z=0;z<N;z++)for(int y=0;y<N;y++)for(int x=0;x<N;x++){
+                float s=(float)x/N*8,t8=(float)y/N*8,u=(float)z/N*8;
+                float perlin=cpuFbm(s,t8,u,4);
+                float w_inv=1-cpuWorleyTile(s,t8,u);
+                float r=w_inv+perlin*(1-w_inv);
+                float g=cpuWorleyTile(s,t8,u);
+                float b=cpuFbm(s,t8,u,3);
+                float a=cpuFbm(s,t8,u,5);
+                int idx=(z*N*N+y*N+x)*4;
+                data[idx]=clampU8(r);data[idx+1]=clampU8(g);data[idx+2]=clampU8(b);data[idx+3]=clampU8(a);
+            }
+            if(!cloudNoiseTex.upload(ctx,data.data(),N,N,N)){fprintf(stderr,"[VkScene] Cloud noise upload failed\n");return false;}
+        }
+
+        // ── 2) Cover 128³ ────────────────────────────────────────────────
+        {
+            const int N=128; std::vector<uint8_t> data(N*N*N*4);
+            for(int z=0;z<N;z++)for(int y=0;y<N;y++)for(int x=0;x<N;x++){
+                float px=(float)x/N,py=(float)y/N,pz=(float)z/N;
+                float r=cpuFbm(px*8,py*8,pz*8,2);
+                float g=cpuFbm(px*8,py*8,pz*8,1);
+                float b=cpuFbm(px*8+12.3f,py*8,pz*8,3);
+                float a=cpuFbm(px*8+47.1f,py*8,pz*8,3);
+                int idx=(z*N*N+y*N+x)*4;
+                data[idx]=clampU8(r);data[idx+1]=clampU8(g);data[idx+2]=clampU8(b);data[idx+3]=clampU8(a);
+            }
+            if(!cloudCoverTex.upload(ctx,data.data(),N,N,N)){fprintf(stderr,"[VkScene] Cloud cover upload failed\n");return false;}
+        }
+
+        // ── 3) Detail 32³ ────────────────────────────────────────────────
+        {
+            const int N=32; std::vector<uint8_t> data(N*N*N*4);
+            for(int z=0;z<N;z++)for(int y=0;y<N;y++)for(int x=0;x<N;x++){
+                float px=(float)x/N,py=(float)y/N,pz=(float)z/N;
+                float r=cpuWorley(px*4+0.13f,py*4+0.47f,pz*4+0.31f);
+                float g=cpuWorley(px*8+7.31f,py*8+5.17f,pz*8+2.89f);
+                float b=cpuWorley(px*16+11.8f,py*16+9.44f,pz*16+14.3f);
+                float a=r*0.625f+g*0.25f+b*0.125f;
+                int idx=(z*N*N+y*N+x)*4;
+                data[idx]=clampU8(r);data[idx+1]=clampU8(g);data[idx+2]=clampU8(b);data[idx+3]=clampU8(a);
+            }
+            if(!cloudDetailTex.upload(ctx,data.data(),N,N,N)){fprintf(stderr,"[VkScene] Cloud detail upload failed\n");return false;}
+        }
+
+        // ── 4) Weather 2048×1024 ─────────────────────────────────────────
+        {
+            const int W=2048,H=1024; std::vector<uint8_t> data(W*H*4);
+            auto ellipse=[&](float lon,float lat,float cLon,float cLat,float hW,float hH){
+                float dlon=lon-cLon;if(dlon>180)dlon-=360;if(dlon<-180)dlon+=360;
+                float dlat=lat-cLat;float r=sqrtf((dlon/hW)*(dlon/hW)+(dlat/hH)*(dlat/hH));
+                if(r>=1.3f)return 0.f;if(r<=0.7f)return 1.f;
+                float tt=(r-0.7f)/0.6f;return 1-tt*tt*(3-2*tt);
+            };
+            auto gauss=[](float x,float c,float s){float d=(x-c)/s;return expf(-0.5f*d*d);};
+            for(int y=0;y<H;y++){
+                float lat=((float)y/H-0.5f)*180;
+                for(int x=0;x<W;x++){
+                    float lon=((float)x/W-0.5f)*360;
+                    float land=0;
+                    land=fmaxf(land,ellipse(lon,lat,-98,52,42,30));
+                    land=fmaxf(land,ellipse(lon,lat,-90,18,13,12));
+                    land=fmaxf(land,ellipse(lon,lat,-60,-14,22,27));
+                    land=fmaxf(land,ellipse(lon,lat,12,52,22,18));
+                    land=fmaxf(land,ellipse(lon,lat,17,20,38,22));
+                    land=fmaxf(land,ellipse(lon,lat,22,-10,28,26));
+                    land=fmaxf(land,ellipse(lon,lat,45,23,18,13));
+                    land=fmaxf(land,ellipse(lon,lat,73,28,18,14));
+                    land=fmaxf(land,ellipse(lon,lat,108,36,30,28));
+                    land=fmaxf(land,ellipse(lon,lat,80,62,65,17));
+                    land=fmaxf(land,ellipse(lon,lat,102,15,15,12));
+                    land=fmaxf(land,ellipse(lon,lat,118,-3,20,7));
+                    land=fmaxf(land,ellipse(lon,lat,134,-26,22,16));
+                    land=fmaxf(land,ellipse(lon,lat,-42,72,22,12));
+                    {float tt=fminf(1,fmaxf(0,(-lat-70)/14));land=fmaxf(land,tt*tt*(3-2*tt));}
+                    land=fminf(land,1);
+
+                    float absLat=fabsf(lat);
+                    float wITCZ=gauss(absLat,2,6),wSubDry=gauss(absLat,27,10);
+                    float wTemperate=gauss(absLat,52,13),wPolar=gauss(absLat,75,9);
+                    float wSum=wITCZ+wSubDry+wTemperate+wPolar+1e-6f;
+                    wITCZ/=wSum;wSubDry/=wSum;wTemperate/=wSum;wPolar/=wSum;
+
+                    float cov_oc=wITCZ*0.82f+wSubDry*0.35f+wTemperate*0.68f+wPolar*0.52f;
+                    float type_oc=wITCZ*0.84f+wSubDry*0.15f+wTemperate*0.48f+wPolar*0.12f;
+                    float hum_oc=wITCZ*0.88f+wSubDry*0.52f+wTemperate*0.72f+wPolar*0.58f;
+                    float cov_la=wITCZ*0.55f+wSubDry*0.28f+wTemperate*0.48f+wPolar*0.38f;
+                    float type_la=wITCZ*0.65f+wSubDry*0.30f+wTemperate*0.38f+wPolar*0.08f;
+                    float hum_la=wITCZ*0.62f+wSubDry*0.28f+wTemperate*0.52f+wPolar*0.42f;
+                    float coverage=cov_oc+(cov_la-cov_oc)*land;
+                    float cloudTypeV=type_oc+(type_la-type_oc)*land;
+                    float humidity=hum_oc+(hum_la-hum_oc)*land;
+
+                    int idx=(y*W+x)*4;
+                    data[idx]=(uint8_t)fminf(255,(int)(coverage*255+0.5f));
+                    data[idx+1]=(uint8_t)fminf(255,(int)(cloudTypeV*255+0.5f));
+                    data[idx+2]=(uint8_t)fminf(255,(int)(humidity*255+0.5f));
+                    data[idx+3]=(uint8_t)fminf(255,(int)(land*255+0.5f));
+                }
+            }
+            if(!cloudWeatherTex.upload(ctx,data.data(),W,H)){fprintf(stderr,"[VkScene] Cloud weather upload failed\n");return false;}
+        }
+
+        // ── Create cloud texture descriptor set ──────────────────────────
+        desc->cloudTexSet = desc->allocateCloudTexSet(ctx.device);
+        if (desc->cloudTexSet == VK_NULL_HANDLE) return false;
+        VkDescriptorImageInfo img[4]{};
+        img[0]={cloudNoiseTex.sampler, cloudNoiseTex.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        img[1]={cloudCoverTex.sampler, cloudCoverTex.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        img[2]={cloudDetailTex.sampler, cloudDetailTex.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        img[3]={cloudWeatherTex.sampler, cloudWeatherTex.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        VkWriteDescriptorSet w[4]{};
+        for (int i=0;i<4;i++) {
+            w[i].sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            w[i].dstSet=desc->cloudTexSet; w[i].dstBinding=(uint32_t)i;
+            w[i].descriptorType=VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            w[i].descriptorCount=1; w[i].pImageInfo=&img[i];
+        }
+        vkUpdateDescriptorSets(ctx.device,4,w,0,nullptr);
+
+        printf("[VkScene] Cloud textures baked and uploaded.\n");
+        return true;
     }
 
     // -----------------------------------------------------------------------

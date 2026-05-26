@@ -120,6 +120,11 @@ if %ERRORLEVEL% neq 0 goto :fail
 if %ERRORLEVEL% neq 0 goto :fail
 %GLSLC% %SHADER_DIR%\atmo.frag -o %OUT_DIR%\atmo.frag.spv
 if %ERRORLEVEL% neq 0 goto :fail
+echo [Cloud] cloud.vert + cloud.frag
+%GLSLC% %SHADER_DIR%\cloud.vert -o %OUT_DIR%\cloud.vert.spv
+if %ERRORLEVEL% neq 0 goto :fail
+%GLSLC% %SHADER_DIR%\cloud.frag -o %OUT_DIR%\cloud.frag.spv
+if %ERRORLEVEL% neq 0 goto :fail
 %GLSLC% %SHADER_DIR%\vegetation.vert -o %OUT_DIR%\vegetation.vert.spv
 if %ERRORLEVEL% neq 0 goto :fail
 %GLSLC% %SHADER_DIR%\vegetation.frag -o %OUT_DIR%\vegetation.frag.spv
