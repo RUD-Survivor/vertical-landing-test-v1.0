@@ -96,10 +96,16 @@ struct SVOChunkDraw {
 // 地形补丁数据 (Block D)
 // ============================================================================
 struct TerrainPatchDraw {
-    float model[16];      // 世界矩阵
-    float planetRadius;   // 星球半径（shader 归一化用）
-    float maxElev;        // 最大海拔
-    float time;           // 时间
+    float model[16];           // 世界矩阵（含行星旋转，translation = 行星世界位置）
+    float planetRadius;        // 星球半径（shader 归一化用）
+    float maxElev;             // 最大海拔（km）
+    float time;                // 时间
+    // 以下字段供 Vulkan terrain shader 使用
+    float nodeCenter[3];       // node->center（单位立方体面中心）
+    float nodeSideA[3];        // node->sideA（水平跨度向量）
+    float nodeSideB[3];        // node->sideB（垂直跨度向量）
+    float planetCenterRel[3];  // 行星中心相对相机位置（world center - cam pos）
+    int   nodeLevel;           // LOD 层级
 };
 
 // ============================================================================

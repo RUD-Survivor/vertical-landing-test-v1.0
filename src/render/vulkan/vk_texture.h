@@ -120,6 +120,68 @@ struct VkTexture2D {
         return true;
     }
 
+    // Upload RGBA32F float texture (16 bytes/pixel: 4×float).
+    // Used for hydro/climate maps that need raw float values in the shader.
+    bool uploadFloat4(VulkanContext& ctx, const float* data, uint32_t w, uint32_t h) {
+        width = w; height = h;
+        VkDeviceSize size = (VkDeviceSize)w * h * 4 * sizeof(float);
+
+        VkBuffer      stagingBuf  = VK_NULL_HANDLE;
+        VmaAllocation stagingAlloc = VK_NULL_HANDLE;
+        {
+            VkBufferCreateInfo bci{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+            bci.size  = size;
+            bci.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+            VmaAllocationCreateInfo aci{};
+            aci.usage = VMA_MEMORY_USAGE_CPU_ONLY;
+            aci.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
+            VmaAllocationInfo info{};
+            if (vmaCreateBuffer(ctx.allocator, &bci, &aci, &stagingBuf, &stagingAlloc, &info) != VK_SUCCESS) {
+                fprintf(stderr, "[VkTexture2D] uploadFloat4: staging failed\n"); return false;
+            }
+            memcpy(info.pMappedData, data, (size_t)size);
+        }
+        VkFormat fmt = VK_FORMAT_R32G32B32A32_SFLOAT;
+        {
+            VkImageCreateInfo ici{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+            ici.imageType  = VK_IMAGE_TYPE_2D; ici.format = fmt;
+            ici.extent     = { w, h, 1 };
+            ici.mipLevels  = 1; ici.arrayLayers = 1;
+            ici.samples    = VK_SAMPLE_COUNT_1_BIT;
+            ici.tiling     = VK_IMAGE_TILING_OPTIMAL;
+            ici.usage      = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+            ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+            VmaAllocationCreateInfo aci{}; aci.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+            if (vmaCreateImage(ctx.allocator, &ici, &aci, &image, &alloc, nullptr) != VK_SUCCESS) {
+                fprintf(stderr, "[VkTexture2D] uploadFloat4: image create failed\n");
+                vmaDestroyBuffer(ctx.allocator, stagingBuf, stagingAlloc); return false;
+            }
+        }
+        VkCommandBuffer cmd = beginSingleTimeCommands(ctx);
+        transitionImage(cmd, image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE,
+            VK_PIPELINE_STAGE_2_TRANSFER_BIT,   VK_ACCESS_2_TRANSFER_WRITE_BIT);
+        VkBufferImageCopy region{};
+        region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        region.imageSubresource.layerCount = 1;
+        region.imageExtent = { w, h, 1 };
+        vkCmdCopyBufferToImage(cmd, stagingBuf, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+        transitionToShaderRead(cmd, image, 1);
+        endSingleTimeCommands(ctx, cmd);
+        vmaDestroyBuffer(ctx.allocator, stagingBuf, stagingAlloc);
+
+        VkImageViewCreateInfo vci{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+        vci.image = image; vci.viewType = VK_IMAGE_VIEW_TYPE_2D; vci.format = fmt;
+        vci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        vci.subresourceRange.levelCount = 1; vci.subresourceRange.layerCount = 1;
+        if (vkCreateImageView(ctx.device, &vci, nullptr, &view) != VK_SUCCESS) {
+            fprintf(stderr, "[VkTexture2D] uploadFloat4: view failed\n"); return false;
+        }
+        if (!createSampler(ctx)) return false;
+        printf("[VkTexture2D] uploadFloat4 %ux%u RGBA32F\n", w, h);
+        return true;
+    }
+
     void destroy(VulkanContext& ctx) {
         if (sampler != VK_NULL_HANDLE) { vkDestroySampler   (ctx.device, sampler, nullptr); sampler = VK_NULL_HANDLE; }
         if (view    != VK_NULL_HANDLE) { vkDestroyImageView (ctx.device, view,    nullptr); view    = VK_NULL_HANDLE; }

@@ -831,7 +831,18 @@ else {
         }
 
         // ---- 15. SVO + Terrain + Vegetation (Block D) ----
-        _extractBlockD(snap, ss, ctx, ws_d, ro_x, ro_y, ro_z);
+        {
+            auto* r3d_check = GameContext::getInstance().renderer3d;
+#ifdef USE_VULKAN
+            bool needBlockD = (GameContext::getInstance().terrain != nullptr);
+#else
+            bool needBlockD = r3d_check && r3d_check->svoManager
+                              && r3d_check->svoManager->hasActiveChunks();
+#endif
+            if (needBlockD) {
+                _extractBlockD(snap, ss, ctx, ws_d, ro_x, ro_y, ro_z);
+            }
+        }
 
         return snap;
     }
@@ -843,7 +854,7 @@ private:
                                const RenderContext& ctx,
                                double ws_d, double ro_x, double ro_y, double ro_z) {
         auto* r3d = GameContext::getInstance().renderer3d;
-        if (!r3d) return;
+        // r3d 在 Vulkan 模式下为 nullptr，SVO 块内部已自守卫；terrain 块用 activeTerrain
 
         // 查找地球的 CelestialDraw 数据（bodyIdx==3）
         const CelestialDraw* earthCD = nullptr;
@@ -860,7 +871,7 @@ private:
         axisX = axisX.normalized(); axisY = axisY.normalized(); axisZ = axisZ.normalized();
 
         // --- SVO ---
-        if (r3d->svoManager && r3d->svoManager->hasActiveChunks()) {
+        if (r3d && r3d->svoManager && r3d->svoManager->hasActiveChunks()) {
             SVO::meshAllDirty(r3d->svoManager->chunks, r3d->svoManager->pool, r3d->svoManager->region);
 
             Vec3 E = r3d->svoManager->region.east;
@@ -884,16 +895,21 @@ private:
         }
 
         // --- Terrain Quadtree ---
-        if (r3d->terrain) {
+#ifdef USE_VULKAN
+        Terrain::QuadtreeTerrain* activeTerrain = GameContext::getInstance().terrain;
+#else
+        Terrain::QuadtreeTerrain* activeTerrain = r3d->terrain;
+#endif
+        if (activeTerrain) {
             Vec3 camPosInertialRel = -planetCenterRel;
             Vec3 camPosLocalRel(camPosInertialRel.dot(axisX),
                                 camPosInertialRel.dot(axisY),
                                 camPosInertialRel.dot(axisZ));
 
             for (int i = 0; i < 6; i++) {
-                r3d->terrain->updateSubdivision(r3d->terrain->roots[i].get(), camPosLocalRel, earthCD->radius);
+                activeTerrain->updateSubdivision(activeTerrain->roots[i].get(), camPosLocalRel, earthCD->radius);
                 _extractTerrainLeaves(snap.terrainPatches,
-                    r3d->terrain->roots[i].get(), earthCD->radius, earthCD->model, snap.time);
+                    activeTerrain->roots[i].get(), earthCD->radius, earthCD->model, snap.time, planetCenterRel);
             }
 
             // --- Vegetation 实例 ---
@@ -905,7 +921,7 @@ private:
                     float offX = ((i * 7) % 1000 / 500.f - 1.f) * 0.002f;
                     float offZ = ((i * 13) % 1000 / 500.f - 1.f) * 0.002f;
                     Vec3 p = (camNorm + Vec3(offX, 0, offZ)).normalized();
-                    float h = r3d->terrain->getHeight(p) / earthCD->radius;
+                    float h = activeTerrain->getHeight(p) / earthCD->radius;
                     if (h > 0.0f) {
                         Vec3 localPos = p * (earthCD->radius + h * earthCD->radius);
                         Vec3 worldP = localPos + planetCenter;
@@ -924,7 +940,8 @@ private:
 
     static void _extractTerrainLeaves(std::vector<TerrainPatchDraw>& out,
                                        Terrain::TerrainNode* node, float planetRadius,
-                                       const float model[16], float time) {
+                                       const float model[16], float time,
+                                       const Vec3& planetCenterRel) {
         if (!node) return;
         if (node->isLeaf) {
             TerrainPatchDraw tp;
@@ -932,10 +949,23 @@ private:
             tp.planetRadius = planetRadius;
             tp.maxElev = 25.f;
             tp.time = time;
+            tp.nodeCenter[0] = node->center.x;
+            tp.nodeCenter[1] = node->center.y;
+            tp.nodeCenter[2] = node->center.z;
+            tp.nodeSideA[0]  = node->sideA.x;
+            tp.nodeSideA[1]  = node->sideA.y;
+            tp.nodeSideA[2]  = node->sideA.z;
+            tp.nodeSideB[0]  = node->sideB.x;
+            tp.nodeSideB[1]  = node->sideB.y;
+            tp.nodeSideB[2]  = node->sideB.z;
+            tp.planetCenterRel[0] = planetCenterRel.x;
+            tp.planetCenterRel[1] = planetCenterRel.y;
+            tp.planetCenterRel[2] = planetCenterRel.z;
+            tp.nodeLevel = node->level;
             out.push_back(tp);
         } else {
             for (int i = 0; i < 4; i++)
-                _extractTerrainLeaves(out, node->children[i].get(), planetRadius, model, time);
+                _extractTerrainLeaves(out, node->children[i].get(), planetRadius, model, time, planetCenterRel);
         }
     }
 };

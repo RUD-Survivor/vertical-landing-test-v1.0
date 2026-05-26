@@ -28,6 +28,7 @@ public:
     Renderer3D* renderer3d = nullptr;
 #ifdef USE_VULKAN
     struct VkRenderer3D* vkRenderer3d = nullptr;
+    Terrain::QuadtreeTerrain* terrain = nullptr;
 #endif
 
     // ==== 跨模式持久化存档状态 (Persistent State) ====

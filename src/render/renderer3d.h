@@ -1602,6 +1602,7 @@ R"(
           glUniform3f(ut_nodeUp, node->sideB.x, node->sideB.y, node->sideB.z);
           glUniform1i(ut_nodeLevel, node->level);
           
+#ifndef USE_VULKAN
           if (node->localHydroTex != 0) {
               glActiveTexture(GL_TEXTURE8);
               glBindTexture(GL_TEXTURE_2D, node->localHydroTex);
@@ -1610,6 +1611,9 @@ R"(
           } else {
               glUniform1i(ut_hasLocalHydro, 0);
           }
+#else
+          glUniform1i(ut_hasLocalHydro, 0);
+#endif
 
           sharedPatchMesh.draw();
       } else {
@@ -1703,6 +1707,7 @@ R"(
         }
         
         // --- Climate Simulation Texture ---
+#ifndef USE_VULKAN
         if (terrain && terrain->climateSim && terrain->getClimateTexture() != 0) {
             glActiveTexture(GL_TEXTURE5);
             glBindTexture(GL_TEXTURE_2D, terrain->getClimateTexture());
@@ -1713,6 +1718,7 @@ R"(
             glBindTexture(GL_TEXTURE_2D, terrain->getHydroTexture());
             glUniform1i(ut_hydroMap, 6);
         }
+#endif
         glUniform1i(ut_viewMode, climateViewMode);
         
         // 1. Planet center from model matrix translation components

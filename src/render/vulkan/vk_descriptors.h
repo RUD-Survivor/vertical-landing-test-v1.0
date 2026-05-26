@@ -130,11 +130,9 @@ struct AtmoPushConstants {
 };                         //            total: 64 bytes
 
 // Terrain patch 专属 UBO（binding 1 of Set 0）
+// nodePos/nodeSide/nodeUp 已移至 push constants（每 draw call 更新），此处只保留每帧常量
 struct TerrainDataUBO {
-    float planetCenterRel[4]; // 16 bytes
-    float nodePos[4];         // 32 bytes
-    float nodeSide[4];        // 48 bytes
-    float nodeUp[4];          // 64 bytes
+    float planetCenterRel[4]; // 16 bytes — planet center relative to camera (per-frame constant)
 };
 
 // -----------------------------------------------------------------------

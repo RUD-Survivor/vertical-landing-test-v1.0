@@ -644,8 +644,9 @@ struct VkSVOPipeline {
 };
 
 // -----------------------------------------------------------------------
-// VkAtmoPipeline — 大气散射球体（alpha 混合，深度测试不写入）
-// Vertex: vec3 aPos (stride=12). Set 0 only. Push: AtmoPushConstants (64 bytes).
+// VkAtmoPipeline — 大气散射全屏三角形（alpha 混合，无顶点缓冲，无深度写入）
+// Fullscreen triangle: 3 vertices from gl_VertexIndex, no VBO.
+// Set 0 only. Push: AtmoPushConstants (64 bytes).
 // -----------------------------------------------------------------------
 struct VkAtmoPipeline {
     VkPipelineLayout layout=VK_NULL_HANDLE; VkPipeline pipeline=VK_NULL_HANDLE;
@@ -655,21 +656,12 @@ struct VkAtmoPipeline {
         if(vc.empty()||fc.empty()) return false;
         VkShaderModule vm=createShaderModule(ctx.device,vc), fm=createShaderModule(ctx.device,fc);
         if(!vm||!fm){if(vm)vkDestroyShaderModule(ctx.device,vm,nullptr);if(fm)vkDestroyShaderModule(ctx.device,fm,nullptr);return false;}
-        VkVertexInputBindingDescription bind{0,12,VK_VERTEX_INPUT_RATE_VERTEX};
-        VkVertexInputAttributeDescription attr{0,0,VK_FORMAT_R32G32B32_SFLOAT,0};
-        PipelineInitParams p{}; p.bindings=&bind; p.bindingCount=1; p.attrs=&attr; p.attrCount=1;
+        // Fullscreen triangle: no vertex buffer, no input attributes
+        PipelineInitParams p{}; p.bindings=nullptr; p.bindingCount=0; p.attrs=nullptr; p.attrCount=0;
         p.blendEnable=true;
-        // Premultiplied alpha: matches OpenGL glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA)
-        // Result = scatter_color * 1 + background * (1 - opacity)  [physically correct]
         p.srcColor=VK_BLEND_FACTOR_ONE;  p.dstColor=VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
         p.srcAlpha=VK_BLEND_FACTOR_ONE;  p.dstAlpha=VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-        // No depth test: matches OpenGL glDisable(GL_DEPTH_TEST).
-        // Shader handles ray termination at surface via intersectSphere internally.
         p.depthTest=VK_FALSE; p.depthWrite=VK_FALSE; p.depthOp=VK_COMPARE_OP_LESS_OR_EQUAL;
-        // Hemisphere selection is done in the fragment shader via tFrag test.
-        // Hardware culling is disabled: Y-flip + VK_FRONT_FACE_CLOCKWISE inverts the
-        // effective cull sense relative to OpenGL, making BACK_BIT keep the wrong hemisphere.
-        // The fragment shader discards near-hemisphere fragments (tFrag < midpoint).
         p.cullMode=VK_CULL_MODE_NONE;
         p.pcSize=sizeof(AtmoPushConstants); p.setLayouts=&desc.set0Layout; p.setCount=1;
         p.colorFmt=colorFmt; p.depthFmt=depthFmt; p.name="Atmosphere";
@@ -719,10 +711,20 @@ struct VkVegetationPipeline {
 // VkTerrainPipeline — Quadtree 地形渲染
 // Set 0: FrameUBO(b0) + TerrainData UBO(b1)
 // Set 1: 4 textures (tectonic/hydro/climate/localHydro)
-// Push: TerrainPushConstants (80 bytes)
+// Push: TerrainPushConstants (128 bytes)
 // ==========================================================================
 struct TerrainPushConstants {
-    float model[16]; float planetRadius; float maxElevation; int nodeLevel; int hasLocalHydro;
+    float model[16];      // offset   0 — 64 bytes
+    float planetRadius;   // offset  64
+    float maxElevation;   // offset  68
+    int   nodeLevel;      // offset  72
+    int   hasLocalHydro;  // offset  76
+    float nodePos[3];     // offset  80 (vec3, 16-byte aligned in push_constant block)
+    float _pad0;          // offset  92
+    float nodeSide[3];    // offset  96
+    float _pad1;          // offset 108
+    float nodeUp[3];      // offset 112
+    float _pad2;          // offset 124 — total: 128 bytes
 };
 struct VkTerrainPipeline {
     VkPipelineLayout layout=VK_NULL_HANDLE; VkPipeline pipeline=VK_NULL_HANDLE;

@@ -188,12 +188,15 @@ struct VkRenderer3D {
 
         // ---- 2. 太阳 ----
         if (snap.drawSunBody && hasMesh("earth")) {
-            drawMesh(cmd, "earth", snap.sunBody.model, 1.0f, 0.95f, 0.9f, 1.0f, 2.0f);
+            drawMesh(cmd, "earth", snap.sunBody.model, 1.0f, 0.95f, 0.9f, 1.0f, 20.0f);
         }
 
         // ---- 2. 行星表面（不透明，共用 "earth" unit sphere mesh） ----
         // 逐行星更新光照方向（匹配 OpenGL per-planet lightDir）
         for (const auto& cd : snap.celestials) {
+            // 当地形四叉树补丁存在时，跳过地球程序噪声球体（terrain 已覆盖）
+            if (cd.bodyIdx == 3 && !snap.terrainPatches.empty()) continue;
+
             float lx = snap.sunWorldPos[0] - cd.center[0];
             float ly = snap.sunWorldPos[1] - cd.center[1];
             float lz = snap.sunWorldPos[2] - cd.center[2];
@@ -214,7 +217,35 @@ struct VkRenderer3D {
         scene.updateLightDir(snap.frameIndex % 2,
             snap.lightDir[0], snap.lightDir[1], snap.lightDir[2]);
 
-        // ---- 3. 火箭（全零件渲染，保留物理深度遮挡） ----
+        // ---- 3. 地形（不透明，与行星表面同层，先于大气/轨道线） ----
+        if (!snap.terrainPatches.empty()) {
+            TerrainDataUBO planetTd{};
+            planetTd.planetCenterRel[0] = snap.terrainPatches[0].planetCenterRel[0];
+            planetTd.planetCenterRel[1] = snap.terrainPatches[0].planetCenterRel[1];
+            planetTd.planetCenterRel[2] = snap.terrainPatches[0].planetCenterRel[2];
+            planetTd.planetCenterRel[3] = 0.f;
+            for (const auto& tp : snap.terrainPatches) {
+                TerrainPushConstants tpc{};
+                memcpy(tpc.model, tp.model, 64);
+                tpc.planetRadius  = tp.planetRadius;
+                tpc.maxElevation  = tp.maxElev;
+                tpc.nodeLevel     = tp.nodeLevel;
+                tpc.hasLocalHydro = 0;
+                tpc.nodePos[0]    = tp.nodeCenter[0];
+                tpc.nodePos[1]    = tp.nodeCenter[1];
+                tpc.nodePos[2]    = tp.nodeCenter[2];
+                tpc.nodeSide[0]   = tp.nodeSideA[0];
+                tpc.nodeSide[1]   = tp.nodeSideA[1];
+                tpc.nodeSide[2]   = tp.nodeSideA[2];
+                tpc.nodeUp[0]     = tp.nodeSideB[0];
+                tpc.nodeUp[1]     = tp.nodeSideB[1];
+                tpc.nodeUp[2]     = tp.nodeSideB[2];
+                drawTerrainPatch(cmd, scene.terrainPatchVbo, scene.terrainPatchIbo,
+                    scene.terrainPatchIcount, tpc, planetTd, scene.terrainGlobalTexSet);
+            }
+        }
+
+        // ---- 4. 火箭（全零件渲染，保留物理深度遮挡） ----
         if (snap.rocketParts.empty()) {
             drawMesh(cmd, "rocketBody", snap.rocketBodyModel, 0.92f, 0.92f, 0.92f);
             drawMesh(cmd, "rocketNose", snap.rocketNoseModel, 0.88f, 0.88f, 0.88f);
@@ -244,8 +275,8 @@ struct VkRenderer3D {
             apc.planetCenter[0] = cd.center[0];
             apc.planetCenter[1] = cd.center[1];
             apc.planetCenter[2] = cd.center[2];
-            apc.innerRadius    = cd.radius;  // 与表面半径一致，防止光穿透行星
-            apc.outerRadius    = cd.radius + 0.16f;    // 160km 大气高度（render units：1 unit = 1000km）
+            apc.innerRadius    = cd.radius;
+            apc.outerRadius    = cd.radius + 160.0f;   // 160 km 大气高度（1 rU = 1 km）
             apc.surfaceRadius  = cd.radius;
             apc.planetIdx      = cd.atmoIdx;
             apc.sunVisibility  = sunVis;
@@ -269,6 +300,47 @@ struct VkRenderer3D {
         // ---- 6. 镜头光晕（太阳光晕 + 辉光 + 条纹） ----
         if (scene.billboardQuadVbo != VK_NULL_HANDLE
             && snap.sunScreen[0] > -2.0f && snap.sunIntensity > 0.001f) {
+
+            // 软件遮挡检测：匹配 OpenGL drawSunAndFlare 的渐变逻辑
+            float occlusionFade = 1.0f;
+            {
+                float sdx = snap.sunWorldPos[0] - snap.camPos[0];
+                float sdy = snap.sunWorldPos[1] - snap.camPos[1];
+                float sdz = snap.sunWorldPos[2] - snap.camPos[2];
+                float sunDist = sqrtf(sdx*sdx + sdy*sdy + sdz*sdz);
+                float sunDx = sdx / sunDist;
+                float sunDy = sdy / sunDist;
+                float sunDz = sdz / sunDist;
+                for (const auto& oc : snap.occluders) {
+                    float Lx = oc.cx - snap.camPos[0];
+                    float Ly = oc.cy - snap.camPos[1];
+                    float Lz = oc.cz - snap.camPos[2];
+                    float t_ca = Lx*sunDx + Ly*sunDy + Lz*sunDz;
+                    if (t_ca < 0.0f) continue; // 遮挡体在相机后面
+                    float d2 = (Lx*Lx + Ly*Ly + Lz*Lz) - t_ca*t_ca;
+                    float r2 = oc.radius * oc.radius;
+                    float localOccFade = 1.0f;
+                    if (d2 < r2) {
+                        // 射线命中球体 → 太阳在行星后面
+                        float dt = sqrtf(r2 - d2);
+                        float t_hit = t_ca - dt;
+                        if (t_hit > 0.0f && t_hit < sunDist) {
+                            localOccFade = 0.0f; // 完全被遮挡
+                        }
+                    } else {
+                        // 射线擦过：计算距行星边缘的距离，薄上层大气渐变
+                        float passDist = sqrtf(d2); // 射线到球心的最近距离
+                        float distToLimb = passDist - oc.radius;
+                        if (distToLimb >= 0.0f && distToLimb < oc.radius * 0.05f) {
+                            localOccFade *= distToLimb / (oc.radius * 0.05f);
+                        }
+                    }
+                    occlusionFade = fminf(occlusionFade, localOccFade);
+                    if (occlusionFade <= 0.01f) break;
+                }
+            }
+            if (occlusionFade <= 0.01f) goto skip_lens_flare;
+
             // 动态强度/缩放（匹配 OpenGL 距离衰减）
             float refDist = 149597.87f; // 1 AU in render units
             float sunDx = snap.sunWorldPos[0] - snap.camPos[0];
@@ -276,7 +348,7 @@ struct VkRenderer3D {
             float sunDz = snap.sunWorldPos[2] - snap.camPos[2];
             float curDist = sqrtf(sunDx*sunDx + sunDy*sunDy + sunDz*sunDz);
             float distFactor = refDist / fmaxf(1.0f, curDist);
-            float intensityScale = powf(distFactor, 1.25f);
+            float intensityScale = powf(distFactor, 1.25f) * occlusionFade;
             intensityScale = fminf(fmaxf(intensityScale, 0.15f), 8.0f);
             float sizeScale = fminf(fmaxf(distFactor, 0.2f), 10.0f);
 
@@ -284,34 +356,35 @@ struct VkRenderer3D {
             float asp = snap.aspect;
 
             // 热白核心（太阳位置）
-            drawLensFlare(cmd, scene.billboardQuadVbo, sx, sy, asp, 3.5f * intensityScale,
+            drawLensFlare(cmd, scene.billboardQuadVbo, sx, sy, asp, 175.f * intensityScale,
                           0.10f*sizeScale, 0.10f*sizeScale, sx, sy,
                           1.0f, 0.98f, 0.95f, 1.0f, 0);
             // 暖色光晕
-            drawLensFlare(cmd, scene.billboardQuadVbo, sx, sy, asp, 1.2f * intensityScale,
+            drawLensFlare(cmd, scene.billboardQuadVbo, sx, sy, asp, 60.f * intensityScale,
                           0.22f*sizeScale, 0.22f*sizeScale, sx, sy,
                           1.0f, 0.92f, 0.75f, 1.0f, 0);
             // 淡暖色散开
-            drawLensFlare(cmd, scene.billboardQuadVbo, sx, sy, asp, 0.35f * intensityScale,
+            drawLensFlare(cmd, scene.billboardQuadVbo, sx, sy, asp, 18.f * intensityScale,
                           0.50f*sizeScale, 0.50f*sizeScale, sx, sy,
                           0.9f, 0.75f, 0.55f, 1.0f, 0);
             // 蓝色变形条纹（穿过太阳，窄条不长）
-            drawLensFlare(cmd, scene.billboardQuadVbo, sx, sy, asp, 0.5f * intensityScale,
+            drawLensFlare(cmd, scene.billboardQuadVbo, sx, sy, asp, 25.f * intensityScale,
                           0.8f*sizeScale, 0.012f*sizeScale, sx, sy,
                           0.7f, 0.8f, 1.0f, 1.0f, 1);
             // 白色核心条纹
-            drawLensFlare(cmd, scene.billboardQuadVbo, sx, sy, asp, 0.7f * intensityScale,
+            drawLensFlare(cmd, scene.billboardQuadVbo, sx, sy, asp, 35.f * intensityScale,
                           0.5f*sizeScale, 0.006f*sizeScale, sx, sy,
                           1.0f, 0.95f, 0.9f, 1.0f, 1);
             // 衍射条纹
-            drawLensFlare(cmd, scene.billboardQuadVbo, sx, sy, asp, 0.25f * intensityScale,
+            drawLensFlare(cmd, scene.billboardQuadVbo, sx, sy, asp, 12.f * intensityScale,
                           0.35f*sizeScale, 0.35f*sizeScale, sx, sy,
                           0.6f, 0.85f, 1.0f, 1.0f, 2);
             // 星芒
-            drawLensFlare(cmd, scene.billboardQuadVbo, sx, sy, asp, 0.4f * intensityScale,
+            drawLensFlare(cmd, scene.billboardQuadVbo, sx, sy, asp, 20.f * intensityScale,
                           0.40f*sizeScale, 0.40f*sizeScale, sx, sy,
                           1.0f, 0.97f, 0.9f, 1.0f, 3);
         }
+        skip_lens_flare:;
 
         // ---- 8. 发射台 (Block C) ----
         if (snap.hasLaunchPad) {
@@ -339,27 +412,9 @@ struct VkRenderer3D {
             }
         }
 
-        // ---- 11. SVO + Terrain (Block D) ----
+        // ---- 11. SVO (Block D) ----
         for (const auto& sc : snap.svoChunks) {
             drawSVO(cmd, "svo_chunk", sc.svoMat);
-        }
-        for (const auto& tp : snap.terrainPatches) {
-            TerrainPushConstants tpc{};
-            memcpy(tpc.model, tp.model, 64);
-            tpc.planetRadius = tp.planetRadius;
-            tpc.maxElevation = tp.maxElev;
-            tpc.nodeLevel = 0;
-            tpc.hasLocalHydro = 0;
-            TerrainDataUBO td{};
-            // 从 model 矩阵提取节点位置、侧向、上向
-            td.planetCenterRel[0] = tp.model[12] - snap.camPos[0];
-            td.planetCenterRel[1] = tp.model[13] - snap.camPos[1];
-            td.planetCenterRel[2] = tp.model[14] - snap.camPos[2];
-            td.planetCenterRel[3] = 0;
-            memset(td.nodePos, 0, 16); memset(td.nodeSide, 0, 16); memset(td.nodeUp, 0, 16);
-            td.nodeUp[1] = 1.f; // default up
-            drawTerrainPatch(cmd, scene.terrainPatchVbo, scene.terrainPatchIbo,
-                scene.terrainPatchIcount, tpc, td, VK_NULL_HANDLE);
         }
         // 植被实例渲染 — 从 snapshot 上传到 GPU
         if (snap.vegInstanceCount > 0 && scene.vegVertVbo != VK_NULL_HANDLE

@@ -63,6 +63,12 @@ struct VkSceneSystem {
     void*         terrainDataMapped[2]= {nullptr, nullptr};
     VkDescriptorSet terrainSet0[2]    = {VK_NULL_HANDLE, VK_NULL_HANDLE};
 
+    // Terrain 全局纹理（Set1: tectonic/hydro/climate/null）
+    VkTexture2D     terrainTectonicTex;
+    VkTexture2D     terrainHydroTex;
+    VkTexture2D     terrainNullTex2;      // climate + localHydro 占位
+    VkDescriptorSet terrainGlobalTexSet = VK_NULL_HANDLE;
+
     // Vegetation 实例 VBO + 环形缓冲
     VkBuffer      vegInstanceVbo      = VK_NULL_HANDLE;
     VmaAllocation vegInstanceAlloc    = VK_NULL_HANDLE;
@@ -210,6 +216,9 @@ struct VkSceneSystem {
         for (auto& e : meshCache)   e.second.destroy(ctx);
         meshCache.clear();
         nullTex.destroy(ctx);
+        terrainTectonicTex.destroy(ctx);
+        terrainHydroTex.destroy(ctx);
+        terrainNullTex2.destroy(ctx);
         for (auto& e : planetPipes) e.second.shutdown(ctx.device);
         planetPipes.clear();
         vegPipe.shutdown(ctx.device);
@@ -349,22 +358,19 @@ struct VkSceneSystem {
     }
 
     // -----------------------------------------------------------------------
-    // Atmosphere — 使用内建 unit sphere VBO（着色器按 pc.outerRadius 缩放）
-    // 须在不透明几何之后、天空盒之前调用（alpha 混合，深度测试 LESS_OR_EQUAL）
+    // Atmosphere — fullscreen triangle, ray direction reconstructed in shader.
+    // No vertex buffer needed; pipeline uses gl_VertexIndex to generate 3 verts.
     void drawAtmosphere(VkCommandBuffer cmd, const AtmoPushConstants& pc) {
-        if (atmoPipe.pipeline == VK_NULL_HANDLE || atmoSphereVerts == 0) return;
+        if (atmoPipe.pipeline == VK_NULL_HANDLE) return;
 
         atmoPipe.bind(cmd);
-        // atmoPipe 只有 set0；显式重绑确保切换后 set0 有效
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
             atmoPipe.layout, 0, 1, &desc->set0[_frameIdx], 0, nullptr);
         vkCmdPushConstants(cmd, atmoPipe.layout,
             VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
             0, sizeof(AtmoPushConstants), &pc);
-        VkDeviceSize off = 0;
-        vkCmdBindVertexBuffers(cmd, 0, 1, &atmoSphereVbo, &off);
-        vkCmdDraw(cmd, atmoSphereVerts, 1, 0, 0);
-        _bindMeshPipe(cmd);  // 恢复 set1（切走后已失效）
+        vkCmdDraw(cmd, 3, 1, 0, 0);  // fullscreen triangle — no VBO
+        _bindMeshPipe(cmd);
     }
 
     // -----------------------------------------------------------------------
@@ -387,6 +393,54 @@ struct VkSceneSystem {
     }
 
     // -----------------------------------------------------------------------
+    // 上传地形纹理并创建 Set1 descriptor set（每次飞行开始时调用一次）
+    // tectonicData: float[w*h], values in [0,255] (normalized to [0,1] as RGBA8 R channel)
+    // hydroData:    float[w*h*4] RGBA32F (R=filledHeight, G=accumulation, B=strahler, A=flowDir)
+    bool uploadTerrainTextures(VulkanContext& ctx,
+                               const uint8_t* tectonicRGBA8, uint32_t tw, uint32_t th,
+                               const float*   hydroFloat4,   uint32_t hw, uint32_t hh) {
+        if (!terrainTectonicTex.upload(ctx, tectonicRGBA8, tw, th))
+            return false;
+        if (!terrainHydroTex.uploadFloat4(ctx, hydroFloat4, hw, hh))
+            return false;
+
+        // 1×1 白色占位（climate + localHydro 绑定槽）
+        static const uint8_t white4[4] = {255,255,255,255};
+        if (terrainNullTex2.image == VK_NULL_HANDLE) {
+            if (!terrainNullTex2.upload(ctx, white4, 1, 1)) return false;
+        }
+
+        // 分配 descriptor set（Set1，4 个 combined image sampler）
+        VkDescriptorSetAllocateInfo ai{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+        ai.descriptorPool     = desc->pool;
+        ai.descriptorSetCount = 1;
+        ai.pSetLayouts        = &terrainPipe.set1Layout;
+        if (vkAllocateDescriptorSets(ctx.device, &ai, &terrainGlobalTexSet) != VK_SUCCESS) {
+            fprintf(stderr, "[VkScene] Failed to alloc terrain global tex set\n");
+            return false;
+        }
+
+        VkDescriptorImageInfo imgs[4]{};
+        imgs[0] = {terrainTectonicTex.sampler, terrainTectonicTex.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        imgs[1] = {terrainHydroTex.sampler,    terrainHydroTex.view,    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        imgs[2] = {terrainNullTex2.sampler,    terrainNullTex2.view,    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        imgs[3] = {terrainNullTex2.sampler,    terrainNullTex2.view,    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+
+        VkWriteDescriptorSet w[4]{};
+        for (int i = 0; i < 4; i++) {
+            w[i].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            w[i].dstSet          = terrainGlobalTexSet;
+            w[i].dstBinding      = (uint32_t)i;
+            w[i].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            w[i].descriptorCount = 1;
+            w[i].pImageInfo      = &imgs[i];
+        }
+        vkUpdateDescriptorSets(ctx.device, 4, w, 0, nullptr);
+        printf("[VkScene] Terrain textures uploaded: tectonic %ux%u, hydro %ux%u\n", tw, th, hw, hh);
+        return true;
+    }
+
+    // -----------------------------------------------------------------------
     // Terrain — Quadtree patch 渲染（Phase B 骨架）
     // 每 leaf patch 调用一次：绑定 terrain 管线 + push constants
     // patchVbo/patchIbo: sharedPatchMesh 的 GPU 缓冲
@@ -404,8 +458,12 @@ struct VkSceneSystem {
         int fi = _frameIdx;
         if (terrainDataMapped[fi]) memcpy(terrainDataMapped[fi], &td, sizeof(TerrainDataUBO));
 
+        // 若调用方没有提供纹理集，使用全局地形纹理集
+        VkDescriptorSet resolvedTexSet = (texSet != VK_NULL_HANDLE) ? texSet : terrainGlobalTexSet;
+        if (resolvedTexSet == VK_NULL_HANDLE) return; // 纹理未就绪，跳过
+
         terrainPipe.bind(cmd);
-        VkDescriptorSet sets[] = { terrainSet0[fi], texSet };
+        VkDescriptorSet sets[] = { terrainSet0[fi], resolvedTexSet };
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
             terrainPipe.layout, 0, 2, sets, 0, nullptr);
         vkCmdPushConstants(cmd, terrainPipe.layout,

@@ -83,6 +83,7 @@ static VkHUDSystem         g_vkHUD;
 static VkImGuiSystem       g_vkImGui;
 static VkGameUI            g_gameUI;
 static FlightScene*        g_flightScene = nullptr;
+static Terrain::QuadtreeTerrain* g_vkTerrain = nullptr;
 static bool                g_vkSwapchainDirty = false;
 static int                 warmup = 0;  // TAA 预热帧计数（飞行开始时重置）
 static bool                g_workshopMeshesReady = false;
@@ -97,14 +98,17 @@ static bool initVulkanFlight(bool skipBuilder = false) {
     gc.vkRenderer3d = &g_vkR3D;
 
     if (skipBuilder) {
-        // 全景视角初始位置（地球上方 100km）
-        constexpr double ALT = 100000.0;
+        // 地表初始位置（地球表面 + 10m，防止被地形裁剪）
+        constexpr double ALT = 10.0;
         CelestialBody& earth = UniverseModel::getInstance().solar_system[3];
         RocketState& rs = gc.loaded_rocket_state;
         rs.abs_px = earth.px; rs.abs_py = earth.py + EARTH_RADIUS + ALT; rs.abs_pz = earth.pz;
         rs.px = 0.0; rs.py = EARTH_RADIUS + ALT; rs.pz = 0.0;
         rs.surf_px = 0.0; rs.surf_py = EARTH_RADIUS + ALT; rs.surf_pz = 0.0;
         rs.altitude = ALT; rs.fuel = 50000.0;
+        rs.launch_site_px = rs.surf_px;
+        rs.launch_site_py = rs.surf_py;
+        rs.launch_site_pz = rs.surf_pz;
     }
 
     g_flightScene->onEnter();
@@ -186,6 +190,47 @@ static bool initVulkanFlight(bool skipBuilder = false) {
             }
         }
     }
+
+    // ---- 地形四叉树 + 纹理上传（只在首次飞行时创建）----
+    if (!g_vkTerrain) {
+        g_vkTerrain = new Terrain::QuadtreeTerrain(EARTH_RADIUS);
+
+        // 打包构造纹理数据
+        auto* tecSim = g_vkTerrain->sim;
+        auto* hydSim = g_vkTerrain->hydroSim;
+        const int tw = tecSim->width, th = tecSim->height;
+        const int hw = hydSim->width, hh = hydSim->height;
+
+        // Tectonic: RGBA8（高度值 → R 通道，[0,1] → [0,255]）
+        std::vector<uint8_t> tecRGBA8(tw * th * 4);
+        for (int i = 0; i < tw * th; i++) {
+            uint8_t r = (uint8_t)(std::min(1.0f, std::max(0.0f, tecSim->gridHeight[i])) * 255.f);
+            tecRGBA8[i * 4 + 0] = r;
+            tecRGBA8[i * 4 + 1] = 0;
+            tecRGBA8[i * 4 + 2] = 0;
+            tecRGBA8[i * 4 + 3] = 255;
+        }
+
+        // Hydro: RGBA32F — R:filledHeight, G:accumulation, B:strahler(raw), A:flowDir
+        std::vector<float> hydFloat4(hw * hh * 4);
+        for (int i = 0; i < hw * hh; i++) {
+            hydFloat4[i * 4 + 0] = hydSim->data.filledHeight[i];
+            hydFloat4[i * 4 + 1] = hydSim->data.accumulation[i];
+            hydFloat4[i * 4 + 2] = (float)hydSim->data.strahler[i];
+            hydFloat4[i * 4 + 3] = (float)hydSim->data.flowDir[i];
+        }
+
+        if (!g_vkR3D.scene.uploadTerrainTextures(g_vkCtx,
+                tecRGBA8.data(), (uint32_t)tw, (uint32_t)th,
+                hydFloat4.data(), (uint32_t)hw, (uint32_t)hh)) {
+            fprintf(stderr, "[Vulkan] Failed to upload terrain textures\n");
+        } else {
+            printf("[Vulkan] Terrain textures uploaded (%dx%d tectonic, %dx%d hydro)\n",
+                tw, th, hw, hh);
+        }
+    }
+    gc.terrain = g_vkTerrain;
+
     return true;
 }
 
@@ -542,6 +587,7 @@ int main() {
 #ifdef USE_VULKAN
   vkDeviceWaitIdle(g_vkCtx.device);
   delete g_flightScene; g_flightScene = nullptr;
+  delete g_vkTerrain;   g_vkTerrain   = nullptr;
   g_vkImGui.shutdown(g_vkCtx.device);
   g_vkR3D.shutdown(g_vkCtx);
   g_vkTAA.shutdown(g_vkCtx);

@@ -12,9 +12,6 @@ layout(set = 0, binding = 0) uniform FrameUBO {
 
 layout(set = 0, binding = 1, std140) uniform TerrainData {
     vec4  planetCenterRel;
-    vec4  nodePos;
-    vec4  nodeSide;
-    vec4  nodeUp;
 } terrain;
 
 layout(set = 1, binding = 0) uniform sampler2D uTectonicMap;
@@ -23,11 +20,17 @@ layout(set = 1, binding = 2) uniform sampler2D uClimateMap;
 layout(set = 1, binding = 3) uniform sampler2D uLocalHydroMap;
 
 layout(push_constant) uniform PC {
-    mat4  model;
-    float planetRadius;
-    float maxElevation;
-    int   nodeLevel;
-    int   hasLocalHydro;
+    mat4  model;           // offset   0
+    float planetRadius;    // offset  64
+    float maxElevation;    // offset  68
+    int   nodeLevel;       // offset  72
+    int   hasLocalHydro;   // offset  76
+    vec3  nodePos;         // offset  80
+    float _pad0;
+    vec3  nodeSide;        // offset  96
+    float _pad1;
+    vec3  nodeUp;          // offset 112
+    float _pad2;
 } pc;
 
 layout(location = 0) in vec3 aPos;
@@ -165,7 +168,7 @@ float sampleTectonic(vec2 uv) {
 
 void main() {
     vLocalUV = aPos.xz + 0.5;
-    vec3 cubePos = terrain.nodePos.xyz + aPos.x * terrain.nodeSide.xyz + aPos.z * terrain.nodeUp.xyz;
+    vec3 cubePos = pc.nodePos + aPos.x * pc.nodeSide + aPos.z * pc.nodeUp;
     vec3 normPos = normalize(cubePos);
     float fV_phi = acos(clamp(normPos.y, -1.0, 1.0));
     float fV_theta = atan(normPos.z, normPos.x);
@@ -249,14 +252,17 @@ void main() {
     finalH = mix(finalH, 0.005 / pc.planetRadius, smoothstep(0.08, 0.02, distToKSC));
 
     mat3 localRotScale = mat3(pc.model);
-    vRelViewPos = terrain.planetCenterRel.xyz + localRotScale * (normPos * (1.0 + finalH));
+    // pc.model column 3 = absolute planet center in floating-origin world space
+    vec3 planetCenterAbs = vec3(pc.model[3][0], pc.model[3][1], pc.model[3][2]);
+    vec3 worldPos = planetCenterAbs + localRotScale * (normPos * (1.0 + finalH));
+    vRelViewPos = worldPos - frame.viewPos;   // camera-relative, used by frag for lighting
     vElevation = hRefined;
     vNormal = localRotScale * normPos;
     vUV = aUV;
     vLocalPos = normPos;
     vWaterDepth = max(0.0, hydro.r - hRefined);
     vSlope = currentSlope;
-    gl_Position = frame.proj * frame.view * vec4(vRelViewPos, 1.0);
+    gl_Position = frame.proj * frame.view * vec4(worldPos, 1.0);
     gl_Position.y = -gl_Position.y;
     gl_Position.z = gl_Position.z * 0.5 + gl_Position.w * 0.5;
 }
