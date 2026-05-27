@@ -189,20 +189,6 @@ struct VkRenderer3D {
         // ---- 1. 帧开始 ----
         beginFrame(cmd, snap.frameIndex % 2, snap.view, snap.proj, snap.lightDir, snap.camPos, snap.time);
 
-        // ---- 云参数同步（从 CloudTuner 面板 → Vulkan cloudTune）----
-        if (snap.cloudTuner.visible) {
-            scene.cloudTune.covLo      = snap.cloudTuner.covLo;
-            scene.cloudTune.covHi      = snap.cloudTuner.covHi;
-            scene.cloudTune.threshLo   = snap.cloudTuner.threshLo;
-            scene.cloudTune.threshHi   = snap.cloudTuner.threshHi;
-            scene.cloudTune.erosion    = snap.cloudTuner.erosion;
-            scene.cloudTune.density    = snap.cloudTuner.density;
-            scene.cloudTune.extinction = snap.cloudTuner.extinction;
-            scene.cloudTune.minAlt     = snap.cloudTuner.minAlt;
-            scene.cloudTune.maxAlt     = snap.cloudTuner.maxAlt;
-            scene.cloudTune.debugMode  = snap.cloudTuner.debugMode;
-        }
-
         // ---- 星空（先于行星，匹配 OpenGL 顺序） ----
         drawSkybox(cmd, snap.skyVibrancy, snap.aspect);
 
@@ -327,6 +313,11 @@ struct VkRenderer3D {
                     drawMesh(cmd, mid, rp.model, rp.r, rp.g, rp.b);
                 }
             }
+        }
+
+        // ---- 排气羽流（加法混合，在火箭之后、光晕之前） ----
+        for (const auto& ed : snap.plumes) {
+            drawExhaust(cmd, ed.model, ed.throttle, ed.expansion, ed.groundDist, ed.plumeLen);
         }
 
         // ---- 6. 天空盒（跳过——debug 测试） ----

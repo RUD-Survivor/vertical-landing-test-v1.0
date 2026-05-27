@@ -71,6 +71,7 @@ public:
     FlightInputSystem inputSystem;
     int last_soi = -1;
     bool show_clouds = true;
+    int last_save_frame = -1000;  // 自动存档闪烁指示器（OpenGL / Vulkan 通用）
     CloudTuner cloudTuner;
     // Vulkan 轨道缓存（update 中计算，extractRenderSnapshot 中消费）
     KepOrbitCache     vkKepCache;
@@ -147,23 +148,57 @@ for (const auto& p : builder_state_assembly.parts) {
     }
 }
 if (skip_builder) {
-    // 使用加载的状态 — copy loaded RocketState fields into ECS components
-    auto& ls = loaded_state;
-    trans.px = ls.px; trans.py = ls.py; trans.pz = ls.pz;
-    trans.abs_px = ls.abs_px; trans.abs_py = ls.abs_py; trans.abs_pz = ls.abs_pz;
-    trans.surf_px = ls.surf_px; trans.surf_py = ls.surf_py; trans.surf_pz = ls.surf_pz;
-    trans.launch_site_px = ls.launch_site_px; trans.launch_site_py = ls.launch_site_py; trans.launch_site_pz = ls.launch_site_pz;
-    vel.vx = ls.vx; vel.vy = ls.vy; vel.vz = ls.vz;
-    att.angle = ls.angle; att.ang_vel = ls.ang_vel;
-    att.angle_z = ls.angle_z; att.ang_vel_z = ls.ang_vel_z;
-    prop.fuel = ls.fuel; prop.current_stage = ls.current_stage;
-    prop.total_stages = ls.total_stages; prop.stage_fuels = ls.stage_fuels;
-    prop.jettisoned_mass = ls.jettisoned_mass;
-    tele.sim_time = ls.sim_time; tele.altitude = ls.altitude;
-    guid.status = ls.status; guid.auto_mode = ls.auto_mode;
-    control_input = loaded_input;
-    // Sync config to loaded stage
-    StageManager::SyncActiveConfig(rocket_config, prop.current_stage);
+    // ==== 从存档文件加载火箭状态（OpenGL / Vulkan 双路径通用）====
+    bool loaded = SaveSystem::LoadGame(builder_state_assembly, world, rocket_entity, control_input);
+    if (loaded) {
+        // 重建 rocket_config 以匹配加载的装配
+        rocket_config = builder_state_assembly.buildRocketConfig();
+        // 确保 stage 同步
+        StageManager::SyncActiveConfig(rocket_config, prop.current_stage);
+        // 将 assemble 回写到 GameContext（供后续渲染等引用）
+        ctx.launch_assembly = builder_state_assembly;
+        guid.mission_msg = "存档已加载 - 飞行继续";
+        cout << "[SAVE] Loaded saved game: " << builder_state_assembly.parts.size()
+             << " parts, fuel=" << (int)prop.fuel << " kg, sim_time=" << tele.sim_time << "s" << endl;
+    } else {
+        // 存档加载失败，回退到新游戏初始化
+        cout << "[SAVE] Failed to load save file, starting new game." << endl;
+        prop.fuel = builder_state_assembly.total_fuel;
+        guid.status = PRE_LAUNCH;
+        guid.mission_msg = "READY ON PAD - PRESS SPACE TO LAUNCH";
+        prop.total_stages = rocket_config.stages;
+        prop.current_stage = 0;
+        prop.stage_fuels.clear();
+        for (int i = 0; i < (int)rocket_config.stage_configs.size(); i++) {
+            prop.stage_fuels.push_back(rocket_config.stage_configs[i].fuel_capacity);
+        }
+        if (!prop.stage_fuels.empty()) prop.fuel = prop.stage_fuels[0];
+        // Fallback surface coordinate initialization
+        double lat_rad = trans.launch_latitude * PI / 180.0;
+        double lon_rad = trans.launch_longitude * PI / 180.0;
+        float lowest_y = 0.0f;
+        if (!builder_state_assembly.parts.empty()) {
+            lowest_y = 1e10f;
+            for (const auto& p : builder_state_assembly.parts)
+                lowest_y = std::min(lowest_y, (float)p.pos.y);
+        }
+        double R = UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].radius - (double)lowest_y;
+        trans.surf_px = R * cos(lat_rad) * cos(lon_rad);
+        trans.surf_py = R * cos(lat_rad) * sin(lon_rad);
+        trans.surf_pz = R * sin(lat_rad);
+        trans.launch_site_px = trans.surf_px;
+        trans.launch_site_py = trans.surf_py;
+        trans.launch_site_pz = trans.surf_pz;
+        CelestialBody& body = UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index];
+        double theta = body.prime_meridian_epoch;
+        Quat rot = Quat::fromAxisAngle(Vec3(0, 0, 1), (float)theta);
+        Quat tilt = Quat::fromAxisAngle(Vec3(1, 0, 0), (float)body.axial_tilt);
+        Quat full_rot = tilt * rot;
+        Vec3 world_pos = full_rot.rotate(Vec3((float)trans.surf_px, (float)trans.surf_py, (float)trans.surf_pz));
+        trans.px = (double)world_pos.x;
+        trans.py = (double)world_pos.y;
+        trans.pz = (double)world_pos.z;
+    }
 }
 else {
     // 新游戏初始化
@@ -334,6 +369,12 @@ else {
             rmb = glfwGetMouseButton(GameContext::getInstance().window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
             mouse_x = mx_raw / _ww * 2.0 - 1.0;
             mouse_y = 1.0 - my_raw / _wh * 2.0;
+        }
+
+        // ==== 自动存档（每 300 帧 = 约 6 秒，OpenGL / Vulkan 双路径通用）====
+        if (frame % 300 == 0 && guid.status != PRE_LAUNCH) {
+            SaveSystem::SaveGame(assembly, world, rocket_entity, control_input);
+            last_save_frame = frame;
         }
     }
     void render() override {

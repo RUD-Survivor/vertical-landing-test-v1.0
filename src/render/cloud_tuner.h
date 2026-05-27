@@ -40,7 +40,7 @@ struct CloudTuner {
         r2d->addRectOutline(cx, cy, PW, panH, 0.4f, 0.8f, 1.0f, 0.7f, 0.003f);
 
         // Title
-        r2d->drawText(cx, PY - 0.025f, "Cloud Tuner  [~] to close",
+        r2d->drawText(cx, PY - 0.025f, "Cloud Tuner  [F2] to close",
                       0.030f, 0.5f, 0.9f, 1.0f, 1.0f, false, Renderer::CENTER);
 
         // Slider descriptors: { label, ptr, min, max }

@@ -187,12 +187,8 @@ inline void FlightHUD::RenderIndicators(entt::registry& registry, entt::entity e
         }
     }
     
-    // 保存指示器 (每次保存后闪烁3秒)
+    // 保存指示器 (自动存档已移至 FlightScene::update()，此处仅保留手动触发闪烁)
     static int last_save_frame = -1000;
-    if (frame % 300 == 0 && guid.status != PRE_LAUNCH) {
-        last_save_frame = frame;
-        SaveSystem::SaveGame(assembly, registry, entity, control_input);
-    }
     int frames_since_save = frame - last_save_frame;
     if (frames_since_save < 180) { // 3秒 = 180帧
         float save_alpha = 1.0f - (float)frames_since_save / 180.0f;

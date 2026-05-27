@@ -78,10 +78,12 @@ inline void computeOrbitDataVK(OrbitSystem& osys,
         static int  s_last_ref_mode = -1, s_last_ref_body = -1, s_last_sec_body = -1;
         static float s_last_pred_days = -1; static int s_last_iters = -1;
         static double s_last_sim_time = -1.0;
+        static size_t s_last_mnv_count = 0;
         static auto s_last_periodic = std::chrono::steady_clock::now();
         bool params_changed = (hud.adv_orbit_ref_mode != s_last_ref_mode || hud.adv_orbit_ref_body != s_last_ref_body ||
             hud.adv_orbit_secondary_ref_body != s_last_sec_body ||
             hud.adv_orbit_pred_days != s_last_pred_days || hud.adv_orbit_iters != s_last_iters);
+        bool mnv_changed = (mnv.maneuvers.size() != s_last_mnv_count);
         bool sim_jumped = (std::abs(tele.sim_time - s_last_sim_time) > 3600.0);
         // 火箭在推力或大气中时轨道实时变化，需要周期性更新
         bool state_changing = (control_input.throttle > 0.01) || (tele.altitude < 200000.0);
@@ -89,12 +91,13 @@ inline void computeOrbitDataVK(OrbitSystem& osys,
         float elapsed_periodic = std::chrono::duration<float>(now - s_last_periodic).count();
         bool needs_periodic = state_changing && (elapsed_periodic > 0.05f);
         
-        if (!orb.prediction_in_progress && (orb.predicted_path.empty() || params_changed || sim_jumped || needs_periodic)) {
+        if (!orb.prediction_in_progress && (orb.predicted_path.empty() || params_changed || mnv_changed || sim_jumped || needs_periodic)) {
             orb.prediction_in_progress = true;
             s_last_ref_mode = hud.adv_orbit_ref_mode; s_last_ref_body = hud.adv_orbit_ref_body;
             s_last_sec_body = hud.adv_orbit_secondary_ref_body;
             s_last_pred_days = hud.adv_orbit_pred_days; s_last_iters = hud.adv_orbit_iters;
             s_last_sim_time = tele.sim_time;
+            s_last_mnv_count = mnv.maneuvers.size();
             s_last_periodic = now;
             s_last_sim_time = tele.sim_time;
             trans.abs_px = trans.px + soiBody.px;
@@ -103,7 +106,7 @@ inline void computeOrbitDataVK(OrbitSystem& osys,
             vel.abs_vx = vel.vx + soiBody.vx;
             vel.abs_vy = vel.vy + soiBody.vy;
             vel.abs_vz = vel.vz + soiBody.vz;
-            bool force_reset = params_changed || sim_jumped || state_changing;
+            bool force_reset = params_changed || mnv_changed || sim_jumped || state_changing;
             RocketState pred_state;
                 pred_state.px = trans.px; pred_state.py = trans.py; pred_state.pz = trans.pz;
                 pred_state.vx = vel.vx; pred_state.vy = vel.vy; pred_state.vz = vel.vz;
@@ -150,7 +153,7 @@ inline void computeOrbitDataVK(OrbitSystem& osys,
                     adv.valid   = true;
                 }
             }
-            if (mnv.maneuvers.empty()) draw_mnv_points.clear();
+            if (mnv.maneuvers.empty()) { draw_mnv_points.clear(); adv.mnvDash.clear(); adv.mnvCols.clear(); }
             if (!draw_mnv_points.empty()) {
                 osys.cached_mnv_rel_pts = CatmullRomSpline::interpolate(draw_mnv_points, 8);
                 std::vector<Vec3> newDash; std::vector<Vec4> newDashCols;

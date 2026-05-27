@@ -73,12 +73,14 @@ static void scroll_callback(GLFWwindow* /*w*/, double /*xoffset*/, double yoffse
 // ImGui Vulkan 仪表板
 #include "render/vulkan/vk_imgui.h"
 #include "render/vulkan/systems/vk_game_ui.h"
+#include "render/vulkan/imgui_cloud_tuner.h"
 #include "render/scene_snapshot.h"
 static VulkanContext       g_vkCtx;
 static FrameSync           g_frameSync;
 static VkDescriptorManager g_vkDesc;
 static VkTAA               g_vkTAA;
 static VkRenderer3D        g_vkR3D;
+static bool                g_vkCloudTunerOpen = false;  // F2 toggles
 static VkHUDSystem         g_vkHUD;
 static VkImGuiSystem       g_vkImGui;
 static VkGameUI            g_gameUI;
@@ -98,17 +100,8 @@ static bool initVulkanFlight(bool skipBuilder = false) {
     gc.vkRenderer3d = &g_vkR3D;
 
     if (skipBuilder) {
-        // 地表初始位置（地球表面 + 10m，防止被地形裁剪）
-        constexpr double ALT = 10.0;
-        CelestialBody& earth = UniverseModel::getInstance().solar_system[3];
-        RocketState& rs = gc.loaded_rocket_state;
-        rs.abs_px = earth.px; rs.abs_py = earth.py + EARTH_RADIUS + ALT; rs.abs_pz = earth.pz;
-        rs.px = 0.0; rs.py = EARTH_RADIUS + ALT; rs.pz = 0.0;
-        rs.surf_px = 0.0; rs.surf_py = EARTH_RADIUS + ALT; rs.surf_pz = 0.0;
-        rs.altitude = ALT; rs.fuel = 50000.0;
-        rs.launch_site_px = rs.surf_px;
-        rs.launch_site_py = rs.surf_py;
-        rs.launch_site_pz = rs.surf_pz;
+        // 存档已在 FlightScene::onEnter() 内调用 SaveSystem::LoadGame() 加载，
+        // 此处仅设置相机模式 —— 存档读取后为全景（轨道俯瞰），新游戏为地面发射台。
     }
 
     g_flightScene->onEnter();
@@ -305,6 +298,7 @@ static void renderVulkanFrame(GLFWwindow* window) {
     // Pass 3: ImGui UI / HUD（覆盖在 TAA 结果之上）
     g_vkImGui.newFrame();
     g_gameUI.draw(inFlight ? g_flightScene : nullptr, ww, wh);
+    CloudTunerImGui(&g_vkCloudTunerOpen, g_vkR3D.scene.cloudTune);
     ImGui::Render();
     g_vkImGui.renderToSwapchain(frame.commandBuffer,
         g_vkCtx.swapImages[imageIdx],
