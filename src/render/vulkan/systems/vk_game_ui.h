@@ -16,6 +16,7 @@
 #include "simulation/center_calculator.h"
 #include "simulation/factory_system.h"
 #include "core/agency_state.h"
+#include "scene/game_context.h"
 #include "scene/flight_scene.h"
 #include "render/scene_snapshot.h"
 #include "save_system.h"

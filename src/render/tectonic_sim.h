@@ -1,5 +1,4 @@
 #pragma once
-#include <glad/glad.h>
 #include <vector>
 #include <cmath>
 #include <algorithm>
@@ -25,7 +24,6 @@ public:
     std::vector<int> gridPlate;
     std::vector<Plate> plates;
     std::vector<Vec3> hotspots; // Stationary mantle plumes
-    GLuint textureID = 0;
     static constexpr float CONT_THRESHOLD = 0.45f;
 
     TectonicSimulator(int w, int h) : width(w), height(h) {

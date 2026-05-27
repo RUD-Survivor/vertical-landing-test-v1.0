@@ -127,8 +127,8 @@ glDisable(GL_DEPTH_TEST);
       double ry = wx * sin_c + wy * cos_c;
       return (float)((ry - rocket_r) * scale + cy);
     };
-    float w = max(0.015f, (float)(10.0 * scale));
-    float h = max(0.06f, (float)(40.0 * scale));
+    float w = std::max(0.015f, (float)(10.0 * scale));
+    float h = std::max(0.06f, (float)(40.0 * scale));
     float y_offset = -h / 2.0f;
 
 
@@ -139,19 +139,8 @@ glDisable(GL_DEPTH_TEST);
     if (show_hud) {  // 用户按 H 键切换开关
         
         // --- 强制重置 2D 渲染器批处理状态 ---
-        // 结束之前的可能遗留的 2D 绘制 (如烟雾特效)
+        // Vulkan: HUD rendered via ImGui/VkHUD; legacy GL calls removed
         renderer->endFrame();
-        // 彻底重置 OpenGL 混合和深度测试状态，防止 3D 尾焰泄露
-        glUseProgram(0);
-        glDisable(GL_DEPTH_TEST);
-        glDisable(GL_CULL_FACE); // 确保2D矩形不会因为绘制方向被意外剔除
-        glDepthMask(GL_TRUE);
-        glEnable(GL_BLEND);
-        glBlendEquation(GL_FUNC_ADD); // 修复：引擎(Shock Diamonds)用了 GL_MAX 导致 HUD 的 alpha 混合失效
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        glBindVertexArray(0);
-        glBindBuffer(GL_ARRAY_BUFFER, 0);
-        // 重新开启一个新的 2D 批处理专供 HUD 使用 (确保着色器正确绑定)
         renderer->beginFrame();
 
         float hud_opacity = 0.8f;

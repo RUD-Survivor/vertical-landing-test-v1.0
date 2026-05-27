@@ -564,7 +564,7 @@ inline void FlightHUD::RenderAdvancedMenus(entt::registry& registry, entt::entit
                     adv_embed_mnv = true;
 
                     guid.mission_msg = "TRANSFER NODE CREATED";
-                    cout << ">> Transfer maneuver created: dv=" << best.dv_total/1000.0 << " km/s" << endl;
+                    std::cout << ">> Transfer maneuver created: dv=" << best.dv_total/1000.0 << " km/s" << std::endl;
                 }
             } else {
                 // No result yet - show instructions

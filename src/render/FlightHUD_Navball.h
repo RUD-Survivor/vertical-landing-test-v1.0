@@ -164,7 +164,7 @@ inline void FlightHUD::RenderNavball(entt::registry& registry, entt::entity enti
             guid.sas_mode = sas_btns[i].mode;
             guid.sas_active = true;
             guid.auto_mode = false; // Override autopilot
-            cout << ">> SAS MODE: " << sas_btns[i].label << " (Active)" << endl;
+            std::cout << ">> SAS MODE: " << sas_btns[i].label << " (Active)" << std::endl;
         }
         
         float alpha = (guid.sas_mode == sas_btns[i].mode) ? 0.9f : 0.4f;

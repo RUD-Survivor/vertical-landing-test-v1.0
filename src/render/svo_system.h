@@ -116,24 +116,16 @@ struct SVOChunk {
     bool meshDirty = true;
 
     // Mesh data (output of Marching Cubes)
-    GLuint vao = 0, vbo = 0, ebo = 0;
+    unsigned int vao = 0, vbo = 0, ebo = 0;
     int indexCount = 0;
     int vertexCount = 0;
 
     void initGL() {
-        if (!vao) {
-            glGenVertexArrays(1, &vao);
-            glGenBuffers(1, &vbo);
-            glGenBuffers(1, &ebo);
-        }
+        // Vulkan: SVO mesh managed by VkMeshManager
     }
 
     void destroyGL() {
-        if (vao) glDeleteVertexArrays(1, &vao);
-        if (vbo) glDeleteBuffers(1, &vbo);
-        if (ebo) glDeleteBuffers(1, &ebo);
-        vao = vbo = ebo = 0;
-        indexCount = 0;
+        // Vulkan: SVO mesh managed by VkMeshManager
     }
 
     // Morton-order child index from position relative to center

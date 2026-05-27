@@ -131,9 +131,7 @@ struct TerrainNode {
     bool isLeaf = true;
     std::unique_ptr<TerrainNode> children[4];
     
-#ifndef USE_VULKAN
-    GLuint localHydroTex = 0;
-#endif
+    // localHydroTex removed (Vulkan: hydro data passed via VkTexture)
     bool hydroGenerated = false;
     std::vector<float> hydroCache; // 64x64 canonical filledHeight for inheritance
     bool hasHydroCache = false;
@@ -170,9 +168,7 @@ struct TerrainNode {
     }
 
     ~TerrainNode() {
-#ifndef USE_VULKAN
-        if (localHydroTex) glDeleteTextures(1, &localHydroTex);
-#endif
+        // Vulkan: GPU resources managed by VkTexture / VkDescriptorManager
     }
 
     void subdivide() {
@@ -400,15 +396,7 @@ public:
             }
         }
 
-#ifndef USE_VULKAN
-        if (node->localHydroTex == 0) glGenTextures(1, &node->localHydroTex);
-        glBindTexture(GL_TEXTURE_2D, node->localHydroTex);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, texRes, texRes, 0, GL_RED, GL_FLOAT, texData.data());
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-#endif
+        // Vulkan: hydro texture managed by VkTexture, not GL
         node->hydroGenerated = true;
     }
 
@@ -710,15 +698,7 @@ public:
         return normalizedPos * (planetRadius + h);
     }
 
-#ifndef USE_VULKAN
-    GLuint getClimateTexture() {
-        return climateSim ? climateSim->data.textureID : 0;
-    }
-
-    GLuint getHydroTexture() {
-        return hydroSim ? hydroSim->textureID : 0;
-    }
-#endif
+    // Vulkan: texture access via VkDescriptorManager, not GL getters
 };
 
 } // namespace Terrain

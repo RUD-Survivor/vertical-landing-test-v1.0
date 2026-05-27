@@ -4,9 +4,7 @@
 
 #include "center_visualizer.h"
 
-// We need the mesh creation functions from renderer3d.h
-// These are inline functions defined in the header
-#include <glad/glad.h>
+// Mesh creation functions from renderer3d.h (MeshGen)
 #include "render/renderer3d.h"
 #include "render/renderer_2d.h"
 
@@ -15,9 +13,6 @@ namespace CenterVisualizer {
     void renderMarker(Renderer3D* renderer, const Vec3& pos, 
                      MarkerType type, const Mat4& rocketTransform) {
         if (!renderer) return;
-        
-        // Disable depth test so markers are always visible on top
-        glDisable(GL_DEPTH_TEST);
         
         // Create transformation matrix: translate to position
         Mat4 translation = Mat4::translate(pos);
@@ -54,9 +49,6 @@ namespace CenterVisualizer {
                 break;
             }
         }
-        
-        // Re-enable depth test for subsequent rendering
-        glEnable(GL_DEPTH_TEST);
     }
     
     void renderLabel(Renderer* renderer2d, const Vec3& worldPos, 

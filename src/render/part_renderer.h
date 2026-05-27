@@ -63,20 +63,7 @@ namespace PartRenderer {
             }
             customMesh = &r3d->meshCache[activeModelPath];
         }
-        
-        if (def.texture_path) {
-            std::string tp(def.texture_path);
-            if (r3d->textureCache.find(tp) == r3d->textureCache.end()) {
-                r3d->textureCache[tp] = Renderer3D::loadTGA(def.texture_path);
-            }
-            if (r3d->textureCache[tp].id != 0) {
-                r3d->textureCache[tp].bind(0);
-                hasTexture = true;
-            }
-        }
-        
-        glUniform1i(r3d->u_hasTexture, hasTexture ? 1 : 0);
-        glUniform1i(r3d->u_sampler, 0);
+        // Vulkan: texture loading handled by VkTexture; legacy OpenGL path removed
 
         if (customMesh && customMesh->indexCount > 0) {
             // Calculate proportional scales to match physical dimensions
@@ -123,8 +110,7 @@ namespace PartRenderer {
             }
         }
         
-        // Cleanup texture binding
-        glUniform1i(r3d->u_hasTexture, 0);
+        // Cleanup
     }
 
     // Helper for symmetry rendering

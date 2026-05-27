@@ -17,7 +17,7 @@ public:
     void update(double dt) override {
         GameContext& ctx = GameContext::getInstance();
         GLFWwindow* window = ctx.window;
-        Renderer* renderer = ctx.renderer2d;
+        Renderer dummyRenderer; Renderer* renderer = &dummyRenderer;
         auto& agency_state = ctx.agency_state;
         auto& factory = ctx.factory;
 

@@ -133,7 +133,7 @@ inline void FlightHUD::RenderIndicators(entt::registry& registry, entt::entity e
     }
 
     renderer->addRect(0.0f, time_y, time_w, time_h, 0.05f, 0.05f, 0.05f, 0.7f);
-    string time_str = formatTime(guid.show_absolute_time ? tele.sim_time : guid.mission_timer, guid.show_absolute_time);
+    std::string time_str = formatTime(guid.show_absolute_time ? tele.sim_time : guid.mission_timer, guid.show_absolute_time);
     renderer->drawText(0.0f, time_y, time_str.c_str(), 0.018f, 1.0f, 1.0f, 1.0f, 0.9f, true, Renderer::CENTER);
 
     // Time Warp Display

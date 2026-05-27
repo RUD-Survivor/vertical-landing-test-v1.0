@@ -19,15 +19,11 @@
 class SpaceportManager {
 public:
     Mesh launchPadMesh;
-    Texture launchPadTexture;
+    // Texture removed (Vulkan: textures managed by VkTexture)
     bool has_launch_pad = false;
 
-    /**
-     * 场景初始化时调用，加载发设台静态资源
-     */
     void init() {
         launchPadMesh = ModelLoader::loadOBJ("assets/launch_pad.obj");
-        launchPadTexture = Renderer3D::loadTGA("assets/launch_pad.tga");
         has_launch_pad = (launchPadMesh.indexCount > 0);
     }
 
@@ -92,22 +88,13 @@ public:
         padRot.m[12] = 0;         padRot.m[13] = 0;         padRot.m[14] = 0;         padRot.m[15] = 1;
         
         if (has_launch_pad) {
-            float pad_scale = (float)ws_d; // 1:1 Physical Scale
+            float pad_scale = (float)ws_d;
             Mat4 padModel = Mat4::scale(Vec3(pad_scale, pad_scale, pad_scale));
-            padModel = padRot * padModel; // Orient pad
+            padModel = padRot * padModel;
             Vec3 correctedPos = padCenter - padUp * (8.0f * (float)ws_d);
             padModel = Mat4::translate(correctedPos) * padModel;
-            
-            bool hasTex = (launchPadTexture.id != 0);
-            if (hasTex) {
-                launchPadTexture.bind(0);
-                glUniform1i(r3d->u_hasTexture, 1);
-                glUniform1i(r3d->u_sampler, 0);
-            }
-            
+            // Vulkan: texture binding handled by VkDescriptorManager
             r3d->drawMesh(launchPadMesh, padModel, 1.0f, 1.0f, 1.0f, 1.0f, 0.2f);
-            
-            if (hasTex) glUniform1i(r3d->u_hasTexture, 0);
         }
         else {
             float pad_w = rw_3d * 20.0f;

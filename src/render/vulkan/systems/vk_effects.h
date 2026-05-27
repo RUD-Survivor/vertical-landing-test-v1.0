@@ -14,7 +14,7 @@
 #include "../vk_context.h"
 #include "../vk_descriptors.h"
 #include "../vk_pipeline.h"
-
+#include "../../math/math3d.h"  // Vec3, Vec4
 #include <cstring>
 #include <cstdio>
 

@@ -476,38 +476,11 @@ inline void meshChunk(SVOChunk& chunk, NodePool& pool, const SVORegion& region) 
         return;
     }
 
-    chunk.initGL();
-    glBindVertexArray(chunk.vao);
-
-    glBindBuffer(GL_ARRAY_BUFFER, chunk.vbo);
-    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(SVOVertex),
-                 vertices.data(), GL_DYNAMIC_DRAW);
-
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, chunk.ebo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int),
-                 indices.data(), GL_DYNAMIC_DRAW);
-
-    // Position (location 0)
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(SVOVertex),
-                          (void*)offsetof(SVOVertex, px));
-    glEnableVertexAttribArray(0);
-    // Normal (location 1)
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(SVOVertex),
-                          (void*)offsetof(SVOVertex, nx));
-    glEnableVertexAttribArray(1);
-    // UV (location 2)
-    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(SVOVertex),
-                          (void*)offsetof(SVOVertex, u));
-    glEnableVertexAttribArray(2);
-    // Color (location 3)
-    glVertexAttribPointer(3, 4, GL_FLOAT, GL_FALSE, sizeof(SVOVertex),
-                          (void*)offsetof(SVOVertex, r));
-    glEnableVertexAttribArray(3);
-
-    glBindVertexArray(0);
-
+    // Vulkan: GPU upload handled by VkMeshManager; CPU-side only
+    (void)chunk;
     chunk.indexCount = (int)indices.size();
     chunk.vertexCount = (int)vertices.size();
+    chunk.meshDirty = false;
     chunk.meshDirty = false;
 }
 

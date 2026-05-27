@@ -338,28 +338,10 @@ private:
 
 public:
     void bake() {
-#ifndef USE_VULKAN
-        if (textureID == 0) glGenTextures(1, &textureID);
-        glBindTexture(GL_TEXTURE_2D, textureID);
-        
-        // R: FilledHeight (for Lake flattening), G: Accumulation, B: Strahler, A: Placeholder
-        std::vector<float> textureData(width * height * 4, 0.0f);
-        for (int i = 0; i < width * height; i++) {
-            textureData[i * 4 + 0] = data.filledHeight[i];
-            textureData[i * 4 + 1] = data.accumulation[i];
-            textureData[i * 4 + 2] = (float)data.strahler[i];
-            textureData[i * 4 + 3] = (float)data.flowDir[i];
-        }
-
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, width, height, 0, GL_RGBA, GL_FLOAT, textureData.data());
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-#endif
+        // Vulkan: texture baking handled by GPU compute path
     }
 
-    GLuint textureID = 0;
+    // Vulkan: GPU resources managed by VkTexture / VkDescriptorManager
 
     // --- STATIC UTILITY: Local Priority Flood for Quadtree Nodes ---
     // grid: a w*w grid of heights to be filled

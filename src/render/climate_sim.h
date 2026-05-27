@@ -1,5 +1,4 @@
 #pragma once
-#include <glad/glad.h>
 #include <vector>
 #include <cmath>
 #include <algorithm>
@@ -12,8 +11,7 @@ struct ClimateData {
     std::vector<float> precipitation; 
     std::vector<float> pressure;      
     std::vector<Vec2> wind;           
-    std::vector<float> moisture;      
-    GLuint textureID = 0;
+    std::vector<float> moisture;
 };
 
 class ClimateSimulator {
@@ -40,24 +38,7 @@ public:
     }
 
     void bake() {
-#ifndef USE_VULKAN
-        if (data.textureID == 0) glGenTextures(1, &data.textureID);
-        glBindTexture(GL_TEXTURE_2D, data.textureID);
-        
-        std::vector<float> textureData(width * height * 4, 0.0f);
-        for (int i = 0; i < width * height; i++) {
-            textureData[i * 4 + 0] = data.temperature[i];
-            textureData[i * 4 + 1] = data.precipitation[i];
-            textureData[i * 4 + 2] = data.pressure[i];
-            textureData[i * 4 + 3] = data.moisture[i];
-        }
-
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, width, height, 0, GL_RGBA, GL_FLOAT, textureData.data());
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-#endif
+        // Vulkan: texture baking handled by GPU compute path
     }
 
 private:

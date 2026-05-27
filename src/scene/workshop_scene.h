@@ -31,7 +31,7 @@ public:
     void update(double dt) override {
         GameContext& ctx = GameContext::getInstance();
         GLFWwindow* window = ctx.window;
-        Renderer* renderer = ctx.renderer2d;
+        Renderer dummyRenderer; Renderer* renderer = &dummyRenderer;
         Renderer3D* r3d = ctx.renderer3d;
         
         // ==========================================

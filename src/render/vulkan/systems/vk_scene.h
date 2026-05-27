@@ -11,6 +11,7 @@
 #include "../vk_pipeline.h"
 #include "../vk_texture.h"
 #include "../../cloud_system.h"  // CloudTuneParams
+#include "../../math/math3d.h"   // Vec3, Mat4
 
 #include <unordered_map>
 #include <string>
@@ -18,6 +19,7 @@
 #include <cstring>
 #include <cstdio>
 #include <cmath>
+static constexpr float kPI_f = 3.14159265358979323846f;
 
 struct VkSceneSystem {
     VkMeshPipeline       meshPipe;
@@ -777,11 +779,11 @@ private:
         pts.reserve(R * S * 6 * 3);
 
         for (int r = 0; r < R; r++) {
-            float phi0 = (float)M_PI * r       / R;
-            float phi1 = (float)M_PI * (r + 1) / R;
+            float phi0 = kPI_f * r       / R;
+            float phi1 = kPI_f * (r + 1) / R;
             for (int s = 0; s < S; s++) {
-                float th0 = 2.f * (float)M_PI * s       / S;
-                float th1 = 2.f * (float)M_PI * (s + 1) / S;
+                float th0 = 2.f * kPI_f * s       / S;
+                float th1 = 2.f * kPI_f * (s + 1) / S;
                 float p[4][3] = {
                     { sinf(phi0)*cosf(th0), cosf(phi0), sinf(phi0)*sinf(th0) },
                     { sinf(phi0)*cosf(th1), cosf(phi0), sinf(phi0)*sinf(th1) },

@@ -23,7 +23,7 @@ public:
         double dt, int frame, double ws_d, float mouse_x, float mouse_y, 
         bool lmb, bool lmb_prev, bool rmb)
     {
-        glClear(GL_DEPTH_BUFFER_BIT);
+        // Vulkan: HUD rendered via ImGui/VkHUD; GL clear removed
         renderer->beginFrame();
         hud.render(registry, entity, renderer, r3d, cam, assembly, ctx, dt, frame, ws_d, mnvManager.global_best_ang, sim_ctrl.time_warp, mouse_x, mouse_y, lmb, lmb_prev, rmb);
         renderer->endFrame();

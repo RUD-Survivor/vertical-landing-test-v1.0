@@ -20,7 +20,7 @@ public:
         GLFWwindow* window = ctx.window;
         auto& agency_state = ctx.agency_state;
         auto& factory = ctx.factory;
-        Renderer* renderer = ctx.renderer2d;
+        Renderer dummyRenderer; Renderer* renderer = &dummyRenderer;
 
         MenuSystem::MenuState menu_state;
         MenuSystem::MenuChoice menu_choice = MenuSystem::MENU_AGENCY_HUB;

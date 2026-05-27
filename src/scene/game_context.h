@@ -1,7 +1,6 @@
 #pragma once
 #include <GLFW/glfw3.h>
 
-#include "render/renderer_2d.h"
 #include "render/renderer3d.h"
 #include "core/rocket_state.h"
 #include "simulation/rocket_builder.h"
@@ -24,12 +23,9 @@ public:
 
     // ==== 核心图形接口 (Core Graphics Handles) ====
     GLFWwindow* window = nullptr;
-    Renderer* renderer2d = nullptr;
-    Renderer3D* renderer3d = nullptr;
-#ifdef USE_VULKAN
+    Renderer3D* renderer3d = nullptr;  // 保留用于 SVO/terrain 访问
     struct VkRenderer3D* vkRenderer3d = nullptr;
     Terrain::QuadtreeTerrain* terrain = nullptr;
-#endif
 
     // ==== 跨模式持久化存档状态 (Persistent State) ====
     // 玩家在 Agency 中积攒的资金、物品

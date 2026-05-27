@@ -1,12 +1,13 @@
-// Build optimization test
-#ifdef USE_VULKAN
+// Vulkan-only build
 // Vulkan 相关宏必须在 GLFW 第一次 include 之前定义
+#define VK_USE_PLATFORM_WIN32_KHR
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #define GLFW_INCLUDE_VULKAN
-#endif
+#define __gl_h_  // 阻止 Windows SDK 的 GL/gl.h 引入
 
-#include<glad/glad.h>
+#include <windows.h>
+#include <vulkan/vulkan.h>  // 确保 vulkan.h 在 VMA 之前正确加载
 #include <GLFW/glfw3.h>
 #include <algorithm>
 #include <chrono>
@@ -15,23 +16,41 @@
 #include <functional>
 #include <mutex>
 
+#include "render/gl_stub.h"  // GL no-op stubs for Vulkan-only build
+
+using namespace std;
+
 #include "math/math3d.h"
 #include "render/renderer3d.h"
 #include "render/model_loader.h"
 #include "core/rocket_state.h"
 #include "physics/physics_system.h"
 #include "control/control_system.h"
-#include "render/renderer_2d.h"
 #include "simulation/orbit_physics.h"
 #include "simulation/predictor.h"
 #include "simulation/stage_manager.h"
 #include "simulation/maneuver_system.h"
 #include "simulation/transfer_calculator.h"
 #include "math/spline.h"
-#include "math/chebyshev.h"  // Leaving for reference but not using for rendering
+#include "math/chebyshev.h"
 #include "camera/camera_director.h"
 
-using namespace std;
+// Vulkan + VMA 在项目头文件之后、全局变量之前
+#include "vma/vk_mem_alloc.h"
+#include "render/vulkan/vk_context.h"
+#include "render/vulkan/vk_frame.h"
+#include "render/vulkan/vk_mesh.h"
+#include "render/vulkan/vk_descriptors.h"
+#include "render/vulkan/vk_renderpass.h"
+#include "render/vulkan/vk_pipeline.h"
+#include "render/vulkan/vk_taa.h"
+#include "render/vulkan/vk_texture.h"
+#include "render/vulkan/vk_renderer3d.h"
+#include "render/vulkan/systems/vk_hud.h"
+#include "render/vulkan/vk_imgui.h"
+#include "render/vulkan/systems/vk_game_ui.h"
+#include "render/vulkan/imgui_cloud_tuner.h"
+#include "render/scene_snapshot.h"
 
 // ==========================================
 // 全局变量与系统初始化 (Global Systems)
@@ -57,24 +76,6 @@ static void scroll_callback(GLFWwindow* /*w*/, double /*xoffset*/, double yoffse
 #include "scene/workshop_scene.h"
 #include "scene/flight_scene.h"
 
-#ifdef USE_VULKAN
-// vendor 目录已在 include 路径中（vcxproj: ..\vendor）
-#include "vma/vk_mem_alloc.h"
-#include "render/vulkan/vk_context.h"
-#include "render/vulkan/vk_frame.h"
-#include "render/vulkan/vk_mesh.h"
-#include "render/vulkan/vk_descriptors.h"
-#include "render/vulkan/vk_renderpass.h"
-#include "render/vulkan/vk_pipeline.h"
-#include "render/vulkan/vk_taa.h"
-#include "render/vulkan/vk_texture.h"
-#include "render/vulkan/vk_renderer3d.h"
-#include "render/vulkan/systems/vk_hud.h"
-// ImGui Vulkan 仪表板
-#include "render/vulkan/vk_imgui.h"
-#include "render/vulkan/systems/vk_game_ui.h"
-#include "render/vulkan/imgui_cloud_tuner.h"
-#include "render/scene_snapshot.h"
 static VulkanContext       g_vkCtx;
 static FrameSync           g_frameSync;
 static VkDescriptorManager g_vkDesc;
@@ -344,7 +345,6 @@ static void renderVulkanFrame(GLFWwindow* window) {
     g_vkTAA.swap();
     g_frameSync.advance();
 }
-#endif
 
 
 // ==========================================
@@ -353,17 +353,10 @@ static void renderVulkanFrame(GLFWwindow* window) {
 
 
 void framebuffer_size_callback(GLFWwindow* /*window*/, int width, int height) {
-#ifdef USE_VULKAN
   g_vkSwapchainDirty = true;
-#else
-  glViewport(0, 0, width, height);
-#endif
 }
 
-#include "render/HUD_system.h"
 #include "simulation/simulation_controller.h"
-FlightHUD hud;
-Renderer *renderer;
 
 
 // ==========================================================
@@ -407,21 +400,12 @@ int main() {
   
   
   // ==========================================================
-  // 这里是程序的入口。我们首先初始化 GLFW（一个处理窗口和输入的库）
-  // 并配置 OpenGL 环境（处理 3D 图形的标准）
-  // #############等待被模块化进入AppFramework：仅负责基础设置（GLFW/GLAD）、窗口管理和最外层异常处理。#############
+  // 初始化 GLFW（窗口和输入）+ Vulkan 渲染
   // ==========================================================
   glfwInit();
 
-#ifdef USE_VULKAN
-  // Phase 5: 纯 Vulkan 窗口，不创建 OpenGL 上下文
+  // 纯 Vulkan 窗口，不创建 OpenGL 上下文
   glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-#else
-  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-  glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-  glfwWindowHint(GLFW_SAMPLES, 4);
-#endif
 
   GLFWwindow *window = glfwCreateWindow(1000, 800, "3D Rocket Sim", NULL, NULL);
   if (!window) {
@@ -435,8 +419,7 @@ int main() {
   // UniverseModel 初始化必须在 FlightScene::onEnter() 之前
   PhysicsSystem::InitSolarSystem();
 
-#ifdef USE_VULKAN
-  // 完整 Vulkan 初始化序列（Phase 5）
+  // 完整 Vulkan 初始化序列
   if (!g_vkCtx.initCore()
    || !g_vkCtx.initSwapchain(window)
    || !g_frameSync.init(g_vkCtx.device, g_vkCtx.commandPool)
@@ -451,37 +434,18 @@ int main() {
     glfwTerminate();
     return -1;
   }
-  // Vulkan 模式从主菜单启动（不立即进入飞行）
+  // 从主菜单启动
   g_gameUI.state = VkGameState::MENU;
-#else
-  glfwMakeContextCurrent(window);
-  if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
-    return -1;
-  glEnable(GL_BLEND);
-  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-  glEnable(GL_MULTISAMPLE);
-#endif
-
-#ifndef USE_VULKAN
-  renderer = new Renderer();
-#endif
 
   Simulation::AsyncOrbitPredictor orbit_predictor;
   orbit_predictor.Start();
 
   // =========================================================
-  // SceneManager State Machine Loop
+  // GameContext 初始化
   // =========================================================
   GameContext& ctx = GameContext::getInstance();
   ctx.window = window;
-#ifndef USE_VULKAN
-  ctx.renderer2d = renderer;
-#endif
   ctx.orbit_predictor = &orbit_predictor;
-
-#ifndef USE_VULKAN
-  SceneManager::getInstance().changeScene(std::make_unique<MenuScene>());
-#endif
 
   double last_time = glfwGetTime();
 
@@ -493,34 +457,9 @@ int main() {
       last_time = current_time;
       if (real_dt > 0.1) real_dt = 0.02;
 
-#ifndef USE_VULKAN
-      // Handle Scene Transitions based on flags
-      IScene* cur = SceneManager::getInstance().getCurrentScene();
-      if (cur) {
-          if (auto* menu = dynamic_cast<MenuScene*>(cur)) {
-              if (menu->next_scene_flag == 1) {
-                  menu->next_scene_flag = 0;
-                  SceneManager::getInstance().changeScene(std::make_unique<AgencyScene>());
-              }
-          } else if (auto* agency = dynamic_cast<AgencyScene*>(cur)) {
-              if (agency->next_scene_flag == 1) {
-                  agency->next_scene_flag = 0;
-                  SceneManager::getInstance().changeScene(std::make_unique<WorkshopScene>());
-              }
-          } else if (auto* workshop = dynamic_cast<WorkshopScene*>(cur)) {
-              if (workshop->done) {
-                  workshop->done = false;
-                  SceneManager::getInstance().changeScene(std::make_unique<FlightScene>());
-              }
-          }
-      }
-      SceneManager::getInstance().update(real_dt);
-#endif
-
       // If window got closed by a scene
       if (glfwWindowShouldClose(window)) break;
 
-#ifdef USE_VULKAN
       // --- 状态机转换 ---
       if (g_gameUI.goToExit) {
           glfwSetWindowShouldClose(window, true);
@@ -547,9 +486,9 @@ int main() {
           if (!initVulkanFlight(skip)) {
               fprintf(stderr, "[Vulkan] initVulkanFlight failed\n");
           } else {
-              g_workshopMeshesReady = true;  // Flight 初始化也注册了网格
+              g_workshopMeshesReady = true;
               g_gameUI.state = VkGameState::FLIGHT;
-              warmup = 0;  // 重置 TAA 预热
+              warmup = 0;
           }
       }
       // --- Workshop 输入更新（ImGui 帧之前）---
@@ -563,22 +502,13 @@ int main() {
       // --- 场景更新（仅飞行状态） ---
       if (g_gameUI.state == VkGameState::FLIGHT && g_flightScene) {
           g_flightScene->update(real_dt);
-          g_flightScene->render();  // ctx.update() → 相机矩阵，然后早退（USE_VULKAN 下）
+          g_flightScene->render();
       }
       renderVulkanFrame(window);
-#else
-      SceneManager::getInstance().render();
-      glfwSwapBuffers(window);
-#endif
   }
 
-#ifndef USE_VULKAN
-  delete renderer;
-  if (ctx.renderer3d) delete ctx.renderer3d;
-#endif
   orbit_predictor.Stop();
 
-#ifdef USE_VULKAN
   vkDeviceWaitIdle(g_vkCtx.device);
   delete g_flightScene; g_flightScene = nullptr;
   delete g_vkTerrain;   g_vkTerrain   = nullptr;
@@ -589,7 +519,6 @@ int main() {
   g_vkDesc.shutdown(g_vkCtx);
   g_frameSync.shutdown(g_vkCtx.device);
   g_vkCtx.shutdown();
-#endif
 
   glfwTerminate();
   return 0;

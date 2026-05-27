@@ -2,7 +2,6 @@
 #include "core/universe_model.h"
 #include "core/rocket_state.h"
 #include "simulation/orbit_physics.h" // For UniverseModel::getInstance().solar_system
-#include <glad/glad.h>
 #include <math.h>
 
 /**
@@ -76,16 +75,5 @@ public:
             }
         }
 
-        // Clear screen with camera-centric sky color (OpenGL only)
-#ifndef USE_VULKAN
-        if (cam_mode == 2) {
-            glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-        }
-        else {
-            float sky_day = (float)(day_blend * (1.0 - alt_factor));
-            glClearColor(0.5f * sky_day, 0.7f * sky_day, 1.0f * sky_day, 1.0f);
-        }
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-#endif
     }
 };

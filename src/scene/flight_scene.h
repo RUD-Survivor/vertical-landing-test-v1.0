@@ -1,4 +1,5 @@
 #pragma once
+extern float g_scroll_y;
 #include "core/universe_model.h"
 #include "scene.h"
 #include "save_system.h"
@@ -71,7 +72,7 @@ public:
     FlightInputSystem inputSystem;
     int last_soi = -1;
     bool show_clouds = true;
-    int last_save_frame = -1000;  // 自动存档闪烁指示器（OpenGL / Vulkan 通用）
+    int last_save_frame = -1000;  // 自动存档闪烁指示器
     CloudTuner cloudTuner;
     // Vulkan 轨道缓存（update 中计算，extractRenderSnapshot 中消费）
     KepOrbitCache     vkKepCache;
@@ -148,7 +149,7 @@ for (const auto& p : builder_state_assembly.parts) {
     }
 }
 if (skip_builder) {
-    // ==== 从存档文件加载火箭状态（OpenGL / Vulkan 双路径通用）====
+    // ==== 从存档文件加载火箭状态 ====
     bool loaded = SaveSystem::LoadGame(builder_state_assembly, world, rocket_entity, control_input);
     if (loaded) {
         // 重建 rocket_config 以匹配加载的装配
@@ -299,11 +300,6 @@ else {
         Renderer3D* r3d = GameContext::getInstance().renderer3d;
         // Limit spikes
         frame++;
-#ifndef USE_VULKAN
-        if (frame == 1) {
-            cout << "[FlightScene] r3d=" << (void*)r3d << " earthProg=" << r3d->earthProgram << " atmoProg=" << r3d->atmoProg << " terrainProg=" << r3d->terrainProg << endl;
-        }
-#endif
         // Scene escape logic handled externally or here
         if (glfwGetKey(GameContext::getInstance().GameContext::getInstance().window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
             glfwSetWindowShouldClose(GameContext::getInstance().window, true);
@@ -328,12 +324,6 @@ else {
             cam.handleScroll(g_scroll_y);
             g_scroll_y = 0.0f;
         }
-        // --- Maneuver Node Input Handling (仅 OpenGL 路径；Vulkan 由 ImGui 面板管理) ---
-#ifndef USE_VULKAN
-        if (cam.mode == 2) {
-            mnvManager.update(GameContext::getInstance().window, world, rocket_entity, hudManager.hud, cam, dt, ww, wh);
-        }
-#endif
         // --- Ensure Rocket starts perfectly on the Terrain/SVO surface ---
         if (r3d && r3d->terrain) {
             Vec3 localUp(trans.surf_px, trans.surf_py, trans.surf_pz);
@@ -371,7 +361,7 @@ else {
             mouse_y = 1.0 - my_raw / _wh * 2.0;
         }
 
-        // ==== 自动存档（每 300 帧 = 约 6 秒，OpenGL / Vulkan 双路径通用）====
+        // ==== 自动存档（每 300 帧 = 约 6 秒）====
         if (frame % 300 == 0 && guid.status != PRE_LAUNCH) {
             SaveSystem::SaveGame(assembly, world, rocket_entity, control_input);
             last_save_frame = frame;
@@ -392,102 +382,28 @@ else {
         auto& control_input = world.get<ControlInput>(rocket_entity);
 
 
-        Renderer* renderer = GameContext::getInstance().renderer2d;
+        // Vulkan: renderer2d 已移除；HUD 由 ImGui/VkHUD 处理
         Renderer3D* r3d = GameContext::getInstance().renderer3d;
         const RocketAssembly& assembly = GameContext::getInstance().launch_assembly;
         // ================= 3D 渲染通道 =================
         {
             // === 1. 构建本帧渲染参考系上下文 (浮动原点、物理变换、投影矩阵) ===
             ctx.update(trans, vel, att, tele, guid, rocket_config, UniverseModel::getInstance().current_soi_index, last_soi, comma_prev, period_prev, cam, ws_d, dt);
-#ifdef USE_VULKAN
-            // 必须在 early-return 前更新 day_blend / alt_factor，
-            // 否则 extractRenderSnapshot() 中 snap.skyVibrancy / snap.dayBlend 永远是构造默认值 1.0
+            // 更新 day_blend / alt_factor（extractRenderSnapshot() 消费）
             environmentSystem.updateAndApply(ctx.camEye_rel, ctx.ro_x, ctx.ro_y, ctx.ro_z, ws_d, cam.mode);
-            // 轨道计算（仅 Panorama 模式，匹配 OpenGL 行为）
+            // 轨道计算（仅 Panorama 模式）
             if (cam.mode == 2) {
                 computeOrbitDataVK(orbitSystem, world, rocket_entity, hudManager.hud, cam,
                     ws_d, ctx.ro_x, ctx.ro_y, ctx.ro_z, ctx.earth_r, ctx.cam_dist,
                     ctx.renderRocketBase, ctx.camEye_rel, vkKepCache, vkAdvCache, vkRktCache);
             }
+            // 实际渲染由 main.cpp 中的 renderVulkanFrame() 通过 extractRenderSnapshot() 驱动
             return;
-#endif
-            // 相机设置 (TAA 与 GL 状态清理)
-            int ww, wh;
-            glfwGetFramebufferSize(GameContext::getInstance().window, &ww, &wh);
-            r3d->initTAA(ww, wh);
-            
-            // === CRITICAL: Full GL state reset before 3D pass ===
-            glViewport(0, 0, ww, wh);
-            glDisable(GL_BLEND);
-            glEnable(GL_DEPTH_TEST);
-            glDepthMask(GL_TRUE);
-            glDepthFunc(GL_LESS);
-            glDisable(GL_CULL_FACE);
-            glFrontFace(GL_CCW);
-            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-            glBindFramebuffer(GL_FRAMEBUFFER, 0); 
-
-            // --- Camera-Centric Visuals (Day/Night & Atmosphere) 已转移至 EnvironmentSystem ---
-            environmentSystem.updateAndApply(ctx.camEye_rel, ctx.ro_x, ctx.ro_y, ctx.ro_z, ws_d, cam.mode);
-            float day_blend = (float)environmentSystem.day_blend;
-            float alt_factor = environmentSystem.alt_factor;
-            
-            // =========== PASS 1: MACRO BACKGROUND (天体渲染已转移至 CelestialRenderer) ===========
-            celestialRenderer.renderMacroPass(
-                r3d, tele, UniverseModel::getInstance().current_soi_index, cam, ctx.camEye_rel, ctx.cam_dist,
-                ws_d, ctx.ro_x, ctx.ro_y, ctx.ro_z, ctx.aspect, (float)day_blend, alt_factor, 
-                show_clouds, frame, ww, wh, ctx.renderRocketBase, ctx.renderSun, ctx.sun_radius, ctx.earth_r,
-                earthMesh, ringMesh, ctx.viewMat, ctx.macroProjMat, ctx.lightVec
-            );
-            if (cam.mode == 2) {
-                // ===== 历史轨迹线与轨道预测线 (已转移至 OrbitSystem) =====
-                orbitSystem.render(world, rocket_entity, hudManager.hud, mnvManager, r3d, cam, ctx.viewMat, ctx.macroProjMat, ctx.aspect, ws_d, ctx.ro_x, ctx.ro_y, ctx.ro_z, ww, wh, dt, UniverseModel::getInstance().current_soi_index, ctx.earth_r, ctx.cam_dist, ctx.renderRocketBase, ctx.camEye_rel);
-                // --- Maneuver Nodes & Interaction ---
-                mnvManager.render(world, rocket_entity, hudManager.hud, r3d, ctx.viewMat, ctx.macroProjMat, ctx.aspect, ctx.earth_r, ctx.cam_dist, ws_d, ctx.ro_x, ctx.ro_y, ctx.ro_z, dt);
-            }
-     
-            // Dynamic TAA blend: reduce temporal accumulation during fast changes
-            // to prevent ghosting/smearing of orbit lines
-            if (sim_ctrl.time_warp > 1 || hudManager.hud.mnv_popup_slider_dragging >= 0) {
-                // In time warp or during slider drag, favor current frame heavily
-                float warp_blend = (sim_ctrl.time_warp > 100) ? 0.8f : (sim_ctrl.time_warp > 1 ? 0.5f : 0.4f);
-                if (hudManager.hud.mnv_popup_slider_dragging >= 0) warp_blend = fmaxf(warp_blend, 0.6f);
-                r3d->taaBlendOverride = warp_blend;
-            }
-            else {
-                r3d->taaBlendOverride = -1.0f; // Use default
-            }
-            r3d->resolveTAA();
-            // =========== PASS 2: MICRO FOREGROUND (已转移至 RocketVisuals) ===========
-            rocketVisuals.render(r3d, cam, ctx.cam_dist, ctx.rh, ctx.aspect, world, rocket_entity, assembly, 
-                                 ctx.renderRocketBase, ctx.rocketQuat, ws_d, rocketBody, rocketNose, rocketBox, 
-                                 ctx.viewMat, ctx.camEye_rel);
-            //=============火箭涂装==========================
-            
-            // ===== 发射台渲染 (已转移至 SpaceportManager) =====
-            spaceportManager.render(r3d, world, rocket_entity, UniverseModel::getInstance().current_soi_index, ws_d, ctx.ro_x, ctx.ro_y, ctx.ro_z, rocketBox, ctx.rw_3d, ctx.rh);
-
-            // ===== 体积尾焰渲染 (ECS 化) =====
-            plumeManager.render(world, rocket_entity, assembly, r3d, rocketBox, ctx.rocketQuat, ctx.renderRocketBase, ws_d);
-            r3d->endFrame();
         }
-        // ================= 2D HUD 渲染通道 (已转移至 HUDManager) =================
-        hudManager.render(renderer, r3d, world, rocket_entity, cam, sim_ctrl, mnvManager, assembly, ctx,
-                          dt, frame, ws_d, (float)mouse_x, (float)mouse_y, lmb, lmb_prev, rmb);
-
-        // Cloud tuner overlay (Tab to toggle)
-        if (cloudTuner.visible && r3d) {
-            renderer->beginFrame();
-            cloudTuner.render(renderer, r3d, (float)mouse_x, (float)mouse_y, lmb);
-            renderer->endFrame();
-        }
-
-        // Update state for next frame ONLY at the very end
-        lmb_prev = lmb;
     }
 
     // ========================================================================
-    // extractRenderSnapshot — 从当前帧提取纯数据快照，供 Vulkan/OpenGL 渲染器消费
+    // extractRenderSnapshot — 从当前帧提取纯数据快照，供 Vulkan 渲染器消费
     //
     // 调用前必须已执行 ctx.update()（在 render() 开头自动完成）
     // 返回的 Snapshot 不持有任何 GL/Vulkan 资源，可跨线程传递
@@ -877,12 +793,7 @@ else {
         // ---- 15. SVO + Terrain + Vegetation (Block D) ----
         {
             auto* r3d_check = GameContext::getInstance().renderer3d;
-#ifdef USE_VULKAN
             bool needBlockD = (GameContext::getInstance().terrain != nullptr);
-#else
-            bool needBlockD = r3d_check && r3d_check->svoManager
-                              && r3d_check->svoManager->hasActiveChunks();
-#endif
             if (needBlockD) {
                 _extractBlockD(snap, ss, ctx, ws_d, ro_x, ro_y, ro_z);
             }
@@ -939,11 +850,7 @@ private:
         }
 
         // --- Terrain Quadtree ---
-#ifdef USE_VULKAN
         Terrain::QuadtreeTerrain* activeTerrain = GameContext::getInstance().terrain;
-#else
-        Terrain::QuadtreeTerrain* activeTerrain = r3d->terrain;
-#endif
         if (activeTerrain) {
             Vec3 camPosInertialRel = -planetCenterRel;
             Vec3 camPosLocalRel(camPosInertialRel.dot(axisX),
