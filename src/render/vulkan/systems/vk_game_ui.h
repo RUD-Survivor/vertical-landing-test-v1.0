@@ -1018,34 +1018,23 @@ private:
         dl->AddCircle(ctr, R, IM_COL32(160, 160, 160, 220), 64, 2.2f);
 
         // ════════════════════════════════════════════════════════════════
-        // 9. 中心固定指示器（橙色"机翼"） ─────────────────────────────
+        // 9. 中心黄色十字准星（固定，表示火箭鼻锥方向）───────────────
         // ════════════════════════════════════════════════════════════════
         {
-            // 半透明黑色底座
-            dl->AddCircleFilled(ctr, R * 0.12f, IM_COL32(0, 0, 0, 102));
-            float iw = R * 0.45f;
-            float ih = R * 0.045f;
-            // 左侧机翼
-            dl->AddRectFilled({ctr.x - iw * 0.7f - iw * 0.52f, ctr.y - ih * 1.5f},
-                              {ctr.x - iw * 0.7f,               ctr.y + ih * 1.5f},
-                              IM_COL32(0, 0, 0, 200));
-            dl->AddRectFilled({ctr.x - iw * 0.7f - iw * 0.5f, ctr.y - ih},
-                              {ctr.x - iw * 0.7f,              ctr.y + ih},
-                              IM_COL32(255, 153, 0, 255));
-            // 右侧机翼
-            dl->AddRectFilled({ctr.x + iw * 0.7f,               ctr.y - ih * 1.5f},
-                              {ctr.x + iw * 0.7f + iw * 0.52f, ctr.y + ih * 1.5f},
-                              IM_COL32(0, 0, 0, 200));
-            dl->AddRectFilled({ctr.x + iw * 0.7f,              ctr.y - ih},
-                              {ctr.x + iw * 0.7f + iw * 0.5f, ctr.y + ih},
-                              IM_COL32(255, 153, 0, 255));
-            // 中心方块
-            dl->AddRectFilled({ctr.x - ih * 2.5f, ctr.y - ih * 2.5f},
-                              {ctr.x + ih * 2.5f, ctr.y + ih * 2.5f},
-                              IM_COL32(0, 0, 0, 200));
-            dl->AddRectFilled({ctr.x - ih * 2.5f, ctr.y - ih * 2.5f},
-                              {ctr.x + ih * 2.5f, ctr.y + ih * 2.5f},
-                              IM_COL32(255, 153, 0, 255));
+            float g = R * 0.11f;   // 中心空心圆半径
+            float l = R * 0.34f;   // 左右长线段延伸长度
+            // 左侧长线段
+            dl->AddLine({ctr.x - l - g, ctr.y}, {ctr.x - g, ctr.y},
+                        IM_COL32(255, 210, 0, 245), 2.5f);
+            // 右侧长线段
+            dl->AddLine({ctr.x + g,       ctr.y}, {ctr.x + l + g, ctr.y},
+                        IM_COL32(255, 210, 0, 245), 2.5f);
+            // 中心空心圆
+            dl->AddCircle(ctr, g, IM_COL32(255, 210, 0, 245), 16, 2.f);
+            // 上部短竖线
+            dl->AddLine({ctr.x, ctr.y - g},
+                        {ctr.x, ctr.y - g * 1.9f},
+                        IM_COL32(255, 210, 0, 245), 2.5f);
         }
     }
 
