@@ -293,10 +293,12 @@ else {
             cam.handleScroll(g_scroll_y);
             g_scroll_y = 0.0f;
         }
-        // --- Maneuver Node Input Handling (Delegated to ManeuverManager) ---
+        // --- Maneuver Node Input Handling (仅 OpenGL 路径；Vulkan 由 ImGui 面板管理) ---
+#ifndef USE_VULKAN
         if (cam.mode == 2) {
             mnvManager.update(GameContext::getInstance().window, world, rocket_entity, hudManager.hud, cam, dt, ww, wh);
         }
+#endif
         // --- Ensure Rocket starts perfectly on the Terrain/SVO surface ---
         if (r3d && r3d->terrain) {
             Vec3 localUp(trans.surf_px, trans.surf_py, trans.surf_pz);
@@ -828,6 +830,7 @@ else {
             snap.cloudTuner.erosion=p.erosion; snap.cloudTuner.density=p.density;
             snap.cloudTuner.extinction=p.extinction;
             snap.cloudTuner.minAlt=p.minAlt; snap.cloudTuner.maxAlt=p.maxAlt;
+            snap.cloudTuner.debugMode=p.debugMode;
         }
 
         // ---- 15. SVO + Terrain + Vegetation (Block D) ----

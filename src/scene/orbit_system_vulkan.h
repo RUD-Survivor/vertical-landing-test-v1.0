@@ -72,20 +72,39 @@ inline void computeOrbitDataVK(OrbitSystem& osys,
 
     // ===== 高级数值轨道 =====
     if (hud.adv_orbit_enabled) {
-        if (!orb.prediction_in_progress) {
-            auto now = std::chrono::steady_clock::now();
-            float elapsed_real = std::chrono::duration<float>(now - osys.last_req_time).count();
-            if (elapsed_real > 0.1f || orb.predicted_path.empty()) {
-                orb.prediction_in_progress = true;
-                osys.last_req_time = now;
-                trans.abs_px = trans.px + soiBody.px;
-                trans.abs_py = trans.py + soiBody.py;
-                trans.abs_pz = trans.pz + soiBody.pz;
-                vel.abs_vx = vel.vx + soiBody.vx;
-                vel.abs_vy = vel.vy + soiBody.vy;
-                vel.abs_vz = vel.vz + soiBody.vz;
-                bool force_reset = (control_input.throttle > 0.01) || (std::abs(tele.sim_time - orb.last_prediction_sim_time) > 3600.0);
-                RocketState pred_state;
+        kep = {}; // 清除 Kepler 缓存，防止旧轨道残留
+        
+        // 预测请求条件：首次 / 参数变化 / 时间跳跃 / 火箭状态变化时周期性更新
+        static int  s_last_ref_mode = -1, s_last_ref_body = -1, s_last_sec_body = -1;
+        static float s_last_pred_days = -1; static int s_last_iters = -1;
+        static double s_last_sim_time = -1.0;
+        static auto s_last_periodic = std::chrono::steady_clock::now();
+        bool params_changed = (hud.adv_orbit_ref_mode != s_last_ref_mode || hud.adv_orbit_ref_body != s_last_ref_body ||
+            hud.adv_orbit_secondary_ref_body != s_last_sec_body ||
+            hud.adv_orbit_pred_days != s_last_pred_days || hud.adv_orbit_iters != s_last_iters);
+        bool sim_jumped = (std::abs(tele.sim_time - s_last_sim_time) > 3600.0);
+        // 火箭在推力或大气中时轨道实时变化，需要周期性更新
+        bool state_changing = (control_input.throttle > 0.01) || (tele.altitude < 200000.0);
+        auto now = std::chrono::steady_clock::now();
+        float elapsed_periodic = std::chrono::duration<float>(now - s_last_periodic).count();
+        bool needs_periodic = state_changing && (elapsed_periodic > 0.05f);
+        
+        if (!orb.prediction_in_progress && (orb.predicted_path.empty() || params_changed || sim_jumped || needs_periodic)) {
+            orb.prediction_in_progress = true;
+            s_last_ref_mode = hud.adv_orbit_ref_mode; s_last_ref_body = hud.adv_orbit_ref_body;
+            s_last_sec_body = hud.adv_orbit_secondary_ref_body;
+            s_last_pred_days = hud.adv_orbit_pred_days; s_last_iters = hud.adv_orbit_iters;
+            s_last_sim_time = tele.sim_time;
+            s_last_periodic = now;
+            s_last_sim_time = tele.sim_time;
+            trans.abs_px = trans.px + soiBody.px;
+            trans.abs_py = trans.py + soiBody.py;
+            trans.abs_pz = trans.pz + soiBody.pz;
+            vel.abs_vx = vel.vx + soiBody.vx;
+            vel.abs_vy = vel.vy + soiBody.vy;
+            vel.abs_vz = vel.vz + soiBody.vz;
+            bool force_reset = params_changed || sim_jumped || state_changing;
+            RocketState pred_state;
                 pred_state.px = trans.px; pred_state.py = trans.py; pred_state.pz = trans.pz;
                 pred_state.vx = vel.vx; pred_state.vy = vel.vy; pred_state.vz = vel.vz;
                 pred_state.abs_px = trans.abs_px; pred_state.abs_py = trans.abs_py; pred_state.abs_pz = trans.abs_pz;
@@ -101,7 +120,6 @@ inline void computeOrbitDataVK(OrbitSystem& osys,
                     hud.adv_orbit_pred_days, hud.adv_orbit_iters, hud.adv_orbit_ref_mode,
                     hud.adv_orbit_ref_body, hud.adv_orbit_secondary_ref_body, force_reset);
             }
-        }
         {
             std::vector<Vec3> draw_points, draw_mnv_points;
             {
@@ -114,39 +132,39 @@ inline void computeOrbitDataVK(OrbitSystem& osys,
             Quat qLI = PhysicsSystem::GetFrameRotation(hud.adv_orbit_ref_mode, hud.adv_orbit_ref_body,
                 hud.adv_orbit_secondary_ref_body, tele.sim_time);
             if (!draw_points.empty()) {
-                bool needs_update = (draw_points.size() != osys.last_draw_points_size) || (draw_points[0].x != osys.last_first_pt.x);
-                if (needs_update) {
-                    osys.cached_rel_pts = CatmullRomSpline::interpolate(draw_points, 8);
-                    osys.last_draw_points_size = draw_points.size();
-                    osys.last_first_pt = draw_points[0];
-                }
-                adv.worldPts.clear(); adv.cols.clear();
+                // 每帧直接从 draw_points 重建 spline（与 OpenGL 路径行为一致）
+                osys.cached_rel_pts = CatmullRomSpline::interpolate(draw_points, 8);
+                // 先构建临时 buffer，成功后才替换 adv，防止空数据冲掉上一帧的轨道
+                std::vector<Vec3> newPts; std::vector<Vec4> newCols;
                 for (const auto& p : osys.cached_rel_pts) {
                     Vec3 p_rot = qLI.rotate(p);
-                    adv.worldPts.push_back(Vec3(
+                    newPts.push_back(Vec3(
                         (float)((rb_px + p_rot.x) * ws_d - ro_x),
                         (float)((rb_py + p_rot.y) * ws_d - ro_y),
                         (float)((rb_pz + p_rot.z) * ws_d - ro_z)));
-                    adv.cols.push_back(Vec4(0.4f, 0.8f, 1.0f, 0.85f));
+                    newCols.push_back(Vec4(0.4f, 0.8f, 1.0f, 0.85f));
                 }
-                adv.valid = !adv.worldPts.empty();
+                if (!newPts.empty()) {
+                    adv.worldPts = std::move(newPts);
+                    adv.cols    = std::move(newCols);
+                    adv.valid   = true;
+                }
             }
             if (mnv.maneuvers.empty()) draw_mnv_points.clear();
             if (!draw_mnv_points.empty()) {
-                bool needs_update = (draw_mnv_points.size() != osys.last_draw_mnv_points_size) || (draw_mnv_points[0].x != osys.last_mnv_first_pt.x);
-                if (needs_update) {
-                    osys.cached_mnv_rel_pts = CatmullRomSpline::interpolate(draw_mnv_points, 8);
-                    osys.last_draw_mnv_points_size = draw_mnv_points.size();
-                    osys.last_mnv_first_pt = draw_mnv_points[0];
-                }
-                adv.mnvDash.clear(); adv.mnvCols.clear();
+                osys.cached_mnv_rel_pts = CatmullRomSpline::interpolate(draw_mnv_points, 8);
+                std::vector<Vec3> newDash; std::vector<Vec4> newDashCols;
                 for (const auto& p : osys.cached_mnv_rel_pts) {
                     Vec3 p_rot = qLI.rotate(p);
-                    adv.mnvDash.push_back(Vec3(
+                    newDash.push_back(Vec3(
                         (float)((rb_px + p_rot.x) * ws_d - ro_x),
                         (float)((rb_py + p_rot.y) * ws_d - ro_y),
                         (float)((rb_pz + p_rot.z) * ws_d - ro_z)));
-                    adv.mnvCols.push_back(Vec4(1.0f, 0.6f, 0.1f, 0.9f));
+                    newDashCols.push_back(Vec4(1.0f, 0.6f, 0.1f, 0.9f));
+                }
+                if (!newDash.empty()) {
+                    adv.mnvDash = std::move(newDash);
+                    adv.mnvCols = std::move(newDashCols);
                 }
             }
         }
@@ -155,6 +173,7 @@ inline void computeOrbitDataVK(OrbitSystem& osys,
 
     // ===== 标准开普勒轨道 =====
     if (!hud.adv_orbit_enabled) {
+        adv = {}; // 清除高级轨道缓存
         kep = {}; // reset
         for (int ref_idx = 0; ref_idx < 2; ref_idx++) {
             bool is_sun_ref = (ref_idx == 1);

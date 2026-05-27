@@ -430,8 +430,8 @@ public:
         auto& mnv   = registry.get<ManeuverComponent>(entity);
         auto& rocket_config = registry.get<RocketConfig>(entity);
 
-        // --- 轨迹历史 ribbon ---
-        if (!traj_history.empty()) {
+        // --- 轨迹历史 ribbon (高级轨道模式下跳过，由 extractAdvRibbons 统一处理) ---
+        if (!hud.adv_orbit_enabled && !traj_history.empty()) {
             CelestialBody& body = UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index];
             std::vector<Vec3> pts; std::vector<Vec4> cols;
             pts.reserve(traj_history.size()); cols.reserve(traj_history.size());
@@ -450,8 +450,8 @@ public:
             }
         }
 
-        // --- 缓存轨道预测点 ribbon ---
-        if (!cached_rel_pts.empty()) {
+        // --- 缓存轨道预测点 ribbon (仅 Kepler 模式；高级轨道由 extractAdvRibbons 处理) ---
+        if (!hud.adv_orbit_enabled && !cached_rel_pts.empty()) {
             CelestialBody& body = UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index];
             Vec3 ref((float)((body.px + trans.px) * ws_d - ro_x),
                      (float)((body.py + trans.py) * ws_d - ro_y),
@@ -469,7 +469,8 @@ public:
             }
         }
 
-        // --- 变轨节点预测轨道 ribbon ---
+        // --- 变轨节点预测轨道 ribbon (仅 Kepler 模式；高级轨道由 extractAdvRibbons 处理) ---
+        if (!hud.adv_orbit_enabled) {
         auto& mnvComp = registry.get<ManeuverComponent>(entity);
         for (auto& node : mnvComp.maneuvers) {
             if (!node.active || !node.snap_valid) continue;
@@ -495,6 +496,7 @@ public:
                 out.push_back({pts, cols, ribbon_w});
             }
         }
+        } // if (!hud.adv_orbit_enabled)
     }
 };
 

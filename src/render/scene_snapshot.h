@@ -81,6 +81,7 @@ struct CloudTunerState {
     bool visible;
     float covLo, covHi, threshLo, threshHi;
     float erosion, density, extinction, minAlt, maxAlt;
+    int   debugMode;
 };
 
 // ============================================================================

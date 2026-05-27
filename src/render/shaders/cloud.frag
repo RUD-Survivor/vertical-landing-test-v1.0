@@ -211,6 +211,9 @@ float cloudDensity(vec3 p, float h, bool highDetail) {
     if (pc.showClouds < 0.5) return 0.0;
     if (h < gCloudMinAlt || h > gCloudMaxAlt) return 0.0;
 
+    // Debug: force uniform density to isolate shape from lighting
+    if (cloud.uDebug == 1) return 2.0;
+
     vec3 sph = normalize(p - pc.planetCenter.xyz);
     float t = cloud.uTime * 0.004;
     float density = 0.0;

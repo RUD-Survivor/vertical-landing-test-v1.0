@@ -9,9 +9,8 @@
 // Use LMB to drag sliders. Reads/writes Renderer3D::cloudTuneParams directly.
 struct CloudTuner {
     bool visible = false;
-
-    // Which slider is being dragged (-1 = none)
     int  dragging = -1;
+    float dbgFloat = 0.0f;  // float bridge for debugMode int slider
 
     void toggle() { visible = !visible; }
 
@@ -22,12 +21,15 @@ struct CloudTuner {
 
         auto& p = r3d->cloudSystem.tuneParams;
 
+        // Sync int debugMode ↔ float slider
+        dbgFloat = (float)p.debugMode;
+
         // Panel layout (NDC)
         const float PX  = -0.99f;  // left edge
         const float PY  =  0.96f;  // top edge
         const float PW  =  0.62f;  // panel width
         const float RH  =  0.068f; // row height
-        const int   N   =  9;
+        const int   N   =  10;
 
         const float panH = RH * N + 0.04f;
         const float cx   = PX + PW * 0.5f;
@@ -38,7 +40,7 @@ struct CloudTuner {
         r2d->addRectOutline(cx, cy, PW, panH, 0.4f, 0.8f, 1.0f, 0.7f, 0.003f);
 
         // Title
-        r2d->drawText(cx, PY - 0.025f, "Cloud Tuner  [Tab] to close",
+        r2d->drawText(cx, PY - 0.025f, "Cloud Tuner  [~] to close",
                       0.030f, 0.5f, 0.9f, 1.0f, 1.0f, false, Renderer::CENTER);
 
         // Slider descriptors: { label, ptr, min, max }
@@ -53,6 +55,7 @@ struct CloudTuner {
             { "Extinction",                       &p.extinction,0.01f, 0.60f },
             { "MinAlt (km)",                      &p.minAlt,    0.50f, 6.00f },
             { "MaxAlt (km)",                      &p.maxAlt,    8.00f,22.00f },
+            { "Debug (0=off 1=force density)",    &p.dbgFloat,  0.00f, 1.00f },
         };
 
         const float LABEL_X  = PX + 0.01f;
@@ -106,6 +109,9 @@ struct CloudTuner {
             *sliders[dragging].val = sliders[dragging].lo +
                                      t * (sliders[dragging].hi - sliders[dragging].lo);
         }
+
+        // Sync float slider → int debugMode
+        p.debugMode = (int)(dbgFloat + 0.5f);
 
         // Print current values hint at bottom
         r2d->drawText(cx, PY - panH + 0.018f,

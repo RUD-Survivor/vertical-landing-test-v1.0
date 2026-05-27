@@ -37,6 +37,7 @@ struct CloudTuneParams {
     float minAlt     = 1.5f;
     float maxAlt     = 15.0f;
     int   debugMode  = 0;      // 0=off 1=force density for debug
+    float dbgFloat   = 0.f;    // float mirror for slider UI
 };
 
 class CloudSystem {

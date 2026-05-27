@@ -383,10 +383,16 @@ void AsyncOrbitPredictor::WorkerLoop() {
                 if (!m_context.crashed) {
                     Vec3 p_inertial((float)(cur_h_px - rbpx), (float)(cur_h_py - rbpy), (float)(cur_h_pz - rbpz));
                     Vec3 p_local = q_inv.rotate(p_inertial);
-                    if (std::isfinite(p_local.x)) {
-                        m_context.points.push_back(p_local);
-                        m_context.point_times.push_back(t_sim);
+                    // 所有模式统一存局部坐标（惯性系=p_inertial，共转/地表=p_local）
+                    // 渲染端用 rb_px + qLI.rotate(p) 还原日心坐标
+                    if (req.ref_mode == 0) {
+                        if (std::isfinite(p_inertial.x))
+                            m_context.points.push_back(p_inertial);
+                    } else {
+                        if (std::isfinite(p_local.x))
+                            m_context.points.push_back(p_local);
                     }
+                    m_context.point_times.push_back(t_sim);
                     
                     // 轨道近地点/远地点检测 (Apsis Detection)
                     // 通过检测径向速度 (dr) 的正负切换来寻找距离的极值点。
@@ -409,10 +415,17 @@ void AsyncOrbitPredictor::WorkerLoop() {
                 
                 if (loop_has_mnv && (m_context.mnv_done || m_context.mnv_burning) && !m_context.mnv_crashed) {
                     Vec3 mnv_inertial((float)(mnv_h_px - rbpx), (float)(mnv_h_py - rbpy), (float)(mnv_h_pz - rbpz));
-                    Vec3 mnv_local = q_inv.rotate(mnv_inertial);
-                    if (std::isfinite(mnv_local.x)) {
-                        m_context.mnv_points.push_back(mnv_local);
-                        m_context.mnv_point_times.push_back(t_sim);
+                    if (req.ref_mode == 0) {
+                        if (std::isfinite(mnv_inertial.x)) {
+                            m_context.mnv_points.push_back(mnv_inertial);
+                            m_context.mnv_point_times.push_back(t_sim);
+                        }
+                    } else {
+                        Vec3 mnv_local = q_inv.rotate(mnv_inertial);
+                        if (std::isfinite(mnv_local.x)) {
+                            m_context.mnv_points.push_back(mnv_local);
+                            m_context.mnv_point_times.push_back(t_sim);
+                        }
                     }
                 }
                 last_record_t = t_sim;

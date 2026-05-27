@@ -91,8 +91,8 @@ struct FlightInputSystem {
             std::cout << "[CLOUDS] " << (show_clouds ? "ON" : "OFF") << std::endl;
         });
 
-        // Tab: toggle cloud tuner panel
-        router.registerKey(GLFW_KEY_TAB, [&cloudTuner]() {
+        // ~ key: toggle cloud tuner panel
+        router.registerKey(GLFW_KEY_GRAVE_ACCENT, [&cloudTuner]() {
             cloudTuner.toggle();
         });
 

@@ -1573,7 +1573,12 @@ private:
                 { char buf[16]; snprintf(buf,16,"%.2f°", inc_deg);        rowR("倾角:", buf); }
             }
             ImGui::Separator();
-            if (ImGui::Button(hud_adv_orbit  ?"[ 高级轨道 ]":"高级轨道",  {120.f,20.f})) hud_adv_orbit   = !hud_adv_orbit;
+            // 防止在"高级轨道"面板区域内点击时误关面板
+            static float s_advOrbitLeft = 0, s_advOrbitTop = 0, s_advOrbitRight = 0, s_advOrbitBottom = 0;
+            bool blockAdvToggle = hud_adv_orbit &&
+                ImGui::GetMousePos().x >= s_advOrbitLeft && ImGui::GetMousePos().x <= s_advOrbitRight &&
+                ImGui::GetMousePos().y >= s_advOrbitTop && ImGui::GetMousePos().y <= s_advOrbitBottom;
+            if (ImGui::Button(hud_adv_orbit  ?"[ 高级轨道 ]":"高级轨道",  {120.f,20.f}) && !blockAdvToggle) hud_adv_orbit   = !hud_adv_orbit;
             ImGui::SameLine();
             if (ImGui::Button(hud_flight_asst?"[ 飞行辅助 ]":"飞行辅助", {120.f,20.f})) hud_flight_asst = !hud_flight_asst;
             ImGui::Separator();
@@ -1585,21 +1590,129 @@ private:
 
             // ── 高级轨道面板 ─────────────────────────────────────────
             if (hud_adv_orbit) {
+                auto& hudRef = fs->hudManager.hud;
+                auto& ss2 = UniverseModel::getInstance().solar_system;
+                int nBodies = (int)ss2.size();
+
                 ImGui::SetNextWindowPos(ImVec2((float)ww - 565.f, 10.f), ImGuiCond_Always);
-                ImGui::SetNextWindowSize(ImVec2(268.f, 0), ImGuiCond_Always);
+                ImGui::SetNextWindowSize(ImVec2(290.f, 0), ImGuiCond_Always);
                 ImGui::SetNextWindowBgAlpha(0.82f);
                 ImGui::Begin("高级轨道##adv", nullptr,
                     ImGuiWindowFlags_NoResize|ImGuiWindowFlags_NoMove|
                     ImGuiWindowFlags_NoCollapse|ImGuiWindowFlags_AlwaysAutoResize);
+
+                // ── 轨道模式切换 ──────────────────────────────────────
+                ImGui::TextColored({0.8f,0.8f,0.4f,1}, "轨道模式");
+                bool advEnabled = hudRef.adv_orbit_enabled;
+                if (ImGui::Checkbox("SYM-LMM4 (数值预测)", &advEnabled))
+                    hudRef.adv_orbit_enabled = advEnabled;
+                ImGui::SameLine(); ImGui::SetWindowFontScale(0.72f);
+                ImGui::TextColored({0.6f,0.6f,0.6f,1}, advEnabled ? "(高精度)" : "(Kepler)");
+                ImGui::SetWindowFontScale(1.0f);
+                ImGui::Separator();
+
+                // ── 参考系选择 ──────────────────────────────────────
+                static const char* frameNames[] = {"惯性系", "共转系", "地表系"};
+                ImGui::TextColored({0.6f,0.8f,1,1}, "参考系");
+                int curFrame = hudRef.adv_orbit_ref_mode;
+                if (ImGui::Combo("##frame", &curFrame, frameNames, 3))
+                    hudRef.adv_orbit_ref_mode = curFrame;
+                ImGui::Separator();
+
+                // ── 主参考天体 ───────────────────────────────────────
+                ImGui::TextColored({0.6f,0.8f,1,1}, "主参考天体");
+                if (nBodies > 0) {
+                    int curBody = hudRef.adv_orbit_ref_body;
+                    if (curBody < 0) curBody = 0;
+                    if (curBody >= nBodies) curBody = nBodies - 1;
+                    if (ImGui::Button("<##priL", {24.f,20.f}) && curBody > 0)
+                        hudRef.adv_orbit_ref_body = curBody - 1;
+                    ImGui::SameLine();
+                    ImGui::Text("%s", ss2[curBody].name.c_str());
+                    ImGui::SameLine();
+                    if (ImGui::Button(">##priR", {24.f,20.f}) && curBody < nBodies - 1)
+                        hudRef.adv_orbit_ref_body = curBody + 1;
+                }
+                ImGui::Separator();
+
+                // ── 副参考天体（仅共转系）───────────────────────────
+                if (hudRef.adv_orbit_ref_mode == 1) {
+                    ImGui::TextColored({0.5f,0.9f,0.5f,1}, "副参考天体");
+                    if (nBodies > 0) {
+                        int curSec = hudRef.adv_orbit_secondary_ref_body;
+                        if (curSec < 0) curSec = 0;
+                        if (curSec >= nBodies) curSec = nBodies - 1;
+                        if (ImGui::Button("<##secL", {24.f,20.f}) && curSec > 0)
+                            hudRef.adv_orbit_secondary_ref_body = curSec - 1;
+                        ImGui::SameLine();
+                        ImGui::Text("%s", ss2[curSec].name.c_str());
+                        ImGui::SameLine();
+                        if (ImGui::Button(">##secR", {24.f,20.f}) && curSec < nBodies - 1)
+                            hudRef.adv_orbit_secondary_ref_body = curSec + 1;
+                    }
+                    ImGui::Separator();
+                }
+
+                // ── 预测天数滑块 ────────────────────────────────────
+                ImGui::TextColored({0.6f,0.8f,1,1}, "预测时长");
+                float predDays = hudRef.adv_orbit_pred_days;
+                // 对数滑块: 1 ~ 3650 天
+                float predLog = logf(predDays);
+                float predLogMin = 0.f, predLogMax = logf(3650.f);
+                float predT = (predLog - predLogMin) / (predLogMax - predLogMin);
+                if (ImGui::SliderFloat("##predT", &predT, 0.f, 1.f, ""))
+                    hudRef.adv_orbit_pred_days = expf(predLogMin + predT * (predLogMax - predLogMin));
+                ImGui::SameLine();
+                if (predDays < 1.5f) ImGui::Text("%.0f 天", predDays);
+                else if (predDays < 365.f) ImGui::Text("%.0f 天", predDays);
+                else ImGui::Text("%.1f 年", predDays / 365.25f);
+                ImGui::Separator();
+
+                // ── 迭代次数 ────────────────────────────────────────
+                ImGui::TextColored({0.6f,0.8f,1,1}, "迭代次数");
+                static const int iterOpts[] = {500, 1000, 2000, 4000, 8000, 16000, 32000};
+                static const char* iterNames[] = {"500","1000","2000","4000","8000","16000","32000"};
+                int curIter = hudRef.adv_orbit_iters;
+                int curIterIdx = 3; // default 4000
+                for (int j=0; j<7; j++) if (curIter == iterOpts[j]) curIterIdx = j;
+                if (ImGui::Combo("##iters", &curIterIdx, iterNames, 7))
+                    hudRef.adv_orbit_iters = iterOpts[curIterIdx];
+                ImGui::Separator();
+
+                // ── 创建变轨节点 ────────────────────────────────────
+                ImGui::TextColored({0.4f,0.8f,0.4f,1}, "变轨操作");
+                if (ImGui::Button("创建变轨节点", {260.f, 22.f})) {
+                    ManeuverNode node;
+                    node.sim_time = tele.sim_time + 600.0;
+                    node.delta_v = Vec3(0, 0, 0);
+                    node.active = true;
+                    node.ref_body = UniverseModel::getInstance().current_soi_index;
+                    mnv.maneuvers.clear();
+                    mnv.maneuvers.push_back(node);
+                    mnv.selected_maneuver_index = 0;
+                }
+                ImGui::Separator();
+
+                // ── 快速跃迁到节点 ──────────────────────────────────
+                bool hasMnv = !mnv.maneuvers.empty();
+                if (!hasMnv) ImGui::BeginDisabled();
+                bool warpOn = hudRef.adv_warp_to_node;
+                if (ImGui::Checkbox("跃迁到变轨节点", &warpOn))
+                    hudRef.adv_warp_to_node = warpOn;
+                if (!hasMnv) ImGui::EndDisabled();
+                ImGui::Separator();
+
+                // ── 变轨节点列表 + 编辑 ──────────────────────────────
                 ImGui::TextColored({0.6f,0.8f,1,1}, "变轨节点");
                 ImGui::Separator();
                 auto& mnvs = mnv.maneuvers;
                 if (mnvs.empty()) {
                     ImGui::TextColored({0.6f,0.6f,0.6f,1}, "无变轨节点");
                 } else {
+                    int selIdx = mnv.selected_maneuver_index;
                     for (int i=0; i<(int)mnvs.size(); i++) {
                         double dt2 = mnvs[i].sim_time - tele.sim_time;
-                        bool sel2 = (mnv.selected_maneuver_index == i);
+                        bool sel2 = (selIdx == i);
                         if (sel2) ImGui::PushStyleColor(ImGuiCol_Text, {1,0.9f,0.3f,1});
                         double dv_mag = mnvs[i].delta_v.length();
                         ImGui::Text("节点 %d  T%+.0fs  ΔV=%.0f m/s", i+1, dt2, dv_mag);
@@ -1608,8 +1721,83 @@ private:
                         if (ImGui::SmallButton(("选##mn"+std::to_string(i)).c_str()))
                             mnv.selected_maneuver_index = i;
                     }
+
+                    // ── 选中节点的编辑面板 ──────────────────────────
+                    if (selIdx >= 0 && selIdx < (int)mnvs.size()) {
+                        auto& node = mnvs[selIdx];
+                        ImGui::Separator();
+                        ImGui::TextColored({1.0f,0.9f,0.3f,1}, "编辑节点 %d", selIdx+1);
+                        ImGui::SameLine();
+                        // 关闭按钮 — 点击取消选中即可关闭编辑面板
+                        if (ImGui::SmallButton("X##closeEdit"))
+                            mnv.selected_maneuver_index = -1;
+
+                        // 参考天体
+                        if (node.ref_body >= 0 && node.ref_body < (int)ss2.size())
+                            ImGui::TextColored({0.5f,0.7f,0.9f,1}, "参考: %s", ss2[node.ref_body].name.c_str());
+
+                        // 时间偏移
+                        double timeOffset = node.sim_time - tele.sim_time;
+                        ImGui::TextColored({0.6f,1.0f,0.6f,1}, "时间偏移");
+                        float tSlide = (float)timeOffset;
+                        float tMin = -300.f, tMax = 3600.f;
+                        if (ImGui::SliderFloat("##mnvTime", &tSlide, tMin, tMax, "T%+.0f s"))
+                            node.sim_time = tele.sim_time + (double)tSlide;
+                        // 微调按钮
+                        ImGui::SameLine();
+                        if (ImGui::SmallButton("+10s##t")) node.sim_time += 10.0;
+                        ImGui::SameLine();
+                        if (ImGui::SmallButton("-10s##t")) node.sim_time -= 10.0;
+                        ImGui::SameLine();
+                        if (ImGui::SmallButton("+60s##t")) node.sim_time += 60.0;
+                        ImGui::SameLine();
+                        if (ImGui::SmallButton("-60s##t")) node.sim_time -= 60.0;
+
+                        // ΔV 分量滑块 (Prograde / Normal / Radial)
+                        float dvPro = (float)node.delta_v.x;
+                        float dvNrm = (float)node.delta_v.y;
+                        float dvRad = (float)node.delta_v.z;
+                        float dvRange = 500.f;
+                        float dvStep = 1.f;
+
+                        ImGui::TextColored({1.0f,0.9f,0.1f,1}, "顺向 ΔV (Prograde)");
+                        if (ImGui::SliderFloat("##dvPro", &dvPro, -dvRange, dvRange, "%.0f m/s"))
+                            node.delta_v.x = (double)dvPro;
+                        ImGui::SameLine(); ImGui::SetWindowFontScale(0.7f);
+                        if (ImGui::SmallButton("0##p0")) node.delta_v.x = 0.0;
+                        ImGui::SetWindowFontScale(1.0f);
+
+                        ImGui::TextColored({1.0f,0.3f,1.0f,1}, "法向 ΔV (Normal)");
+                        if (ImGui::SliderFloat("##dvNrm", &dvNrm, -dvRange, dvRange, "%.0f m/s"))
+                            node.delta_v.y = (double)dvNrm;
+                        ImGui::SameLine(); ImGui::SetWindowFontScale(0.7f);
+                        if (ImGui::SmallButton("0##n0")) node.delta_v.y = 0.0;
+                        ImGui::SetWindowFontScale(1.0f);
+
+                        ImGui::TextColored({0.2f,0.8f,1.0f,1}, "径向 ΔV (Radial)");
+                        if (ImGui::SliderFloat("##dvRad", &dvRad, -dvRange, dvRange, "%.0f m/s"))
+                            node.delta_v.z = (double)dvRad;
+                        ImGui::SameLine(); ImGui::SetWindowFontScale(0.7f);
+                        if (ImGui::SmallButton("0##r0")) node.delta_v.z = 0.0;
+                        ImGui::SetWindowFontScale(1.0f);
+
+                        // 总 ΔV 显示
+                        double totalDv = node.delta_v.length();
+                        ImGui::TextColored({0.8f,1.0f,0.5f,1}, "总 ΔV = %.0f m/s", totalDv);
+
+                        // 删除节点
+                        ImGui::Separator();
+                        if (ImGui::Button("删除此节点", {260.f, 22.f})) {
+                            mnv.maneuvers.erase(mnv.maneuvers.begin() + selIdx);
+                            if (mnv.selected_maneuver_index >= (int)mnv.maneuvers.size())
+                                mnv.selected_maneuver_index = (int)mnv.maneuvers.size() - 1;
+                            if (mnv.maneuvers.empty()) hudRef.adv_warp_to_node = false;
+                        }
+                    }
                 }
                 ImGui::Separator();
+
+                // ── 当前轨道根数 ────────────────────────────────────
                 ImGui::TextColored({0.5f,0.8f,0.5f,1}, "当前轨道根数");
                 if (a_val > 0) {
                     ImGui::Text("a = %.1f km  e = %.4f  i = %.2f°", a_val/1000.0, e_val, inc_deg);
@@ -1617,11 +1805,15 @@ private:
                     ImGui::TextColored({0.6f,0.6f,0.6f,1}, "轨道数据不足（速度过低）");
                 }
                 ImGui::End();
+                // 记住面板位置，用于防止误关 + 动态定位飞行辅助面板
+                { ImVec2 p = ImGui::GetWindowPos(); ImVec2 s = ImGui::GetWindowSize();
+                  s_advOrbitLeft = p.x; s_advOrbitTop = p.y;
+                  s_advOrbitRight = p.x + s.x; s_advOrbitBottom = p.y + s.y; }
             }
 
             // ── 飞行辅助面板 ─────────────────────────────────────────
             if (hud_flight_asst) {
-                float asst_y = 10.f + (hud_adv_orbit ? 160.f : 0.f);
+                float asst_y = hud_adv_orbit ? (s_advOrbitBottom + 5.f) : 10.f;
                 ImGui::SetNextWindowPos(ImVec2((float)ww - 565.f, asst_y), ImGuiCond_Always);
                 ImGui::SetNextWindowSize(ImVec2(268.f, 0), ImGuiCond_Always);
                 ImGui::SetNextWindowBgAlpha(0.82f);

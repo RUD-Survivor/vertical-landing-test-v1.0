@@ -30,7 +30,7 @@ struct VkRenderer3D {
         if (!scene.initCloudTextures(ctx))                 return false;
         if (!sky.init(ctx, desc, colorFmt, depthFmt))     return false;
         if (!effects.init(ctx, desc, colorFmt, depthFmt)) return false;
-        effects.initRibbonRing(ctx);  // 环形 VBO 用于丝带渲染
+        effects.initRibbonRing(ctx, 524288);  // 环形 VBO (512K verts) 用于丝带渲染，需足够大以容纳高级轨道预测+机动虚线
         printf("[VkRenderer3D] All systems initialized\n");
         return true;
     }
@@ -188,6 +188,20 @@ struct VkRenderer3D {
 
         // ---- 1. 帧开始 ----
         beginFrame(cmd, snap.frameIndex % 2, snap.view, snap.proj, snap.lightDir, snap.camPos, snap.time);
+
+        // ---- 云参数同步（从 CloudTuner 面板 → Vulkan cloudTune）----
+        if (snap.cloudTuner.visible) {
+            scene.cloudTune.covLo      = snap.cloudTuner.covLo;
+            scene.cloudTune.covHi      = snap.cloudTuner.covHi;
+            scene.cloudTune.threshLo   = snap.cloudTuner.threshLo;
+            scene.cloudTune.threshHi   = snap.cloudTuner.threshHi;
+            scene.cloudTune.erosion    = snap.cloudTuner.erosion;
+            scene.cloudTune.density    = snap.cloudTuner.density;
+            scene.cloudTune.extinction = snap.cloudTuner.extinction;
+            scene.cloudTune.minAlt     = snap.cloudTuner.minAlt;
+            scene.cloudTune.maxAlt     = snap.cloudTuner.maxAlt;
+            scene.cloudTune.debugMode  = snap.cloudTuner.debugMode;
+        }
 
         // ---- 星空（先于行星，匹配 OpenGL 顺序） ----
         drawSkybox(cmd, snap.skyVibrancy, snap.aspect);
