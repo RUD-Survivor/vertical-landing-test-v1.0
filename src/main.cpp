@@ -16,8 +16,6 @@
 #include <functional>
 #include <mutex>
 
-#include "render/gl_stub.h"  // GL no-op stubs for Vulkan-only build
-
 using namespace std;
 
 #include "math/math3d.h"
