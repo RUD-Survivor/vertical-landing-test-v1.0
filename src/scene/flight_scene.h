@@ -5,7 +5,14 @@ extern float g_scroll_y;
 #include "save_system.h"
 #include "render/part_renderer.h"
 #include "game_context.h"
-#include "simulation/simulation_controller.h"
+#include "simulation/simulation_controller.h"  // [兼容层] vk_game_ui 仍引用 sim_ctrl
+#include "ecs/system_scheduler.h"
+#include "ecs/systems/time_warp_system.h"
+#include "ecs/systems/manual_input_system.h"
+#include "ecs/systems/maneuver_exec_system.h"
+#include "ecs/systems/physics_pipeline_system.h"
+#include "ecs/systems/debris_physics_system.h"
+#include "ecs/systems/debris_cleanup_system.h"
 #include "camera/camera_director.h"
 #include "simulation/orbit_physics.h"
 #include "simulation/predictor.h"
@@ -53,6 +60,10 @@ public:
     Mesh launchPadMesh;
     bool hasLaunchPadOBJ = false;
     std::map<std::string, Mesh> partObjMeshes;  // OBJ 路径 → 已加载 Mesh（空 cpuIndices = 未找到）
+    // === ECS 系统调度器（替代 SimulationController 上帝对象） ===
+    SystemScheduler scheduler;
+    SystemContext sysCtx;
+    // [兼容层] vk_game_ui.h 仍通过 sim_ctrl.time_warp 访问时间加速
     SimulationController sim_ctrl;
     double dt = 0.02;
     double real_dt = 0.02;
@@ -98,6 +109,9 @@ public:
         world.emplace<OrbitComponent>(rocket_entity);
         world.emplace<ManeuverComponent>(rocket_entity);
         world.emplace<VFXComponent>(rocket_entity);
+        // 多实体支持：标签组件 + 物理精度
+        world.emplace<TagComponent>(rocket_entity, EntityTag::ROCKET, "Player Rocket");
+        world.emplace<FullPhysicsTag>(rocket_entity);  // 受控 → FULL 物理
 
         auto& trans = world.get<TransformComponent>(rocket_entity);
         auto& vel   = world.get<VelocityComponent>(rocket_entity);
@@ -274,6 +288,17 @@ else {
     // 记录火箭历史飞行的 3D 轨迹点
     // --- 5. 核心飞行模拟循环 (The Main Flight Loop) ---
     // 这里是游戏最核心的部分：物理计算、姿态控制、轨道绘图都在这里执行。
+
+    // ======== ECS 系统调度器注册 ========
+    // 按执行顺序注册：时间加速 → 手动输入 → 变轨执行 → 物理管线 → 碎片物理 → 碎片清理
+    scheduler.add(std::make_unique<TimeWarpSystem>());
+    scheduler.add(std::make_unique<ManualInputSystem>());
+    scheduler.add(std::make_unique<ManeuverExecSystem>());
+    scheduler.add(std::make_unique<PhysicsPipelineSystem>());
+    scheduler.add(std::make_unique<DebrisPhysicsSystem>());
+    scheduler.add(std::make_unique<DebrisCleanupSystem>());
+    sysCtx.focused_entity = rocket_entity;  // 玩家焦点：ManualInput/ManeuverExec 只看这个
+    // =======================================
     }
 
 
@@ -344,9 +369,16 @@ else {
         }
         // SVO Automation and Input Polling
         inputSystem.poll(GameContext::getInstance().window, input, world, rocket_entity, r3d);
-        // --- Simulation & Physics Update ---
-        sim_ctrl.handleInput(GameContext::getInstance().window, world, rocket_entity);
-        sim_ctrl.update(real_dt, world, rocket_entity, hudManager.hud, GameContext::getInstance().window, cam.mode);
+        // --- ECS 系统调度：时间加速 → 输入采集 → 变轨执行 → 物理管线 ---
+        sysCtx.window = GameContext::getInstance().window;
+        sysCtx.real_dt = real_dt;
+        sysCtx.cam_mode = cam.mode;
+        sysCtx.hud = &hudManager.hud;
+        // 从兼容层同步：vk_game_ui 可能在上帧修改了 time_warp（如 warp-to-node）
+        sysCtx.time_warp = sim_ctrl.time_warp;
+        scheduler.run(world, sysCtx);
+        // 同步回兼容层：供 vk_game_ui 显示/读取
+        sim_ctrl.time_warp = sysCtx.time_warp;
         // 轨迹记录（Vulkan 兼容：每帧采样火箭位置用于轨道丝带）
         orbitSystem.recordTrajectory(world, rocket_entity, ctx.earth_r);
         // Update mouse state for HUD

@@ -354,8 +354,6 @@ void framebuffer_size_callback(GLFWwindow* /*window*/, int width, int height) {
   g_vkSwapchainDirty = true;
 }
 
-#include "simulation/simulation_controller.h"
-
 
 // ==========================================================
 // Part 3: 火箭建造系统 (Rocket Builder) -> see rocket_builder.h

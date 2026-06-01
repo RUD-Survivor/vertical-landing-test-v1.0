@@ -120,8 +120,32 @@ bool SeparateStage(entt::registry& registry, entt::entity entity) {
     double jettison = old_stage.dry_mass + prop.stage_fuels[prop.current_stage];
     prop.jettisoned_mass += jettison; // 累加到已抛弃的总质量中
 
+    // ---- 多实体化：创建碎片实体 ----
+    auto& trans = registry.get<TransformComponent>(entity);
+    auto& vel   = registry.get<VelocityComponent>(entity);
+    auto& att   = registry.get<AttitudeComponent>(entity);
+
+    auto debrisEntity = registry.create();
+    registry.emplace<TagComponent>(debrisEntity, EntityTag::DEBRIS,
+        "Stage " + std::to_string(prop.current_stage + 1) + " Debris");
+    registry.emplace<TransformComponent>(debrisEntity) = trans;
+    registry.emplace<VelocityComponent>(debrisEntity) = vel;
+    registry.emplace<AttitudeComponent>(debrisEntity) = att;
+    // 不给 debris 挂 FullPhysicsTag → 自动走 SIMPLE 物理
+    // 不给 debris 挂 PendingDestroy → 存活直到坠地
+
+    // 给碎片一个向后的小分离速度
+    auto& debrisVel = registry.get<VelocityComponent>(debrisEntity);
+    Vec3 fwd = att.attitude.forward();
+    double sep_speed = 5.0; // 5 m/s 分离速度
+    debrisVel.vx -= fwd.x * sep_speed;
+    debrisVel.vy -= fwd.y * sep_speed;
+    debrisVel.vz -= fwd.z * sep_speed;
+
     std::cout << ">> [STAGING] === STAGE " << (prop.current_stage + 1)
-              << " SEPARATION! === Jettisoned " << (int)jettison << " kg" << std::endl;
+              << " SEPARATION! === Jettisoned " << (int)jettison << " kg"
+              << " | Debris entity #" << (uint32_t)debrisEntity << std::endl;
+    // ---- 碎片实体创建完毕 ----
 
     // 2. 推进到下一级
     prop.current_stage++;

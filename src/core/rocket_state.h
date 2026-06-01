@@ -439,4 +439,29 @@ struct RocketState {
     bool prediction_in_progress = false;
 };
 
+// ==========================================
+// 多实体支持组件 (Multi-Entity Components) — Phase 2
+// ==========================================
+
+// 物理精度标签：有这个组件的实体 → FULL 物理管线（受控）
+// 没有这个组件的实体 → SIMPLE（仅引力+阻力+自动清理）
+// 设计意图：精度由"是否被控制"决定，不由距离决定
+struct FullPhysicsTag {};
+
+// 实体标签：标识这是什么类型的实体
+// 只分两类：受控火箭 vs 不受控碎片（级段/整流罩/任何抛弃物都是 DEBRIS）
+enum class EntityTag : uint8_t {
+    ROCKET,   // 玩家控制的火箭，走完整物理管线
+    DEBRIS,   // 不受控碎片：助推器、整流罩、任何被抛弃的零件
+};
+
+// 标签组件：每个实体都应该有，用于 view 过滤
+struct TagComponent {
+    EntityTag tag = EntityTag::ROCKET;
+    std::string name = "Rocket";
+};
+
+// 待销毁标签：有这个组件的实体将在帧末被回收
+struct PendingDestroy {};
+
 #endif // ROCKET_STATE_H

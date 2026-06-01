@@ -6,7 +6,6 @@
 #include "simulation/stage_manager.h"
 #include "camera/camera_director.h"
 #include "render/HUD_system.h"
-#include "simulation/simulation_controller.h"
 #include "render/cloud_tuner.h"
 
 struct FlightInputSystem {
