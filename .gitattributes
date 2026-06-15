@@ -4,60 +4,87 @@
 * text=auto
 
 ###############################################################################
-# Set default behavior for command prompt diff.
-#
-# This is need for earlier builds of msysgit that does not have it on by
-# default for csharp files.
-# Note: This is only used by command line
+# RocketSim3D - C++ Source Files (Windows MSVC project → CRLF)
 ###############################################################################
-#*.cs     diff=csharp
+*.cpp       text eol=crlf
+*.h         text eol=crlf
+*.hpp       text eol=crlf
+*.c         text eol=crlf
+*.inl       text eol=crlf
+*.tpp       text eol=crlf
 
 ###############################################################################
-# Set the merge driver for project and solution files
-#
-# Merging from the command prompt will add diff markers to the files if there
-# are conflicts (Merging from VS is not affected by the settings below, in VS
-# the diff markers are never inserted). Diff markers may cause the following 
-# file extensions to fail to load in VS. An alternative would be to treat
-# these files as binary and thus will always conflict and require user
-# intervention with every merge. To do so, just uncomment the entries below
+# Build Scripts (Windows → CRLF)
 ###############################################################################
-#*.sln       merge=binary
-#*.csproj    merge=binary
-#*.vbproj    merge=binary
-#*.vcxproj   merge=binary
-#*.vcproj    merge=binary
-#*.dbproj    merge=binary
-#*.fsproj    merge=binary
-#*.lsproj    merge=binary
-#*.wixproj   merge=binary
-#*.modelproj merge=binary
-#*.sqlproj   merge=binary
-#*.wwaproj   merge=binary
+*.bat       text eol=crlf
+*.cmd       text eol=crlf
 
 ###############################################################################
-# behavior for image files
-#
-# image files are treated as binary by default.
+# GPU Shaders (cross-platform → LF)
 ###############################################################################
-#*.jpg   binary
-#*.png   binary
-#*.gif   binary
+*.frag      text eol=lf
+*.vert      text eol=lf
+*.glsl      text eol=lf
+*.comp      text eol=lf
+*.spv       binary
 
 ###############################################################################
-# diff behavior for common document formats
-# 
-# Convert binary document formats to text before diffing them. This feature
-# is only available from the command line. Turn it on by uncommenting the 
-# entries below.
+# Data & Config Files (cross-platform → LF)
 ###############################################################################
-#*.doc   diff=astextplain
-#*.DOC   diff=astextplain
-#*.docx  diff=astextplain
-#*.DOCX  diff=astextplain
-#*.dot   diff=astextplain
-#*.DOT   diff=astextplain
-#*.pdf   diff=astextplain
-#*.PDF   diff=astextplain
-#*.rtf   diff=astextplain
-#*.RTF   diff=astextplain
+*.json      text eol=lf
+*.md        text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.xml       text eol=lf
+*.toml      text eol=lf
+*.cfg       text eol=lf
+
+###############################################################################
+# Binary Assets
+###############################################################################
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.bmp       binary
+*.tga       binary
+*.dds       binary
+*.ktx       binary
+*.otf       binary
+*.ttf       binary
+*.wav       binary
+*.ogg       binary
+*.mp3       binary
+
+# 3D Model & Material files
+*.fbx       binary
+*.gltf      text eol=lf
+*.glb       binary
+*.mtl       text eol=lf
+# Note: *.obj is ambiguous (compiler object vs 3D model).
+# Compiler .obj files should be in .gitignore.
+# 3D model .obj files in assets/ can be tracked as binary:
+# assets/**/*.obj binary
+
+###############################################################################
+# Build System Files (Visual Studio)
+###############################################################################
+*.sln       text eol=crlf
+*.slnx      text eol=crlf
+*.vcxproj   text eol=crlf
+*.vcxproj.filters text eol=crlf
+*.props     text eol=crlf
+*.targets   text eol=crlf
+
+###############################################################################
+# Binary Build Artifacts (should also be in .gitignore)
+###############################################################################
+*.exe       binary
+*.dll       binary
+*.lib       binary
+*.pdb       binary
+*.ilk       binary
+*.obj       binary
+*.o         binary
+*.a         binary
+*.so        binary

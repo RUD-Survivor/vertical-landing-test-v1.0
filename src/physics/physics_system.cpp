@@ -1,9 +1,12 @@
 #include "core/universe_model.h"
 #include "physics_system.h"
 #include "simulation/stage_manager.h"
+#include "scene/game_context.h"
 #include "math/math3d.h"
 #include <algorithm>
 #include <iostream>
+#include <string>
+#include <vector>
 
 /* 
  * 物理系统实现文件 (physics_system.cpp)
@@ -21,6 +24,347 @@ namespace PhysicsSystem {
 // 很多星球的轨道参数都是相对于这个时间点给出的。
 // 一个儒略世纪 = 36525 天。
 constexpr double SECONDS_PER_JULIAN_CENTURY = 36525.0 * 24.0 * 3600.0;
+
+namespace {
+
+constexpr double kContactSlop = 0.02;          // meters
+constexpr double kRestitution = 0.08;          // mostly inelastic soil/landing-leg contact
+constexpr double kStaticFriction = 0.75;
+constexpr double kDynamicFriction = 0.55;
+
+struct GroundFrame {
+    Quat bodyToWorld;
+    Quat worldToBody;
+    Vec3 normal;
+    Vec3 omegaWorld;
+};
+
+struct ContactPoint {
+    Vec3 local;
+    Vec3 world;
+    Vec3 normal;
+    Vec3 groundVelocity;
+    double penetration = 0.0;
+    double normalSpeed = 0.0;
+    double tangentSpeed = 0.0;
+    bool isLandingLeg = false;
+};
+
+struct ContactResult {
+    int contactCount = 0;
+    int legContactCount = 0;
+    double maxPenetration = 0.0;
+    double maxClosingSpeed = 0.0;
+    double maxTangentSpeed = 0.0;
+    bool crashed = false;
+    bool stable = false;
+    bool anyNonLegHardContact = false;
+};
+
+static GroundFrame makeGroundFrame(const CelestialBody& body, double simTime, const Vec3& referencePos) {
+    double theta = body.prime_meridian_epoch + (simTime * 2.0 * PI / body.rotation_period);
+    Quat rot = Quat::fromAxisAngle(Vec3(0, 0, 1), theta);
+    Quat tilt = Quat::fromAxisAngle(Vec3(1, 0, 0), body.axial_tilt);
+    GroundFrame frame;
+    frame.bodyToWorld = tilt * rot;
+    frame.worldToBody = frame.bodyToWorld.conjugate();
+    frame.normal = referencePos.lengthSq() > 1e-9 ? referencePos.normalized() : Vec3(0, 1, 0);
+    double omega = (2.0 * PI) / body.rotation_period;
+    frame.omegaWorld = frame.bodyToWorld.rotate(Vec3(0, 0, omega));
+    return frame;
+}
+
+static Vec3 surfaceVelocityAt(const GroundFrame& frame, const Vec3& worldPos) {
+    return frame.omegaWorld.cross(worldPos);
+}
+
+static void lockEntityToSurface(TransformComponent& trans,
+                                VelocityComponent& vel,
+                                TelemetryComponent& tele,
+                                const CelestialBody& body,
+                                double simTime) {
+    Vec3 localPos(trans.surf_px, trans.surf_py, trans.surf_pz);
+    GroundFrame frame = makeGroundFrame(body, simTime, localPos);
+    Vec3 worldPos = frame.bodyToWorld.rotate(localPos);
+    trans.px = worldPos.x;
+    trans.py = worldPos.y;
+    trans.pz = worldPos.z;
+    Vec3 worldVel = surfaceVelocityAt(frame, worldPos);
+    vel.vx = worldVel.x;
+    vel.vy = worldVel.y;
+    vel.vz = worldVel.z;
+    tele.altitude = 0.0;
+    tele.velocity = 0.0;
+    tele.local_vx = 0.0;
+}
+
+static void freezeSurfacePoint(TransformComponent& trans,
+                               const CelestialBody& body,
+                               double simTime) {
+    Vec3 worldPos(trans.px, trans.py, trans.pz);
+    GroundFrame frame = makeGroundFrame(body, simTime, worldPos);
+    Vec3 localRel = frame.worldToBody.rotate(worldPos);
+    trans.surf_px = localRel.x;
+    trans.surf_py = localRel.y;
+    trans.surf_pz = localRel.z;
+}
+
+static double sampleTerrainHeightMeters(const Vec3& surfaceNormal,
+                                        const TelemetryComponent& tele) {
+    Terrain::QuadtreeTerrain* terrain = GameContext::getInstance().terrain;
+    if (terrain && surfaceNormal.lengthSq() > 1e-9) {
+        // QuadtreeTerrain uses the same planet-local convention as FlightScene terrain adjustment.
+        Quat unalign = Quat::fromAxisAngle(Vec3(1, 0, 0), PI / 2.0);
+        Vec3 terrainNormal = unalign.rotate(surfaceNormal.normalized());
+        return (double)terrain->getHeight(terrainNormal) * 1000.0;
+    }
+    return tele.terrain_altitude;
+}
+
+static Vec3 angularVelocityWorld(const AttitudeComponent& att) {
+    return att.attitude.rotate(Vec3(att.ang_vel_z, att.ang_vel_roll, att.ang_vel));
+}
+
+static void addAngularVelocityWorld(AttitudeComponent& att, const Vec3& deltaWorld) {
+    Vec3 local = att.attitude.conjugate().rotate(deltaWorld);
+    att.ang_vel_z += local.x;
+    att.ang_vel_roll += local.y;
+    att.ang_vel += local.z;
+}
+
+static int activePartStart(const RocketConfig& config, const PropulsionComponent& prop) {
+    if (prop.current_stage >= 0 && prop.current_stage < (int)config.stage_configs.size()) {
+        return config.stage_configs[prop.current_stage].part_start_index;
+    }
+    return 0;
+}
+
+static void addSymmetricContactSamples(std::vector<Vec3>& out,
+                                       const PlacedPart& part,
+                                       const PartDef& def,
+                                       int symmetryIndex) {
+    constexpr double kTwoPi = 6.28318530717958647692;
+    double symAngle = (part.symmetry > 1) ? (symmetryIndex * kTwoPi / part.symmetry) : 0.0;
+    Vec3 localPos = part.pos;
+    if (part.symmetry > 1) {
+        double dist = std::sqrt(part.pos.x * part.pos.x + part.pos.z * part.pos.z);
+        if (dist > 0.01) {
+            double ca = std::atan2(part.pos.z, part.pos.x);
+            localPos.x = std::cos(ca + symAngle) * dist;
+            localPos.z = std::sin(ca + symAngle) * dist;
+        }
+    }
+
+    Quat symRot = Quat::fromAxisAngle(Vec3(0, 1, 0), symAngle);
+    Quat localRot = part.rot * symRot;
+    bool isLandingLeg = (std::string(def.name) == "Landing Leg");
+    if (isLandingLeg) {
+        out.push_back(localPos);
+        return;
+    }
+
+    double r = std::max(0.2, (double)def.diameter * 0.5);
+    const double ys[] = { 0.0, std::max(0.0, (double)def.height) };
+    for (double y : ys) {
+        out.push_back(localPos + localRot.rotate(Vec3(0, y, 0)));
+        for (int i = 0; i < 6; i++) {
+            double a = kTwoPi * (double)i / 6.0;
+            Vec3 ringPoint(std::cos(a) * r, y, std::sin(a) * r);
+            out.push_back(localPos + localRot.rotate(ringPoint));
+        }
+    }
+}
+
+static std::vector<ContactPoint> buildContactManifold(const RocketConfig& config,
+                                                      const PropulsionComponent& prop,
+                                                      const TransformComponent& trans,
+                                                      const VelocityComponent& vel,
+                                                      const AttitudeComponent& att,
+                                                      const TelemetryComponent& tele,
+                                                      const CelestialBody& body,
+                                                      double simTime) {
+    std::vector<Vec3> localSamples;
+    const RocketAssembly& assembly = GameContext::getInstance().launch_assembly;
+    int renderStart = activePartStart(config, prop);
+
+    if (!assembly.parts.empty()) {
+        for (int pi = renderStart; pi < (int)assembly.parts.size(); pi++) {
+            const PlacedPart& part = assembly.parts[pi];
+            if (part.def_id < 0 || part.def_id >= PART_CATALOG_SIZE) continue;
+            const PartDef& def = PART_CATALOG[part.def_id];
+            int symmetry = std::max(1, part.symmetry);
+            for (int s = 0; s < symmetry; s++) {
+                addSymmetricContactSamples(localSamples, part, def, s);
+            }
+        }
+    }
+
+    if (localSamples.empty()) {
+        double r = std::max(0.5, config.diameter * 0.5);
+        double y = config.bounds_bottom;
+        localSamples.push_back(Vec3(0, y, 0));
+        for (int i = 0; i < 8; i++) {
+            double a = 2.0 * PI * (double)i / 8.0;
+            localSamples.push_back(Vec3(std::cos(a) * r, y, std::sin(a) * r));
+        }
+    }
+
+    Vec3 com(trans.px, trans.py, trans.pz);
+    Vec3 linVel(vel.vx, vel.vy, vel.vz);
+    Vec3 omega = angularVelocityWorld(att);
+    std::vector<ContactPoint> contacts;
+    contacts.reserve(localSamples.size());
+
+    for (const Vec3& local : localSamples) {
+        ContactPoint cp;
+        cp.local = local;
+        cp.world = com + att.attitude.rotate(local);
+        cp.normal = cp.world.lengthSq() > 1e-9 ? cp.world.normalized() : Vec3(0, 1, 0);
+        double terrainH = sampleTerrainHeightMeters(cp.normal, tele);
+        double pointAlt = cp.world.length() - body.radius;
+        cp.penetration = terrainH - pointAlt;
+        if (cp.penetration <= -kContactSlop) continue;
+
+        GroundFrame frame = makeGroundFrame(body, simTime, cp.world);
+        cp.groundVelocity = surfaceVelocityAt(frame, cp.world);
+        Vec3 r = cp.world - com;
+        Vec3 contactVel = linVel + omega.cross(r);
+        Vec3 relVel = contactVel - cp.groundVelocity;
+        cp.normalSpeed = relVel.dot(cp.normal);
+        Vec3 tangent = relVel - cp.normal * cp.normalSpeed;
+        cp.tangentSpeed = tangent.length();
+        cp.isLandingLeg = false;
+
+        // Mark samples very near placed Landing Leg origins as gear contact. This preserves
+        // stronger survivability for actual gear without requiring a new part schema.
+        if (!assembly.parts.empty()) {
+            for (int pi = renderStart; pi < (int)assembly.parts.size(); pi++) {
+                const PlacedPart& p = assembly.parts[pi];
+                if (p.def_id >= 0 && p.def_id < PART_CATALOG_SIZE && std::string(PART_CATALOG[p.def_id].name) == "Landing Leg") {
+                    if ((local - p.pos).length() < 0.5) {
+                        cp.isLandingLeg = true;
+                        break;
+                    }
+                }
+            }
+        }
+        contacts.push_back(cp);
+    }
+    return contacts;
+}
+
+static ContactResult solveGroundContacts(std::vector<ContactPoint>& contacts,
+                                         TransformComponent& trans,
+                                         VelocityComponent& vel,
+                                         AttitudeComponent& att,
+                                         GuidanceComponent& guid,
+                                         const RocketConfig& config,
+                                         double totalMass,
+                                         double dt) {
+    ContactResult result;
+    if (contacts.empty()) return result;
+
+    Vec3 com(trans.px, trans.py, trans.pz);
+    Vec3 linVel(vel.vx, vel.vy, vel.vz);
+    Vec3 omega = angularVelocityWorld(att);
+    double radius = std::max(0.5, config.diameter * 0.5);
+    double height = std::max(1.0, config.height);
+    double inertia = std::max(1.0, totalMass * (3.0 * radius * radius + height * height) / 12.0);
+    double invMass = 1.0 / std::max(1.0, totalMass);
+    double invInertia = 1.0 / inertia;
+
+    Vec3 correctionNormal(0, 0, 0);
+    for (ContactPoint& cp : contacts) {
+        if (cp.penetration <= 0.0 && cp.normalSpeed >= 0.0) continue;
+
+        result.contactCount++;
+        if (cp.isLandingLeg) result.legContactCount++;
+        result.maxPenetration = std::max(result.maxPenetration, cp.penetration);
+        result.maxClosingSpeed = std::max(result.maxClosingSpeed, -cp.normalSpeed);
+        result.maxTangentSpeed = std::max(result.maxTangentSpeed, cp.tangentSpeed);
+
+        double hardNormalLimit = cp.isLandingLeg ? 14.0 : 8.0;
+        double hardTangentLimit = cp.isLandingLeg ? 22.0 : 14.0;
+        if (-cp.normalSpeed > hardNormalLimit || cp.tangentSpeed > hardTangentLimit) {
+            result.crashed = true;
+            if (!cp.isLandingLeg) result.anyNonLegHardContact = true;
+        }
+
+        Vec3 r = cp.world - com;
+        Vec3 relVel = (linVel + omega.cross(r)) - cp.groundVelocity;
+        double vn = relVel.dot(cp.normal);
+        if (vn < 0.0) {
+            Vec3 rn = r.cross(cp.normal);
+            double denom = invMass + rn.lengthSq() * invInertia;
+            double jn = -(1.0 + kRestitution) * vn / std::max(1e-6, denom);
+            Vec3 impulseN = cp.normal * jn;
+            linVel += impulseN * invMass;
+            omega += r.cross(impulseN) * invInertia;
+
+            Vec3 relAfterN = (linVel + omega.cross(r)) - cp.groundVelocity;
+            Vec3 tangent = relAfterN - cp.normal * relAfterN.dot(cp.normal);
+            double tangentLen = tangent.length();
+            if (tangentLen > 1e-5) {
+                Vec3 tdir = tangent / tangentLen;
+                Vec3 rt = r.cross(tdir);
+                double denomT = invMass + rt.lengthSq() * invInertia;
+                double jtIdeal = -tangentLen / std::max(1e-6, denomT);
+                double jtMax = (tangentLen < 0.25 ? kStaticFriction : kDynamicFriction) * jn;
+                double jt = std::max(-jtMax, std::min(jtIdeal, jtMax));
+                Vec3 impulseT = tdir * jt;
+                linVel += impulseT * invMass;
+                omega += r.cross(impulseT) * invInertia;
+            }
+        }
+
+        if (cp.penetration > kContactSlop) {
+            correctionNormal += cp.normal * (cp.penetration - kContactSlop);
+        }
+    }
+
+    if (result.contactCount > 0) {
+        if (correctionNormal.lengthSq() > 1e-10) {
+            Vec3 correction = correctionNormal / (double)result.contactCount;
+            correction *= 0.85;
+            trans.px += correction.x;
+            trans.py += correction.y;
+            trans.pz += correction.z;
+        }
+
+        vel.vx = linVel.x;
+        vel.vy = linVel.y;
+        vel.vz = linVel.z;
+        Vec3 deltaOmega = omega - angularVelocityWorld(att);
+        addAngularVelocityWorld(att, deltaOmega);
+
+        double angularSpeed = omega.length();
+        double tiltCos = att.attitude.forward().normalized().dot(Vec3(trans.px, trans.py, trans.pz).normalized());
+        bool uprightEnough = tiltCos > (result.legContactCount > 0 ? std::cos(50.0 * PI / 180.0) : std::cos(25.0 * PI / 180.0));
+        result.stable =
+            !result.crashed &&
+            result.contactCount >= 1 &&
+            result.maxClosingSpeed < 1.5 &&
+            result.maxTangentSpeed < 1.0 &&
+            angularSpeed < 0.08 &&
+            uprightEnough;
+
+        if (!uprightEnough && result.maxClosingSpeed > 2.5) {
+            result.crashed = true;
+        }
+
+        if (result.crashed) {
+            guid.status = CRASHED;
+            guid.mission_msg = result.anyNonLegHardContact
+                ? "CRASHED: STRUCTURE HIT TERRAIN!"
+                : "CRASHED: LANDING LOAD EXCEEDED!";
+            vel.vx = vel.vy = vel.vz = 0.0;
+            att.ang_vel = att.ang_vel_z = att.ang_vel_roll = 0.0;
+        }
+    }
+    return result;
+}
+
+} // namespace
 
 /**
  * @brief 初始化太阳系 (InitSolarSystem)
@@ -661,40 +1005,10 @@ void Update(entt::registry& registry, entt::entity entity, double dt) {
     CelestialBody& current_body = UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index];
 
     // 3. 处理地面逻辑 (Ground Handling)
-    // 如果飞船在地面上（待发射或已着陆），我们需要让它随星球一起旋转。
-    bool on_ground = false;
-    if (guid.status == PRE_LAUNCH || guid.status == LANDED) {
-        if (input.throttle > 0.01) {
-            // 如果推力足够，切换到上升状态
-            if (guid.status == PRE_LAUNCH) guid.mission_msg = "LIFTOFF!";
-            else guid.mission_msg = "TOUCHDOWN TO LIFTOFF!";
-            guid.status = ASCEND;
-        } else {
-            on_ground = true;
-            // 计算星球当前的旋转角度 (自转 + 轴倾角)
-            double theta = current_body.prime_meridian_epoch + (tele.sim_time * 2.0 * PI / current_body.rotation_period);
-            Quat rot = Quat::fromAxisAngle(Vec3(0, 0, 1), (float)theta);
-            Quat tilt = Quat::fromAxisAngle(Vec3(1, 0, 0), (float)current_body.axial_tilt);
-            Quat full_rot = tilt * rot;
-            
-            // 地面坐标同步：将地表相对坐标转换为宇宙绝对惯性坐标
-            Vec3 local_pos((float)trans.surf_px, (float)trans.surf_py, (float)trans.surf_pz);
-            Vec3 world_pos = full_rot.rotate(local_pos);
-            trans.px = (double)world_pos.x;
-            trans.py = (double)world_pos.y;
-            trans.pz = (double)world_pos.z;
-            
-            // 计算地面的线速度 (v = omega x r)
-            double omega = (2.0 * PI) / current_body.rotation_period;
-            Vec3 ang_vel_world = full_rot.rotate(Vec3(0, 0, (float)omega));
-            Vec3 world_v = ang_vel_world.cross(world_pos);
-            vel.vx = (double)world_v.x;
-            vel.vy = (double)world_v.y;
-            vel.vz = (double)world_v.z;
-            
-            tele.altitude = tele.terrain_altitude;
-            tele.velocity = 0; tele.local_vx = 0;
-        }
+    // 待发射/已着陆时先随地表旋转；是否离地稍后由实际推力和接触反力决定。
+    bool grounded_locked = (guid.status == PRE_LAUNCH || guid.status == LANDED);
+    if (grounded_locked) {
+        lockEntityToSurface(trans, vel, tele, current_body, tele.sim_time);
     }
     // 如果已经坠毁，停止物理模拟
     if (guid.status == CRASHED) {
@@ -809,7 +1123,20 @@ void Update(entt::registry& registry, entt::entity entity, double dt) {
     double Ft_y = prop.thrust_power * thrust_dir.y;
     double Ft_z = prop.thrust_power * thrust_dir.z;
 
-    if (on_ground) return; // 地面状态跳过后续积分步骤
+    if (grounded_locked) {
+        Vec3 pos(trans.px, trans.py, trans.pz);
+        Vec3 groundNormal = pos.lengthSq() > 1e-9 ? pos.normalized() : Vec3(0, 1, 0);
+        double r_ground = std::max(1.0, pos.length());
+        double local_g = G_const * current_body.mass / (r_ground * r_ground);
+        double upward_thrust = Vec3(Ft_x, Ft_y, Ft_z).dot(groundNormal);
+        if (upward_thrust <= total_mass * local_g * 1.02) {
+            lockEntityToSurface(trans, vel, tele, current_body, tele.sim_time);
+            return;
+        }
+        guid.status = ASCEND;
+        guid.mission_msg = (input.throttle > 0.01) ? "LIFTOFF!" : "CONTACT RELEASED";
+        grounded_locked = false;
+    }
 
     // 3. Aerodynamic Drag & RK4 Integration
     double v_sq = vel.vx * vel.vx + vel.vy * vel.vy + vel.vz * vel.vz;
@@ -947,95 +1274,50 @@ void Update(entt::registry& registry, entt::entity entity, double dt) {
     double surface_rotation_speed = (2.0 * PI / current_body.rotation_period) * std::sqrt(trans.px * trans.px + trans.py * trans.py);
     tele.local_vx = (-vel.vx * std::sin(local_up_angle) + vel.vy * std::cos(local_up_angle)) - surface_rotation_speed;
 
-    // 13. 碰撞检测与状态同步 (Collision & Final Sync)
-    // 计算飞船底部到地形表面的真实高度
-    double com_alt = std::sqrt(trans.px*trans.px+trans.py*trans.py+trans.pz*trans.pz) - current_body.radius;
-    double current_alt_f = com_alt - tele.terrain_altitude + config.bounds_bottom;
-    
-    if (current_alt_f <= 0.0) {
-        // 如果垂直速度极小且正在上升，可能是数值抖动，强制贴地
-        if (guid.status == ASCEND && tele.velocity < 0.01) {
-            // (坐标同步代码...)
-            double theta = current_body.prime_meridian_epoch + (tele.sim_time * 2.0 * PI / current_body.rotation_period);
-            Quat rot = Quat::fromAxisAngle(Vec3(0, 0, 1), (float)theta);
-            Quat tilt = Quat::fromAxisAngle(Vec3(1, 0, 0), (float)current_body.axial_tilt);
-            Quat full_rot = tilt * rot;
-            
-            Vec3 local_pos((float)trans.surf_px, (float)trans.surf_py, (float)trans.surf_pz);
-            Vec3 world_pos = full_rot.rotate(local_pos);
-            trans.px = (double)world_pos.x;
-            trans.py = (double)world_pos.y;
-            trans.pz = (double)world_pos.z;
-            
-            double omega = (2.0 * PI) / current_body.rotation_period;
-            Vec3 ang_vel_world = full_rot.rotate(Vec3(0, 0, (float)omega));
-            Vec3 world_v = ang_vel_world.cross(world_pos);
-            vel.vx = (double)world_v.x; vel.vy = (double)world_v.y; vel.vz = (double)world_v.z;
-            tele.altitude = tele.terrain_altitude;
-        } else if (tele.velocity < 0.1) {
-            // 落地判断
-            tele.altitude = tele.terrain_altitude;
-            if (guid.status != PRE_LAUNCH && guid.status != LANDED) {
-                // 如果入场速度太快 ( > 10m/s)，飞船坠毁
-                if (std::abs(tele.velocity) > 10 || std::abs(tele.local_vx) > 10) {
-                    guid.status = CRASHED;
-                    guid.mission_msg = "CRASHED INTO TERRAIN (HIGH IMPACT)!";
-                    vel.vx = 0; vel.vy = 0; vel.vz = 0;
-                    att.ang_vel = 0; att.ang_vel_z = 0; att.ang_vel_roll = 0;
-                } else {
-                    // 安全着陆
-                    guid.status = LANDED;
-                    guid.mission_msg = "LANDED!";
-                    // 将当前的惯性坐标系坐标“冻结”到地表坐标系中
-                    double theta = current_body.prime_meridian_epoch + (tele.sim_time * 2.0 * PI / current_body.rotation_period);
-                    Quat rot = Quat::fromAxisAngle(Vec3(0, 0, 1), (float)theta);
-                    Quat tilt = Quat::fromAxisAngle(Vec3(1, 0, 0), (float)current_body.axial_tilt);
-                    Quat inv_full_rot = (tilt * rot).conjugate();
-                    
-                    Vec3 local_rel = inv_full_rot.rotate(Vec3((float)trans.px, (float)trans.py, (float)trans.pz));
-                    trans.surf_px = (double)local_rel.x;
-                    trans.surf_py = (double)local_rel.y;
-                    trans.surf_pz = (double)local_rel.z;
+    // 13. 多点刚体接触求解 (Collision & Final Sync)
+    std::vector<ContactPoint> contacts = buildContactManifold(config, prop, trans, vel, att, tele, current_body, tele.sim_time);
+    ContactResult contact = solveGroundContacts(contacts, trans, vel, att, guid, config, total_mass, dt);
 
-                    double omega = (2.0 * PI) / current_body.rotation_period;
-                    Quat full_rot_l = tilt * rot;
-                    Vec3 ang_vel_world = full_rot_l.rotate(Vec3(0, 0, (float)omega));
-                    Vec3 world_v = ang_vel_world.cross(Vec3((float)trans.px, (float)trans.py, (float)trans.pz));
-                    vel.vx = (double)world_v.x; vel.vy = (double)world_v.y; vel.vz = (double)world_v.z;
-                }
-                att.ang_vel = 0; att.ang_vel_z = 0; att.ang_vel_roll = 0;
+    Vec3 postPos(trans.px, trans.py, trans.pz);
+    Vec3 postNormal = postPos.lengthSq() > 1e-9 ? postPos.normalized() : Vec3(0, 1, 0);
+    double terrainH = sampleTerrainHeightMeters(postNormal, tele);
+    double com_alt = postPos.length() - current_body.radius;
+    double current_alt_f = com_alt - terrainH + config.bounds_bottom;
+    tele.altitude = (contact.contactCount > 0) ? 0.0 : std::max(0.0, current_alt_f);
+
+    GroundFrame postFrame = makeGroundFrame(current_body, tele.sim_time, postPos);
+    Vec3 relVelPost = Vec3(vel.vx, vel.vy, vel.vz) - surfaceVelocityAt(postFrame, postPos);
+    tele.velocity = relVelPost.dot(postNormal);
+    tele.local_vx = (relVelPost - postNormal * tele.velocity).length();
+
+    if (guid.status != CRASHED) {
+        if (contact.contactCount > 0) {
+            if (contact.stable) {
+                guid.status = LANDED;
+                guid.mission_msg = "LANDED - CONTACTS STABLE";
+                freezeSurfacePoint(trans, current_body, tele.sim_time);
+                lockEntityToSurface(trans, vel, tele, current_body, tele.sim_time);
+                att.ang_vel = 0.0;
+                att.ang_vel_z = 0.0;
+                att.ang_vel_roll = 0.0;
+            } else {
+                guid.status = (tele.velocity > 0.5) ? ASCEND : DESCEND;
+                guid.mission_msg = (contact.maxTangentSpeed > 2.0)
+                    ? "GROUND CONTACT - SLIDING"
+                    : "GROUND CONTACT - BOUNCING";
+                freezeSurfacePoint(trans, current_body, tele.sim_time);
             }
         } else {
-            // 高速撞击：如果垂直速度很大 ( >= 0.1) 但已经深入地下
-            guid.status = CRASHED;
-            guid.mission_msg = "SUDDEN IMPACT: CRASHED!";
-            vel.vx = 0; vel.vy = 0; vel.vz = 0;
-            att.ang_vel = 0; att.ang_vel_z = 0; att.ang_vel_roll = 0;
-            tele.altitude = tele.terrain_altitude;
-            
-            // 坐标修正：将飞船强行弹回地面（防止陷进星球中心）
-            double r_surf = current_body.radius + tele.terrain_altitude - config.bounds_bottom;
-            double r_current = std::sqrt(trans.px*trans.px + trans.py*trans.py + trans.pz*trans.pz);
-            if (r_current > 1e-6) {
-                trans.px *= (r_surf / r_current);
-                trans.py *= (r_surf / r_current);
-                trans.pz *= (r_surf / r_current);
+            if (guid.status == LANDED) {
+                guid.status = ASCEND;
+            } else if (guid.status != PRE_LAUNCH) {
+                guid.status = (tele.velocity < -0.5) ? DESCEND : ASCEND;
             }
+            freezeSurfacePoint(trans, current_body, tele.sim_time);
         }
-    } else {
-        // 14. 飞行状态的高度与经纬度刷新 (In-Flight Update)
-        tele.altitude = current_alt_f;
-        // 更新旋转参考系下的“星下点”坐标，用于实时计算经纬度
-        double theta = current_body.prime_meridian_epoch + (tele.sim_time * 2.0 * PI / current_body.rotation_period);
-        Quat rot = Quat::fromAxisAngle(Vec3(0, 0, 1), (float)theta);
-        Quat tilt = Quat::fromAxisAngle(Vec3(1, 0, 0), (float)current_body.axial_tilt);
-        Quat inv_full_rot = (tilt * rot).conjugate();
-        
-        // 将当前的惯性坐标投影到星球的固定坐标系中
-        Vec3 local_rel = inv_full_rot.rotate(Vec3((float)trans.px, (float)trans.py, (float)trans.pz));
-        trans.surf_px = (double)local_rel.x;
-        trans.surf_py = (double)local_rel.y;
-        trans.surf_pz = (double)local_rel.z;
+    }
+    if (guid.status == CRASHED) {
+        return;
     }
 
     // 15. 角速度更新 (Angular Velocity)
@@ -1093,30 +1375,7 @@ void FastGravityUpdate(entt::registry& registry, entt::entity entity, double dt_
         UpdateCelestialBodies(tele.sim_time);
         
         CelestialBody& current_body = UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index];
-        // 维持相对于旋转星球的锁定位置
-        double theta = current_body.prime_meridian_epoch + (tele.sim_time * 2.0 * PI / current_body.rotation_period);
-        Quat rot = Quat::fromAxisAngle(Vec3(0, 0, 1), (float)theta);
-        Quat tilt = Quat::fromAxisAngle(Vec3(1, 0, 0), (float)current_body.axial_tilt);
-        Quat full_rot = tilt * rot;
-        
-        Vec3 local_pos((float)trans.surf_px, (float)trans.surf_py, (float)trans.surf_pz);
-        Vec3 world_pos = full_rot.rotate(local_pos);
-        if (std::isnan(world_pos.x) || std::isnan(world_pos.y) || std::isnan(world_pos.z)) {
-            // NaN 防御：旋转失败时保留原坐标
-            printf("[SOI] NaN from FastGravity rot, skipping\n");
-        } else {
-            trans.px = (double)world_pos.x;
-            trans.py = (double)world_pos.y;
-            trans.pz = (double)world_pos.z;
-        }
-        
-        double omega = (2.0 * PI) / current_body.rotation_period;
-        Vec3 ang_vel_world = full_rot.rotate(Vec3(0, 0, (float)omega));
-        Vec3 world_v = ang_vel_world.cross(world_pos);
-        vel.vx = (double)world_v.x;
-        vel.vy = (double)world_v.y;
-        vel.vz = (double)world_v.z;
-        tele.altitude = tele.terrain_altitude;
+        lockEntityToSurface(trans, vel, tele, current_body, tele.sim_time);
         
         CheckSOI_Transitions(registry, entity);
         return;
@@ -1211,12 +1470,23 @@ void FastGravityUpdate(entt::registry& registry, entt::entity entity, double dt_
         trans.pz += (dt / 6.0) * (k1_pz + 2.0 * k2_pz + 2.0 * k3_pz + k4_pz);
         
         // 3. 高倍率碰撞检测
-        double current_com_alt = std::sqrt(trans.px*trans.px + trans.py*trans.py + trans.pz*trans.pz) - UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index].radius;
-        if (current_com_alt + config.bounds_bottom <= tele.terrain_altitude) {
-            tele.altitude = tele.terrain_altitude;
+        CelestialBody& body_now = UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index];
+        Vec3 pos_now(trans.px, trans.py, trans.pz);
+        Vec3 normal_now = pos_now.lengthSq() > 1e-9 ? pos_now.normalized() : Vec3(0, 1, 0);
+        double terrain_now = sampleTerrainHeightMeters(normal_now, tele);
+        double current_com_alt = pos_now.length() - body_now.radius;
+        if (current_com_alt + config.bounds_bottom <= terrain_now) {
+            tele.altitude = 0.0;
             guid.status = CRASHED;
-            guid.mission_msg = "CRASHED (WARP IMPACT)!";
+            guid.mission_msg = "CRASHED: WARP TERRAIN IMPACT!";
             vel.vx = 0; vel.vy = 0; vel.vz = 0;
+            double targetR = body_now.radius + terrain_now - config.bounds_bottom;
+            if (pos_now.lengthSq() > 1e-9) {
+                Vec3 corrected = normal_now * targetR;
+                trans.px = corrected.x;
+                trans.py = corrected.y;
+                trans.pz = corrected.z;
+            }
             break;
         }
     }

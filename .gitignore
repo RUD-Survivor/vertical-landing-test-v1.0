@@ -365,3 +365,38 @@ FodyWeavers.xsd
 # Game save files
 rocket_save.dat
 *.dat
+
+# ================================================================
+# RocketSim3D - Project-specific ignores
+# ================================================================
+
+# JetBrains IDE
+.idea/
+
+# Claude / AI assistant local settings
+.claude/
+
+# Python virtual environment
+.venv/
+venv/
+ENV/
+
+# Executables at project root
+*.exe
+
+# ImGui runtime layout config (auto-generated)
+imgui.ini
+
+# Temporary build scripts and headers
+temp_*
+
+# Build output logs (already covered by *.log for most)
+build_log.txt
+build_out.txt
+build_check_result.txt
+
+# Note: *.obj is already ignored above, but this also
+# ignores .obj 3D model files in assets/.
+# If you want to track 3D models, add:
+!assets/**/*.obj
+
