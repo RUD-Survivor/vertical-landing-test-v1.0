@@ -393,8 +393,8 @@ temp_*
 # Build output logs (already covered by *.log for most)
 build_log.txt
 build_out.txt
-build_check_result.txt
-
+build_check_result.txtbuild_report.txt
+build_report_*.log
 # Note: *.obj is already ignored above, but this also
 # ignores .obj 3D model files in assets/.
 # If you want to track 3D models, add:

@@ -6,7 +6,7 @@
             "command": "cmd.exe",
             "args": [
                 "/C",
-                "temp_build.cmd"
+                "build.cmd"
             ],
             "options": {
                 "cwd": "${workspaceFolder}"

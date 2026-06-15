@@ -1,5 +1,0 @@
-@echo off
-call "D:\Microsoft Visual Studio 2026\VC\Auxiliary\Build\vcvars64.bat" >nul 2>&1
-cd /d "C:\antigravity_code\RocketSim3D"
-cl /utf-8 /std:c++17 /EHsc /MD /O2 /D USE_VULKAN /I "D:\Vulkan SDK\Include" /I dependencires\include /I vendor /I vendor\imgui /I vendor\imgui\backends /I src src\main.cpp src\physics\physics_system.cpp src\control\control_system.cpp src\render\stb_impl.cpp src\render\cloud_system.cpp src\simulation\stage_manager.cpp src\simulation\center_calculator.cpp src\simulation\center_visualizer.cpp src\simulation\predictor.cpp vendor\glad\glad.c src\render\vulkan\vk_allocator.cpp vendor\imgui\imgui.cpp vendor\imgui\imgui_draw.cpp vendor\imgui\imgui_widgets.cpp vendor\imgui\imgui_tables.cpp vendor\imgui\backends\imgui_impl_glfw.cpp vendor\imgui\backends\imgui_impl_vulkan.cpp /link /OUT:vertical-landing-test.exe dependencires\lib\glfw3.lib opengl32.lib user32.lib gdi32.lib shell32.lib "D:\Vulkan SDK\Lib\vulkan-1.lib" 2>&1
-echo BUILD_EXIT:%ERRORLEVEL%

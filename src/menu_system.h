@@ -49,7 +49,7 @@ inline bool CheckRectHit(float mx, float my, float cx, float cy, float w, float 
 }
 
 // 绘制主菜单
-void DrawMainMenu(Renderer* r, MenuState& menu, float time) {
+inline void DrawMainMenu(Renderer* r, MenuState& menu, float time) {
     const Localization::Strings& s = Localization::Get(menu.language);
 
     // 背景
@@ -166,7 +166,7 @@ void DrawMainMenu(Renderer* r, MenuState& menu, float time) {
 }
 
 // 绘制设置菜单
-void DrawSettingsMenu(Renderer* r, MenuState& menu, float time) {
+inline void DrawSettingsMenu(Renderer* r, MenuState& menu, float time) {
     const Localization::Strings& s = Localization::Get(menu.language);
     r->addRect(0.0f, 0.0f, 2.0f, 2.0f, 0.02f, 0.03f, 0.08f, 1.0f);
     
@@ -211,7 +211,7 @@ void DrawSettingsMenu(Renderer* r, MenuState& menu, float time) {
 }
 
 // 绘制航天局总览界面
-void DrawAgencyHub(Renderer* r, MenuState& menu, const AgencyState& agency, float time, const FactorySystem& factory) {
+inline void DrawAgencyHub(Renderer* r, MenuState& menu, const AgencyState& agency, float time, const FactorySystem& factory) {
     const Localization::Strings& s = Localization::Get(menu.language);
 
     // 背景
@@ -385,7 +385,7 @@ void DrawAgencyHub(Renderer* r, MenuState& menu, const AgencyState& agency, floa
 static bool g_lmb_pressed = false;
 
 // 处理菜单输入
-MenuChoice HandleMenuInput(GLFWwindow* window, MenuState& menu, bool& up_pressed, bool& down_pressed, bool& enter_pressed, float mx, float my, bool lmb) {
+inline MenuChoice HandleMenuInput(GLFWwindow* window, MenuState& menu, bool& up_pressed, bool& down_pressed, bool& enter_pressed, float mx, float my, bool lmb) {
     bool up_now = glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS;
     bool down_now = glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS;
     bool enter_now = glfwGetKey(window, GLFW_KEY_ENTER) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS;
@@ -439,7 +439,7 @@ MenuChoice HandleMenuInput(GLFWwindow* window, MenuState& menu, bool& up_pressed
 }
 
 // 处理设置菜单输入
-MenuChoice HandleSettingsInput(GLFWwindow* window, MenuState& menu, bool& up_pressed, bool& down_pressed, bool& left_pressed, bool& right_pressed, bool& enter_pressed, float mx, float my, bool lmb) {
+inline MenuChoice HandleSettingsInput(GLFWwindow* window, MenuState& menu, bool& up_pressed, bool& down_pressed, bool& left_pressed, bool& right_pressed, bool& enter_pressed, float mx, float my, bool lmb) {
     bool up_now = glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS;
     bool down_now = glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS;
     bool left_now = glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS;
@@ -478,7 +478,7 @@ MenuChoice HandleSettingsInput(GLFWwindow* window, MenuState& menu, bool& up_pre
 }
 
 // 处理航天局界面输入
-MenuChoice HandleAgencyHubInput(GLFWwindow* window, MenuState& menu, bool& up_pressed, bool& down_pressed, bool& enter_pressed, float mx, float my, bool lmb) {
+inline MenuChoice HandleAgencyHubInput(GLFWwindow* window, MenuState& menu, bool& up_pressed, bool& down_pressed, bool& enter_pressed, float mx, float my, bool lmb) {
     bool up_now = glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS;
     bool down_now = glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS;
     bool enter_now = glfwGetKey(window, GLFW_KEY_ENTER) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS;
