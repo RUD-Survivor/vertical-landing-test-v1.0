@@ -173,6 +173,26 @@ struct ManeuverNode {
     bool snap_valid = false;                 // whether snapshot is populated
 };
 
+struct AeroCrossSection {
+    double station = 0.0;             // Rocket-local longitudinal station (m)
+    double area = 0.0;                // Voxelized cross-section area (m^2)
+    double second_area_deriv = 0.0;   // Area-rule curvature term (1/m)
+    double flatness_ratio = 1.0;      // Longest/shortest span ratio for the section
+};
+
+struct AeroProfile {
+    std::vector<AeroCrossSection> sections;
+    double reference_length = 0.0;
+    double frontal_area = 0.0;
+    double side_area = 0.0;
+    double max_area = 0.0;
+    double area_roughness = 0.0;
+
+    bool valid() const {
+        return !sections.empty() && frontal_area > 0.0 && reference_length > 0.0;
+    }
+};
+
 // Per-stage physical configuration
 struct StageConfig {
     double dry_mass = 0;          // Dry mass of this stage (kg)
@@ -185,6 +205,8 @@ struct StageConfig {
     double nozzle_area = 0;       // Nozzle area
     int part_start_index = 0;     // Start index in assembly parts list
     int part_end_index = 0;       // End index (exclusive) in assembly parts list
+    AeroProfile aero_profile;     // This isolated stage's voxel profile
+    AeroProfile active_aero_profile; // Current stage plus upper visible stages
 };
 
 // Static Rocket Configuration (immutable during flight)
@@ -202,6 +224,7 @@ struct RocketConfig {
 
     // 多级配置 (Stage 0 = 底部第一级)
     std::vector<StageConfig> stage_configs;
+    AeroProfile aero_profile;     // Active visible stack aerodynamic profile
 
     // 上方级别的总质量：除了当前正在喷火的那一级，上面还背了多少东西
     double upper_stages_mass = 0;

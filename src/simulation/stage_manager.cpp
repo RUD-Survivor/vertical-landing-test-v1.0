@@ -68,6 +68,14 @@ void BuildStages(const RocketAssembly& assembly, RocketConfig& config) {
 
     config.stages = (int)config.stage_configs.size();
 
+    for (int i = 0; i < (int)config.stage_configs.size(); i++) {
+        StageConfig& stage = config.stage_configs[i];
+        stage.aero_profile =
+            assembly.buildAerodynamicProfile(stage.part_start_index, stage.part_end_index);
+        stage.active_aero_profile =
+            assembly.buildAerodynamicProfile(stage.part_start_index, (int)assembly.parts.size());
+    }
+
     // 初始化：将火箭物理参数同步到第 0 级（起飞级）
     SyncActiveConfig(config, 0);
 }
@@ -82,6 +90,7 @@ void SyncActiveConfig(RocketConfig& config, int stage_index) {
     config.specific_impulse = sc.specific_impulse; // 发动机比冲
     config.cosrate = sc.consumption_rate;    // 燃料消耗率 (kg/s)
     config.nozzle_area = sc.nozzle_area;     // 喷嘴截面积
+    config.aero_profile = sc.active_aero_profile;
     
     // 计算上方级的总质量（所有处于当前活跃级之上的零件，包括其满载燃料）
     // 这对于物理引擎计算整体重力加速度至关重要。

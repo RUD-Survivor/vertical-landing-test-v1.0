@@ -1,5 +1,6 @@
 #include "core/universe_model.h"
 #include "physics_system.h"
+#include "aerodynamics_system.h"
 #include "ground_collision_system.h"
 #include "math/math3d.h"
 #include <algorithm>
@@ -722,8 +723,13 @@ double get_pressure(double h) {
 // 空气密度不仅受到高度影响，理论上还受气温影响，但这里采用标准指数模型。
 // 密度 rho 决定了动压 (Dynamic Pressure)，进而决定了空气阻力。
 double get_air_density(double h) {
-    if (h > 100000) return 0;
-    return 1.225 * std::exp(-h / 7000.0); // 1.225 是地球海平面的标准密度
+    if (UniverseModel::getInstance().solar_system.empty()) {
+        if (h > 100000) return 0;
+        return 1.225 * std::exp(-h / 7000.0);
+    }
+    const CelestialBody& body =
+        UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index];
+    return AerodynamicsSystem::AirDensityAt(body, h);
 }
 
 // 获取轨道核心参数：远拱点 (AP) 和近拱点 (PE)
@@ -1002,36 +1008,18 @@ void Update(entt::registry& registry, entt::entity entity, double dt) {
             Fgz += common * (dz / (d_sq * d) - dz_c / (dc_sq * dc));
         }
         
-        // (3) 空气阻力 (Aerodynamic Drag)
-        // 阻力公式：Fd = 1/2 * rho * v_rel^2 * Cd * A
-        double Fdx = 0, Fdy = 0, Fdz = 0;
-        double omega = (2.0 * PI) / current_body.rotation_period;
-        
-        // 计算大气相对于惯性系的旋转速度
-        double v_atmo_x = -omega * temp_py;
-        double v_atmo_y = omega * temp_px;
-        // 计算飞船相对于大气的速度 (Relatice Velocity)
-        double rel_vx = temp_vx - v_atmo_x;
-        double rel_vy = temp_vy - v_atmo_y;
-        double rel_vz = temp_vz;
-        double temp_v_sq = rel_vx * rel_vx + rel_vy * rel_vy + rel_vz * rel_vz;
-        double temp_v_mag = std::sqrt(temp_v_sq);
-        double alt = r_inner - current_body.radius;
-        
-        // 只在有大气层的高度计算阻力
-        if (temp_v_mag > 0.1 && alt < 80000) {
-            double rho = get_air_density(alt);
-            // 简单截面估算：横截面积 + 侧面积。
-            double base_area = 10.0;
-            double side_area = config.height * config.diameter;
-            // 迎风面积随飞船姿态变化。
-            double effective_area = base_area + side_area * std::abs(std::sin(att.angle_z));
-            double drag_mag = 0.5 * rho * temp_v_sq * 0.5 * effective_area;
-            
-            Fdx = -drag_mag * (rel_vx / temp_v_mag);
-            Fdy = -drag_mag * (rel_vy / temp_v_mag);
-            Fdz = -drag_mag * (rel_vz / temp_v_mag);
-        }
+        // (3) 气动力 (Aerodynamics)
+        // 独立气动系统基于整船体素截面和面积律估算阻力/体升力。
+        AerodynamicsSystem::Sample aero = AerodynamicsSystem::ComputeForces(
+            config,
+            att,
+            current_body,
+            tele.sim_time,
+            Vec3(temp_px, temp_py, temp_pz),
+            Vec3(temp_vx, temp_vy, temp_vz));
+        double Fdx = aero.force.x;
+        double Fdy = aero.force.y;
+        double Fdz = aero.force.z;
         out_ax = (Fgx + Ft_x + Fdx) / std::max(total_mass, 1.0);
         out_ay = (Fgy + Ft_y + Fdy) / std::max(total_mass, 1.0);
         out_az = (Fgz + Ft_z + Fdz) / std::max(total_mass, 1.0);
@@ -1148,8 +1136,9 @@ void Update(entt::registry& registry, entt::entity entity, double dt) {
     // 根据指令力矩和转动惯量更新旋转速度。
     double base_moi = 50000.0;
     double moment_of_inertia = base_moi * (total_mass / 50000.0); 
-    // 空气力矩：在高空稀薄大气中，空气会产生微弱的稳定力矩。
-    double aero_torque = (v_mag > 0.1 && tele.altitude < 80000) ? (-0.1 * v_mag * get_air_density(tele.altitude)) : 0;
+    // 气动阻尼力矩由独立气动系统估算。
+    double aero_torque =
+        AerodynamicsSystem::AngularDampingCoefficient(config, current_body, tele.altitude, v_mag);
     att.ang_vel_z += (input.torque_cmd_z / moment_of_inertia + att.ang_vel_z * aero_torque) * dt;
     att.ang_vel += (input.torque_cmd / moment_of_inertia + att.ang_vel * aero_torque) * dt;
     att.ang_vel_roll += (input.torque_cmd_roll / moment_of_inertia + att.ang_vel_roll * aero_torque) * dt;
