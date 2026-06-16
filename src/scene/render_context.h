@@ -141,7 +141,7 @@ public:
         // 用最终浮动原点计算相对坐标 (renderEarth 未被保留在外层，不需要作为成员)
         renderSun = Vec3((float)(sun_px - ro_x), (float)(sun_py - ro_y), (float)(sun_pz - ro_z));
         renderRocketBase = Vec3((float)(r_px - ro_x), (float)(r_py - ro_y), (float)(r_pz - ro_z));
-        renderRocketPos = (guid.status == PRE_LAUNCH || guid.status == LANDED)
+        renderRocketPos = (guid.status == PRE_LAUNCH)
             ? (renderRocketBase + rocketUp * (rh * 0.425f))
             : renderRocketBase;
             

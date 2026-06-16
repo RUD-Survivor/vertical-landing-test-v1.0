@@ -359,10 +359,14 @@ else {
             tele.terrain_altitude = (double)terrH * 1000.0; // km to meters
             if (guid.status == PRE_LAUNCH && !terrain_adjusted) {
                 double platform_height = 8.5; // Thickness of the visual launch platform
-                double new_R = EARTH_RADIUS + tele.terrain_altitude - rocket_config.bounds_bottom + platform_height;
-                trans.surf_px = localUp.x * new_R;
-                trans.surf_py = localUp.y * new_R;
-                trans.surf_pz = localUp.z * new_R;
+                double rocket_R = EARTH_RADIUS + tele.terrain_altitude - rocket_config.bounds_bottom + platform_height;
+                double pad_R = EARTH_RADIUS + tele.terrain_altitude + platform_height;
+                trans.surf_px = localUp.x * rocket_R;
+                trans.surf_py = localUp.y * rocket_R;
+                trans.surf_pz = localUp.z * rocket_R;
+                trans.launch_site_px = localUp.x * pad_R;
+                trans.launch_site_py = localUp.y * pad_R;
+                trans.launch_site_pz = localUp.z * pad_R;
                 terrain_adjusted = true;
                 cout << "[TERRAIN] Adjusted launchpad altitude by " << tele.terrain_altitude << " meters to match SVO bounds." << endl;
             }

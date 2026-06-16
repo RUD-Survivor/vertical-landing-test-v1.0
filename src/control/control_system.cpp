@@ -201,7 +201,7 @@ void UpdateManualControl(entt::registry& registry, entt::entity entity, const Ma
     auto& trans = registry.get<TransformComponent>(entity);
     auto& vel = registry.get<VelocityComponent>(entity);
     auto& tele = registry.get<TelemetryComponent>(entity);
-    if (guid.status == PRE_LAUNCH || guid.status == LANDED || guid.status == CRASHED)
+    if (guid.status == PRE_LAUNCH || guid.status == CRASHED)
         return;
 
     if (manual.throttle_up) input.throttle = std::min(1.0, input.throttle + 1.5 * dt);

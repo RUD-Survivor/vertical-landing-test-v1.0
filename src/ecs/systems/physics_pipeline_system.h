@@ -12,6 +12,8 @@
 #include "physics/physics_system.h"
 #include "control/control_system.h"
 #include "simulation/stage_manager.h"
+#include <algorithm>
+#include <cmath>
 
 struct PhysicsPipelineSystem : ISystem {
     PhysicsPipelineSystem() : ISystem("PhysicsPipeline") {}
@@ -37,7 +39,6 @@ struct PhysicsPipelineSystem : ISystem {
 
         for (auto e : view) {
             auto& guid = view.get<GuidanceComponent>(e);
-            if (guid.status == LANDED || guid.status == CRASHED) continue;
 
             // 1) 自动驾驶
             if (!ctx.mnv_autopilot_active || e != ctx.focused_entity) {
@@ -46,8 +47,15 @@ struct PhysicsPipelineSystem : ISystem {
                 }
             }
 
-            // 2) 物理积分
-            PhysicsSystem::Update(registry, e, dt);
+            // 2) 物理积分：高速或高速旋转时拆子步，避免单步穿透/大角度旋转让求解器吃到病态输入。
+            auto& config = view.get<RocketConfig>(e);
+            auto& vel = view.get<VelocityComponent>(e);
+            auto& att = view.get<AttitudeComponent>(e);
+            int substeps = computeSubsteps(config, vel, att, dt);
+            double stepDt = dt / (double)substeps;
+            for (int i = 0; i < substeps; i++) {
+                PhysicsSystem::Update(registry, e, stepDt);
+            }
 
             // 3) 自动级间分离
             auto& prop = view.get<PropulsionComponent>(e);
@@ -68,6 +76,29 @@ struct PhysicsPipelineSystem : ISystem {
     }
 
 private:
+    static int computeSubsteps(const RocketConfig& config,
+                               const VelocityComponent& vel,
+                               const AttitudeComponent& att,
+                               double dt) {
+        if (dt <= 0.0) return 1;
+        double speed = std::sqrt(vel.vx * vel.vx + vel.vy * vel.vy + vel.vz * vel.vz);
+        double omega = std::sqrt(att.ang_vel * att.ang_vel +
+                                 att.ang_vel_z * att.ang_vel_z +
+                                 att.ang_vel_roll * att.ang_vel_roll);
+        if (!std::isfinite(speed)) speed = 0.0;
+        if (!std::isfinite(omega)) omega = 0.0;
+
+        double characteristic = std::max(0.5, std::min(std::max(1.0, config.height),
+                                                       std::max(0.5, config.diameter)));
+        double maxLinearTravel = std::max(0.25, characteristic * 0.25);
+        double maxAngularTravel = 0.20; // radians per substep, numerical accuracy constraint
+        double linearSteps = (speed > 0.0) ? std::ceil((speed * dt) / maxLinearTravel) : 1.0;
+        double angularSteps = (omega > 0.0) ? std::ceil((omega * dt) / maxAngularTravel) : 1.0;
+        double required = std::max(1.0, std::max(linearSteps, angularSteps));
+        constexpr double kMaxSolverSubsteps = 4096.0;
+        return (int)std::min(required, kMaxSolverSubsteps);
+    }
+
     static void superWarpPath(entt::registry& reg, entt::entity e, double dt) {
         auto& trans = reg.get<TransformComponent>(e);
         auto& vel   = reg.get<VelocityComponent>(e);
@@ -76,7 +107,7 @@ private:
         auto& guid  = reg.get<GuidanceComponent>(e);
 
         double ss = std::sqrt(tele.velocity*tele.velocity + tele.local_vx*tele.local_vx);
-        bool parked = (guid.status==PRE_LAUNCH||guid.status==LANDED) && ss<0.1;
+            bool parked = (guid.status==PRE_LAUNCH) && ss<0.1;
         if (parked) {
             if (guid.status!=PRE_LAUNCH && guid.status!=LANDED) {
                 guid.status=LANDED;

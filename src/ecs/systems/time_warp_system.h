@@ -31,7 +31,7 @@ struct TimeWarpSystem : ISystem {
             auto& prop = registry.get<PropulsionComponent>(ctx.focused_entity);
 
             double surface_speed = std::sqrt(tele.velocity * tele.velocity + tele.local_vx * tele.local_vx);
-            bool is_parked = (guid.status == PRE_LAUNCH || guid.status == LANDED) && surface_speed < 0.1;
+            bool is_parked = (guid.status == PRE_LAUNCH) && surface_speed < 0.1;
             bool can_super_warp = (!guid.auto_mode && (prop.thrust_power <= 0.01 || prop.fuel <= 0)
                                    && (tele.altitude > 100000.0 || is_parked));
 

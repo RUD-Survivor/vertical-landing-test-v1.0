@@ -290,6 +290,7 @@ struct GuidanceComponent {
     double leg_deploy_progress = 0.0;
     bool suicide_burn_locked = false; // 是否已经锁定“自杀点火”逻辑
     bool show_absolute_time = false;  // 是否显示绝对时间 (UT)
+    bool has_lifted_off = false;      // 起飞后才允许稳定接触改判为着陆，避免点火瞬间被落地状态抢回
 
     // Autopilot PID controllers
     PID pid_vert = {0.5, 0.001, 1.2};       

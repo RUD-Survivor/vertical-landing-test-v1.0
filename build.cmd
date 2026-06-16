@@ -106,6 +106,7 @@ set "BUILD_LOG=%OUTPUT_DIR%\build_%TIMESTAMP%.log"
 :: --- Source files ---
 set "SRC=src\main.cpp"
 set "SRC=%SRC% src\physics\physics_system.cpp"
+set "SRC=%SRC% src\physics\ground_collision_system.cpp"
 set "SRC=%SRC% src\control\control_system.cpp"
 set "SRC=%SRC% src\render\stb_impl.cpp"
 set "SRC=%SRC% src\simulation\stage_manager.cpp"

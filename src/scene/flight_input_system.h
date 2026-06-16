@@ -20,8 +20,9 @@ struct FlightInputSystem {
         
         router.on_ignition = [&world, rocket_entity]() {
             auto& guid = world.get<GuidanceComponent>(rocket_entity);
-            if (guid.status == PRE_LAUNCH) {
+            if (guid.status == PRE_LAUNCH || guid.status == LANDED) {
                 guid.status = ASCEND;
+                guid.has_lifted_off = false;
                 guid.mission_msg = "T-0: IGNITION! LIFTOFF!";
             }
         };
