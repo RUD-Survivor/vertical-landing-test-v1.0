@@ -2350,6 +2350,61 @@ private:
             ImGui::TextWrapped("%s", guid.mission_msg.c_str());
             ImGui::SetWindowFontScale(1.0f);
         }
+        bool hasDamageEvent = fs->world.all_of<DamageEventComponent>(fs->rocket_entity);
+        bool hasZone = fs->world.all_of<DeformableZoneComponent>(fs->rocket_entity);
+        bool hasVoxelDebug = fs->world.all_of<VoxelDamageDebugComponent>(fs->rocket_entity);
+        if (hasDamageEvent || hasZone || hasVoxelDebug) {
+            ImGui::Separator();
+            ImGui::TextColored({0.95f,0.45f,1.0f,1}, "Voxel Damage Debug");
+            if (hasDamageEvent) {
+                const auto& damage = fs->world.get<DamageEventComponent>(fs->rocket_entity);
+                char buf[96];
+                snprintf(buf, sizeof(buf), "pending impulse %.0f  r %.1fm",
+                         damage.impulse, damage.radius);
+                ImGui::TextColored({1.0f,0.75f,0.25f,1}, "%s", buf);
+            }
+            if (hasZone) {
+                const auto& zone = fs->world.get<DeformableZoneComponent>(fs->rocket_entity);
+                int broken = 0;
+                for (const auto& c : zone.constraints) {
+                    if (c.bond == VoxelPhysics::kInvalidBond) broken++;
+                }
+                const char* phase = zone.ready_to_rechunk
+                    ? "RECHUNK"
+                    : (zone.initialized ? "XPBD" : "SPAWN");
+                ImVec4 phaseColor = zone.ready_to_rechunk
+                    ? ImVec4{1.0f,0.55f,0.15f,1}
+                    : ImVec4{0.65f,0.85f,1.0f,1};
+                ImGui::TextColored(phaseColor, "phase: %s", phase);
+                ImGui::Text("nodes: %d  constraints: %d  broken: %d",
+                            (int)zone.nodes.size(), (int)zone.constraints.size(), broken);
+                ImGui::Text("age: %.2f / %.2f s  stable: %.2f / %.2f s",
+                            zone.age, zone.max_age, zone.stable_time, zone.settle_time);
+                ImGui::Text("radius: %.1f m  vmax: %.2f m/s",
+                            zone.radius, zone.max_node_speed);
+                float ageFrac = zone.max_age > 0.001 ? (float)(zone.age / zone.max_age) : 0.0f;
+                ageFrac = std::max(0.0f, std::min(1.0f, ageFrac));
+                ImGui::PushStyleColor(ImGuiCol_PlotHistogram, zone.ready_to_rechunk
+                    ? ImVec4{1.0f,0.5f,0.1f,1}
+                    : ImVec4{0.55f,0.25f,1.0f,1});
+                ImGui::ProgressBar(ageFrac, ImVec2(155, 12), zone.ready_to_rechunk ? "rechunk" : "solving");
+                ImGui::PopStyleColor();
+            } else if (hasVoxelDebug) {
+                const auto& debug = fs->world.get<VoxelDamageDebugComponent>(fs->rocket_entity);
+                ImGui::TextColored({0.55f,0.95f,1.0f,1}, "last phase: %s", debug.phase.c_str());
+                ImGui::Text("nodes: %d  constraints: %d  broken: %d",
+                            debug.node_count, debug.constraint_count, debug.broken_constraint_count);
+                if (debug.chunk_count > 0) {
+                    ImGui::TextColored({1.0f,0.7f,0.25f,1}, "detached chunks: %d", debug.chunk_count);
+                }
+                ImGui::Text("age: %.2f s  radius: %.1f m  vmax: %.2f m/s",
+                            debug.age, debug.radius, debug.max_node_speed);
+                float ttlFrac = std::max(0.0f, std::min(1.0f, (float)(debug.ttl / 2.0)));
+                ImGui::PushStyleColor(ImGuiCol_PlotHistogram, {0.25f,0.75f,1.0f,1});
+                ImGui::ProgressBar(ttlFrac, ImVec2(155, 12), "recent");
+                ImGui::PopStyleColor();
+            }
+        }
         ImGui::End();
 
         // ── 底部中央：导航球 + 控制面板 ─────────────────────────────

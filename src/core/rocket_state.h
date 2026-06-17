@@ -4,10 +4,12 @@
 #include <string>
 #include <vector>
 #include <cmath>
+#include <algorithm>
 #include <iostream>
 #include <memory>
 #include <mutex>
 #include "math/math3d.h"
+#include "physics/voxel/vessel_voxel_model.h"
 
 // --- 物理常数 (Constants) ---
 // 这些是宇宙运行的基本规则。初学者可以把它们看作是“游戏规则的参数”。
@@ -471,6 +473,125 @@ struct RocketState {
 // 没有这个组件的实体 → SIMPLE（仅引力+阻力+自动清理）
 // 设计意图：精度由"是否被控制"决定，不由距离决定
 struct FullPhysicsTag {};
+struct BreakableBodyTag {};
+struct ChunkPhysicsTag {};
+
+// 零件级碎片：直接渲染 assembly 中的 OBJ/程序网格，不再依赖体素方块
+struct PartDebrisComponent {
+    int part_index = -1;
+    Vec3 local_com; // 该零件体素质心（assembly 局部坐标）
+};
+
+struct VoxelBodyComponent {
+    VoxelPhysics::VesselVoxelModelPtr model;
+    VoxelPhysics::ChunkId active_chunk = 0;
+    double voxel_size = 1.0;
+    bool dirty_chunks = false;
+    bool structure_fractured = false;
+};
+
+struct RigidChunkComponent {
+    VoxelPhysics::ChunkId chunk_id = VoxelPhysics::kInvalidChunk;
+    std::vector<VoxelPhysics::VoxelId> owned_voxels;
+    double mass = 1.0;
+    Vec3 local_center_of_mass;
+    Vec3 inertia_diag = Vec3(1, 1, 1);
+    Vec3 local_bounds_min;
+    Vec3 local_bounds_max;
+    double damage = 0.0;
+    bool attached_to_parent = false;
+};
+
+// 运行时结构完整性：从体素存活状态推导有效物理配置（不修改 launch_assembly）
+struct StructuralStateComponent {
+    std::vector<uint8_t> part_active;   // 1 = 部件仍存活
+    RocketConfig effective_config;        // 仅存活部件聚合后的物理参数
+    Vec3 com_local = Vec3(0, 0, 0);     // 存活部件质心（assembly 局部坐标）
+    double effective_fuel_capacity = 0.0; // 存活油箱总容量 (kg)
+    int active_part_count = 0;
+    bool structurally_damaged = false;
+    bool initialized = false;
+};
+
+inline bool isPartStructurallyActive(const StructuralStateComponent* structural, int partIndex) {
+    if (!structural || !structural->structurally_damaged) return true;
+    if (partIndex < 0 || partIndex >= (int)structural->part_active.size()) return false;
+    return structural->part_active[(size_t)partIndex] != 0;
+}
+
+struct DamageEventComponent {
+    Vec3 local_point;
+    double impulse = 0.0;
+    double radius = 1.0;
+    bool hard_impact = false;
+};
+
+struct DeformableZoneNode {
+    VoxelPhysics::VoxelId voxel = VoxelPhysics::kInvalidVoxel;
+    Vec3 rest_local;
+    Vec3 position;
+    Vec3 previous_position;
+    Vec3 velocity;
+    double inv_mass = 0.0;
+    bool pinned = false;
+};
+
+struct DeformableZoneConstraint {
+    VoxelPhysics::BondId bond = VoxelPhysics::kInvalidBond;
+    int node_a = -1;
+    int node_b = -1;
+    double rest_length = 0.0;
+    double compliance = 1e-6;
+    double lambda = 0.0;
+    double break_strain = 0.18;
+};
+
+struct DeformableZoneComponent {
+    Vec3 local_center;
+    double radius = 1.0;
+    double impulse = 0.0;
+    double spawn_sim_time = 0.0;
+    double age = 0.0;
+    double stable_time = 0.0;
+    double max_age = 0.35;
+    double settle_time = 0.08;
+    double max_node_speed = 0.0;
+    int solver_iterations = 6;
+    bool hard_impact = false;
+    bool initialized = false;
+    bool ready_to_rechunk = false;
+    std::vector<DeformableZoneNode> nodes;
+    std::vector<DeformableZoneConstraint> constraints;
+};
+
+struct VoxelDamageDebugComponent {
+    std::string phase = "IDLE";
+    double ttl = 0.0;
+    double age = 0.0;
+    Vec3 local_center;
+    double radius = 0.0;
+    double max_node_speed = 0.0;
+    int node_count = 0;
+    int constraint_count = 0;
+    int broken_constraint_count = 0;
+    int chunk_count = 0;
+    std::vector<Vec3> sample_positions;
+    std::vector<uint8_t> sample_pinned;
+};
+
+inline void CopyVoxelZoneDebugMarkers(VoxelDamageDebugComponent& debug,
+                                      const DeformableZoneComponent& zone) {
+    debug.local_center = zone.local_center;
+    debug.radius = zone.radius;
+    debug.sample_positions.clear();
+    debug.sample_pinned.clear();
+    int stride = zone.nodes.empty() ? 1 : std::max(1, (int)zone.nodes.size() / 64);
+    for (int i = 0; i < (int)zone.nodes.size(); i += stride) {
+        const auto& node = zone.nodes[(size_t)i];
+        debug.sample_positions.push_back(node.position);
+        debug.sample_pinned.push_back(node.pinned ? 1 : 0);
+    }
+}
 
 // 实体标签：标识这是什么类型的实体
 // 只分两类：受控火箭 vs 不受控碎片（级段/整流罩/任何抛弃物都是 DEBRIS）

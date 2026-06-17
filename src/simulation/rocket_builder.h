@@ -403,6 +403,137 @@ struct RocketAssembly {
         }
         return profile;
     }
+
+    AeroProfile buildAerodynamicProfileFiltered(const std::vector<uint8_t>& partActive,
+                                                int part_start_index = 0,
+                                                int part_end_index = -1) const {
+        AeroProfile profile;
+        if (parts.empty() || partActive.empty()) return profile;
+        if (part_end_index < 0 || part_end_index > (int)parts.size()) part_end_index = (int)parts.size();
+        part_start_index = std::max(0, part_start_index);
+        if (part_start_index >= part_end_index) return profile;
+
+        constexpr int kStations = 48;
+        constexpr int kGrid = 24;
+        constexpr double kTwoPi = 6.28318530717958647692;
+
+        auto symmetricPos = [kTwoPi](const PlacedPart& part, int s) {
+            Vec3 localPos = part.pos;
+            int symmetry = std::max(1, part.symmetry);
+            if (symmetry > 1) {
+                double dist = std::sqrt(part.pos.x * part.pos.x + part.pos.z * part.pos.z);
+                if (dist > 0.01) {
+                    double ca = std::atan2(part.pos.z, part.pos.x);
+                    double symAngle = s * kTwoPi / symmetry;
+                    localPos.x = std::cos(ca + symAngle) * dist;
+                    localPos.z = std::sin(ca + symAngle) * dist;
+                }
+            }
+            return localPos;
+        };
+
+        auto radiusAt = [](const PartDef& def, double localY) {
+            double h = std::max(0.01f, def.height);
+            double t = std::max(0.0, std::min(1.0, localY / h));
+            double r = std::max(0.05f, def.diameter * 0.5f);
+            if (def.category == CAT_NOSE_CONE) {
+                return std::max(0.05 * r, r * (1.0 - 0.92 * t));
+            }
+            if (def.category == CAT_ENGINE) {
+                return r * (0.75 + 0.25 * t);
+            }
+            if (def.category == CAT_STRUCTURAL && def.id == 13) {
+                return r * 0.65;
+            }
+            return r;
+        };
+
+        double minY = 1.0e30, maxY = -1.0e30;
+        double minX = 1.0e30, maxX = -1.0e30, minZ = 1.0e30, maxZ = -1.0e30;
+        for (int i = part_start_index; i < part_end_index; i++) {
+            if (i >= (int)partActive.size() || !partActive[(size_t)i]) continue;
+            if (parts[i].def_id < 0 || parts[i].def_id >= PART_CATALOG_SIZE) continue;
+            const PartDef& def = PART_CATALOG[parts[i].def_id];
+            int symmetry = std::max(1, parts[i].symmetry);
+            for (int s = 0; s < symmetry; s++) {
+                Vec3 p = symmetricPos(parts[i], s);
+                double r = std::max(0.05f, def.diameter * 0.5f);
+                minY = std::min(minY, p.y);
+                maxY = std::max(maxY, p.y + (double)def.height);
+                minX = std::min(minX, p.x - r);
+                maxX = std::max(maxX, p.x + r);
+                minZ = std::min(minZ, p.z - r);
+                maxZ = std::max(maxZ, p.z + r);
+            }
+        }
+        if (maxY <= minY || maxX <= minX || maxZ <= minZ) return profile;
+
+        double length = maxY - minY;
+        double dy = length / kStations;
+        double pad = std::max(0.25, std::max(maxX - minX, maxZ - minZ) * 0.04);
+        minX -= pad; maxX += pad; minZ -= pad; maxZ += pad;
+        double dx = (maxX - minX) / kGrid;
+        double dz = (maxZ - minZ) / kGrid;
+        double cellArea = dx * dz;
+
+        profile.reference_length = length;
+        profile.sections.reserve(kStations);
+
+        for (int si = 0; si < kStations; si++) {
+            double y = minY + (si + 0.5) * dy;
+            int occupied = 0;
+            double occMinX = 1.0e30, occMaxX = -1.0e30;
+            double occMinZ = 1.0e30, occMaxZ = -1.0e30;
+            for (int i = part_start_index; i < part_end_index; i++) {
+                if (i >= (int)partActive.size() || !partActive[(size_t)i]) continue;
+                if (parts[i].def_id < 0 || parts[i].def_id >= PART_CATALOG_SIZE) continue;
+                const PlacedPart& pp = parts[i];
+                const PartDef& def = PART_CATALOG[pp.def_id];
+                int symmetry = std::max(1, pp.symmetry);
+                for (int s = 0; s < symmetry; s++) {
+                    Vec3 p = symmetricPos(pp, s);
+                    double y0 = p.y;
+                    double y1 = p.y + def.height;
+                    if (y < y0 || y > y1) continue;
+                    double localY = y - y0;
+                    double r = radiusAt(def, localY);
+                    for (int gx = 0; gx < kGrid; gx++) {
+                        for (int gz = 0; gz < kGrid; gz++) {
+                            double x = minX + (gx + 0.5) * dx;
+                            double z = minZ + (gz + 0.5) * dz;
+                            double dxp = x - p.x;
+                            double dzp = z - p.z;
+                            if (dxp * dxp + dzp * dzp <= r * r) {
+                                occupied++;
+                                occMinX = std::min(occMinX, x);
+                                occMaxX = std::max(occMaxX, x);
+                                occMinZ = std::min(occMinZ, z);
+                                occMaxZ = std::max(occMaxZ, z);
+                            }
+                        }
+                    }
+                }
+            }
+            AeroCrossSection section;
+            section.station = y;
+            section.area = occupied * cellArea;
+            if (occupied > 0) {
+                double spanX = std::max(dx, occMaxX - occMinX);
+                double spanZ = std::max(dz, occMaxZ - occMinZ);
+                double shortSpan = std::max(0.01, std::min(spanX, spanZ));
+                section.flatness_ratio = std::min(10.0, std::max(spanX, spanZ) / shortSpan);
+                profile.side_area += std::max(spanX, spanZ) * dy;
+            }
+            profile.max_area = std::max(profile.max_area, section.area);
+            profile.sections.push_back(section);
+        }
+
+        profile.frontal_area = std::max(0.05, profile.max_area);
+        if (profile.side_area <= 0.0) {
+            profile.side_area = std::max(0.1, length * std::sqrt(profile.frontal_area / PI) * 2.0);
+        }
+        return profile;
+    }
     
     struct RocketConfig buildRocketConfig() const {
         RocketConfig cfg; 

@@ -168,6 +168,12 @@ struct VkRenderer3D {
         effects.drawBillboard(cmd, _frameIdx, vbo, cx, cy, cz, w, h, r, g, b, a);
     }
 
+    void drawBillboardOverlay(VkCommandBuffer cmd, VkBuffer vbo,
+                              float cx, float cy, float cz, float w, float h,
+                              float r, float g, float b, float a) {
+        effects.drawBillboardOverlay(cmd, _frameIdx, vbo, cx, cy, cz, w, h, r, g, b, a);
+    }
+
     void drawLensFlare(VkCommandBuffer cmd, VkBuffer vbo,
                        float sunSX, float sunSY, float aspect, float intensity,
                        float scaleX, float scaleY, float offX, float offY,
@@ -452,6 +458,7 @@ struct VkRenderer3D {
                     scene.vegInstanceVbo, snap.vegInstanceCount);
             }
         }
+
     }
 
 private:

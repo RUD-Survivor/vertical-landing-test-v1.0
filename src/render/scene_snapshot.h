@@ -12,6 +12,7 @@
 #include "math/math3d.h"
 #include <vector>
 #include <cstring>
+#include <string>
 
 // ============================================================================
 // 单个天体的渲染数据（行星/卫星/太阳）
@@ -82,6 +83,30 @@ struct CloudTunerState {
     float covLo, covHi, threshLo, threshHi;
     float erosion, density, extinction, minAlt, maxAlt;
     int   debugMode;
+};
+
+// ============================================================================
+// 体素破坏调试状态
+// ============================================================================
+struct VoxelDebugState {
+    bool active = false;
+    bool initialized = false;
+    bool readyToRechunk = false;
+    int nodeCount = 0;
+    int constraintCount = 0;
+    int brokenConstraintCount = 0;
+    float radius = 0.0f;
+    float age = 0.0f;
+    float maxAge = 0.0f;
+    float stableTime = 0.0f;
+    float settleTime = 0.0f;
+    float maxNodeSpeed = 0.0f;
+};
+
+struct VoxelDebugMarker {
+    float pos[3];
+    float size = 0.02f;
+    float r = 1.0f, g = 1.0f, b = 1.0f, a = 1.0f;
 };
 
 // ============================================================================
@@ -174,6 +199,10 @@ struct SceneSnapshot {
     // ---- 云调试面板 (Block F) ----
     CloudTunerState cloudTuner;
 
+    // ---- 体素破坏调试 ----
+    VoxelDebugState voxelDebug;
+    std::vector<VoxelDebugMarker> voxelDebugMarkers;
+
     // ---- SVO 区块 (Block D) ----
     std::vector<SVOChunkDraw> svoChunks;
 
@@ -204,5 +233,6 @@ struct SceneSnapshot {
         launchPad.model[0]=launchPad.model[5]=launchPad.model[10]=launchPad.model[15]=1.f;
         sunBody.model[0]=sunBody.model[5]=sunBody.model[10]=sunBody.model[15]=1.f;
         cloudTuner.visible = false;
+        voxelDebug = VoxelDebugState{};
     }
 };

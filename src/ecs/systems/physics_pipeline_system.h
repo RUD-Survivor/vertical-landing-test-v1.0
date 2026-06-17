@@ -12,6 +12,7 @@
 #include "physics/physics_system.h"
 #include "control/control_system.h"
 #include "simulation/stage_manager.h"
+#include "simulation/structural_state.h"
 #include <algorithm>
 #include <cmath>
 
@@ -48,7 +49,7 @@ struct PhysicsPipelineSystem : ISystem {
             }
 
             // 2) 物理积分：高速或高速旋转时拆子步，避免单步穿透/大角度旋转让求解器吃到病态输入。
-            auto& config = view.get<RocketConfig>(e);
+            const RocketConfig& config = StructuralState::physicsConfig(registry, e);
             auto& vel = view.get<VelocityComponent>(e);
             auto& att = view.get<AttitudeComponent>(e);
             int substeps = computeSubsteps(config, vel, att, dt);
@@ -63,6 +64,12 @@ struct PhysicsPipelineSystem : ISystem {
                 && prop.current_stage < prop.total_stages - 1
                 && (guid.status == ASCEND || guid.status == DESCEND)) {
                 StageManager::SeparateStage(registry, e);
+                if (registry.all_of<StructuralStateComponent>(e)) {
+                    const auto& structural = registry.get<StructuralStateComponent>(e);
+                    if (structural.structurally_damaged) {
+                        StructuralState::rebuild(registry, e, false);
+                    }
+                }
             }
         }
 

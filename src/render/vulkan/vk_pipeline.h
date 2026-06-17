@@ -563,7 +563,8 @@ struct VkRibbonPipeline {
 struct VkBillboardPipeline {
     VkPipelineLayout layout=VK_NULL_HANDLE; VkPipeline pipeline=VK_NULL_HANDLE;
     bool init(VulkanContext& ctx, VkDescriptorManager& desc,
-              VkFormat colorFmt, VkFormat depthFmt, const char* vertSpv, const char* fragSpv) {
+              VkFormat colorFmt, VkFormat depthFmt, const char* vertSpv, const char* fragSpv,
+              bool depthTest = true) {
         auto vc=loadSPIRV(vertSpv); auto fc=loadSPIRV(fragSpv);
         if(vc.empty()||fc.empty()) return false;
         VkShaderModule vm=createShaderModule(ctx.device,vc), fm=createShaderModule(ctx.device,fc);
@@ -573,10 +574,11 @@ struct VkBillboardPipeline {
         PipelineInitParams p{}; p.bindings=&bind; p.bindingCount=1; p.attrs=&attr; p.attrCount=1;
         p.blendEnable=true; p.srcColor=VK_BLEND_FACTOR_SRC_ALPHA; p.dstColor=VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
         p.srcAlpha=VK_BLEND_FACTOR_ONE; p.dstAlpha=VK_BLEND_FACTOR_ZERO;
-        p.depthTest=VK_TRUE; p.depthWrite=VK_FALSE; p.depthOp=VK_COMPARE_OP_LESS; p.cullMode=VK_CULL_MODE_NONE;
+        p.depthTest=depthTest ? VK_TRUE : VK_FALSE; p.depthWrite=VK_FALSE;
+        p.depthOp=VK_COMPARE_OP_LESS; p.cullMode=VK_CULL_MODE_NONE;
         p.topology=VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
         p.pcSize=sizeof(BillboardPushConstants); p.setLayouts=&desc.set0Layout; p.setCount=1;
-        p.colorFmt=colorFmt; p.depthFmt=depthFmt; p.name="Billboard";
+        p.colorFmt=colorFmt; p.depthFmt=depthFmt; p.name=depthTest ? "Billboard" : "BillboardOverlay";
         bool ok=buildPipeline(ctx.device,vm,fm,p,layout,pipeline);
         vkDestroyShaderModule(ctx.device,vm,nullptr); vkDestroyShaderModule(ctx.device,fm,nullptr); return ok;
     }

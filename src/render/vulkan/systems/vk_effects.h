@@ -22,6 +22,7 @@ struct VkEffectsSystem {
     VkExhaustPipeline   exhaustPipe;
     VkRibbonPipeline    ribbonPipe;
     VkBillboardPipeline billboardPipe;
+    VkBillboardPipeline billboardOverlayPipe;
     VkLensFlarePipeline lensFlarePipe;
 
     VkDescriptorManager* desc = nullptr;
@@ -42,8 +43,15 @@ struct VkEffectsSystem {
         }
         if (!billboardPipe.init(ctx, d, colorFmt, depthFmt,
                                 "src/render/shaders/spirv/billboard.vert.spv",
-                                "src/render/shaders/spirv/billboard.frag.spv")) {
+                                "src/render/shaders/spirv/billboard.frag.spv",
+                                true)) {
             fprintf(stderr, "[VkEffects] Failed: billboard\n"); return false;
+        }
+        if (!billboardOverlayPipe.init(ctx, d, colorFmt, depthFmt,
+                                       "src/render/shaders/spirv/billboard.vert.spv",
+                                       "src/render/shaders/spirv/billboard.frag.spv",
+                                       false)) {
+            fprintf(stderr, "[VkEffects] Failed: billboard overlay\n"); return false;
         }
         if (!lensFlarePipe.init(ctx, colorFmt, depthFmt,
                                 "src/render/shaders/spirv/lens_flare.vert.spv",
@@ -58,6 +66,7 @@ struct VkEffectsSystem {
         exhaustPipe.shutdown(d);
         ribbonPipe.shutdown(d);
         billboardPipe.shutdown(d);
+        billboardOverlayPipe.shutdown(d);
         lensFlarePipe.shutdown(d);
     }
 
@@ -182,6 +191,26 @@ struct VkEffectsSystem {
         pc.size[0]=w; pc.size[1]=h;
         pc.color[0]=r; pc.color[1]=g; pc.color[2]=b; pc.color[3]=a;
         vkCmdPushConstants(cmd, billboardPipe.layout,
+            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+            0, sizeof(BillboardPushConstants), &pc);
+        VkDeviceSize off = 0;
+        vkCmdBindVertexBuffers(cmd, 0, 1, &vbo, &off);
+        vkCmdDraw(cmd, 4, 1, 0, 0);
+    }
+
+    void drawBillboardOverlay(VkCommandBuffer cmd, int frameIdx,
+                              VkBuffer vbo,
+                              float cx, float cy, float cz, float w, float h,
+                              float r, float g, float b, float a) {
+        if (billboardOverlayPipe.pipeline == VK_NULL_HANDLE) return;
+        billboardOverlayPipe.bind(cmd);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+            billboardOverlayPipe.layout, 0, 1, &desc->set0[frameIdx], 0, nullptr);
+        BillboardPushConstants pc{};
+        pc.center[0]=cx; pc.center[1]=cy; pc.center[2]=cz; pc.center[3]=1.f;
+        pc.size[0]=w; pc.size[1]=h;
+        pc.color[0]=r; pc.color[1]=g; pc.color[2]=b; pc.color[3]=a;
+        vkCmdPushConstants(cmd, billboardOverlayPipe.layout,
             VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
             0, sizeof(BillboardPushConstants), &pc);
         VkDeviceSize off = 0;

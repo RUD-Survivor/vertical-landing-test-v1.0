@@ -26,15 +26,15 @@ struct FrameUBO {
 
 // -----------------------------------------------------------------------
 // MeshPushConstants — must match push_constant block in mesh.vert / mesh.frag
-// 现在与 PlanetPushConstants 统一为 104 bytes（mesh.vert 包含 planetCenter 以兼容星球管线）
-// std430: mat4(64) + vec4 baseColor(16) + vec4 planetCenter(16) + float(4) + int(4) = 104
+// std430: mat4(64) + vec4(16) + vec4(16) + float(4) + int(4) + vec4(16) = 120
 struct MeshPushConstants {
     float model[16];       // 64 bytes — offset   0
     float baseColor[4];    // 16 bytes — offset  64
-    float planetCenter[4]; // 16 bytes — offset  80（mesh 管线中未使用，填 0）
+    float planetCenter[4]; // 16 bytes — offset  80（mesh 火箭绘制未使用；星球管线填 center）
     float ambientStr;      //  4 bytes — offset  96
     int   hasTexture;      //  4 bytes — offset 100
-};                         //           total: 104 bytes
+    float clipPlane[4];    // 16 bytes — offset 104 (.xyz=world normal, .w=dot(n,p) keep threshold)
+};                         //           total: 120 bytes
 
 // -----------------------------------------------------------------------
 // PlanetPushConstants — 行星着色器扩展（在 MeshPushConstants 基础上追加

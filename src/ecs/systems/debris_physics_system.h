@@ -19,7 +19,7 @@ struct DebrisPhysicsSystem : ISystem {
     bool update(entt::registry& registry, SystemContext& ctx) override {
         // 排除 FullPhysicsTag —— 只处理不受控实体
         auto view = registry.view<TransformComponent, VelocityComponent, AttitudeComponent>(
-            entt::exclude<FullPhysicsTag, PendingDestroy>);
+            entt::exclude<FullPhysicsTag, ChunkPhysicsTag, PendingDestroy>);
 
         // 统一全局物理时钟（含时间加速）
         double dt = ctx.real_dt * ctx.time_warp;

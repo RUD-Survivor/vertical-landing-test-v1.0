@@ -11,17 +11,26 @@ extern float g_scroll_y;
 #include "ecs/systems/manual_input_system.h"
 #include "ecs/systems/maneuver_exec_system.h"
 #include "ecs/systems/physics_pipeline_system.h"
+#include "ecs/systems/voxel_structure_system.h"
+#include "ecs/systems/voxel_deformable_zone_system.h"
+#include "ecs/systems/voxel_fracture_system.h"
+#include "ecs/systems/voxel_chunk_physics_system.h"
 #include "ecs/systems/debris_physics_system.h"
 #include "ecs/systems/debris_cleanup_system.h"
 #include "camera/camera_director.h"
 #include "simulation/orbit_physics.h"
 #include "simulation/predictor.h"
 #include "simulation/center_calculator.h"
+#include "simulation/structural_state.h"
 #include "input/input_router.h"
 #include "math/math3d.h"
 #include "render/HUD_system.h"
 #include "render/scene_snapshot.h"
+#include "physics/voxel/vessel_voxel_model.h"
 #include <entt/entt.hpp>
+#include <algorithm>
+#include <cmath>
+#include <unordered_set>
 
 
 // Any other includes you need
@@ -37,6 +46,169 @@ extern float g_scroll_y;
 #include "hud_manager.h"
 #include "render_context.h"
 #include "orbit_system_vulkan.h"
+
+namespace {
+
+bool computePartKeptBounds(const VoxelPhysics::VesselVoxelModel& model,
+                           const std::unordered_set<VoxelPhysics::VoxelId>& keepVoxels,
+                           int partIndex,
+                           Vec3& outMin,
+                           Vec3& outMax) {
+    const auto& cells = model.getCells();
+    bool found = false;
+    outMin = Vec3(1e30, 1e30, 1e30);
+    outMax = Vec3(-1e30, -1e30, -1e30);
+    double half = model.voxelSize() * 0.5;
+    for (VoxelPhysics::VoxelId vid : keepVoxels) {
+        if (vid < 0 || vid >= (VoxelPhysics::VoxelId)cells.size()) continue;
+        const auto& cell = cells[(size_t)vid];
+        if (!cell.active || cell.part_index != partIndex) continue;
+        found = true;
+        outMin.x = std::min(outMin.x, cell.center.x - half);
+        outMin.y = std::min(outMin.y, cell.center.y - half);
+        outMin.z = std::min(outMin.z, cell.center.z - half);
+        outMax.x = std::max(outMax.x, cell.center.x + half);
+        outMax.y = std::max(outMax.y, cell.center.y + half);
+        outMax.z = std::max(outMax.z, cell.center.z + half);
+    }
+    return found;
+}
+
+void appendVoxelSolidDraws(std::vector<RocketPartDraw>& out,
+                           const VoxelPhysics::VesselVoxelModel& model,
+                           const std::vector<VoxelPhysics::VoxelId>& voxelIds,
+                           const Vec3& chunkCom,
+                           const Vec3& anchorRender,
+                           const Quat& worldRot,
+                           float ws_d,
+                           float r, float g, float b,
+                           bool offsetFromChunkCom,
+                           bool includeInactive) {
+    const auto& cells = model.getCells();
+    if (voxelIds.empty()) return;
+
+    float vs = (float)(model.voxelSize() * ws_d);
+
+    for (VoxelPhysics::VoxelId vid : voxelIds) {
+        if (vid < 0 || vid >= (VoxelPhysics::VoxelId)cells.size()) continue;
+        const auto& cell = cells[(size_t)vid];
+        if (!cell.active && !includeInactive) continue;
+
+        Vec3 localPos = cell.center;
+        if (offsetFromChunkCom) localPos = localPos - chunkCom;
+        Vec3 wp = anchorRender + worldRot.rotate(localPos * ws_d);
+
+        RocketPartDraw rp;
+        Mat4 m = Mat4::translate(wp) * Mat4::fromQuat(worldRot) * Mat4::scale(Vec3(vs, vs, vs));
+        m.toFloatArray(rp.model);
+        rp.r = r;
+        rp.g = g;
+        rp.b = b;
+        rp.meshType = 2;
+        out.push_back(rp);
+    }
+}
+
+void appendChunkSolidDraws(std::vector<RocketPartDraw>& out,
+                           const VoxelPhysics::VesselVoxelModel& model,
+                           const VoxelPhysics::VoxelChunkSummary& chunk,
+                           const Vec3& anchorRender,
+                           const Quat& worldRot,
+                           float ws_d,
+                           float r, float g, float b,
+                           bool offsetFromChunkCom) {
+    appendVoxelSolidDraws(out, model, chunk.voxels, chunk.center_of_mass,
+                          anchorRender, worldRot, ws_d, r, g, b,
+                          offsetFromChunkCom, false);
+}
+
+void appendSinglePartDraws(std::vector<RocketPartDraw>& out,
+                           const std::map<std::string, Mesh>& partObjMeshes,
+                           const RocketAssembly& assembly,
+                           int pi,
+                           const Vec3& anchorRender,
+                           const Quat& worldRot,
+                           float ws_d,
+                           const Vec3* cropMin = nullptr,
+                           const Vec3* cropMax = nullptr) {
+    if (pi < 0 || pi >= (int)assembly.parts.size()) return;
+    const PlacedPart& pp = assembly.parts[(size_t)pi];
+    if (pp.def_id < 0 || pp.def_id >= PART_CATALOG_SIZE) return;
+    const PartDef& def = PART_CATALOG[pp.def_id];
+
+    std::string objPath;
+    if (def.model_path) {
+        objPath = def.model_path;
+    } else {
+        std::string tmp = def.name;
+        for (char& c : tmp) { c = (char)tolower((unsigned char)c); if (c == ' ') c = '_'; }
+        objPath = "assets/models/" + tmp + ".obj";
+    }
+    auto oit = partObjMeshes.find(objPath);
+    const Mesh* objMesh = (oit != partObjMeshes.end() && !oit->second.cpuIndices.empty())
+        ? &oit->second : nullptr;
+
+    Vec3 cropCenter = pp.pos;
+    float cropScaleX = 1.0f, cropScaleY = 1.0f, cropScaleZ = 1.0f;
+    if (cropMin && cropMax) {
+        Vec3 keptSize = *cropMax - *cropMin;
+        cropCenter = (*cropMin + *cropMax) * 0.5;
+        cropScaleX = (float)std::max(0.08, keptSize.x / std::max(0.01f, def.diameter));
+        cropScaleY = (float)std::max(0.08, keptSize.y / std::max(0.01f, def.height));
+        cropScaleZ = (float)std::max(0.08, keptSize.z / std::max(0.01f, def.diameter));
+    }
+
+    constexpr float k2Pi = 6.28318530718f;
+    for (int s = 0; s < pp.symmetry; s++) {
+        float symAngle = (s * k2Pi) / pp.symmetry;
+        Vec3 localPos = cropCenter;
+        if (pp.symmetry > 1 && !cropMin) {
+            localPos = pp.pos;
+            float dist = sqrtf(pp.pos.x * pp.pos.x + pp.pos.z * pp.pos.z);
+            if (dist > 0.01f) {
+                float ca = atan2f(pp.pos.z, pp.pos.x);
+                localPos.x = cosf(ca + symAngle) * dist;
+                localPos.z = sinf(ca + symAngle) * dist;
+            }
+        } else if (pp.symmetry > 1 && cropMin) {
+            float dist = sqrtf(cropCenter.x * cropCenter.x + cropCenter.z * cropCenter.z);
+            if (dist > 0.01f) {
+                float ca = atan2f(cropCenter.z, cropCenter.x);
+                localPos.x = cosf(ca + symAngle) * dist;
+                localPos.z = sinf(ca + symAngle) * dist;
+                localPos.y = cropCenter.y;
+            }
+        }
+        Vec3 wp = anchorRender + worldRot.rotate(localPos * ws_d);
+        Quat wr = worldRot * pp.rot * Quat::fromAxisAngle(Vec3(0, 1, 0), symAngle);
+        RocketPartDraw rp;
+        if (objMesh) {
+            float sx = (def.diameter / objMesh->width) * ws_d * cropScaleX;
+            float sy = (def.height / objMesh->height) * ws_d * cropScaleY;
+            float sz = (def.diameter / objMesh->depth) * ws_d * cropScaleZ;
+            Mat4 m = Mat4::translate(wp) * Mat4::fromQuat(wr)
+                   * Mat4::scale(Vec3(sx, sy, sz))
+                   * Mat4::translate(Vec3(-objMesh->centerX, -objMesh->minY, -objMesh->centerZ));
+            m.toFloatArray(rp.model);
+            rp.r = def.r; rp.g = def.g; rp.b = def.b;
+            rp.meshType = 0;
+            rp.meshId = objPath;
+        } else {
+            float h = def.height * ws_d * cropScaleY;
+            float d = def.diameter * ws_d * std::max(cropScaleX, cropScaleZ);
+            Mat4 m = Mat4::TRS(wp, wr, Vec3(d, h, d));
+            m.toFloatArray(rp.model);
+            rp.r = cropMin ? 0.82f : 0.9f;
+            rp.g = cropMin ? 0.80f : 0.9f;
+            rp.b = cropMin ? 0.78f : 0.9f;
+            rp.meshType = (def.category == CAT_NOSE_CONE || def.category == CAT_COMMAND_POD) ? 1 : 0;
+        }
+        out.push_back(rp);
+    }
+}
+
+} // namespace
+
 class FlightScene : public IScene {
 public:
     // === Core Members ===
@@ -112,6 +284,11 @@ public:
         // 多实体支持：标签组件 + 物理精度
         world.emplace<TagComponent>(rocket_entity, EntityTag::ROCKET, "Player Rocket");
         world.emplace<FullPhysicsTag>(rocket_entity);  // 受控 → FULL 物理
+        world.emplace<BreakableBodyTag>(rocket_entity);
+        auto& voxelBody = world.emplace<VoxelBodyComponent>(rocket_entity);
+        voxelBody.voxel_size = 1.0;
+        world.emplace<RigidChunkComponent>(rocket_entity).attached_to_parent = true;
+        world.emplace<StructuralStateComponent>(rocket_entity);
 
         auto& trans = world.get<TransformComponent>(rocket_entity);
         auto& vel   = world.get<VelocityComponent>(rocket_entity);
@@ -262,6 +439,8 @@ else {
     trans.py = (double)world_pos.y;
     trans.pz = (double)world_pos.z;
     }
+
+    StructuralState::initialize(world, rocket_entity);
     
     // ======== INPUT ROUTER INITIALIZATION ========
     inputSystem.setup(input, rocket_config, control_input, hudManager.hud, cam, show_clouds, world, rocket_entity, cloudTuner);
@@ -290,11 +469,15 @@ else {
     // 这里是游戏最核心的部分：物理计算、姿态控制、轨道绘图都在这里执行。
 
     // ======== ECS 系统调度器注册 ========
-    // 按执行顺序注册：时间加速 → 手动输入 → 变轨执行 → 物理管线 → 碎片物理 → 碎片清理
+    // 按执行顺序注册：时间加速 → 手动输入 → 变轨执行 → 刚体物理 → 局部变形 → 断裂重聚合 → 碎片物理
     scheduler.add(std::make_unique<TimeWarpSystem>());
     scheduler.add(std::make_unique<ManualInputSystem>());
     scheduler.add(std::make_unique<ManeuverExecSystem>());
+    scheduler.add(std::make_unique<VoxelStructureSystem>());
     scheduler.add(std::make_unique<PhysicsPipelineSystem>());
+    scheduler.add(std::make_unique<VoxelDeformableZoneSystem>());
+    scheduler.add(std::make_unique<VoxelFractureSystem>());
+    scheduler.add(std::make_unique<VoxelChunkPhysicsSystem>());
     scheduler.add(std::make_unique<DebrisPhysicsSystem>());
     scheduler.add(std::make_unique<DebrisCleanupSystem>());
     sysCtx.focused_entity = rocket_entity;  // 玩家焦点：ManualInput/ManeuverExec 只看这个
@@ -595,6 +778,9 @@ else {
         auto& config = world.get<RocketConfig>(rocket_entity);
         auto& input  = world.get<ControlInput>(rocket_entity);
         const RocketAssembly& assembly = GameContext::getInstance().launch_assembly;
+        const StructuralStateComponent* structural = world.all_of<StructuralStateComponent>(rocket_entity)
+            ? &world.get<StructuralStateComponent>(rocket_entity) : nullptr;
+        const RocketConfig& physicsCfg = StructuralState::physicsConfig(world, rocket_entity);
 
         if (prop.thrust_power >= 0.01 && !assembly.parts.empty()) {
             float thrust      = (float)input.throttle;
@@ -603,14 +789,15 @@ else {
             float thrust_scale = 0.25f + 0.75f * powf(thrust, 1.5f);
 
             int render_start = 0;
-            if (prop.current_stage < (int)config.stage_configs.size())
-                render_start = config.stage_configs[prop.current_stage].part_start_index;
+            if (prop.current_stage < (int)physicsCfg.stage_configs.size())
+                render_start = physicsCfg.stage_configs[prop.current_stage].part_start_index;
 
             const Quat& rocketQuat      = ctx.rocketQuat;
             const Vec3& renderRocketBase = ctx.renderRocketBase;
             constexpr float kTwoPi      = 6.28318530718f;
 
             for (int pi = render_start; pi < (int)assembly.parts.size(); pi++) {
+                if (!isPartStructurallyActive(structural, pi)) continue;
                 const PlacedPart& pp  = assembly.parts[pi];
                 const PartDef&    def = PART_CATALOG[pp.def_id];
                 if (def.category != CAT_ENGINE) continue;
@@ -694,66 +881,131 @@ else {
             snap.occluders.push_back(oc);
         }
 
-        // ---- 10. 火箭全零件 ----
+        // ---- 10. 火箭零件 + 断裂体素 ----
         if (!assembly.parts.empty()) {
             auto& prop = world.get<PropulsionComponent>(rocket_entity);
-            auto& config = world.get<RocketConfig>(rocket_entity);
+            const RocketConfig& physicsCfg = StructuralState::physicsConfig(world, rocket_entity);
+            const StructuralStateComponent* structural = world.all_of<StructuralStateComponent>(rocket_entity)
+                ? &world.get<StructuralStateComponent>(rocket_entity) : nullptr;
             int render_start = 0;
-            if (prop.current_stage < (int)config.stage_configs.size())
-                render_start = config.stage_configs[prop.current_stage].part_start_index;
+            if (prop.current_stage < (int)physicsCfg.stage_configs.size())
+                render_start = physicsCfg.stage_configs[prop.current_stage].part_start_index;
             const Quat& rq = ctx.rocketQuat;
             const Vec3& rb = ctx.renderRocketBase;
-            constexpr float k2Pi = 6.28318530718f;
-            for (int pi = render_start; pi < (int)assembly.parts.size(); pi++) {
-                const PlacedPart& pp = assembly.parts[pi];
-                const PartDef& def = PART_CATALOG[pp.def_id];
-                // 查找 OBJ 模型
-                std::string objPath;
-                if (def.model_path) {
-                    objPath = def.model_path;
-                } else {
-                    std::string tmp = def.name;
-                    for (char& c : tmp) { c=(char)tolower((unsigned char)c); if(c==' ')c='_'; }
-                    objPath = "assets/models/" + tmp + ".obj";
-                }
-                auto oit = partObjMeshes.find(objPath);
-                const Mesh* objMesh = (oit != partObjMeshes.end() && !oit->second.cpuIndices.empty())
-                                    ? &oit->second : nullptr;
 
-                for (int s = 0; s < pp.symmetry; s++) {
-                    float symAngle = (s * k2Pi) / pp.symmetry;
-                    Vec3 localPos = pp.pos;
-                    if (pp.symmetry > 1) {
-                        float dist = sqrtf(pp.pos.x*pp.pos.x + pp.pos.z*pp.pos.z);
-                        if (dist > 0.01f) {
-                            float ca = atan2f(pp.pos.z, pp.pos.x);
-                            localPos.x = cosf(ca+symAngle)*dist;
-                            localPos.z = sinf(ca+symAngle)*dist;
+            bool fractured = structural && structural->structurally_damaged;
+            int mainActiveChunk = 0;
+            std::unordered_set<VoxelPhysics::VoxelId> keepVoxels;
+            std::unordered_map<int, int> partTotalVoxels;
+            std::unordered_map<int, int> partKeptVoxels;
+            const VoxelPhysics::VesselVoxelModel* mainModel = nullptr;
+
+            if (world.all_of<VoxelBodyComponent>(rocket_entity)) {
+                const auto& mainVoxel = world.get<VoxelBodyComponent>(rocket_entity);
+                if (mainVoxel.model && fractured) {
+                    mainModel = mainVoxel.model.get();
+                    mainActiveChunk = mainVoxel.active_chunk;
+                    const auto& chunks = mainVoxel.model->getChunks();
+                    const auto& cells = mainVoxel.model->getCells();
+                    if (world.all_of<RigidChunkComponent>(rocket_entity)) {
+                        const auto& mainRigid = world.get<RigidChunkComponent>(rocket_entity);
+                        for (VoxelPhysics::VoxelId vid : mainRigid.owned_voxels) {
+                            keepVoxels.insert(vid);
                         }
                     }
-                    Vec3 wp = rb + rq.rotate(localPos * (float)ws_d);
-                    Quat wr = rq * pp.rot * Quat::fromAxisAngle(Vec3(0,1,0), symAngle);
-                    RocketPartDraw rp;
-                    if (objMesh) {
-                        // OBJ 模型：按物理尺寸缩放 + 中心偏移对齐
-                        float sx = (def.diameter / objMesh->width)  * (float)ws_d;
-                        float sy = (def.height   / objMesh->height) * (float)ws_d;
-                        float sz = (def.diameter / objMesh->depth)  * (float)ws_d;
-                        Mat4 m = Mat4::translate(wp) * Mat4::fromQuat(wr)
-                               * Mat4::scale(Vec3(sx,sy,sz))
-                               * Mat4::translate(Vec3(-objMesh->centerX, -objMesh->minY, -objMesh->centerZ));
-                        m.toFloatArray(rp.model);
-                        rp.r = def.r; rp.g = def.g; rp.b = def.b;
-                        rp.meshType = 0;
-                        rp.meshId = objPath;
-                    } else {
-                        float h=def.height*(float)ws_d, d=def.diameter*(float)ws_d;
-                        Mat4 m=Mat4::TRS(wp, wr, Vec3(d,h,d));
-                        m.toFloatArray(rp.model);
-                        rp.r=0.9f; rp.g=0.9f; rp.b=0.9f;
-                        rp.meshType=(def.category==CAT_NOSE_CONE||def.category==CAT_COMMAND_POD)?1:0;
+                    if (keepVoxels.empty() && mainActiveChunk >= 0 && mainActiveChunk < (int)chunks.size()) {
+                        for (VoxelPhysics::VoxelId vid : chunks[(size_t)mainActiveChunk].voxels) {
+                            if (vid >= 0 && vid < (VoxelPhysics::VoxelId)cells.size()) {
+                                keepVoxels.insert(vid);
+                            }
+                        }
                     }
-                    snap.rocketParts.push_back(rp);
+                    for (VoxelPhysics::VoxelId vid = 0; vid < (VoxelPhysics::VoxelId)cells.size(); vid++) {
+                        const auto& cell = cells[(size_t)vid];
+                        if (!cell.active || cell.part_index < 0) continue;
+                        partTotalVoxels[cell.part_index]++;
+                        if (keepVoxels.count(vid)) partKeptVoxels[cell.part_index]++;
+                    }
+                }
+            }
+
+            auto isPartFullyKept = [&](int pi) -> bool {
+                if (!fractured) return true;
+                if (structural) return isPartStructurallyActive(structural, pi);
+                auto totalIt = partTotalVoxels.find(pi);
+                auto keptIt = partKeptVoxels.find(pi);
+                if (totalIt == partTotalVoxels.end() || totalIt->second <= 0) return false;
+                return keptIt != partKeptVoxels.end() && keptIt->second == totalIt->second;
+            };
+
+            auto isPartPartiallyKept = [&](int pi) -> bool {
+                if (!fractured) return false;
+                auto totalIt = partTotalVoxels.find(pi);
+                auto keptIt = partKeptVoxels.find(pi);
+                if (totalIt == partTotalVoxels.end() || totalIt->second <= 0) return false;
+                return keptIt != partKeptVoxels.end() && keptIt->second > 0
+                    && keptIt->second < totalIt->second;
+            };
+
+            for (int pi = render_start; pi < (int)assembly.parts.size(); pi++) {
+                if (!isPartStructurallyActive(structural, pi)) continue;
+                if (isPartPartiallyKept(pi) && mainModel != nullptr) {
+                    Vec3 cropMin, cropMax;
+                    if (computePartKeptBounds(*mainModel, keepVoxels, pi, cropMin, cropMax)) {
+                        appendSinglePartDraws(
+                            snap.rocketParts, partObjMeshes, assembly, pi,
+                            rb, rq, (float)ws_d, &cropMin, &cropMax);
+                    }
+                } else {
+                    appendSinglePartDraws(
+                        snap.rocketParts, partObjMeshes, assembly, pi,
+                        rb, rq, (float)ws_d, nullptr, nullptr);
+                }
+            }
+        }
+
+        // ---- 10a. 断裂 chunk 碎片（按体素实心绘制，不依赖 surface_indices）----
+        {
+            auto debrisView = world.view<ChunkPhysicsTag, VoxelBodyComponent, RigidChunkComponent,
+                                         TransformComponent, AttitudeComponent>();
+            for (auto e : debrisView) {
+                if (e == rocket_entity) continue;
+                const auto& dVoxel = debrisView.get<VoxelBodyComponent>(e);
+                const auto& dRigid = debrisView.get<RigidChunkComponent>(e);
+                const auto& dTrans = debrisView.get<TransformComponent>(e);
+                const auto& dAtt = debrisView.get<AttitudeComponent>(e);
+                if (!dVoxel.model) continue;
+
+                Vec3 debrisRb(
+                    (float)(dTrans.abs_px * ws_d - ctx.ro_x),
+                    (float)(dTrans.abs_py * ws_d - ctx.ro_y),
+                    (float)(dTrans.abs_pz * ws_d - ctx.ro_z));
+
+                const std::vector<VoxelPhysics::VoxelId>& drawVoxels = dRigid.owned_voxels;
+                if (drawVoxels.empty()) {
+                    const auto& chunks = dVoxel.model->getChunks();
+                    if (dRigid.chunk_id < 0 || dRigid.chunk_id >= (int)chunks.size()) continue;
+                    appendChunkSolidDraws(
+                        snap.rocketParts,
+                        *dVoxel.model,
+                        chunks[(size_t)dRigid.chunk_id],
+                        debrisRb,
+                        dAtt.attitude,
+                        (float)ws_d,
+                        0.85f, 0.50f, 0.35f,
+                        true);
+                } else {
+                    appendVoxelSolidDraws(
+                        snap.rocketParts,
+                        *dVoxel.model,
+                        drawVoxels,
+                        dRigid.local_center_of_mass,
+                        debrisRb,
+                        dAtt.attitude,
+                        (float)ws_d,
+                        0.85f, 0.50f, 0.35f,
+                        true,
+                        true);
                 }
             }
         }

@@ -2,6 +2,7 @@
 #include "physics_system.h"
 #include "aerodynamics_system.h"
 #include "ground_collision_system.h"
+#include "simulation/structural_state.h"
 #include "math/math3d.h"
 #include <algorithm>
 #include <iostream>
@@ -789,7 +790,7 @@ void Update(entt::registry& registry, entt::entity entity, double dt) {
     auto& orb = registry.get<OrbitComponent>(entity);
     auto& mnv = registry.get<ManeuverComponent>(entity);
     auto& vfx = registry.get<VFXComponent>(entity);
-    const auto& config = registry.get<RocketConfig>(entity);
+    const RocketConfig& config = StructuralState::physicsConfig(registry, entity);
     const auto& input = registry.get<ControlInput>(entity);
 
     if (UniverseModel::getInstance().solar_system.empty()) return;
@@ -1016,7 +1017,9 @@ void Update(entt::registry& registry, entt::entity entity, double dt) {
             current_body,
             tele.sim_time,
             Vec3(temp_px, temp_py, temp_pz),
-            Vec3(temp_vx, temp_vy, temp_vz));
+            Vec3(temp_vx, temp_vy, temp_vz),
+            registry.try_get<VoxelBodyComponent>(entity),
+            registry.try_get<RigidChunkComponent>(entity));
         double Fdx = aero.force.x;
         double Fdy = aero.force.y;
         double Fdz = aero.force.z;
@@ -1073,7 +1076,24 @@ void Update(entt::registry& registry, entt::entity entity, double dt) {
     }
     
     // 12. 更新派生物理量
-    vel.acceleration = std::sqrt(k4_vx * k4_vx + k4_vy * k4_vy + k4_vz * k4_vz); 
+    vel.acceleration = std::sqrt(k4_vx * k4_vx + k4_vy * k4_vy + k4_vz * k4_vz);
+    const bool canEmitFractureDamage =
+        registry.all_of<BreakableBodyTag, VoxelBodyComponent>(entity) &&
+        !registry.all_of<DeformableZoneComponent>(entity) &&
+        !registry.all_of<DamageEventComponent>(entity) &&
+        registry.get<VoxelBodyComponent>(entity).model &&
+        registry.get<VoxelBodyComponent>(entity).model->countActiveVoxels() > 0;
+    if (canEmitFractureDamage &&
+        vel.acceleration > G0 * 18.0) {
+        Vec3 loadDir = Vec3(k4_vx, k4_vy, k4_vz).normalized();
+        Vec3 localLoadDir = att.attitude.conjugate().rotate(loadDir);
+        DamageEventComponent damage;
+        damage.local_point = localLoadDir * std::max(1.0, config.height * 0.18);
+        damage.impulse = total_mass * std::max(0.0, vel.acceleration - G0 * 18.0) * 0.02;
+        damage.radius = std::max(1.0, config.diameter * 1.25);
+        damage.hard_impact = false;
+        registry.emplace<DamageEventComponent>(entity, damage);
+    }
     // 垂直速度（上升/下降率）
     tele.velocity = vel.vx * Ux + vel.vy * Uy + vel.vz * Uz;
     // 地表水平速度：考虑到星球自转的相对速度
@@ -1081,9 +1101,31 @@ void Update(entt::registry& registry, entt::entity entity, double dt) {
     tele.local_vx = (-vel.vx * std::sin(local_up_angle) + vel.vy * std::cos(local_up_angle)) - surface_rotation_speed;
 
     // 13. 多点刚体接触求解 (Collision & Final Sync)
+    const VoxelBodyComponent* fracturedVoxel = nullptr;
+    const RigidChunkComponent* fracturedChunk = nullptr;
+    const StructuralStateComponent* structural = nullptr;
+    double contactMass = total_mass;
+    if (registry.all_of<VoxelBodyComponent, RigidChunkComponent>(entity)) {
+        const auto& voxelBody = registry.get<VoxelBodyComponent>(entity);
+        const auto& chunkBody = registry.get<RigidChunkComponent>(entity);
+        if (voxelBody.structure_fractured && chunkBody.mass > 0.0) {
+            fracturedVoxel = &voxelBody;
+            fracturedChunk = &chunkBody;
+            contactMass = chunkBody.mass;
+        }
+    }
+    if (registry.all_of<StructuralStateComponent>(entity)) {
+        structural = &registry.get<StructuralStateComponent>(entity);
+        if (structural->structurally_damaged) {
+            contactMass = std::max(contactMass,
+                structural->effective_config.dry_mass + prop.fuel
+                    + structural->effective_config.upper_stages_mass);
+        }
+    }
     GroundCollisionSystem::ContactResult contact =
         GroundCollisionSystem::ResolveGroundContacts(config, prop, trans, vel, att, guid, tele,
-                                                     current_body, total_mass, tele.sim_time, dt, previousCom);
+                                                     current_body, contactMass, tele.sim_time, dt, previousCom,
+                                                     fracturedVoxel, fracturedChunk, structural);
 
     Vec3 postPos(trans.px, trans.py, trans.pz);
     Vec3 postNormal = postPos.lengthSq() > 1e-9 ? postPos.normalized() : Vec3(0, 1, 0);
@@ -1104,6 +1146,20 @@ void Update(entt::registry& registry, entt::entity entity, double dt) {
     if (contact.contactCount > 0) {
         if (contact.hardImpact) {
             guid.status = (tele.velocity > 0.5) ? ASCEND : DESCEND;
+            // 仅在有实质闭合速度时产生损伤（与 stable 判定 band 一致，静接触不重复触发）
+            if (canEmitFractureDamage && contact.maxClosingSpeed > 1.5) {
+                DamageEventComponent damage;
+                if (contact.hasImpactLocalPoint) {
+                    damage.local_point = contact.impactLocalPoint;
+                } else {
+                    damage.local_point = Vec3(0.0, config.bounds_bottom, 0.0);
+                }
+                double impulseScale = contact.maxClosingSpeed > 35.0 ? 0.12 : 0.05;
+                damage.impulse = std::max(1.0, contact.maxClosingSpeed * contactMass * impulseScale);
+                damage.radius = std::max(config.diameter * 2.0, config.height * 0.45);
+                damage.hard_impact = true;
+                registry.emplace<DamageEventComponent>(entity, damage);
+            }
             GroundCollisionSystem::FreezeSurfacePoint(trans, current_body, tele.sim_time);
         } else if (contact.stable) {
             GroundCollisionSystem::FreezeSurfacePoint(trans, current_body, tele.sim_time);

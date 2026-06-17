@@ -2,6 +2,8 @@
 #include "stage_manager.h"
 #include "render/renderer_2d.h"
 #include "simulation/rocket_builder.h"
+#include "scene/game_context.h"
+#include "physics/voxel/vessel_voxelizer.h"
 #include <iostream>
 #include <cmath>
 
@@ -140,6 +142,35 @@ bool SeparateStage(entt::registry& registry, entt::entity entity) {
     registry.emplace<TransformComponent>(debrisEntity) = trans;
     registry.emplace<VelocityComponent>(debrisEntity) = vel;
     registry.emplace<AttitudeComponent>(debrisEntity) = att;
+    registry.emplace<ChunkPhysicsTag>(debrisEntity);
+    auto& debrisVoxel = registry.emplace<VoxelBodyComponent>(debrisEntity);
+    VoxelPhysics::VoxelizationSettings voxelSettings;
+    voxelSettings.voxel_size = 1.0;
+    voxelSettings.part_start_index = old_stage.part_start_index;
+    voxelSettings.part_end_index = old_stage.part_end_index;
+    debrisVoxel.model = VoxelPhysics::VoxelizeAssembly(GameContext::getInstance().launch_assembly, voxelSettings);
+    debrisVoxel.active_chunk = 0;
+    debrisVoxel.voxel_size = voxelSettings.voxel_size;
+    auto& debrisChunk = registry.emplace<RigidChunkComponent>(debrisEntity);
+    if (debrisVoxel.model && !debrisVoxel.model->getChunks().empty()) {
+        const auto& chunk = debrisVoxel.model->getChunks()[0];
+        auto& debrisTrans = registry.get<TransformComponent>(debrisEntity);
+        Vec3 worldOffset = att.attitude.rotate(chunk.center_of_mass);
+        debrisTrans.px += worldOffset.x;
+        debrisTrans.py += worldOffset.y;
+        debrisTrans.pz += worldOffset.z;
+        debrisTrans.abs_px += worldOffset.x;
+        debrisTrans.abs_py += worldOffset.y;
+        debrisTrans.abs_pz += worldOffset.z;
+        debrisChunk.chunk_id = chunk.id;
+        debrisChunk.mass = std::max(1.0, jettison);
+        debrisChunk.local_center_of_mass = chunk.center_of_mass;
+        debrisChunk.inertia_diag = chunk.inertia_diag;
+        debrisChunk.local_bounds_min = chunk.bounds_min;
+        debrisChunk.local_bounds_max = chunk.bounds_max;
+    } else {
+        debrisChunk.mass = std::max(1.0, jettison);
+    }
     // 不给 debris 挂 FullPhysicsTag → 自动走 SIMPLE 物理
     // 不给 debris 挂 PendingDestroy → 存活直到坠地
 

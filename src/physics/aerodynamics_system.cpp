@@ -51,6 +51,88 @@ static double fallbackSideArea(const RocketConfig& config) {
     return std::max(0.1, config.height) * std::max(0.1, config.diameter);
 }
 
+static bool voxelProjectedAreas(const VoxelBodyComponent* voxel,
+                                const RigidChunkComponent* chunk,
+                                const Vec3& localWindDir,
+                                double& frontalArea,
+                                double& sideArea,
+                                double& flatness) {
+    if (!voxel || !voxel->model) return false;
+    const auto& surfaces = voxel->model->getSurfaceSamples();
+    const auto& cells = voxel->model->getCells();
+
+    if (chunk && !chunk->owned_voxels.empty()) {
+        double projected = 0.0;
+        double exposed = 0.0;
+        Vec3 spanMin(1e30, 1e30, 1e30);
+        Vec3 spanMax(-1e30, -1e30, -1e30);
+        Vec3 com = chunk->local_center_of_mass;
+        for (VoxelPhysics::VoxelId id : chunk->owned_voxels) {
+            if (id < 0 || id >= (VoxelPhysics::VoxelId)cells.size()) continue;
+            const auto& cell = cells[(size_t)id];
+            if (!cell.active) continue;
+            double half = voxel->model->voxelSize() * 0.5;
+            for (int face = 0; face < 6; face++) {
+                Vec3 n(0, 0, 0);
+                if (face == 0) n = Vec3(1, 0, 0);
+                else if (face == 1) n = Vec3(-1, 0, 0);
+                else if (face == 2) n = Vec3(0, 1, 0);
+                else if (face == 3) n = Vec3(0, -1, 0);
+                else if (face == 4) n = Vec3(0, 0, 1);
+                else n = Vec3(0, 0, -1);
+                double area = half * half * 4.0;
+                double facing = std::max(0.0, n.dot(-localWindDir));
+                projected += area * facing;
+                exposed += area;
+            }
+            Vec3 rel = cell.center - com;
+            spanMin.x = std::min(spanMin.x, rel.x);
+            spanMin.y = std::min(spanMin.y, rel.y);
+            spanMin.z = std::min(spanMin.z, rel.z);
+            spanMax.x = std::max(spanMax.x, rel.x);
+            spanMax.y = std::max(spanMax.y, rel.y);
+            spanMax.z = std::max(spanMax.z, rel.z);
+        }
+        if (projected <= 0.0 || exposed <= 0.0) return false;
+        frontalArea = std::max(0.05, projected);
+        sideArea = std::max(frontalArea, exposed * 0.25);
+        double sx = std::max(0.01, spanMax.x - spanMin.x);
+        double sz = std::max(0.01, spanMax.z - spanMin.z);
+        flatness = std::min(10.0, std::max(sx, sz) / std::min(sx, sz));
+        return true;
+    }
+
+    const auto& chunks = voxel->model->getChunks();
+    int chunkId = chunk ? chunk->chunk_id : voxel->active_chunk;
+    if (chunkId < 0 || chunkId >= (int)chunks.size()) return false;
+
+    double projected = 0.0;
+    double exposed = 0.0;
+    Vec3 spanMin(1e30, 1e30, 1e30);
+    Vec3 spanMax(-1e30, -1e30, -1e30);
+    for (int si : chunks[(size_t)chunkId].surface_indices) {
+        if (si < 0 || si >= (int)surfaces.size()) continue;
+        const auto& s = surfaces[(size_t)si];
+        double facing = std::max(0.0, s.normal.dot(-localWindDir));
+        projected += s.area * facing;
+        exposed += s.area;
+        spanMin.x = std::min(spanMin.x, s.local_pos.x);
+        spanMin.y = std::min(spanMin.y, s.local_pos.y);
+        spanMin.z = std::min(spanMin.z, s.local_pos.z);
+        spanMax.x = std::max(spanMax.x, s.local_pos.x);
+        spanMax.y = std::max(spanMax.y, s.local_pos.y);
+        spanMax.z = std::max(spanMax.z, s.local_pos.z);
+    }
+    if (projected <= 0.0 || exposed <= 0.0) return false;
+
+    frontalArea = std::max(0.05, projected);
+    sideArea = std::max(frontalArea, exposed * 0.25);
+    double sx = std::max(0.01, spanMax.x - spanMin.x);
+    double sz = std::max(0.01, spanMax.z - spanMin.z);
+    flatness = std::min(10.0, std::max(sx, sz) / std::min(sx, sz));
+    return true;
+}
+
 } // namespace
 
 double AirDensityAt(const CelestialBody& body, double altitude) {
@@ -91,7 +173,9 @@ Sample ComputeForces(const RocketConfig& config,
                      const CelestialBody& body,
                      double /*sim_time*/,
                      const Vec3& position,
-                     const Vec3& velocity) {
+                     const Vec3& velocity,
+                     const VoxelBodyComponent* voxel,
+                     const RigidChunkComponent* chunk) {
     Sample sample;
     double radius = position.length();
     double altitude = radius - body.radius;
@@ -118,6 +202,15 @@ Sample ComputeForces(const RocketConfig& config,
     double sideArea = profile.valid() ? profile.side_area : fallbackSideArea(config);
     double flatness = profile.valid() ? profileFlatness(profile) : 1.0;
     double roughness = profile.valid() ? profile.area_roughness : 0.0;
+    Vec3 localWindDir = attitude.attitude.conjugate().rotate(velDir).normalized();
+    double voxelFrontal = 0.0;
+    double voxelSide = 0.0;
+    double voxelFlatness = 1.0;
+    if (voxelProjectedAreas(voxel, chunk, localWindDir, voxelFrontal, voxelSide, voxelFlatness)) {
+        frontalArea = voxelFrontal;
+        sideArea = voxelSide;
+        flatness = voxelFlatness;
+    }
 
     double axialArea = frontalArea * axialAlignment * axialAlignment;
     double broadsideArea = sideArea * sinAlpha * sinAlpha;

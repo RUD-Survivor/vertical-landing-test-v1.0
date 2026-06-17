@@ -24,6 +24,8 @@ Sample ComputeForces(const RocketConfig& config,
                      const CelestialBody& body,
                      double sim_time,
                      const Vec3& position,
-                     const Vec3& velocity);
+                     const Vec3& velocity,
+                     const VoxelBodyComponent* voxel = nullptr,
+                     const RigidChunkComponent* chunk = nullptr);
 
 } // namespace AerodynamicsSystem
