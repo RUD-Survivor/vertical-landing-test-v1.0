@@ -105,33 +105,18 @@ float ozoneDensity(float h) {
     return exp(-0.5 * d * d);
 }
 
-// ── Noise helpers (must be before getOpticalDepth for cloud shadow) ──────────
-vec3 hashGrad(vec3 p) {
-    vec3 q = vec3(dot(p, vec3(127.1, 311.7, 74.7)),
-                  dot(p, vec3(269.5, 183.3, 246.1)),
-                  dot(p, vec3(113.5, 271.9, 124.6)));
-    return normalize(-1.0 + 2.0 * fract(q * fract(q * 0.3183099)));
+// ── Baked noise helpers (HZD-style: no runtime FBM in density path) ─────────
+const float INV8 = 0.125;
+
+float sampleBakedN(vec3 tc) {
+    vec3 uvw = tc * INV8;
+    float n  = texture(uNoiseTex3D, uvw).r;
+    float wInv = 1.0 - texture(uNoiseTex3D, uvw * 2.0).g;
+    return n + (wInv - 0.5) * (1.0 - n) * 0.50;
 }
-float noise3d(vec3 p) {
-    vec3 i = floor(p); vec3 f = fract(p);
-    vec3 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
-    return mix(mix(mix(dot(hashGrad(i+vec3(0,0,0)),f-vec3(0,0,0)),
-                       dot(hashGrad(i+vec3(1,0,0)),f-vec3(1,0,0)),u.x),
-                   mix(dot(hashGrad(i+vec3(0,1,0)),f-vec3(0,1,0)),
-                       dot(hashGrad(i+vec3(1,1,0)),f-vec3(1,1,0)),u.x),u.y),
-               mix(mix(dot(hashGrad(i+vec3(0,0,1)),f-vec3(0,0,1)),
-                       dot(hashGrad(i+vec3(1,0,1)),f-vec3(1,0,1)),u.x),
-                   mix(dot(hashGrad(i+vec3(0,1,1)),f-vec3(0,1,1)),
-                       dot(hashGrad(i+vec3(1,1,1)),f-vec3(1,1,1)),u.x),u.y),u.z)*0.5+0.5;
-}
-float fbm(vec3 p, int octaves) {
-    float v = 0.0, amp = 0.5;
-    for (int i = 0; i < octaves; i++) {
-        v += noise3d(p) * amp;
-        p = p * 2.07 + vec3(0.131, -0.217, 0.344);
-        amp *= 0.48;
-    }
-    return v;
+
+float cheapCloudNoise(vec3 sph, float t) {
+    return texture(uNoiseTex3D, (sph * 6.0 + vec3(t * 0.001)) * INV8).r;
 }
 
 // ── Atmospheric optical depth (includes cloud contribution via dC) ───────────
@@ -169,7 +154,7 @@ void getOpticalDepth(vec3 p, vec3 lDir, out float dR, out float dM, out float dO
                 vec3 cs = normalize(cp - pc.planetCenter.xyz);
                 float altN = clamp((ch - gCloudMinAlt) / max(gCloudMaxAlt - gCloudMinAlt, 0.1), 0.0, 1.0);
                 float profile = smoothstep(0.0, 0.05, altN) * smoothstep(1.0, 0.85, altN);
-                float cheapDensity = fbm(cs * 6.0 + cloud.uTime * 0.001, 2) * profile * cloud.uDensity * 0.01;
+                float cheapDensity = cheapCloudNoise(cs, cloud.uTime) * profile * cloud.uDensity * 0.01;
                 dC += cheapDensity * cStep;
             }
         }
@@ -182,31 +167,7 @@ float screenHash(vec2 uv) {
     return fract(ign + float(pc.frameIndex % 32) * 0.6180339887);
 }
 
-float worley3d(vec3 p) {
-    vec3 i = floor(p); vec3 f = fract(p); float md = 1.0;
-    for (int x=-1; x<=1; x++) for (int y=-1; y<=1; y++) for (int z=-1; z<=1; z++) {
-        vec3 nb = vec3(float(x),float(y),float(z));
-        vec3 h = fract(sin(vec3(dot(i+nb,vec3(127.1,311.7,74.7)),
-                               dot(i+nb,vec3(269.5,183.3,246.1)),
-                               dot(i+nb,vec3(113.5,271.9,124.6))))*43758.5453);
-        vec3 d = nb + h - f;
-        md = min(md, dot(d,d));
-    }
-    return sqrt(md);
-}
-
-vec3 curlSph(vec3 p, float scale, float toff) {
-    vec3 n = p * scale + vec3(toff, toff*0.7, toff*1.3);
-    const float eps = 0.015;
-    float dx = noise3d(n+vec3(eps,0,0)) - noise3d(n-vec3(eps,0,0));
-    float dy = noise3d(n+vec3(0,eps,0)) - noise3d(n-vec3(0,eps,0));
-    float dz = noise3d(n+vec3(0,0,eps)) - noise3d(n-vec3(0,0,eps));
-    vec3 grad = vec3(dx,dy,dz)*(0.5/eps);
-    grad -= p*dot(p,grad);
-    return cross(p,grad);
-}
-
-// ── Cloud density (from cloud.glsl, adapted) ────────────────────────────────
+// ── Cloud density (HZD baked-noise path, no runtime FBM) ────────────────────
 float cloudDensity(vec3 p, float h, bool highDetail) {
     if (pc.showClouds < 0.5) return 0.0;
     if (h < gCloudMinAlt || h > gCloudMaxAlt) return 0.0;
@@ -246,7 +207,7 @@ float cloudDensity(vec3 p, float h, bool highDetail) {
             vec3 coverageSph = vec3(sph.x*c1-sph.y*s1, sph.x*s1+sph.y*c1, sph.z);
             vec3 wAxis = normalize(cross(coverageSph,vec3(0,0,1)+coverageSph*0.01));
             vec3 vAxis = cross(coverageSph,wAxis);
-            const float EPS=0.06, INV8=0.125;
+            const float EPS=0.06;
 
             vec3 seedLo = vec3(t*0.003,0,t*0.002);
             float pLo_pu=texture(uCoverTex3D,(coverageSph*1.5+wAxis*EPS+seedLo)*INV8).r;
@@ -276,7 +237,7 @@ float cloudDensity(vec3 p, float h, bool highDetail) {
 
             if (cycInfluence>0.001) {
                 coverage=mix(coverage,clamp(coverage*1.9,0.0,1.0),cycInfluence*0.7);
-                float eyeNoise=fbm(sph*38.0+vec3(t*0.02),2)*0.009;
+                float eyeNoise=texture(uCoverTex3D,(sph*4.0+vec3(t*0.02))*INV8).r*0.009;
                 coverage*=smoothstep((0.017+eyeNoise)*0.35,0.017+eyeNoise,cycDist);
             }
 
@@ -295,69 +256,31 @@ float cloudDensity(vec3 p, float h, bool highDetail) {
             float altShape=heightGradient*1.5;
 
             vec3 tc=windSph1*(80.0+h*0.45)+vec3(t*0.6,t*0.4,t*0.15);
-            float n=0.0;
             float viewDist=length(frame.viewPos-p);
 
-            if (highDetail) {
-                float warp=texture(uNoiseTex3D,tc*0.0375).b;
-                vec3 warpedTc=tc+vec3(warp*0.4,warp*0.4,warp*0.2)+vec3(t*0.02);
-                n=fbm(warpedTc,3);
-                float wInv=1.0-texture(uNoiseTex3D,warpedTc*0.125).g;
-                n=n+(wInv-0.5)*(1.0-n)*0.50;
-                float ero=texture(uNoiseTex3D,tc*0.2875+vec3(-t*0.04,t*0.03,0.0)).g;
-                float topFraction=smoothstep(topHeight*0.5,topHeight*0.95,altNorm);
-                n-=mix(ero,1.0-ero,topFraction)*cloud.uErosion;
-                {
-                    vec3 pW=p+vec3(warp-0.5,warp*1.4-0.7,0.5-warp*0.9)*18.0;
-                    float c1=1.0-texture(uNoiseTex3D,pW*0.005+vec3(0.914+t*0.00225,0.521,0.341+t*0.00150)).g;
-                    float c2=1.0-texture(uNoiseTex3D,pW*0.00975+vec3(0.039,0.440+t*0.00275,0.091)).g;
-                    n+=(c1*(0.4+0.6*c2))*0.30-0.16;
-                }
-                float maskLoVal=min(cloud.uThreshLo,cloud.uThreshHi);
-                float cloudExists=smoothstep(maskLoVal+0.02,maskLoVal+0.10,n);
-                if (viewDist<250.0) {
-                    float wm=1.0-smoothstep(80.0,250.0,viewDist);
-                    float cellVal=1.0-texture(uNoiseTex3D,p*0.005+vec3(t*0.00375,0.0,0.0)).g;
-                    float surfaceProx=smoothstep(0.20,0.50,n)*(1.0-smoothstep(0.50,0.70,n));
-                    n+=(cellVal-0.5)*0.22*wm*(0.3+0.7*surfaceProx)*cloudExists;
-                }
-                if (viewDist<80.0) {
-                    float lm=1.0-smoothstep(40.0,80.0,viewDist);
-                    float largeW=1.0-texture(uNoiseTex3D,p*0.015625+vec3(t*0.003125,t*0.001875,0.0)).g;
-                    float largeSurf=smoothstep(0.15,0.45,n)*(1.0-smoothstep(0.45,0.65,n));
-                    n+=(largeW-0.5)*0.14*lm*(0.30+0.70*largeSurf)*cloudExists;
-                }
-                if (viewDist<8.0) {
-                    float dW1=1.0-smoothstep(0.5,8.0,viewDist);
-                    vec3 uvA=fract(p/0.200+vec3(0.137,0.421,0.073));
-                    float da=texture(uDetailTex3D,uvA).a;
-                    float tFr1=smoothstep(0.5,0.85,altNorm);
-                    float surfW=1.0-smoothstep(maskLoVal,maskLoVal+0.10,n);
-                    n-=mix(da,1.0-da,tFr1)*(0.10+0.30*surfW)*dW1;
-                }
-            } else {
-                n=fbm(tc,2);
-                { float wInvS=1.0-texture(uNoiseTex3D,tc*0.125).g;
-                  n=n+(wInvS-0.5)*(1.0-n)*0.50; }
-                {
-                    float pw=texture(uNoiseTex3D,tc*0.0375).b;
-                    vec3 pW=p+vec3(pw-0.5,pw*1.4-0.7,0.5-pw*0.9)*18.0;
-                    float c1=1.0-texture(uNoiseTex3D,pW*0.005+vec3(0.914+t*0.00225,0.521,0.341+t*0.00150)).g;
-                    float c2=1.0-texture(uNoiseTex3D,pW*0.00975+vec3(0.039,0.440+t*0.00275,0.091)).g;
-                    n+=(c1*(0.4+0.6*c2))*0.30-0.16;
-                }
+            float warp=texture(uNoiseTex3D,tc*0.0375).b;
+            vec3 warpedTc=tc+vec3(warp*0.4,warp*0.4,warp*0.2)+vec3(t*0.02);
+            float n=sampleBakedN(warpedTc);
+
+            float ero=texture(uNoiseTex3D,tc*0.2875+vec3(-t*0.04,t*0.03,0.0)).g;
+            float topFraction=smoothstep(topHeight*0.5,topHeight*0.95,altNorm);
+            n-=mix(ero,1.0-ero,topFraction)*cloud.uErosion;
+
+            {
+                vec3 pW=p+vec3(warp-0.5,warp*1.4-0.7,0.5-warp*0.9)*18.0;
+                float c1=1.0-texture(uNoiseTex3D,pW*0.005+vec3(0.914+t*0.00225,0.521,0.341+t*0.00150)).g;
+                float c2=1.0-texture(uNoiseTex3D,pW*0.00975+vec3(0.039,0.440+t*0.00275,0.091)).g;
+                n+=(c1*(0.4+0.6*c2))*0.30-0.16;
             }
 
-            if (viewDist<40.0) {
-                float edgeMaskLo=min(cloud.uThreshLo,cloud.uThreshHi);
-                vec3 curlVec=curlSph(windSph1*4.0,3.0,t*0.3);
-                float tke=abs(dot(curlVec,windSph1))*2.5;
-                float tkeThreshold=smoothstep(0.35,0.75,tke);
-                float distToCore=1.0-worley3d(windSph1*14.0+t*0.12);
-                float coreStrength=exp(-distToCore*distToCore*18.0)*tkeThreshold;
-                float surfaceZone=smoothstep(edgeMaskLo-0.06,edgeMaskLo+0.02,n)
-                                *(1.0-smoothstep(edgeMaskLo+0.18,edgeMaskLo+0.35,n));
-                n+=coreStrength*0.12*surfaceZone*(0.4+0.6*altNorm);
+            if (viewDist<8.0) {
+                float dW1=1.0-smoothstep(0.5,8.0,viewDist);
+                vec3 uvA=fract(p/0.200+vec3(0.137,0.421,0.073));
+                float da=texture(uDetailTex3D,uvA).a;
+                float tFr1=smoothstep(0.5,0.85,altNorm);
+                float maskLoVal=min(cloud.uThreshLo,cloud.uThreshHi);
+                float surfW=1.0-smoothstep(maskLoVal,maskLoVal+0.10,n);
+                n-=mix(da,1.0-da,tFr1)*(0.10+0.30*surfW)*dW1;
             }
 
             float maskLo=min(cloud.uThreshLo,cloud.uThreshHi);
@@ -381,10 +304,9 @@ float cloudDensity(vec3 p, float h, bool highDetail) {
             float latWarp2=sph.z*sph.z*sph.z*0.15;
             float s2=sin(angle2+latWarp2),c2=cos(angle2+latWarp2);
             vec3 windSph2=vec3(sph.x*c2-sph.y*s2,sph.x*s2+sph.y*c2,sph.z);
-            vec3 tc2=windSph2*50.0;
-            float n2=highDetail?fbm(tc2+vec3(fbm(tc2*0.4,2)*0.7,fbm(tc2*0.4,2)*0.9,0.0)+vec3(t*0.04),4)
-                                -fbm(tc2*2.5+vec3(t*0.08),2)*0.18
-                              :fbm(tc2+vec3(t*0.04),1);
+            vec3 tc2=windSph2*50.0+vec3(t*0.04);
+            float n2=texture(uNoiseTex3D,tc2*INV8).b;
+            n2-=texture(uNoiseTex3D,tc2*0.3125).g*0.18;
             float mask2=smoothstep(0.42+altNorm*0.10,0.82,n2)*altShape;
             density=max(density,mask2*0.30);
         }
@@ -394,8 +316,7 @@ float cloudDensity(vec3 p, float h, bool highDetail) {
         float angle=cloud.uTime*0.004*-0.1;
         float s1s=sin(angle),c1s=cos(angle);
         vec3 windSph=vec3(sph.x*c1s-sph.y*s1s,sph.x*s1s+sph.y*c1s,sph.z);
-        float n=highDetail?fbm(windSph*8.0+vec3(cloud.uTime*0.004*0.05),3)
-                          :fbm(windSph*8.0+vec3(cloud.uTime*0.004*0.05),1);
+        float n=texture(uNoiseTex3D,(windSph*8.0+vec3(cloud.uTime*0.0002))*INV8).r;
         density=(0.3+0.7*n)*altShape*0.8;
     }
     return density;
@@ -421,17 +342,17 @@ float coneAO(vec3 p, vec3 sph, float h) {
         { vec3 pp=p+down*dists[d]; float ph=length(pp-pc.planetCenter.xyz)-pc.surfaceRadius;
           if (ph>=gCloudMinAlt&&ph<=gCloudMaxAlt) {
               vec3 ps=normalize(pp-pc.planetCenter.xyz);
-              float dC=1.0-worley3d(ps*3.0); occ+=dC*wgts[d]*0.50; }
+              float dC=1.0-texture(uNoiseTex3D,ps*INV8).g; occ+=dC*wgts[d]*0.50; }
           wSum+=wgts[d]*0.50; }
         { vec3 pp=p+tan1*dists[d]*1.5; float ph=length(pp-pc.planetCenter.xyz)-pc.surfaceRadius;
           if (ph>=gCloudMinAlt&&ph<=gCloudMaxAlt) {
               vec3 ps=normalize(pp-pc.planetCenter.xyz);
-              float dC=1.0-worley3d(ps*3.0); occ+=dC*wgts[d]*0.25; }
+              float dC=1.0-texture(uNoiseTex3D,ps*INV8).g; occ+=dC*wgts[d]*0.25; }
           wSum+=wgts[d]*0.25; }
         { vec3 pp=p+tan2*dists[d]*1.5; float ph=length(pp-pc.planetCenter.xyz)-pc.surfaceRadius;
           if (ph>=gCloudMinAlt&&ph<=gCloudMaxAlt) {
               vec3 ps=normalize(pp-pc.planetCenter.xyz);
-              float dC=1.0-worley3d(ps*3.0); occ+=dC*wgts[d]*0.25; }
+              float dC=1.0-texture(uNoiseTex3D,ps*INV8).g; occ+=dC*wgts[d]*0.25; }
           wSum+=wgts[d]*0.25; }
     }
     float avgOc=(wSum>0.001)?occ/wSum:0.0;
@@ -479,7 +400,7 @@ void main() {
     // Adaptive step: horizon rays traverse hundreds of km through cloud layer.
     // Use max(fineStep, segmentLen/128) to guarantee full coverage in ≤128 iters.
     float segLen = tEnd - tStart;
-    float adaptStep = max(fineStep, segLen / 128.0);
+    float adaptStep = min(max(fineStep, segLen / 128.0), 0.50);
 
     float cJitter=screenHash(gl_FragCoord.xy);
     float tCur=tStart+cJitter*adaptStep;
@@ -511,7 +432,7 @@ void main() {
 
         float cLR,cLM,cLO,cLC;
         getOpticalDepth(cPos,lightDir,cLR,cLM,cLO,cLC);
-        vec3 cloudShadow=exp(-gCloudExtinction*cLC);
+        vec3 cloudShadow=exp(-gCloudExtinction*cLC*0.45);
         vec3 sunTint=exp(-(gRayleighCoeff*cLR+gMieCoeff*1.1*cLM+gOzoneCoeff*cLO))*cloudShadow;
 
         vec3 tauRgb=gCloudExtinction.x*(optDepthC+cLC)*vec3(1.0,1.04,1.10);
@@ -519,11 +440,12 @@ void main() {
 
         float tauLight=gCloudExtinction.x*cLC;
         float powder=1.0-exp(-tauLight*2.0);
-        float coreDark=1.0-powder*0.72;
         float edgeSharpness=smoothstep(0.002,0.018,abs(dC-prevDC)/max(adaptStep,0.0001));
-        float powderEdge=powder*(1.0+edgeSharpness*0.7);
+        float powderEdge=powder*(1.0+edgeSharpness*0.8);
         float silverMask=max(0.0,cosTheta);
-        vec3 cloudAtt=msRgb*(coreDark+powderEdge*silverMask*0.65);
+        vec3 cloudAlbedo=vec3(0.97,0.98,1.00);
+        vec3 directAtt=msRgb*(0.55+powderEdge*silverMask*0.55)*cloudAlbedo;
+        float coreDark=1.0-powder*0.55;
         prevDC=dC;
 
         float layerBase=(ch<7.5)?gCloudMinAlt:8.0;
@@ -536,22 +458,46 @@ void main() {
             float aoConeS=coneAO(cPos,normalize(cPos-ctr),ch);
             aoCone=aoHeight*0.35+aoConeS*0.65;
         }
-        float aoDirect=mix(0.30,1.0,aoCone);   // raised from 0.04 so cloud base isn't black
-        float aoAmbient=mix(0.30,1.0,aoCone);  // raised from 0.16
+        float aoDirect=mix(0.40,1.0,aoCone);
+        float aoAmbient=mix(0.40,1.0,aoCone);
 
         vec3 cSph=normalize(cPos-ctr);
         float sunElev=dot(cSph,lightDir);
-        float skyPathKm=min(8.0/max(sunElev,0.02),60.0);
         float skyVis=smoothstep(-0.5,0.15,sunElev);
-        float nightGlow=0.012*(1.0-skyVis);
-        vec3 skyAmbColor=exp(-gRayleighCoeff*skyPathKm)*skyVis+vec3(nightGlow);
+        float nightGlow=0.015*(1.0-skyVis);
 
+        // Terminator reddening: per-sample sun elevation + global dusk (matches atmo sky band)
+        float twilightLocal=smoothstep(0.22,-0.06,sunElev);
+        float twilightGlobal=smoothstep(0.50,0.12,pc.sunVisibility);
+        float twilight=clamp(max(twilightLocal,twilightGlobal*0.75),0.0,1.0);
+
+        vec3 sunColorDay=vec3(1.08,1.02,0.94);
+        vec3 sunColorDusk=vec3(1.50,0.45,0.08);
+        vec3 sunColor=mix(sunColorDay,sunColorDusk,twilight)*mix(0.04,1.0,pc.sunVisibility);
+
+        float phaseNorm=cloudPhase(cosTheta)/(cloudPhase(1.0)+1e-5);
+        float VoLPowder=pow(clamp(cosTheta*0.5+0.5,0.0,1.0),1.4);
+        float nightFactor=mix(0.05,1.0,pc.sunVisibility);
+        float exposure=mix(8.0,5.0,clamp(camAltCloud/120.0,0.0,1.0))*nightFactor;
+
+        // View-path chromatic tint at twilight only (red on entry, not daytime double-extinction)
         float atmLum=dot(atmTransAtCloud,vec3(0.299,0.587,0.114));
-        vec3 directContrib=atmLum*sunTint*cloudAtt*aoDirect;
+        vec3 viewChrom=atmTransAtCloud/max(atmLum,0.04);
+        vec3 viewTint=mix(vec3(1.0),viewChrom,twilight*0.85);
+
+        vec3 directContrib=sunColor*sunTint*directAtt*aoDirect*phaseNorm*VoLPowder*exposure*viewTint;
+
+        vec3 skyDay=vec3(0.62,0.70,0.92);
+        vec3 skyDusk=vec3(1.05,0.40,0.12);
+        vec3 skyNight=vec3(0.02,0.025,0.04);
+        vec3 skyAmbColor=mix(mix(skyNight,skyDay,skyVis),skyDusk,twilightLocal*skyVis)+vec3(nightGlow);
         float shadowStrength=1.0-dot(cloudShadow,vec3(0.333));
-        vec3 ambientContrib=atmLum*skyAmbColor*1.2*aoAmbient*(1.0-shadowStrength*0.5);
+        vec3 ambAtmTint=mix(vec3(atmLum),atmTransAtCloud,twilight*0.80);
+        vec3 ambientContrib=ambAtmTint*skyAmbColor*cloudAlbedo*aoAmbient*coreDark
+                            *(1.0-shadowStrength*0.40)*mix(0.45,1.0,phaseNorm)*0.65*exposure;
+
         sumCloud+=dC*(directContrib+ambientContrib)*viewTrans;
-        viewTrans*=exp(-dC);  // accumulate view-ray extinction for self-occlusion
+        viewTrans*=exp(-gCloudExtinction.x*dC);
 
         if (viewTrans<0.005) break;
         tCur+=adaptStep;
@@ -560,7 +506,13 @@ void main() {
     float nightFade=smoothstep(0.0,0.12,pc.sunVisibility);
     sumCloud*=nightFade;
 
-    float alpha=clamp(1.0-viewTrans,0.0,1.0);  // direct transmittance-based opacity
+    // Match atmo.frag ACES tonemap — prevents linear muddy brown on composite
+    {
+        vec3 x=max(sumCloud,vec3(0.0));
+        sumCloud=(x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14);
+    }
+
+    float alpha=clamp(1.0-viewTrans,0.0,1.0);
     alpha*=mix(0.08,1.0,nightFade);
     if (alpha<0.003) discard;
 
