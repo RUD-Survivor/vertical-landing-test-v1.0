@@ -15,6 +15,7 @@ extern float g_scroll_y;
 #include "ecs/systems/voxel_deformable_zone_system.h"
 #include "ecs/systems/voxel_fracture_system.h"
 #include "ecs/systems/voxel_chunk_physics_system.h"
+#include "ecs/systems/voxel_chunk_collision_system.h"
 #include "ecs/systems/debris_physics_system.h"
 #include "ecs/systems/debris_cleanup_system.h"
 #include "camera/camera_director.h"
@@ -478,6 +479,7 @@ else {
     scheduler.add(std::make_unique<VoxelDeformableZoneSystem>());
     scheduler.add(std::make_unique<VoxelFractureSystem>());
     scheduler.add(std::make_unique<VoxelChunkPhysicsSystem>());
+    scheduler.add(std::make_unique<VoxelChunkCollisionSystem>());
     scheduler.add(std::make_unique<DebrisPhysicsSystem>());
     scheduler.add(std::make_unique<DebrisCleanupSystem>());
     sysCtx.focused_entity = rocket_entity;  // 玩家焦点：ManualInput/ManeuverExec 只看这个
