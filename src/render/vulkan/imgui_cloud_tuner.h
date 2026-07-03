@@ -19,8 +19,8 @@ inline void CloudTunerImGui(bool* p_open, CloudTuneParams& p) {
     }
 
     ImGui::Text("密度与消光");
-    ImGui::SliderFloat("Density",      &p.density,    0.5f, 12.0f, "%.2f");
-    ImGui::SliderFloat("Extinction",   &p.extinction, 0.01f, 0.60f, "%.3f");
+    ImGui::SliderFloat("Density",      &p.density,    0.10f, 4.00f, "%.2f");
+    ImGui::SliderFloat("Extinction",   &p.extinction, 0.02f, 0.40f, "%.3f");
 
     ImGui::Separator();
     ImGui::Text("覆盖率");
@@ -37,11 +37,21 @@ inline void CloudTunerImGui(bool* p_open, CloudTuneParams& p) {
     ImGui::SliderFloat("Erosion",      &p.erosion,    0.00f, 0.50f, "%.3f");
     ImGui::SliderFloat("MinAlt (km)",  &p.minAlt,     0.50f, 6.00f, "%.2f");
     ImGui::SliderFloat("MaxAlt (km)",  &p.maxAlt,     8.00f, 22.00f, "%.2f");
+    ImGui::SliderFloat("LocalRadius (km)", &p.localRadiusKm, 0.f, 500.f, "%.0f");
+    ImGui::TextDisabled("LocalRadius: Flower-style tangent cloudMap near camera (0=off)");
 
     ImGui::Separator();
     ImGui::Text("调试");
-    const char* debugItems[] = { "Off", "Force Density" };
-    ImGui::Combo("DebugMode", &p.debugMode, debugItems, 2);
+    const char* debugItems[] = {
+        "Off",
+        "Force Density",
+        "Density",
+        "Coverage/Profile/Shape",
+        "Alpha/Trans/Depth",
+        "Sun/Sky/Ground",
+        "Step Optical Depth"
+    };
+    ImGui::Combo("DebugMode", &p.debugMode, debugItems, IM_ARRAYSIZE(debugItems));
 
     ImGui::Separator();
     ImGui::TextDisabled("F2: 开关面板  |  Shift+P: 开关云");

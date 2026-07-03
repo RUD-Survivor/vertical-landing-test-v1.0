@@ -421,6 +421,7 @@ struct VkSceneSystem {
         cpubo.uMinAlt   = cloudTune.minAlt;
         cpubo.uMaxAlt   = cloudTune.maxAlt;
         cpubo.uDebug    = cloudTune.debugMode;
+        cpubo.uLocalRadius = cloudTune.localRadiusKm;
 
         if (camAltKm < 20.f)      { cpubo.uCloudSteps = 128; cpubo.uLightSteps = 16; }
         else if (camAltKm < 500.f) { cpubo.uCloudSteps = 48;  cpubo.uLightSteps = 12; }
@@ -504,11 +505,14 @@ struct VkSceneSystem {
             for(int z=0;z<N;z++)for(int y=0;y<N;y++)for(int x=0;x<N;x++){
                 float s=(float)x/N*8,t8=(float)y/N*8,u=(float)z/N*8;
                 float perlin=cpuFbm(s,t8,u,4);
-                float w_inv=1-cpuWorleyTile(s,t8,u);
-                float r=w_inv+perlin*(1-w_inv);
-                float g=cpuWorleyTile(s,t8,u);
-                float b=cpuFbm(s,t8,u,3);
-                float a=cpuFbm(s,t8,u,5);
+                float w1=1.0f-cpuWorleyTile(s,t8,u);
+                float w2=1.0f-cpuWorleyTile(s*2.0f,t8*2.0f,u*2.0f);
+                float w3=1.0f-cpuWorleyTile(s*4.0f,t8*4.0f,u*4.0f);
+                float worleyFbm=w1*0.625f+w2*0.25f+w3*0.125f;
+                float r=(perlin+(1.0f-worleyFbm))/(2.0f-worleyFbm);
+                float g=w1;
+                float b=w2;
+                float a=w3;
                 int idx=(z*N*N+y*N+x)*4;
                 data[idx]=clampU8(r);data[idx+1]=clampU8(g);data[idx+2]=clampU8(b);data[idx+3]=clampU8(a);
             }

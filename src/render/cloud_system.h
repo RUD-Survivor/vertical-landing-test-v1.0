@@ -34,11 +34,12 @@ struct CloudTuneParams {
     float threshLo   = 0.100f; // lowered to reduce percolation cutoff
     float threshHi   = 0.400f;
     float erosion    = 0.100f;
-    float density    = 8.000f; // boosted for visibility
-    float extinction = 0.800f;
+    float density    = 1.400f; // km-space density scale; keep sigmaE*dt in a debuggable range
+    float extinction = 0.180f;
     float minAlt     = 1.5f;
     float maxAlt     = 15.0f;
-    int   debugMode  = 0;      // 0=off 1=force density for debug
+    float localRadiusKm = 250.f; // local tangent cloudMap radius; 0 = global spherical only
+    int   debugMode  = 0;      // 0=off, 1=force density, 2+=diagnostic views
     float dbgFloat   = 0.f;    // float mirror for slider UI
 };
 

@@ -97,12 +97,15 @@ struct FlightInputSystem {
             std::cout << "[CloudTuner] " << (cloudTuner.visible ? "OPEN (sliders active)" : "CLOSED") << std::endl;
         });
 
-        // F3: cycle debug modes  0=off → 1=coverage grayscale → 2=curl field color → 0
+        // F3: cycle cloud debug views
         router.registerKey(GLFW_KEY_F3, []() {
             Renderer3D* r3d = GameContext::getInstance().renderer3d;
             if (r3d) {
-                r3d->cloudSystem.tuneParams.debugMode = (r3d->cloudSystem.tuneParams.debugMode + 1) % 3;
-                const char* names[] = { "OFF", "COVERAGE", "CURL FIELD" };
+                r3d->cloudSystem.tuneParams.debugMode = (r3d->cloudSystem.tuneParams.debugMode + 1) % 7;
+                const char* names[] = {
+                    "OFF", "FORCE_DENSITY", "DENSITY", "COVERAGE_PROFILE_SHAPE",
+                    "ALPHA_TRANS_DEPTH", "SUN_SKY_GROUND", "STEP_OPTICAL_DEPTH"
+                };
                 std::cout << "[DBG] Cloud debug: " << names[r3d->cloudSystem.tuneParams.debugMode] << std::endl;
             }
         });

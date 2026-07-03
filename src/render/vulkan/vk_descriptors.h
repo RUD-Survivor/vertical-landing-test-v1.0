@@ -145,7 +145,7 @@ struct CloudParamsUBO {
     float uErosion, uDensity, uExtinction;
     float uMinAlt, uMaxAlt;
     int   uCloudSteps, uLightSteps, uDebug;
-    float _pad1;
+    float uLocalRadius;
 };
 
 // -----------------------------------------------------------------------
