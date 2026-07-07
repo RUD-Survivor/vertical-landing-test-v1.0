@@ -80,6 +80,7 @@ static VkDescriptorManager g_vkDesc;
 static VkTAA               g_vkTAA;
 static VkRenderer3D        g_vkR3D;
 static bool                g_vkCloudTunerOpen = false;  // F2 toggles
+static bool                g_flowerCloudTunerOpen = false;  // F3 toggles
 static VkHUDSystem         g_vkHUD;
 static VkImGuiSystem       g_vkImGui;
 static VkGameUI            g_gameUI;
@@ -306,6 +307,7 @@ static void renderVulkanFrame(GLFWwindow* window) {
     g_vkImGui.newFrame();
     g_gameUI.draw(inFlight ? g_flightScene : nullptr, ww, wh);
     CloudTunerImGui(&g_vkCloudTunerOpen, g_vkR3D.scene.cloudTune);
+    FlowerCloudTunerImGui(&g_flowerCloudTunerOpen, g_vkR3D.cloudSystem.tuneParams);
     ImGui::Render();
     g_vkImGui.renderToSwapchain(frame.commandBuffer,
         g_vkCtx.swapImages[imageIdx],
@@ -432,7 +434,8 @@ int main() {
    || !g_vkTAA.init(g_vkCtx, g_vkCtx.swapExtent, g_vkCtx.swapFormat,
                     "src/render/shaders/spirv/taa.vert.spv",
                     "src/render/shaders/spirv/taa.frag.spv")
-   || !g_vkR3D.cloudSystem.init(g_vkCtx, g_vkCtx.swapExtent)
+   || !g_vkR3D.cloudSystem.init(g_vkCtx, g_vkCtx.swapExtent,
+        g_vkR3D.scene.cloudNoiseTex.view, g_vkR3D.scene.cloudDetailTex.view, g_vkR3D.scene.cloudWeatherTex.view)
    || !g_vkHUD.init(g_vkCtx, g_vkCtx.swapFormat)
    || !g_vkImGui.init(g_vkCtx, window, g_vkCtx.swapFormat)) {
     fprintf(stderr, "[Vulkan] Fatal: initialization failed\n");

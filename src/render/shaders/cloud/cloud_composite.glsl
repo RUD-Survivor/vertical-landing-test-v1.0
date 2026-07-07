@@ -44,7 +44,7 @@ void main()
     uvec2 offsetId = workPos.xy + offset;
     offsetId.x = offsetId.x % texSize.x;
     offsetId.y = offsetId.y % texSize.y;
-    float blueNoise2 = samplerBlueNoiseErrorDistribution_128x128_OptimizedFor_2d2d2d2d(offsetId.x, offsetId.y, 0, 0u); 
+    float blueNoise2 = whangHashNoise(offsetId.x, offsetId.y, frameData.frameIndex.x);//没有 flower 蓝噪声数据表，见 cloud_common.glsl 顶部说明
 
     //屏幕UV坐标转换至世界视线方向
     vec4 clipSpace = vec4(uv.x * 2.0f - 1.0f, 1.0f - uv.y * 2.0f, 0.0, 1.0);
@@ -67,7 +67,21 @@ void main()
 
     vec3 result = srcColor.rgb;//默认result是HDR场景色
 
-    if(sceneZ <= 0.0f) // reverse z.,仅天空像素叠云/雾
+    // 是否叠云：flower 原版只在"完全没有场景几何"（纯天空）的像素叠云，这对地面/近地视角
+    // 成立（云永远比地形/建筑远），但 RocketSim3D 有轨道/全景相机——从太空看地球时，整个
+    // 星球圆面全是有效场景深度（地形/地表网格），云层必须能画在星球圆面上，而不是只画在
+    // 星球轮廓外的背景星空里。用视空间距离比较代替单纯的"是否为天空"判断：云比场景近就叠，
+    // 天空（sceneZ<=0）视为场景在无穷远，自然满足。用 getViewPos 而不是世界空间坐标，
+    // 是因为视空间下相机就在原点，直接取 length() 就是距离，不用管 camWorldPos 单位约定。
+    bool bComposite = (sceneZ <= 0.0f);
+    if (!bComposite && cloudDepth > 0.0f)
+    {
+        float sceneDist = length(getViewPos(uv, sceneZ, frameData));
+        float cloudDist  = length(getViewPos(uv, cloudDepth, frameData));
+        bComposite = (cloudDist < sceneDist);
+    }
+
+    if(bComposite)
     {
         // Composite planar cloud.
 
@@ -82,6 +96,11 @@ void main()
         //远距离丁达尔效应不明显，若想要 km 级丁达尔（云缝阳光、远景光轴），需要例如：
         //加长 God Ray march（成本高）；
         //或在云 raymarch 内加强向太阳方向的散射（你们已有 powder/自阴影，更接近真实丁达尔）
+    // Phase 2 待接入：这段 400m 近距 God Ray 原本无条件每像素执行 64 步 march，且内部
+    // P0 的行星坐标换算仍是 flower 近地 Y-up 假设（只在贴近地表时成立，尚未做行星尺度改造）。
+    // 用 cloudGodRay 开关关闭（本次 fillPlanetAtmosphereProfile 里恒为 0），等 SDSM 级联阴影
+    // 与该坐标换算一起接入时再打开。
+    if (frameData.sky.atmosphereConfig.cloudGodRay != 0)
     {
         const uint  kGodRaySteps = 64;//定步数
         const float kMaxMarchingDistance = 400.0f;//最大步进距离=步数*步长
@@ -135,6 +154,10 @@ void main()
         {//————————————————————先算太阳光是否被其他物体遮挡住，即从太阳看过去，是不是已经有别的东西——————
             float visibilityTerm = 1.0;//默认全亮，无阴影
             {
+                // Phase 2 待接入：真正的 SDSM 级联阴影渲染 pass 还没做，C++ 侧把
+                // sky.cacsadeConfig.cascadeCount 绑定为占位值 0，下面这个循环因此 0 次迭代、
+                // activeCascadeId 停在 0，紧接着 `activeCascadeId < cascadeCount`（0<0）为假，
+                // 直接跳过阴影采样、保留 visibilityTerm=1.0——不需要额外分支就能安全降级。
                 //SDSM Sample-Distribution Shadow Maps，Shadow Map是从太阳方向渲染一次深度图，每个像素存从太阳看该像素处的表面深度，每个雾点是否被遮挡只要和贴图中的深度比较
                 // First find active cascade.//cascade是把世界按距离切成多段，每段单独一张「从太阳看的深度图」，近处用高分辨率 cascade，远处用低分辨率 cascade
                 uint activeCascadeId = 0;//当前雾点rayPosWP应该查那一段cascade
@@ -204,7 +227,7 @@ void main()
             transmittance2 *= stepTransmittance;//总的雾透射率
 
             // Step.
-            rayPosWP += stepRay;沿采样点向相机再走一步
+            rayPosWP += stepRay;//沿采样点向相机再走一步
         }
 
         result.rgb = result.rgb * transmittance2 + scatteredLight2;//当前场景颜色HDR*雾的总透射率+雾的散射光

@@ -130,12 +130,22 @@ if %ERRORLEVEL% neq 0 goto :fail
 %GLSLC% -fshader-stage=compute %SHADER_DIR%\cloud\cloud_detailnoise.glsl -o %OUT_DIR%\cloud_detailnoise.comp.spv
 if %ERRORLEVEL% neq 0 goto :fail
 
-echo [Cloud Phase0] flower stub compute passes
-%GLSLC% -fshader-stage=compute %SHADER_DIR%\cloud\cloud_phase0_raymarch.comp.glsl -o %OUT_DIR%\cloud_phase0_raymarch.comp.spv
+echo [Atmosphere LUT] transmittance/multiScatter/skyView/skyIrradiance (real-time per-frame bake)
+%GLSLC% -fshader-stage=compute %SHADER_DIR%\atmosphere\transmittance_lut.glsl -o %OUT_DIR%\transmittance_lut.comp.spv
 if %ERRORLEVEL% neq 0 goto :fail
-%GLSLC% -fshader-stage=compute %SHADER_DIR%\cloud\cloud_phase0_reconstruct.comp.glsl -o %OUT_DIR%\cloud_phase0_reconstruct.comp.spv
+%GLSLC% -fshader-stage=compute %SHADER_DIR%\atmosphere\multi_scatter_lut.glsl -o %OUT_DIR%\multi_scatter_lut.comp.spv
 if %ERRORLEVEL% neq 0 goto :fail
-%GLSLC% -fshader-stage=compute %SHADER_DIR%\cloud\cloud_phase0_composite.comp.glsl -o %OUT_DIR%\cloud_phase0_composite.comp.spv
+%GLSLC% -fshader-stage=compute %SHADER_DIR%\atmosphere\skyview_lut.glsl -o %OUT_DIR%\skyview_lut.comp.spv
+if %ERRORLEVEL% neq 0 goto :fail
+%GLSLC% -fshader-stage=compute %SHADER_DIR%\atmosphere\sky_irradiance_capture.glsl -o %OUT_DIR%\sky_irradiance_capture.comp.spv
+if %ERRORLEVEL% neq 0 goto :fail
+
+echo [Cloud Phase1] real flower cloud compute passes (raymarch/reconstruct/composite)
+%GLSLC% -fshader-stage=compute %SHADER_DIR%\cloud\cloud_raymarching.glsl -o %OUT_DIR%\cloud_raymarching.comp.spv
+if %ERRORLEVEL% neq 0 goto :fail
+%GLSLC% -fshader-stage=compute %SHADER_DIR%\cloud\cloud_reconstruct.glsl -o %OUT_DIR%\cloud_reconstruct.comp.spv
+if %ERRORLEVEL% neq 0 goto :fail
+%GLSLC% -fshader-stage=compute %SHADER_DIR%\cloud\cloud_composite.glsl -o %OUT_DIR%\cloud_composite.comp.spv
 if %ERRORLEVEL% neq 0 goto :fail
 %GLSLC% %SHADER_DIR%\vegetation.vert -o %OUT_DIR%\vegetation.vert.spv
 if %ERRORLEVEL% neq 0 goto :fail

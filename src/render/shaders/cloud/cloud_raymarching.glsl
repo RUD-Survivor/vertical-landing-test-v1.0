@@ -6,7 +6,7 @@
 #include "cloud_common.glsl"
 
 //1/4 分辨率云渲染 + Bayer 时域抖动：每个低分辨率线程算云时，对应到 全分辨率屏幕上的哪一个像素
-layout(local_size_x=8，local_size_y=8) in;
+layout(local_size_x=8,local_size_y=8) in;
 
 void main()
 {
@@ -18,8 +18,8 @@ void main()
         return;
     }//超出纹理大小就退出
 
-    uint bayerIndex=frameData.frameIndex%16;//当前帧在 16 帧循环里的相位
-    ivec2 bayerOffset=ivec2(kBayerMartix16[bayerIndex]%4,kBayerMartix16[bayerIndex]/4);//kBayerMartix16来自shared_functions.glsl
+    uint bayerIndex=frameData.frameIndex.x%16;//当前帧在 16 帧循环里的相位（frameIndex 是 uvec4，取 .x）
+    ivec2 bayerOffset=ivec2(kBayerMatrix16[bayerIndex]%4,kBayerMatrix16[bayerIndex]/4);//kBayerMatrix16来自shared_functions.glsl
     //从 kBayerMatrix16 取出本帧在 4×4 块内的偏移 (0~3, 0~3)
 
     ivec2 fullResSize=texSize*4;//全分辨率宽高
@@ -39,8 +39,9 @@ void main()
     uvec2 offsetId = workPos.xy + offset;
     offsetId.x = offsetId.x % texSize.x;
     offsetId.y = offsetId.y % texSize.y;
-    float blueNoise2 = samplerBlueNoiseErrorDistribution_128x128_OptimizedFor_2d2d2d2d(offsetId.x, offsetId.y, 0, 0u);//仅x,y二维 
-    //samplerBlueNoiseErrorDistribution_128x128_OptimizedFor_2d2d2d2d来自 预烘焙 128×128 蓝噪声
+    float blueNoise2 = whangHashNoise(offsetId.x, offsetId.y, frameData.frameIndex.x);//仅x,y二维
+    //本没有 flower 那套预烘焙蓝噪声数据表，改用 whangHashNoise（shared_functions.glsl）代替，
+    //效果是普通白噪声抖动而非蓝噪声，时域/空间分布没那么均匀，但足够打散 banding，见 cloud_common.glsl 顶部说明
 
     // We are revert z.flower 用 Reversed-Z（近=1、远=0），和 OpenGL 默认相反
     //——————————从屏幕UV反推出该像素对应的相机视线方向worldDir————————————————————————note:vulkan的uv坐标以左上为原点，opengl以左下为原点
