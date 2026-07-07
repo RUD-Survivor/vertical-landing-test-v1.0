@@ -120,10 +120,22 @@ if %ERRORLEVEL% neq 0 goto :fail
 if %ERRORLEVEL% neq 0 goto :fail
 %GLSLC% %SHADER_DIR%\atmo.frag -o %OUT_DIR%\atmo.frag.spv
 if %ERRORLEVEL% neq 0 goto :fail
-echo [Cloud] cloud.vert + cloud.frag
+echo [Cloud] cloud.vert + cloud.frag + cloud bake compute
 %GLSLC% %SHADER_DIR%\cloud.vert -o %OUT_DIR%\cloud.vert.spv
 if %ERRORLEVEL% neq 0 goto :fail
 %GLSLC% %SHADER_DIR%\cloud.frag -o %OUT_DIR%\cloud.frag.spv
+if %ERRORLEVEL% neq 0 goto :fail
+%GLSLC% -fshader-stage=compute %SHADER_DIR%\cloud\cloud_basicnoise.glsl -o %OUT_DIR%\cloud_basicnoise.comp.spv
+if %ERRORLEVEL% neq 0 goto :fail
+%GLSLC% -fshader-stage=compute %SHADER_DIR%\cloud\cloud_detailnoise.glsl -o %OUT_DIR%\cloud_detailnoise.comp.spv
+if %ERRORLEVEL% neq 0 goto :fail
+
+echo [Cloud Phase0] flower stub compute passes
+%GLSLC% -fshader-stage=compute %SHADER_DIR%\cloud\cloud_phase0_raymarch.comp.glsl -o %OUT_DIR%\cloud_phase0_raymarch.comp.spv
+if %ERRORLEVEL% neq 0 goto :fail
+%GLSLC% -fshader-stage=compute %SHADER_DIR%\cloud\cloud_phase0_reconstruct.comp.glsl -o %OUT_DIR%\cloud_phase0_reconstruct.comp.spv
+if %ERRORLEVEL% neq 0 goto :fail
+%GLSLC% -fshader-stage=compute %SHADER_DIR%\cloud\cloud_phase0_composite.comp.glsl -o %OUT_DIR%\cloud_phase0_composite.comp.spv
 if %ERRORLEVEL% neq 0 goto :fail
 %GLSLC% %SHADER_DIR%\vegetation.vert -o %OUT_DIR%\vegetation.vert.spv
 if %ERRORLEVEL% neq 0 goto :fail

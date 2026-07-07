@@ -88,6 +88,7 @@ static Terrain::QuadtreeTerrain* g_vkTerrain = nullptr;
 static bool                g_vkSwapchainDirty = false;
 static int                 warmup = 0;  // TAA 预热帧计数（飞行开始时重置）
 static bool                g_workshopMeshesReady = false;
+static SceneSnapshot       g_lastFlightSnap;
 
 // skipBuilder=true  → 从 loaded_rocket_state 恢复存档，全景相机模式
 // skipBuilder=false → 从 GameContext::launch_assembly 组装发射，地面发射台
@@ -227,10 +228,10 @@ static bool initVulkanFlight(bool skipBuilder = false) {
 }
 
 static void renderFlightSceneVulkan(VkCommandBuffer cmd, int frameSlot) {
-    SceneSnapshot snap = g_flightScene->extractRenderSnapshot();
-    g_vkTAA.updateMatrices(snap.view, snap.proj);
+    g_lastFlightSnap = g_flightScene->extractRenderSnapshot();
+    g_vkTAA.updateMatrices(g_lastFlightSnap.view, g_lastFlightSnap.proj);
     g_vkTAA.uploadMatrices(frameSlot);
-    g_vkR3D.render(cmd, 0, snap, g_vkCtx.swapExtent);
+    g_vkR3D.render(cmd, 0, g_lastFlightSnap, g_vkCtx.swapExtent);
 }
 
 static void handleVkSwapchainResize(GLFWwindow* window) {
@@ -238,6 +239,7 @@ static void handleVkSwapchainResize(GLFWwindow* window) {
     g_vkTAA.recreate(g_vkCtx, g_vkCtx.swapExtent, g_vkCtx.swapFormat,
         "src/render/shaders/spirv/taa.vert.spv",
         "src/render/shaders/spirv/taa.frag.spv");
+    g_vkR3D.cloudSystem.recreate(g_vkCtx, g_vkCtx.swapExtent);
     g_vkSwapchainDirty = false;
 }
 
@@ -283,6 +285,12 @@ static void renderVulkanFrame(GLFWwindow* window) {
         g_vkR3D.render(frame.commandBuffer, 0, snap, g_vkCtx.swapExtent);
     }
     g_vkTAA.endGeometryPass(frame.commandBuffer);
+
+    // Flower cloud Phase0: compute stub → composite onto HDR (sky depth >= 0.9995)
+    if (inFlight && g_vkR3D.cloudSystem.enabled) {
+        g_vkR3D.renderFlowerCloudAfterGeometry(g_vkCtx, frame.commandBuffer, g_vkTAA,
+            g_lastFlightSnap, g_frameSync.currentFrame);
+    }
 
     g_vkTAA.beginResolvePass(frame.commandBuffer,
         g_vkCtx.swapImages[imageIdx],
@@ -424,6 +432,7 @@ int main() {
    || !g_vkTAA.init(g_vkCtx, g_vkCtx.swapExtent, g_vkCtx.swapFormat,
                     "src/render/shaders/spirv/taa.vert.spv",
                     "src/render/shaders/spirv/taa.frag.spv")
+   || !g_vkR3D.cloudSystem.init(g_vkCtx, g_vkCtx.swapExtent)
    || !g_vkHUD.init(g_vkCtx, g_vkCtx.swapFormat)
    || !g_vkImGui.init(g_vkCtx, window, g_vkCtx.swapFormat)) {
     fprintf(stderr, "[Vulkan] Fatal: initialization failed\n");

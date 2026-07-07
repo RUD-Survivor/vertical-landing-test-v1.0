@@ -1,0 +1,4 @@
+#ifndef SHARED_SHADING_MODEL_GLSL
+#define SHARED_SHADING_MODEL_GLSL
+
+#endif

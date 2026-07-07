@@ -220,6 +220,64 @@ struct VkTexture3D {
     uint32_t width  = 0;
     uint32_t height = 0;
     uint32_t depth  = 0;
+    VkFormat  format = VK_FORMAT_R8G8B8A8_UNORM;
+
+    // Compute bake target: STORAGE + SAMPLED, no CPU upload.
+    bool createStorage3D(VulkanContext& ctx,
+                         uint32_t       w,
+                         uint32_t       h,
+                         uint32_t       d,
+                         VkFormat       fmt = VK_FORMAT_R8_UNORM) {
+        width = w; height = h; depth = d; format = fmt;
+
+        VkImageCreateInfo ici{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+        ici.imageType     = VK_IMAGE_TYPE_3D;
+        ici.format        = fmt;
+        ici.extent        = { w, h, d };
+        ici.mipLevels     = 1;
+        ici.arrayLayers   = 1;
+        ici.samples       = VK_SAMPLE_COUNT_1_BIT;
+        ici.tiling        = VK_IMAGE_TILING_OPTIMAL;
+        ici.usage         = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        VmaAllocationCreateInfo aci{};
+        aci.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+        if (vmaCreateImage(ctx.allocator, &ici, &aci, &image, &alloc, nullptr) != VK_SUCCESS) {
+            fprintf(stderr, "[VkTexture3D] Failed to create storage 3D image\n");
+            return false;
+        }
+
+        VkImageViewCreateInfo vci{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+        vci.image                           = image;
+        vci.viewType                        = VK_IMAGE_VIEW_TYPE_3D;
+        vci.format                          = fmt;
+        vci.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+        vci.subresourceRange.levelCount     = 1;
+        vci.subresourceRange.layerCount     = 1;
+        if (vkCreateImageView(ctx.device, &vci, nullptr, &view) != VK_SUCCESS) {
+            fprintf(stderr, "[VkTexture3D] Failed to create storage 3D view\n");
+            destroy(ctx);
+            return false;
+        }
+
+        VkSamplerCreateInfo sci{ VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
+        sci.magFilter        = VK_FILTER_LINEAR;
+        sci.minFilter        = VK_FILTER_LINEAR;
+        sci.mipmapMode       = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+        sci.addressModeU     = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        sci.addressModeV     = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        sci.addressModeW     = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        sci.anisotropyEnable = VK_FALSE;
+        sci.maxLod           = VK_LOD_CLAMP_NONE;
+        if (vkCreateSampler(ctx.device, &sci, nullptr, &sampler) != VK_SUCCESS) {
+            fprintf(stderr, "[VkTexture3D] Failed to create storage 3D sampler\n");
+            destroy(ctx);
+            return false;
+        }
+
+        printf("[VkTexture3D] Created storage %ux%ux%u (fmt=%d)\n", w, h, d, (int)fmt);
+        return true;
+    }
 
     // pixels: width*height*depth*4 bytes (RGBA8)
     bool upload(VulkanContext& ctx,
@@ -228,7 +286,7 @@ struct VkTexture3D {
                 uint32_t       h,
                 uint32_t       d,
                 VkFormat       format = VK_FORMAT_R8G8B8A8_UNORM) {
-        width = w; height = h; depth = d;
+        width = w; height = h; depth = d; this->format = format;
         VkDeviceSize size = (VkDeviceSize)w * h * d * 4;
 
         // --- Staging buffer ---

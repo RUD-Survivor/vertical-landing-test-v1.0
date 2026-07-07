@@ -16,12 +16,14 @@
 #include "systems/vk_scene.h"
 #include "systems/vk_sky.h"
 #include "systems/vk_effects.h"
+#include "vk_cloud_system.h"
 #include "../../render/scene_snapshot.h"
 
 struct VkRenderer3D {
     VkSceneSystem   scene;
     VkSkySystem     sky;
     VkEffectsSystem effects;
+    VkCloudSystem   cloudSystem;
 
     // -----------------------------------------------------------------------
     bool init(VulkanContext& ctx, VkDescriptorManager& desc,
@@ -36,6 +38,7 @@ struct VkRenderer3D {
     }
 
     void shutdown(VulkanContext& ctx) {
+        cloudSystem.shutdown(ctx);
         effects.shutdownRibbonRing();
         effects.shutdown(ctx.device);
         sky.shutdown(ctx.device);
@@ -96,9 +99,19 @@ struct VkRenderer3D {
         scene.drawAtmosphere(cmd, pc);
     }
 
-    // Cloud — 全屏三角形体积云，复用 AtmoPushConstants，地形之后大气之前调用
+    // Cloud — legacy fullscreen frag path (disabled when cloudSystem.enabled)
     void drawCloud(VkCommandBuffer cmd, const AtmoPushConstants& pc, double simTime, float camAlt) {
         scene.drawCloud(cmd, pc, simTime, camAlt);
+    }
+
+    // Flower Phase0 — call after TAA endGeometryPass, before resolve
+    void renderFlowerCloudAfterGeometry(VulkanContext& ctx, VkCommandBuffer cmd, VkTAA& taa,
+                                        const SceneSnapshot& snap, int frameSlot) {
+        bool showClouds = false;
+        for (const auto& cd : snap.celestials) {
+            if (cd.atmoIdx == 3 && cd.showClouds) { showClouds = true; break; }
+        }
+        cloudSystem.renderPhase0(ctx, cmd, taa, snap, frameSlot, showClouds);
     }
 
     static bool isGasGiant(int atmoIdx) {
@@ -288,8 +301,8 @@ struct VkRenderer3D {
             // 大气散射（先渲染，让云层能遮挡后方的大气光）
             drawAtmosphere(cmd, apc);
 
-            // 云：仅地球（planetIdx==3），且开启云显示时渲染（在大气之后，遮挡大气）
-            if (cd.atmoIdx == 3 && cd.showClouds) {
+            // 云：仅地球；flower Phase0 在 geometry pass 后 compute 合成
+            if (cd.atmoIdx == 3 && cd.showClouds && !cloudSystem.enabled) {
                 apc.tuneMinAlt     = 2.0f;
                 apc.tuneMaxAlt     = 14.0f;
                 apc.tuneExtinction = 1.2f;

@@ -15,7 +15,6 @@
 
 //体积云一般分两步
 //【烘焙阶段】Compute Shader 算噪声 → 写入 3D 纹理
-                    ↓
 //【运行阶段】Fragment Shader 采样 3D 纹理 → 画云
 
 

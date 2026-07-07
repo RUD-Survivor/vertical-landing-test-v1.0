@@ -10,6 +10,7 @@
 #include "../vk_descriptors.h"
 #include "../vk_pipeline.h"
 #include "../vk_texture.h"
+#include "../vk_cloud_bake.h"
 #include "../../cloud_system.h"  // CloudTuneParams
 #include "../../math/math3d.h"   // Vec3, Mat4
 
@@ -78,6 +79,7 @@ struct VkSceneSystem {
     VkTexture3D     cloudCoverTex;
     VkTexture3D     cloudDetailTex;
     VkTexture2D     cloudWeatherTex;
+    VkCloudBake     cloudBake;
     CloudTuneParams cloudTune;  // from cloud_system.h
 
     // Vegetation 实例 VBO + 环形缓冲
@@ -247,6 +249,7 @@ struct VkSceneSystem {
         meshPipe.shutdown(ctx.device);
 
         // Cloud textures
+        cloudBake.shutdown(ctx.device);
         cloudNoiseTex.destroy(ctx);
         cloudCoverTex.destroy(ctx);
         cloudDetailTex.destroy(ctx);
@@ -444,11 +447,24 @@ struct VkSceneSystem {
     // -----------------------------------------------------------------------
     // Bake + upload 4 cloud textures (noise 128³, cover 128³, detail 32³, weather 2048×1024)
     // Must be called once after VulkanContext is initialized.
-    // Uses CPU noise helpers ported from cloud_system.cpp.
+    // Noise + detail: GPU compute (flower cloud_basicnoise / cloud_detailnoise).
+    // Cover + weather: CPU (cover 暂无 comp；weather 保留 RS3D 地理图).
     bool initCloudTextures(VulkanContext& ctx) {
         printf("[VkScene] Baking cloud textures...\n");
 
-        // ── CPU noise helpers ────────────────────────────────────────────
+        if (!cloudBake.init(ctx)) {
+            fprintf(stderr, "[VkScene] Cloud bake pipeline init failed\n");
+            return false;
+        }
+
+        // ── 1) Basic noise 128³ R8 (GPU) ─────────────────────────────────
+        if (!cloudNoiseTex.createStorage3D(ctx, 128, 128, 128, VK_FORMAT_R8_UNORM) ||
+            !cloudBake.bakeBasicNoise(ctx, cloudNoiseTex)) {
+            fprintf(stderr, "[VkScene] GPU basic noise bake failed\n");
+            return false;
+        }
+
+        // ── CPU FBM helpers (cover only) ─────────────────────────────────
         auto cpuFract = [](float x) { return x - floorf(x); };
         auto cpuHash = [&](float px, float py, float pz) {
             px=cpuFract(px*443.897f); py=cpuFract(py*441.423f); pz=cpuFract(pz*437.195f);
@@ -470,54 +486,7 @@ struct VkSceneSystem {
             for(int i=0;i<oct;i++){v+=cpuNoise3d(px,py,pz)*amp;px=px*2.07f+0.131f;py=py*2.07f-0.217f;pz=pz*2.07f+0.344f;amp*=0.48f;}
             return v;
         };
-        auto cpuWorley = [&](float px,float py,float pz) {
-            float ix=floorf(px),iy=floorf(py),iz=floorf(pz),fx=px-ix,fy=py-iy,fz=pz-iz,md=1.0f;
-            for(int x=-1;x<=1;x++)for(int y=-1;y<=1;y++)for(int z=-1;z<=1;z++){
-                float bx=ix+x,by=iy+y,bz=iz+z;
-                float hx=cpuFract(sinf(bx*127.1f+by*311.7f+bz*74.7f)*43758.5453f);
-                float hy=cpuFract(sinf(bx*269.5f+by*183.3f+bz*246.1f)*43758.5453f);
-                float hz=cpuFract(sinf(bx*113.5f+by*271.9f+bz*124.6f)*43758.5453f);
-                float dx=fx-(x+hx),dy=fy-(y+hy),dz=fz-(z+hz);
-                float dd=dx*dx+dy*dy+dz*dz; if(dd<md)md=dd;
-            }
-            return sqrtf(md);
-        };
-        auto cpuWorleyTile = [&](float px,float py,float pz) {
-            const float T=8.0f;
-            float wpx=px-floorf(px/T)*T,wpy=py-floorf(py/T)*T,wpz=pz-floorf(pz/T)*T;
-            float ix=floorf(wpx),iy=floorf(wpy),iz=floorf(wpz),fx=wpx-ix,fy=wpy-iy,fz=wpz-iz,md=1.0f;
-            for(int x=-1;x<=1;x++)for(int y=-1;y<=1;y++)for(int z=-1;z<=1;z++){
-                float bx=ix+x,by=iy+y,bz=iz+z;
-                float wbx=bx-floorf(bx/T)*T,wby=by-floorf(by/T)*T,wbz=bz-floorf(bz/T)*T;
-                float hx=cpuFract(sinf(wbx*127.1f+wby*311.7f+wbz*74.7f)*43758.5453f);
-                float hy=cpuFract(sinf(wbx*269.5f+wby*183.3f+wbz*246.1f)*43758.5453f);
-                float hz=cpuFract(sinf(wbx*113.5f+wby*271.9f+wbz*124.6f)*43758.5453f);
-                float dx=fx-(x+hx),dy=fy-(y+hy),dz=fz-(z+hz);
-                float dd=dx*dx+dy*dy+dz*dz; if(dd<md)md=dd;
-            }
-            return sqrtf(md);
-        };
         auto clampU8 = [](float v) { int i=(int)(v*255+0.5f); return (uint8_t)(i<0?0:i>255?255:i); };
-
-        // ── 1) Noise 128³ ────────────────────────────────────────────────
-        {
-            const int N=128; std::vector<uint8_t> data(N*N*N*4);
-            for(int z=0;z<N;z++)for(int y=0;y<N;y++)for(int x=0;x<N;x++){
-                float s=(float)x/N*8,t8=(float)y/N*8,u=(float)z/N*8;
-                float perlin=cpuFbm(s,t8,u,4);
-                float w1=1.0f-cpuWorleyTile(s,t8,u);
-                float w2=1.0f-cpuWorleyTile(s*2.0f,t8*2.0f,u*2.0f);
-                float w3=1.0f-cpuWorleyTile(s*4.0f,t8*4.0f,u*4.0f);
-                float worleyFbm=w1*0.625f+w2*0.25f+w3*0.125f;
-                float r=(perlin+(1.0f-worleyFbm))/(2.0f-worleyFbm);
-                float g=w1;
-                float b=w2;
-                float a=w3;
-                int idx=(z*N*N+y*N+x)*4;
-                data[idx]=clampU8(r);data[idx+1]=clampU8(g);data[idx+2]=clampU8(b);data[idx+3]=clampU8(a);
-            }
-            if(!cloudNoiseTex.upload(ctx,data.data(),N,N,N)){fprintf(stderr,"[VkScene] Cloud noise upload failed\n");return false;}
-        }
 
         // ── 2) Cover 128³ ────────────────────────────────────────────────
         {
@@ -534,19 +503,11 @@ struct VkSceneSystem {
             if(!cloudCoverTex.upload(ctx,data.data(),N,N,N)){fprintf(stderr,"[VkScene] Cloud cover upload failed\n");return false;}
         }
 
-        // ── 3) Detail 32³ ────────────────────────────────────────────────
-        {
-            const int N=32; std::vector<uint8_t> data(N*N*N*4);
-            for(int z=0;z<N;z++)for(int y=0;y<N;y++)for(int x=0;x<N;x++){
-                float px=(float)x/N,py=(float)y/N,pz=(float)z/N;
-                float r=cpuWorley(px*4+0.13f,py*4+0.47f,pz*4+0.31f);
-                float g=cpuWorley(px*8+7.31f,py*8+5.17f,pz*8+2.89f);
-                float b=cpuWorley(px*16+11.8f,py*16+9.44f,pz*16+14.3f);
-                float a=r*0.625f+g*0.25f+b*0.125f;
-                int idx=(z*N*N+y*N+x)*4;
-                data[idx]=clampU8(r);data[idx+1]=clampU8(g);data[idx+2]=clampU8(b);data[idx+3]=clampU8(a);
-            }
-            if(!cloudDetailTex.upload(ctx,data.data(),N,N,N)){fprintf(stderr,"[VkScene] Cloud detail upload failed\n");return false;}
+        // ── 3) Detail noise 32³ R8 (GPU) ─────────────────────────────────
+        if (!cloudDetailTex.createStorage3D(ctx, 32, 32, 32, VK_FORMAT_R8_UNORM) ||
+            !cloudBake.bakeDetailNoise(ctx, cloudDetailTex)) {
+            fprintf(stderr, "[VkScene] GPU detail noise bake failed\n");
+            return false;
         }
 
         // ── 4) Weather 2048×1024 ─────────────────────────────────────────

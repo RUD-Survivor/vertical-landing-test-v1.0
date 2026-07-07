@@ -1,10 +1,13 @@
 #ifndef VOLUMETRIC_CLOUD_COMMON_GLSL
 #define VOLUMETRIC_CLOUD_COMMON_GLSL
 
+#extension GL_EXT_samplerless_texture_functions : enable
+
 // Reference implement from https://www.slideshare.net/guerrillagames/the-realtime-volumetric-cloudscapes-of-horizon-zero-dawn.
 // Reference from https://github.com/qiutang98/flower/blob/main/source/shader/cloud/cloud_common.glsl
 
 #include "../common/shared_functions.glsl"
+#include "../common/shared_atmosphere.glsl"
 
 //// #define SkyMsExtintion 0.5
 #define SkyMsExtinction 0.5//天空方向多次散射的消光衰减系数,后续可以修改硬编码参数
@@ -69,7 +72,7 @@ layout (set = 0, binding = 30) uniform texture2D inHiz; // 层次化 Z（Hi-Z）
 
 //引入 Spatiotemporal Blue Noise 相关 SSBO，用于云 ray march 的 步进抖动
 #define BLUE_NOISE_BUFFER_SET 2
-#include "../common/shared_bluenoise.glsl"
+#include "../common/shared_blue_noise.glsl"
 
 float getDensity(float heightMeter)//单位为米
 {
@@ -201,13 +204,13 @@ float powder(float opticalDepth)//简化版Power Effect粉末效应/银边效应
 float powderEffectNew(float depth,float height,float VoL)//是 Powder Effect（粉末/背光提亮）的完整版实用公式：让云在背光、厚、云底时不要太黑，并随朝向太阳变化
 {
     //depth厚度;height垂直位置概率，云底、薄边更明显;VoL View和Light夹角的cos值
-    float r=VoL*0.5+0.5;先把VoL映射到[0,1]
+    float r = VoL * 0.5 + 0.5;//先把VoL映射到[0,1]
     r=r*r;
     height=height*(1.0-r)+r;//背光最强；顺光时减弱height约束，避免正面过曝
     return depth*height;
 }
 
-vec3 lookupSkylight(vec3 worldDir,vec3 worldPos,float viewHeight,vec3 upVector,ivec2 workPos,in const AtmosphereParameters atmosphere,texture2D lutimage)//在RocketSim3D中LUT和upVector根本不适用，需替换，必须使用任意相机位置实时pass
+vec3 lookupSkylight(vec3 worldDir,vec3 worldPos,float viewHeight,vec3 upVector,ivec2 workPos,in const AtmosphereParameters atmosphere)//在RocketSim3D中LUT和upVector根本不适用，需替换，必须使用任意相机位置实时pass
 {
     //worldDir视线方向；worldPos观察者世界位置；viewHeight观察者据行星中心的高度；upVector当地的地面法向量；workPos像素坐标;AtmosphereParameters大气参数;lutimage SkyviewLUT纹理
 
@@ -229,8 +232,8 @@ vec3 lookupSkylight(vec3 worldDir,vec3 worldPos,float viewHeight,vec3 upVector,i
     vec2 sampleUv;
     vec3 luminance;
 
-    skyViewLutParamsToUv(atmosphere,false,viewZenithCosAngle,lightViewCosAngle,viewHeight,vec2(textureSize(lutimage,0)),sampleUv);
-    luminance=texture(sampler2D(lutimage,linearClampEdgeSampler),sampleUv).rgb;
+    skyViewLutParamsToUv(atmosphere,false,viewZenithCosAngle,lightViewCosAngle,viewHeight,vec2(textureSize(inSkyViewLut,0)),sampleUv);
+    luminance=texture(sampler2D(inSkyViewLut,linearClampEdgeSampler),sampleUv).rgb;
     //skyViewLutParamsToUv：Bruneton / Unreal 风格，把 (高度, 视天顶角, 太阳-视线角) 映射到 LUT 的 2D UV
     //false：射线 不穿过地面（从空中看天）
     //linearClampEdgeSampler：LUT 用 clamp（不 repeat），边缘不 wrap
@@ -238,7 +241,7 @@ vec3 lookupSkylight(vec3 worldDir,vec3 worldPos,float viewHeight,vec3 upVector,i
     return luminance;
 }//整个函数都得替换(丢弃)，但透射率luminance依旧得计算
 
-ParticipatingMedia volumetricShadow(vec3 posKm,vec3 sunDirection,in const AtmosphereParameters atmosphere,int fixNum,float msExtinctionFactor)
+ParticipatingMedia volumetricShadow(vec3 posKm,vec3 sunDirection,const in AtmosphereParameters atmosphere,int fixNum,float msExtinctionFactor)
 {
     ParticipatingMedia participatingMedia;
 
@@ -297,7 +300,7 @@ ParticipatingMedia volumetricShadow(vec3 posKm,vec3 sunDirection,in const Atmosp
 }//各散射阶的 transmittanceToLight，决定该点是亮（顺光薄云）还是暗（厚云阴影里），是体积云自阴影的核心
 
 //主函数：对一条射线算整朵云，返回RGB散射和A透射
-vec4 cloudColorCompute(in const AtmosphereParameters atmosphere,
+vec4 cloudColorCompute(const in AtmosphereParameters atmosphere,
 vec2 uv,
 float blueNoise,
 inout float cloudZ,
@@ -403,7 +406,7 @@ float fogNoise)
         bEarlyOutCloud=true;
     }//距离过远就跳过
 
-    const float marchingDistance=min(frameData.sky.atmosphereConfig.cloudMaxTracingDistance,tMax-tMin);//步进距离
+    const float marchingDistance=min(frameData.sky.atmosphereConfig.cloudMaxTraceingDistance,tMax-tMin);//步进距离
     tMax=tMin+marchingDistance;
 
     const uint stepCountUnit=frameData.sky.atmosphereConfig.cloudMarchingStepNum;//后期可改成自适应步长
@@ -423,7 +426,7 @@ float fogNoise)
     //note:在我的工程中lightDir、cosTheta = dot(rayDir, lightDir)，需确认 frame.lightDir 与 flower 同向约定。
 
     //Cloud background sky color
-    vec3 skyBackgroundColor=lookupSkylight(worldDir,worldPos,viewHeight,normalize(worldPos),workPos,atmosphere,inSkyViewLut);//该像素视线方向天空背景色
+    vec3 skyBackgroundColor=lookupSkylight(worldDir,worldPos,viewHeight,normalize(worldPos),workPos,atmosphere);//该像素视线方向天空背景色
     //Sky View Lut不适合火箭模拟器，应采样atmo pass
     
     float transmittance=1.0;// 视线透射率 T，每步乘 stepTransmittance
