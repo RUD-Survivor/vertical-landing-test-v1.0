@@ -862,7 +862,15 @@ else {
             snap.sunScreen[0] = -3.0f; // 哨兵值：太阳在屏幕外/背后，镜头光晕隐藏
         }
         float sunDist = (sunWorld - ctx.camEye_rel).length();
-        snap.sunIntensity = 149597.87f / fmaxf(1.0f, sunDist); // 1 AU in render units (ws_d=0.001)
+        // 严格物理平方反比，1AU 归一化=1.0：真实 1AU=149597870.7km（render 单位=km，
+        // sun_px=sun_body.px*ws_d 已把米转成 km，见 render_context.h）。
+        // 原来这里写的是 149597.87f（少了3个0=全局缩小1000倍）且只做线性衰减（没平方），
+        // 是云在地球轨道附近直射光需要把 SunIntensityMul 调到 30000 才有立体感的根本原因：
+        // 直射光的量纲比环境光/地面反射低了3个数量级，全靠 mul 硬顶凑。改成真实平方反比后，
+        // 地球轨道附近 sunIntensity≈1.0，和其余~O(1)手调光照项回到同一量纲。
+        const float kAuRenderKm = 149597870.7f;
+        float sunDistClamped = fmaxf(1.0f, sunDist);
+        snap.sunIntensity = (kAuRenderKm * kAuRenderKm) / (sunDistClamped * sunDistClamped);
         snap.sunWorldPos[0] = sunWorld.x; snap.sunWorldPos[1] = sunWorld.y; snap.sunWorldPos[2] = sunWorld.z;
 
         // ---- 8. 天空 + 大气 ----
