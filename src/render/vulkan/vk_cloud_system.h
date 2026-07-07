@@ -128,6 +128,15 @@ struct VkCloudSystem {
     float prevCamViewProj[16] = {};
     bool hasPrevViewProj = false;
 
+    // 上一帧的相机模式（0=Orbit 1=Chase 2=Panorama 3=Free，见 scene_snapshot.h::cameraMode）。
+    // 用于探测"切镜头"（C 键切换 Orbit/Chase/Panorama/Free）——这类切换本身就是相机位置
+    // 的硬跳变（比如 camera_director.h 里进入 Free 模式会直接把相机搬到火箭当前位置），
+    // 不是"prev/current 矩阵不一致"这种连续运动，caches 的 prevCamViewProj 在这一帧
+    // 反而是错的参考系，需要靠 bCameraCut 让 cloud_reconstruct.glsl 那一帧直接放弃 history。
+    // 注：全景模式内部切换聚焦天体（,/. 键）是同类型跳变，但 focus_target 目前没有
+    // 传进 SceneSnapshot，暂不覆盖。
+    int prevCameraMode = -1;
+
     // -----------------------------------------------------------------------
     bool init(VulkanContext& ctx, VkExtent2D ext,
               VkImageView basicNoise, VkImageView detailNoise, VkImageView weather) {
@@ -315,7 +324,14 @@ private:
         memcpy(prevCamViewProj, fd.camViewProj, 64);
         hasPrevViewProj = true;
 
-        fd.jitterPeriod = 1; fd.bEnableJitter = 0; fd.bCameraCut = 0;
+        // 切镜头探测：cameraMode 变化（C 键切 Orbit/Chase/Panorama/Free）是相机位置的硬跳变，
+        // 不是连续运动，prevCamViewProj 在这一帧不是有意义的参考系，标记 bCameraCut 让
+        // cloud_reconstruct.glsl 那一帧强制放弃 history（该逻辑本就存在，见 39 行 bPrevUvValid，
+        // 之前只是没有任何调用方真的把 bCameraCut 置过 1）。
+        bool bModeCut = (prevCameraMode != -1) && (snap.cameraMode != prevCameraMode);
+        prevCameraMode = snap.cameraMode;
+
+        fd.jitterPeriod = 1; fd.bEnableJitter = 0; fd.bCameraCut = bModeCut ? 1u : 0u;
         fd.skyValid = 1; fd.skySDSMValid = 0; fd.fixExposure = 1.0f; fd.bAutoExposure = 0;
         fd.renderWidth = (float)extent.width; fd.renderHeight = (float)extent.height;
         fd.displayWidth = fd.renderWidth; fd.displayHeight = fd.renderHeight;
