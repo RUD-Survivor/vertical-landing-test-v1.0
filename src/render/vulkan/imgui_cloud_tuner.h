@@ -113,10 +113,12 @@ inline void FlowerCloudTunerImGui(bool* p_open, FlowerCloudTuneParams& p) {
     ImGui::Text("调试可视化（排查黑云用）");
     const char* dbgItems[] = {
         "Off（正常渲染）",
-        "1: 太阳方向大气透射率 LUT",
-        "2: 天空视图 LUT 背景色",
-        "3: 天空辐照度 cubemap",
-        "4: 太阳色×强度（不经过任何 LUT）",
+        "1: 相机位置实时大气透射率",
+        "2: 天空背景色（采样自 atmo pass）",
+        "3: 天空环境色近似",
+        "4: 太阳色×强度（不经过任何大气衰减）",
+        "5: 不透明度 1-T（全黑=没找到云密度）",
+        "6: 散射光原始值（未做后处理）",
     };
     ImGui::Combo("DebugMode", &p.debugMode, dbgItems, IM_ARRAYSIZE(dbgItems));
     ImGui::TextDisabled("非 0 时直接输出对应中间量，全黑=那一级 LUT/参数有问题");

@@ -77,6 +77,10 @@ struct VkCloudSystem {
 
     bool enabled = true;  // true = 新管线；false = legacy cloud.frag（vk_renderer3d.h 里判断）
     bool debugLogOnce = true;
+    // dispatch 成功和"跳过"两条路径分开各自的一次性日志开关（之前共用一个 debugLogOnce，
+    // 一旦被"成功 dispatch"用掉，后面哪怕真的开始被跳过也不会再有任何提示，排查起来
+    // 会误以为管线一直在正常跑）。
+    bool skipLogOnce = true;
     FlowerCloudTuneParams tuneParams;
 
     VkExtent2D extent     = {};
@@ -166,17 +170,21 @@ struct VkCloudSystem {
                       const SceneSnapshot& snap, int frameSlot, bool drawClouds) {
         if (!enabled) return;
         if (!drawClouds) {
-            if (debugLogOnce) {
+            if (skipLogOnce) {
                 fprintf(stderr, "[VkCloudSystem] Phase1 skip: drawClouds=false (need Earth atmoIdx=3 + showClouds)\n");
-                debugLogOnce = false;
+                skipLogOnce = false;
             }
             return;
         }
+        skipLogOnce = true; // 下次真的又被跳过时，还能再打一次（不是一辈子只报一次）
         if (raymarchPipe == VK_NULL_HANDLE) return;
 
         const CelestialDraw* earth = nullptr;
         for (const auto& cd : snap.celestials) { if (cd.atmoIdx == 3 && cd.showClouds) { earth = &cd; break; } }
-        if (!earth) return;
+        if (!earth) {
+            fprintf(stderr, "[VkCloudSystem] Phase1 skip: earth==nullptr despite drawClouds=true (snap 不一致?)\n");
+            return;
+        }
 
         if (debugLogOnce) {
             printf("[VkCloudSystem] Phase1 dispatch frame %u (%ux%u)\n", snap.frameIndex, extent.width, extent.height);
@@ -187,7 +195,18 @@ struct VkCloudSystem {
         int histSlot = 1 - slot;
 
         GpuPerFrameData fd = fillCloudFrameData(snap, *earth);
-        atmosphereLut.bake(ctx, cmd, frameSlot, fd);
+        // 已放弃 LUT 方案（Transmittance/MultiScatter/SkyView/SkyIrradiance 全部改成
+        // cloud_common.glsl 里实时算，见 shared_atmosphere.glsl::realTimeTransmittance /
+        // analyticSkyAmbient），不再需要每帧烘这四个 pass，省一次 GPU 开销。
+        // atmosphereLut 相关的描述符绑定（binding 10/20/27）现在是死绑定，指向的内容
+        // 不会再被 cloud_common.glsl 采样；atmosphereLut 整个类先留着不删，
+        // 后续如果不再需要可以连同 vk_atmosphere_lut.h 一起清掉。
+        //
+        // 但 atmosphereLut 的 UBO 仍然是 cloud_common.glsl binding 21 的数据来源（相机矩阵、
+        // 太阳方向、DebugMode 开关都在里面），必须每帧上传，不能跟着 bake() 一起跳过——
+        // 之前这里整行注释掉 bake() 时漏了这个，导致 frameData 一直是旧值，DebugMode 都
+        // 传不进 shader。改成只调用不 dispatch LUT 的轻量上传。
+        atmosphereLut.uploadFrameData(ctx, cmd, frameSlot, fd);
         updateCloudDescriptorSet(ctx, taa, slot, histSlot, fd);
 
         VkDescriptorSet sets[2] = { cloudSet[slot], samplerSet };
@@ -196,9 +215,15 @@ struct VkCloudSystem {
 
         // Phase0 曾经每帧转换 quarter RT 的 layout；Phase1 里所有云自建 RT 都常驻 GENERAL
         // （创建时一次性转换，见 createImages），这里只需要处理场景 HDR 颜色的 layout 切换。
+        //
+        // 注意 dstAccessMask 必须同时包含 SHADER_WRITE 和 SHADER_READ：composite pass 最后要
+        // 写 imageHdrSceneColor（WRITE），但现在 raymarch pass 一开始就要读 inHdrSceneColor
+        // 当 skyBackgroundColor（放弃 Sky-View LUT 后新加的依赖，直接采样 atmo pass 已经
+        // 渲染好的天空色）——只声明 WRITE 的话，raymarch 这次读取没有正确的内存依赖保证，
+        // 可能读到未定稿的数据，云直接就没了。
         transitionImage(cmd, hdrImage, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
             VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT,
-            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT);
+            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT);
 
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cloudPipelineLayout, 0, 2, sets, 0, nullptr);
 

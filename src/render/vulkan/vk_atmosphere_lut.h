@@ -191,10 +191,13 @@ struct VkAtmosphereLut {
     VkImageView skyIrradianceCubeView() const { return cubeView; }
     VkBuffer    frameUBO(int frameSlot) const { return uboBuf[frameSlot % FRAMES_IN_FLIGHT]; }
 
-    // 每帧调用一次：把调用方已经填好的 GpuPerFrameData（相机矩阵 + sky/atmosphere 配置，
-    // 见 vk_cloud_system.h::fillCloudFrameData）写入 UBO，并依次 dispatch 四个 bake pass。
-    // 与 cloud_common.glsl（binding 21）共用同一份每帧数据，天空/大气参数只需算一次。
-    void bake(VulkanContext& ctx, VkCommandBuffer cmd, int frameSlot, const GpuPerFrameData& fd) {
+    // 只做 UBO 上传（memcpy + host->compute 可见性 barrier），不 dispatch 任何 LUT 烘焙 pass。
+    // cloud_common.glsl（binding 21）和这几个 LUT bake pass 共用同一个 GpuPerFrameData，
+    // 即使不再烘 LUT（见 vk_cloud_system.h::renderPhase0 里 bake() 调用已注释掉），
+    // 这个 UBO 依然是云管线自己每帧读相机矩阵/太阳方向/DebugMode 等数据的唯一来源，
+    // 必须每帧都上传，不能跟着 LUT dispatch 一起被跳过——之前就是漏了这个，导致
+    // cloud_common.glsl 读到的 frameData 一直是旧值，DebugMode 开关本身都传不进去。
+    void uploadFrameData(VulkanContext& ctx, VkCommandBuffer cmd, int frameSlot, const GpuPerFrameData& fd) {
         int slot = frameSlot % FRAMES_IN_FLIGHT;
         memcpy(uboMapped[slot], &fd, sizeof(fd));
 
@@ -204,6 +207,13 @@ struct VkAtmosphereLut {
         hostBarrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT; hostBarrier.dstAccessMask = VK_ACCESS_2_UNIFORM_READ_BIT;
         VkDependencyInfo hdep{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO }; hdep.memoryBarrierCount=1; hdep.pMemoryBarriers=&hostBarrier;
         vkCmdPipelineBarrier2(cmd, &hdep);
+    }
+
+    // 每帧调用一次：上传 UBO 并依次 dispatch 四个 bake pass（LUT 方案已弃用，目前没有
+    // 调用方在用这个函数，保留供以后需要时恢复）。
+    void bake(VulkanContext& ctx, VkCommandBuffer cmd, int frameSlot, const GpuPerFrameData& fd) {
+        int slot = frameSlot % FRAMES_IN_FLIGHT;
+        uploadFrameData(ctx, cmd, frameSlot, fd);
 
         VkDescriptorSet set = descSet[slot];
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1, &set, 0, nullptr);
