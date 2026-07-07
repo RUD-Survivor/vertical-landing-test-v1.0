@@ -102,7 +102,7 @@ inline void FlowerCloudTunerImGui(bool* p_open, FlowerCloudTuneParams& p) {
 
     ImGui::Separator();
     ImGui::Text("光照与高度");
-    ImGui::SliderFloat("SunIntensityMul", &p.sunIntensityMul, 0.1f, 2000.0f, "%.1f", ImGuiSliderFlags_Logarithmic);
+    ImGui::SliderFloat("SunIntensityMul", &p.sunIntensityMul, 0.1f, 200000.0f, "%.1f", ImGuiSliderFlags_Logarithmic);
     ImGui::TextDisabled("黑云先调这个：Bruneton 大气积分要的太阳辐照度量级和引擎其它地方不一样");
     ImGui::SliderFloat("SunLightScale", &p.sunLightScale, 0.0f, 4.0f, "%.2f");
     ImGui::SliderFloat("MinAlt (km)",   &p.minAltKm, 0.5f, 8.0f, "%.2f");
