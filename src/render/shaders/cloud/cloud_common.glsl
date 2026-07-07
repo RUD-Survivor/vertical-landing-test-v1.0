@@ -368,8 +368,17 @@ float fogNoise)
     if(viewHeight<radiusCloudStart)//相机在云底之下（含地面）
     {
         //相机在云底之下的情况
+        // 已修复（第二次）：贴地精度问题比想象的严重——球面求交公式里要对 |r0-s0|² 和 sR²
+        // 这种~6371²(4000万)量级的数字相减，float32 在这个量级下绝对误差可能到几米甚至
+        // 几十米（32 位浮点大约 7 位有效数字，6371² 的 ULP 已经有好几个 km²），单靠给 tEarth
+        // 一个固定的小容差（之前给的 0.001km=1米）远远不够，仰角稍微大一点就又被误判成撞地。
+        // 改成更稳的判断：先看射线方向和当地"上方"（行星径向朝外）夹角——只要射线朝上方
+        // 有分量（dot>0，视线在当地地平线以上），物理上就不可能撞到自己脚下的地面，
+        // 不需要再看那个在这个尺度下已经不可靠的求交距离数值。只有明确朝下方看
+        // （dot<=0，地平线以下）才需要用求交距离进一步确认。
+        vec3 localUp=normalize(worldPos);
         float tEarth = raySphereIntersectNearest(worldPos, worldDir, vec3(0.0), earthRadius);
-        if(tEarth > 0.0)//射线撞地，整个像素跳过，值得学习
+        if(dot(worldDir,localUp)<=0.0 && tEarth > 0.0)//视线朝地平线以下，且确实求交命中，才算撞地
         {
             // Intersect with earth, pre-return.
             bEarlyOutCloud = true;
@@ -484,6 +493,21 @@ float fogNoise)
     if(dbgMode==1){ return vec4(realTimeTransmittance(worldPos,sunDirection,atmosphere,8),0.0); }
     if(dbgMode==2){ return vec4(skyBackgroundColor,0.0); }
     if(dbgMode==3){ return vec4(groundToCloudTransfertIsoScatter,0.0); }
+    if(dbgMode==7)
+    {
+        // 7=不经过整个 march 循环，直接在 tMin/tMax 中点采一次 cloudMap() 原始密度：
+        // 排除"march 循环某处出问题"，只看密度函数本身在这个位置/方向是不是 0 或 NaN。
+        // 绿色=正常密度值(×5 放大方便看)；红色=NaN/Inf（数值本身炸了）；
+        // 黑色=bEarlyOutCloud（求交区间本身就无效，tMin/tMax 没找到合法范围）。
+        if(bEarlyOutCloud){ return vec4(0.0,0.0,0.0,0.0); }
+        float dbgT=0.5*(tMin+tMax);
+        vec3 dbgSamplePos=dbgT*worldDir+worldPos;
+        float dbgHeight=length(dbgSamplePos);
+        float dbgNormHeight=(dbgHeight-atmosphere.cloudAreaStartHeight)/atmosphere.cloudAreaThickness;
+        float dbgDensity=cloudMap(dbgSamplePos*1000.0f,dbgNormHeight);
+        if(isnan(dbgDensity)||isinf(dbgDensity)){ return vec4(1.0,0.0,0.0,0.0); }
+        return vec4(0.0,saturate(dbgDensity*5.0),0.0,0.0);
+    }
     if(dbgMode==4){ return vec4(frameData.sky.color*frameData.sky.intensity,0.0); }
 
     if(!bEarlyOutCloud)//主云ray march
@@ -812,23 +836,39 @@ float fogNoise)
         {
             // Get average hit pos.
             rayHitPos/=rayHitPosWeight;
-            // rayHitPos：透射率加权平均云位置 (km，大气空间)。= Σ(samplePos×T) / Σ(T)。
+            // rayHitPos：透射率加权平均云位置 (km，大气空间，行星中心为原点)。= Σ(samplePos×T) / Σ(T)。
             // 代表「这朵云在 3D 里大概在哪」，不是第一个/最后一个采样点。
 
-            vec3 rayHitInRender=convertToCameraUnit(rayHitPos,frameData);
-            // 大气空间 → 引擎渲染空间。不再减 bottomRadius Y 偏移，与上面 worldPos 构造
-            // （行星中心为原点）互逆一致。
+            // 已修复（第二次，之前那版是错的）：camViewProj（camView/camProj 直接拷贝自
+            // snap.view/proj）期望的是"浮动原点绝对世界坐标"，不是"相对相机"的坐标——
+            // 证据见 terrain.vert：gl_Position = frame.proj*frame.view*vec4(worldPos,1.0)
+            // 直接用绝对世界坐标 worldPos，相机位置是 lookAt() 构建 view 矩阵时内部处理的；
+            // 那边"worldPos-frame.viewPos"（相机相对坐标）只是另外算出来给光照用的衍生量，
+            // 根本不会喂给投影矩阵。上一版我把 rayHitPos 减了一次相机位置再投影，相当于
+            // 手动减一次 + view 矩阵内部又减一次，两次相减在相机远离行星中心时（轨道视角）
+            // 误差正比于相机到行星中心的距离，直接炸掉。
+            //
+            // 正确做法：用 camInvertView 的平移列恢复相机在这套绝对世界坐标系里的位置
+            // （camInvertView*vec4(0,0,0,1) 就是相机世界坐标，标准技巧，不需要额外的 UBO
+            // 字段），再加上"相机到云"这段（数值小、精度安全的）偏移，重建云的绝对世界坐标。
+            // 这套世界坐标是 km 尺度（和 terrain.vert 的 worldPos 一致），不需要
+            // convertToCameraUnit 的 km→米换算——那是当初照抄 flower"渲染空间用米"的
+            // 假设，这里同样是错的，直接删掉。
+            vec3 camWorldKm=(frameData.camInvertView*vec4(0.0,0.0,0.0,1.0)).xyz;
+            vec3 offsetKm=rayHitPos-worldPos; // 相机→云，行星大气空间偏移 (km)，数值小
+            vec3 cloudAbsKm=camWorldKm+offsetKm; // 浮动原点绝对世界坐标 (km)
 
-            vec4 rayInH=frameData.camViewProj*vec4(rayHitInRender,1.0);
+            vec4 rayInH=frameData.camViewProj*vec4(cloudAbsKm,1.0);
             // 齐次裁剪空间：把代表点投到屏幕，用于深度缓冲。
 
             cloudZ =rayInH.z/rayInH.w;
-            // cloudZ：该像素云的「代表深度」(NDC/clip z/w)，写入云深度 RT（binding 14/16）。
+            // cloudZ：该像素云的「代表深度」(NDC/clip z/w，标准深度)，写入云深度 RT（binding 14/16）。
             // 用途：与场景 inDepth 比较前后关系、1/4→全分辨率重建、TAA 重投影。
             // 不是云表面深度，是整段体积的单值近似。
 
-            rayHitPos-=worldPos;
-            // 改为相对相机的偏移向量 (km)，worldPos 为 march 射线起点（316 行相机大气坐标）。
+            rayHitPos=offsetKm;
+            // 后面 792 行 rayHitHeight 需要"相机到命中点"的偏移向量，正好是 offsetKm，
+            // 直接复用（等价于原来晚一点做的 rayHitPos-=worldPos，只是不再影响上面的投影）。
 
             float rayHitHeight=length(rayHitPos);
             // rayHitHeight：相机到加权命中点的直线距离 (km)。

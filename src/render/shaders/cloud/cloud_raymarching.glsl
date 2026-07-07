@@ -43,7 +43,10 @@ void main()
     //本没有 flower 那套预烘焙蓝噪声数据表，改用 whangHashNoise（shared_functions.glsl）代替，
     //效果是普通白噪声抖动而非蓝噪声，时域/空间分布没那么均匀，但足够打散 banding，见 cloud_common.glsl 顶部说明
 
-    // We are revert z.flower 用 Reversed-Z（近=1、远=0），和 OpenGL 默认相反
+    // 已修复：RocketSim3D 用标准深度（近=0，远=1，Vulkan NDC z 默认约定），不是 flower
+    // 假设的 Reversed-Z（近=1，远=0）——见 vk_taa.h 深度清除值 1.0f、depthCompareOp=LESS。
+    // 下面 clipSpace.z=0.0 取的正好是"近裁剪面"，在标准约定下这本来就是对的，不用改；
+    // 真正需要改的是下面 depth 变量的默认值（无云时应该代表"远"，见其定义处）。
     //——————————从屏幕UV反推出该像素对应的相机视线方向worldDir————————————————————————note:vulkan的uv坐标以左上为原点，opengl以左下为原点
     vec4 clipSpace = vec4(uv.x * 2.0f - 1.0f, 1.0f - uv.y * 2.0f, 0.0, 1.0);//分量x从[0,1]映射到[-1,1],分量y做同样映射但反转方向，z=0这里 z=0 配合他们的camInvertProj约定,UV->裁剪空间(NDC)
     vec4 viewPosH = frameData.camInvertProj * clipSpace;//camInvertProj是投影矩阵的逆，把NDC上的点反投影到视空间(相机在原点)
@@ -53,7 +56,10 @@ void main()
 
     AtmosphereParameters atmosphere=getAtmosphereParameters(frameData);//AtmosphereParameters和getAtmosphereParameters来自shared_atmosphere.glsl
 
-    float depth=0.0f;//传给 cloudColorCompute 的 cloudZ。march 结束后写入该像素云的代表深度（clip z/w，Reversed-Z）。用于重建、TAA、与场景深度比较
+    float depth=1.0f;//传给 cloudColorCompute 的 cloudZ。march 结束后写入该像素云的代表深度（clip z/w，标准深度：近0远1）。
+    //已修复：默认值从 0.0 改成 1.0——标准深度下 1.0 才代表"远/无云"，0.0 反而是"贴着相机"，
+    //之前默认 0.0 会让"没有云"的像素在 cloud_composite.glsl 里被误判成"云比什么都近"，
+    //是云一直显示不出来的根本原因之一。用于重建、TAA、与场景深度比较
     vec4 fogLighting=vec4(0.0);//God Ray / 低层体积雾。.xyz = 散射 RGB，.w = 有效标记（函数内会先设 -1 表示未算）。
 
 

@@ -119,6 +119,7 @@ inline void FlowerCloudTunerImGui(bool* p_open, FlowerCloudTuneParams& p) {
         "4: 太阳色×强度（不经过任何大气衰减）",
         "5: 不透明度 1-T（全黑=没找到云密度）",
         "6: 散射光原始值（未做后处理）",
+        "7: tMin/tMax 中点原始密度（绿=正常 红=NaN 黑=求交区间无效）",
     };
     ImGui::Combo("DebugMode", &p.debugMode, dbgItems, IM_ARRAYSIZE(dbgItems));
     ImGui::TextDisabled("非 0 时直接输出对应中间量，全黑=那一级 LUT/参数有问题");

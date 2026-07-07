@@ -54,7 +54,11 @@ void main()
 
     //
     vec4 srcColor = imageLoad(imageHdrSceneColor, workPos);//直接按像素读，作为与云混合的背景色，已画好的 atmo + 地形/火箭等 HDR 颜色
-    float sceneZ = texture(sampler2D(inDepth, pointClampEdgeSampler), uv).r;//场景深度，sceneZ决定是否叠云，Reversed-Z：≤ 0 表示天空(叠云)，有值表示碰到几何
+    float sceneZ = texture(sampler2D(inDepth, pointClampEdgeSampler), uv).r;
+    // 场景深度。已修复：RocketSim3D 用的是标准深度（近=0，远=1），不是 flower 的 Reversed-Z
+    // （近=1，远=0）——见 vk_taa.h 深度清除值 1.0f、vk_pipeline.h depthCompareOp=LESS，
+    // 两者都是标准深度的写法。之前一直照抄 flower 的 Reversed-Z 假设，"sceneZ<=0 表示天空"
+    // 从一开始就是错的（天空应该是清除值 1.0，不是 0），这是云一直显示不出来的根本原因。
     // vec4 cloudColor = kuwaharaFilter(inCloudReconstructionTexture, linearClampEdgeSampler,uv);
 
     //读来自cloud_reconstruct的三张全分辨率RT
@@ -62,8 +66,10 @@ void main()
     vec4 fogColor = texture(sampler2D(inCloudFogReconstructionTexture, linearClampEdgeSampler), uv);//
     //linearClampEdgeSampler：双线性 + 边缘 clamp
 
-    float cloudDepth = texture(sampler2D(inCloudDepthReconstructionTexture, linearClampEdgeSampler), uv).r;//Reversed-Z云代表深度
-    cloudDepth = max(1e-5f, cloudDepth); // very far cloud may be negative, use small value is enough.
+    float cloudDepth = texture(sampler2D(inCloudDepthReconstructionTexture, linearClampEdgeSampler), uv).r;
+    // 标准深度下的云代表深度；没有云时 cloud_raymarching.glsl 现在会把它设成 1.0（远），
+    // 不需要再像原来那样 clamp 到一个"很小的正数"下限（那是 Reversed-Z 时代"防止变成 0"
+    // 的写法，标准深度下语义反过来了，见 cloud_raymarching.glsl 里 depth 初始值的修复）。
 
     vec3 result = srcColor.rgb;//默认result是HDR场景色
 
@@ -72,13 +78,9 @@ void main()
     // 星球圆面全是有效场景深度（地形/地表网格），云层必须能画在星球圆面上，而不是只画在
     // 星球轮廓外的背景星空里。
     //
-    // 已修复：原来这里反投影回视空间再比较距离（getViewPos + length），绕了远路且没验证过
-    // 就出了 bug——从星空方向测试时走的是下面 sceneZ<=0 那条完全不需要这个比较的捷径，
-    // 从地面/俯瞰方向测试时地面死死挡住了云，说明这个视空间距离比较从没真正生效过。
-    // 改成直接比较 reversed-Z 裁剪空间深度值本身：sceneZ 和 cloudDepth 都是用同一个
-    // frameData.camViewProj 算出来的，同一套惯例下数值越大离相机越近，不需要反投影，
-    // 直接比大小最简单也最不容易出错。
-    bool bComposite = (sceneZ <= 0.0f) || (cloudDepth > sceneZ);
+    // 标准深度下：天空/空白像素的深度是清除值 1.0（最远），"云比场景近"变成
+    // cloudDepth < sceneZ（数值越小离相机越近）。
+    bool bComposite = (sceneZ >= 1.0f) || (cloudDepth < sceneZ);
 
     if(bComposite)
     {
