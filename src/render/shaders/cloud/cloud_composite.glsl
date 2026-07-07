@@ -70,16 +70,15 @@ void main()
     // 是否叠云：flower 原版只在"完全没有场景几何"（纯天空）的像素叠云，这对地面/近地视角
     // 成立（云永远比地形/建筑远），但 RocketSim3D 有轨道/全景相机——从太空看地球时，整个
     // 星球圆面全是有效场景深度（地形/地表网格），云层必须能画在星球圆面上，而不是只画在
-    // 星球轮廓外的背景星空里。用视空间距离比较代替单纯的"是否为天空"判断：云比场景近就叠，
-    // 天空（sceneZ<=0）视为场景在无穷远，自然满足。用 getViewPos 而不是世界空间坐标，
-    // 是因为视空间下相机就在原点，直接取 length() 就是距离，不用管 camWorldPos 单位约定。
-    bool bComposite = (sceneZ <= 0.0f);
-    if (!bComposite && cloudDepth > 0.0f)
-    {
-        float sceneDist = length(getViewPos(uv, sceneZ, frameData));
-        float cloudDist  = length(getViewPos(uv, cloudDepth, frameData));
-        bComposite = (cloudDist < sceneDist);
-    }
+    // 星球轮廓外的背景星空里。
+    //
+    // 已修复：原来这里反投影回视空间再比较距离（getViewPos + length），绕了远路且没验证过
+    // 就出了 bug——从星空方向测试时走的是下面 sceneZ<=0 那条完全不需要这个比较的捷径，
+    // 从地面/俯瞰方向测试时地面死死挡住了云，说明这个视空间距离比较从没真正生效过。
+    // 改成直接比较 reversed-Z 裁剪空间深度值本身：sceneZ 和 cloudDepth 都是用同一个
+    // frameData.camViewProj 算出来的，同一套惯例下数值越大离相机越近，不需要反投影，
+    // 直接比大小最简单也最不容易出错。
+    bool bComposite = (sceneZ <= 0.0f) || (cloudDepth > sceneZ);
 
     if(bComposite)
     {
