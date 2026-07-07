@@ -15,8 +15,9 @@
 // 的 10 个采样器（Set 1）。
 //
 // 30 个 binding 里，SDSM 级联阴影(28/29)、Froxel 空气透视(11)、Hi-Z(30)、
-// G-Buffer A(5)、curl 噪声(9) 目前绑定中性占位资源（Phase 2 待接入，见
-// cloud_common.glsl / cloud_composite.glsl 对应位置的注释），不影响主 march 路径。
+// G-Buffer A(5) 目前绑定中性占位资源（Phase 2 待接入，见 cloud_common.glsl /
+// cloud_composite.glsl 对应位置的注释），不影响主 march 路径。curl 噪声(9)
+// 已接入真实纹理（vk_scene.h::cloudCurlTex，见 vk_cloud_bake.h::bakeCurlNoise）。
 // ==========================================================================
 
 #include "vk_context.h"
@@ -98,13 +99,14 @@ struct VkCloudSystem {
     VmaAllocation fullColorAlloc[2]={}, fullDepthAlloc[2]={}, fullFogAlloc[2]={};
     VkImageView fullColorView[2]={}, fullDepthView[2]={}, fullFogView[2]={};
 
-    // ── Phase 2 占位资源（SDSM/Froxel/Hi-Z/GBufferA/curl 噪声）────────────────
+    // ── Phase 2 占位资源（SDSM/Froxel/Hi-Z/GBufferA；curl 噪声已用真实纹理，见 curlNoiseView）──
     VkImage dummy2DImg=VK_NULL_HANDLE; VmaAllocation dummy2DAlloc=VK_NULL_HANDLE; VkImageView dummy2DView=VK_NULL_HANDLE;
     VkImage dummy3DImg=VK_NULL_HANDLE; VmaAllocation dummy3DAlloc=VK_NULL_HANDLE; VkImageView dummy3DView=VK_NULL_HANDLE;
     VkBuffer dummyCascadeBuf=VK_NULL_HANDLE; VmaAllocation dummyCascadeAlloc=VK_NULL_HANDLE;
 
     // ── 噪声/天气纹理（复用 vk_scene.h 已烘焙好的资源，不重复创建）─────────────
     VkImageView basicNoiseView=VK_NULL_HANDLE, detailNoiseView=VK_NULL_HANDLE, weatherView=VK_NULL_HANDLE;
+    VkImageView curlNoiseView=VK_NULL_HANDLE; // Phase 2：真实 curl 湍流细节纹理（vk_scene.h::cloudCurlTex）
 
     VkSampler linearRepeatSampler=VK_NULL_HANDLE, linearClampSampler=VK_NULL_HANDLE, pointClampSampler=VK_NULL_HANDLE;
 
@@ -139,10 +141,10 @@ struct VkCloudSystem {
 
     // -----------------------------------------------------------------------
     bool init(VulkanContext& ctx, VkExtent2D ext,
-              VkImageView basicNoise, VkImageView detailNoise, VkImageView weather) {
+              VkImageView basicNoise, VkImageView detailNoise, VkImageView weather, VkImageView curlNoise) {
         extent = ext;
         quarterExt = { std::max(1u, (ext.width + 3) / 4), std::max(1u, (ext.height + 3) / 4) };
-        basicNoiseView = basicNoise; detailNoiseView = detailNoise; weatherView = weather;
+        basicNoiseView = basicNoise; detailNoiseView = detailNoise; weatherView = weather; curlNoiseView = curlNoise;
 
         if (!atmosphereLut.init(ctx)) return false;
         if (!createSamplers(ctx))     return false;
@@ -562,7 +564,9 @@ private:
         VkDescriptorImageInfo basicN{ VK_NULL_HANDLE, basicNoiseView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
         VkDescriptorImageInfo detailN{ VK_NULL_HANDLE, detailNoiseView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
         VkDescriptorImageInfo weatherI{ VK_NULL_HANDLE, weatherView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
-        VkDescriptorImageInfo curl{ VK_NULL_HANDLE, dummy2DView, VK_IMAGE_LAYOUT_GENERAL };
+        // Phase 2 已接入：真实 curl 湍流细节纹理（vk_scene.h::cloudCurlTex，见 vk_cloud_bake.h::bakeCurlNoise），
+        // 之前这里绑定的是 1x1 全零占位纹理，cloudMap() 的 localCoverage 项恒为 0。
+        VkDescriptorImageInfo curl{ VK_NULL_HANDLE, curlNoiseView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
         VkDescriptorImageInfo transLut{ VK_NULL_HANDLE, atmosphereLut.transmittanceView(), VK_IMAGE_LAYOUT_GENERAL };
         VkDescriptorImageInfo froxel{ VK_NULL_HANDLE, dummy3DView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
         VkDescriptorImageInfo qColorRW{ VK_NULL_HANDLE, quarterColorView, VK_IMAGE_LAYOUT_GENERAL };

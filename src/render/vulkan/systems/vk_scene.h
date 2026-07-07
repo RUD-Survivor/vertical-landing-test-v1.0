@@ -79,6 +79,9 @@ struct VkSceneSystem {
     VkTexture3D     cloudCoverTex;
     VkTexture3D     cloudDetailTex;
     VkTexture2D     cloudWeatherTex;
+    // Phase 2: cloud_common.glsl::cloudMap() 的 localCoverage 局部碎片湍流细节纹理
+    // （新 Flower 云管线 binding 9 专用，legacy cloud.frag 的 cloudTexSet 不用它）。
+    VkTexture2D     cloudCurlTex;
     VkCloudBake     cloudBake;
     CloudTuneParams cloudTune;  // from cloud_system.h
 
@@ -254,6 +257,7 @@ struct VkSceneSystem {
         cloudCoverTex.destroy(ctx);
         cloudDetailTex.destroy(ctx);
         cloudWeatherTex.destroy(ctx);
+        cloudCurlTex.destroy(ctx);
     }
 
     // -----------------------------------------------------------------------
@@ -507,6 +511,15 @@ struct VkSceneSystem {
         if (!cloudDetailTex.createStorage3D(ctx, 32, 32, 32, VK_FORMAT_R8_UNORM) ||
             !cloudBake.bakeDetailNoise(ctx, cloudDetailTex)) {
             fprintf(stderr, "[VkScene] GPU detail noise bake failed\n");
+            return false;
+        }
+
+        // ── 3.5) Curl noise 256² R8 (GPU, Phase 2) ───────────────────────
+        // 新 Flower 云管线 cloud_common.glsl::cloudMap() 的 localCoverage 局部碎片项用，
+        // 见 vk_cloud_bake.h::bakeCurlNoise。legacy cloud.frag 不用这张纹理。
+        if (!cloudCurlTex.createStorage2D(ctx, 256, 256, VK_FORMAT_R8_UNORM) ||
+            !cloudBake.bakeCurlNoise(ctx, cloudCurlTex)) {
+            fprintf(stderr, "[VkScene] GPU curl noise bake failed\n");
             return false;
         }
 

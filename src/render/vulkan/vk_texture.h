@@ -182,6 +182,50 @@ struct VkTexture2D {
         return true;
     }
 
+    // Compute bake target: STORAGE + SAMPLED, no CPU upload. 镜像 VkTexture3D::createStorage3D，
+    // 用于 GPU compute 直接 imageStore 写入的 2D 烘焙纹理（如 cloud curl noise）。
+    bool createStorage2D(VulkanContext& ctx,
+                         uint32_t       w,
+                         uint32_t       h,
+                         VkFormat       fmt = VK_FORMAT_R8_UNORM) {
+        width = w; height = h;
+
+        VkImageCreateInfo ici{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+        ici.imageType     = VK_IMAGE_TYPE_2D;
+        ici.format        = fmt;
+        ici.extent        = { w, h, 1 };
+        ici.mipLevels     = 1;
+        ici.arrayLayers   = 1;
+        ici.samples       = VK_SAMPLE_COUNT_1_BIT;
+        ici.tiling        = VK_IMAGE_TILING_OPTIMAL;
+        ici.usage         = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        VmaAllocationCreateInfo aci{};
+        aci.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+        if (vmaCreateImage(ctx.allocator, &ici, &aci, &image, &alloc, nullptr) != VK_SUCCESS) {
+            fprintf(stderr, "[VkTexture2D] Failed to create storage 2D image\n");
+            return false;
+        }
+
+        VkImageViewCreateInfo vci{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+        vci.image                       = image;
+        vci.viewType                    = VK_IMAGE_VIEW_TYPE_2D;
+        vci.format                      = fmt;
+        vci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        vci.subresourceRange.levelCount = 1;
+        vci.subresourceRange.layerCount = 1;
+        if (vkCreateImageView(ctx.device, &vci, nullptr, &view) != VK_SUCCESS) {
+            fprintf(stderr, "[VkTexture2D] Failed to create storage 2D view\n");
+            destroy(ctx);
+            return false;
+        }
+
+        if (!createSampler(ctx)) { destroy(ctx); return false; }
+
+        printf("[VkTexture2D] Created storage %ux%u (fmt=%d)\n", w, h, (int)fmt);
+        return true;
+    }
+
     void destroy(VulkanContext& ctx) {
         if (sampler != VK_NULL_HANDLE) { vkDestroySampler   (ctx.device, sampler, nullptr); sampler = VK_NULL_HANDLE; }
         if (view    != VK_NULL_HANDLE) { vkDestroyImageView (ctx.device, view,    nullptr); view    = VK_NULL_HANDLE; }

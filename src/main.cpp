@@ -435,7 +435,8 @@ int main() {
                     "src/render/shaders/spirv/taa.vert.spv",
                     "src/render/shaders/spirv/taa.frag.spv")
    || !g_vkR3D.cloudSystem.init(g_vkCtx, g_vkCtx.swapExtent,
-        g_vkR3D.scene.cloudNoiseTex.view, g_vkR3D.scene.cloudDetailTex.view, g_vkR3D.scene.cloudWeatherTex.view)
+        g_vkR3D.scene.cloudNoiseTex.view, g_vkR3D.scene.cloudDetailTex.view, g_vkR3D.scene.cloudWeatherTex.view,
+        g_vkR3D.scene.cloudCurlTex.view)
    || !g_vkHUD.init(g_vkCtx, g_vkCtx.swapFormat)
    || !g_vkImGui.init(g_vkCtx, window, g_vkCtx.swapFormat)) {
     fprintf(stderr, "[Vulkan] Fatal: initialization failed\n");
