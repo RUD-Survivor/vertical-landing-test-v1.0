@@ -123,6 +123,11 @@ struct VkCloudSystem {
 
     bool cloudRtInitialized = false;
 
+    // 上一次 fillCloudFrameData() 调用时算出的 camViewProj，供时域重投影用（见该函数内
+    // camViewProjPrev 的赋值处）。首帧 hasPrevViewProj=false，退化成"prev=current"。
+    float prevCamViewProj[16] = {};
+    bool hasPrevViewProj = false;
+
     // -----------------------------------------------------------------------
     bool init(VulkanContext& ctx, VkExtent2D ext,
               VkImageView basicNoise, VkImageView detailNoise, VkImageView weather) {
@@ -287,14 +292,28 @@ private:
         invertMat4(snap.view, fd.camInvertView);
         invertMat4(snap.proj, fd.camInvertProj);
         invertMat4(fd.camViewProj, fd.camInvertViewProj);
-        // 没做单独的去抖动(NoJitter)矩阵/上一帧矩阵，直接复用当前帧——云的时域重建对此不敏感
-        // （真正的 TAA 几何抖动由 vk_taa.h 单独处理，与云管线无关）。
+        // 没做单独的去抖动(NoJitter)矩阵，直接复用当前帧——云管线没有开抖动
+        // （bEnableJitter=0），真正的 TAA 几何抖动由 vk_taa.h 单独处理，与云管线无关。
         memcpy(fd.camProjNoJitter, fd.camProj, 64);
         memcpy(fd.camViewProjNoJitter, fd.camViewProj, 64);
         memcpy(fd.camInvertProjNoJitter, fd.camInvertProj, 64);
         memcpy(fd.camInvertViewProjNoJitter, fd.camInvertViewProj, 64);
-        memcpy(fd.camViewProjPrev, fd.camViewProj, 64);
-        memcpy(fd.camViewProjPrevNoJitter, fd.camViewProj, 64);
+
+        // 已修复：camViewProjPrev 原先每帧都被 memcpy 成"当前帧"的 camViewProj，等于
+        // 永远等于 current——cloud_reconstruct.glsl 用它把当前世界坐标反投影到"上一帧
+        // 屏幕位置"时，prev==current 会让这一步变成恒等变换（uvPrev≈uv，等价于假装
+        // 相机没动）。低速/静止时看不出问题，但高速飞行（本工程轨道速度常见 6~9km/s）
+        // 时一帧内相机实际挪动的距离足以让同一世界点在屏幕上明显移位，"假装没动"的
+        // 重投影会把 history 采样到错误位置，叠加 16 帧 Bayer 轮转就是稀疏噪点花屏、
+        // 高速时永远收敛不了的根因之一。改成真正缓存"上一次调用时的 camViewProj"。
+        if (hasPrevViewProj) {
+            memcpy(fd.camViewProjPrev, prevCamViewProj, 64);
+        } else {
+            memcpy(fd.camViewProjPrev, fd.camViewProj, 64); // 首帧无历史，退化成恒等变换
+        }
+        memcpy(fd.camViewProjPrevNoJitter, fd.camViewProjPrev, 64);
+        memcpy(prevCamViewProj, fd.camViewProj, 64);
+        hasPrevViewProj = true;
 
         fd.jitterPeriod = 1; fd.bEnableJitter = 0; fd.bCameraCut = 0;
         fd.skyValid = 1; fd.skySDSMValid = 0; fd.fixExposure = 1.0f; fd.bAutoExposure = 0;
