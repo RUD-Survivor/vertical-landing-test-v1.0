@@ -110,6 +110,18 @@ inline void FlowerCloudTunerImGui(bool* p_open, FlowerCloudTuneParams& p) {
     ImGui::SliderFloat("Speed",         &p.speed,   0.0f, 2.0f, "%.3f");
 
     ImGui::Separator();
+    ImGui::Text("调试可视化（排查黑云用）");
+    const char* dbgItems[] = {
+        "Off（正常渲染）",
+        "1: 太阳方向大气透射率 LUT",
+        "2: 天空视图 LUT 背景色",
+        "3: 天空辐照度 cubemap",
+        "4: 太阳色×强度（不经过任何 LUT）",
+    };
+    ImGui::Combo("DebugMode", &p.debugMode, dbgItems, IM_ARRAYSIZE(dbgItems));
+    ImGui::TextDisabled("非 0 时直接输出对应中间量，全黑=那一级 LUT/参数有问题");
+
+    ImGui::Separator();
     ImGui::TextDisabled("F3: 开关面板");
 
     ImGui::End();

@@ -66,6 +66,9 @@ struct FlowerCloudTuneParams {
     // 手调出来的 sunIntensity(~1.0) 未必是同一套标定；这里单独给一个宽范围倍率，
     // 用来在不改引擎全局曝光的前提下，把云的整体亮度调到合理范围（黑云多半是这里太低）。
     float sunIntensityMul = 50.0f;
+    // 0=正常渲染；1/2/3/4=调试可视化（借用 cloudSunLitMapOctave 字段传给 shader，
+    // 见 cloud_common.glsl::cloudColorCompute 开头的 dbgMode 分支），排查"黑云"用。
+    int debugMode = 0;
 };
 
 struct VkCloudSystem {
@@ -305,6 +308,7 @@ private:
         ac.cloudPowderPow = tuneParams.powderPow;
         ac.cloudShadingSunLightScale = tuneParams.sunLightScale;
         ac.cloudSpeed = tuneParams.speed;
+        ac.cloudSunLitMapOctave = tuneParams.debugMode; // 调试可视化模式开关（见 cloud_common.glsl）
 
         return fd;
     }

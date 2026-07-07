@@ -458,6 +458,21 @@ float fogNoise)
     //行星尺度下相机可以在球面任意位置，改用 normalize(worldPos)（worldPos 已是行星中心为原点）
     //才是该点真正的当地向上方向。inSkyIrradiance 现由 vk_atmosphere_lut.h 每帧实时烘焙（binding 27）。
 
+    // ── 调试可视化（借用暂未使用的 cloudSunLitMapOctave 当调试模式开关，由 Cloud Tuner
+    // 面板的 DebugMode 下拉框驱动）：直接输出某个中间量，排查"黑云"到底是哪一级 LUT/项目
+    // 出了 0/黑值。1=直接看太阳方向大气透射率 LUT；2=看天空视图 LUT 背景色；
+    // 3=看天空辐照度 cubemap；4=看太阳强度*色（不经过任何 LUT，验证曝光量级本身）。
+    int dbgMode=frameData.sky.atmosphereConfig.cloudSunLitMapOctave;
+    if(dbgMode==1)
+    {
+        vec2 dbgUv;
+        lutTransmittanceParamsToUv(atmosphere,viewHeight,dot(sunDirection,normalize(worldPos)),dbgUv);
+        return vec4(texture(sampler2D(inTransmittanceLut,linearClampEdgeSampler),dbgUv).rgb,1.0);
+    }
+    if(dbgMode==2){ return vec4(skyBackgroundColor,1.0); }
+    if(dbgMode==3){ return vec4(groundToCloudTransfertIsoScatter,1.0); }
+    if(dbgMode==4){ return vec4(frameData.sky.color*frameData.sky.intensity,1.0); }
+
     if(!bEarlyOutCloud)//主云ray march
     {
         //Combine backward and forward scattering to have details in all directions
