@@ -5,6 +5,9 @@
 
 #include "cloud_common.glsl"
 
+#define BLUE_NOISE_BUFFER_SET 2
+#include "../common/shared_blue_noise.glsl"
+
 //1/4 分辨率云渲染 + Bayer 时域抖动：每个低分辨率线程算云时，对应到 全分辨率屏幕上的哪一个像素
 layout(local_size_x=8,local_size_y=8) in;
 
@@ -24,7 +27,7 @@ void main()
 
     ivec2 fullResSize=texSize*4;//全分辨率宽高
     ivec2 fullResWorkPos=workPos*4+bayerOffset;//本帧该线程实际追踪的 全分辨率像素坐标
-    
+
     const vec2 uv=(vec2(fullResWorkPos)+vec2(0.5))/vec2(fullResSize);//该像素的屏幕uv坐标
 
 
@@ -39,9 +42,9 @@ void main()
     uvec2 offsetId = workPos.xy + offset;
     offsetId.x = offsetId.x % texSize.x;
     offsetId.y = offsetId.y % texSize.y;
-    float blueNoise2 = whangHashNoise(offsetId.x, offsetId.y, frameData.frameIndex.x);//仅x,y二维
-    //本没有 flower 那套预烘焙蓝噪声数据表，改用 whangHashNoise（shared_functions.glsl）代替，
-    //效果是普通白噪声抖动而非蓝噪声，时域/空间分布没那么均匀，但足够打散 banding，见 cloud_common.glsl 顶部说明
+    float blueNoise2 = samplerBlueNoiseErrorDistribution_128x128_OptimizedFor_2d2d2d2d(
+        offsetId.x, offsetId.y, 0u, 0u);
+    // flower 同款 Heitz Sobol 蓝噪声（shared_blue_noise.glsl + Set 2 SSBO），替代 whangHashNoise 白噪声
 
     // 已修复：RocketSim3D 用标准深度（近=0，远=1，Vulkan NDC z 默认约定），不是 flower
     // 假设的 Reversed-Z（近=1，远=0）——见 vk_taa.h 深度清除值 1.0f、depthCompareOp=LESS。

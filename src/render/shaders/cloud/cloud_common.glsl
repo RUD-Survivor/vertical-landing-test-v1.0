@@ -70,11 +70,8 @@ layout (set = 0, binding = 30) uniform texture2D inHiz; // 层次化 Z（Hi-Z）
 //note:现在是Set1 的 sampler3D uNoiseTex3D 等，layout 完全不同。替换时要 重排 descriptor，或改 cloud_common.glsl 的 binding 对齐现有 vk_descriptors.h
 
 
-// 原版这里 #include shared_blue_noise.glsl，依赖 flower 自带的 Sobol/ranking/scrambling
-// 三张预计算数据表（一整套单独的蓝噪声数据资产，本工程没有，也不属于"接入体积云算法"本身）。
-// Phase 2 待接入：如果需要更高质量的时域抖动，再引入这套数据表。这次改用引擎已有的
-// whangHashNoise()（shared_functions.glsl）代替 cloud_raymarching.glsl / cloud_composite.glsl
-// 里对 samplerBlueNoiseErrorDistribution_128x128_OptimizedFor_2d2d2d2d() 的调用。
+// Set 2：Heitz Sobol 蓝噪声 SSBO（shared_blue_noise.glsl），由 vk_blue_noise.h 上传，
+// cloud_raymarching.glsl / cloud_composite.glsl 在 include 前 #define BLUE_NOISE_BUFFER_SET 2。
 
 float getDensity(float heightMeter)//单位为米
 {

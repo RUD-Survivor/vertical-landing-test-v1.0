@@ -12,7 +12,7 @@
 // 对应 shader: src/render/shaders/cloud/{cloud_common,cloud_raymarching,
 // cloud_reconstruct,cloud_composite}.glsl，descriptor 布局逐字段对应
 // cloud_common.glsl 顶部 binding 0-30 的声明（Set 0）+ shared_sampler.glsl
-// 的 10 个采样器（Set 1）。
+// 的 10 个采样器（Set 1）+ Heitz Sobol 蓝噪声 SSBO（Set 2，shared_blue_noise.glsl）。
 //
 // 30 个 binding 里，SDSM 级联阴影(28/29)、Froxel 空气透视(11)、Hi-Z(30)、
 // G-Buffer A(5) 目前绑定中性占位资源（Phase 2 待接入，见 cloud_common.glsl /
@@ -27,6 +27,7 @@
 #include "vk_utils.h"
 #include "vk_taa.h"
 #include "vk_atmosphere_lut.h"
+#include "vk_blue_noise.h"
 #include "gpu_frame_data.h"
 #include "../scene_snapshot.h"
 #include "../../math/math3d.h"
@@ -123,6 +124,8 @@ struct VkCloudSystem {
 
     VkPipeline raymarchPipe=VK_NULL_HANDLE, reconstructPipe=VK_NULL_HANDLE, compositePipe=VK_NULL_HANDLE;
 
+    VkBlueNoiseBuffers blueNoise;
+
     bool cloudRtInitialized = false;
 
     // 上一次 fillCloudFrameData() 调用时算出的 camViewProj，供时域重投影用（见该函数内
@@ -149,6 +152,7 @@ struct VkCloudSystem {
         if (!atmosphereLut.init(ctx)) return false;
         if (!createSamplers(ctx))     return false;
         if (!createImages(ctx))       return false;
+        if (!blueNoise.init(ctx))     return false;
         if (!createDescriptors(ctx))  return false;
         if (!createPipelines(ctx))    return false;
 
@@ -173,6 +177,7 @@ struct VkCloudSystem {
         vkDeviceWaitIdle(ctx.device);
         destroyPipelines(ctx.device);
         destroyDescriptorsDynamic(ctx.device);
+        blueNoise.shutdown(ctx);
         if (samplerSetLayout) { vkDestroyDescriptorSetLayout(ctx.device, samplerSetLayout, nullptr); samplerSetLayout=VK_NULL_HANDLE; }
         destroyImages(ctx);
         for (VkSampler& s : samplers10) if (s) { vkDestroySampler(ctx.device, s, nullptr); s = VK_NULL_HANDLE; }
@@ -225,7 +230,7 @@ struct VkCloudSystem {
         atmosphereLut.uploadFrameData(ctx, cmd, frameSlot, fd);
         updateCloudDescriptorSet(ctx, taa, slot, histSlot, fd);
 
-        VkDescriptorSet sets[2] = { cloudSet[slot], samplerSet };
+        VkDescriptorSet sets[3] = { cloudSet[slot], samplerSet, blueNoise.set };
 
         VkImage hdrImage = taa.colorImages[taa.currentIdx];
 
@@ -241,7 +246,7 @@ struct VkCloudSystem {
             VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT,
             VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT);
 
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cloudPipelineLayout, 0, 2, sets, 0, nullptr);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cloudPipelineLayout, 0, 3, sets, 0, nullptr);
 
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, raymarchPipe);
         dispatch2D(cmd, quarterExt);
@@ -333,7 +338,7 @@ private:
         bool bModeCut = (prevCameraMode != -1) && (snap.cameraMode != prevCameraMode);
         prevCameraMode = snap.cameraMode;
 
-        fd.jitterPeriod = 1; fd.bEnableJitter = 0; fd.bCameraCut = bModeCut ? 1u : 0u;
+        fd.jitterPeriod = 16; fd.bEnableJitter = 0; fd.bCameraCut = bModeCut ? 1u : 0u;
         fd.skyValid = 1; fd.skySDSMValid = 0; fd.fixExposure = 1.0f; fd.bAutoExposure = 0;
         fd.renderWidth = (float)extent.width; fd.renderHeight = (float)extent.height;
         fd.displayWidth = fd.renderWidth; fd.displayHeight = fd.renderHeight;
@@ -510,9 +515,9 @@ private:
             if (vkCreateDescriptorSetLayout(ctx.device, &ci, nullptr, &cloudSetLayout) != VK_SUCCESS) return false;
         }
 
-        VkDescriptorSetLayout layouts[2] = { cloudSetLayout, samplerSetLayout };
+        VkDescriptorSetLayout layouts[3] = { cloudSetLayout, samplerSetLayout, blueNoise.setLayout };
         VkPipelineLayoutCreateInfo plci{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
-        plci.setLayoutCount = 2; plci.pSetLayouts = layouts;
+        plci.setLayoutCount = 3; plci.pSetLayouts = layouts;
         if (vkCreatePipelineLayout(ctx.device, &plci, nullptr, &cloudPipelineLayout) != VK_SUCCESS) return false;
 
         VkDescriptorPoolSize sizes[] = {

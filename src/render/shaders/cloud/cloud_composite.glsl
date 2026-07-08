@@ -5,6 +5,9 @@
 
 #include "cloud_common.glsl"
 
+#define BLUE_NOISE_BUFFER_SET 2
+#include "../common/shared_blue_noise.glsl"
+
 
 vec3 drawSun(vec3 rayDir, vec3 sunDir) 
 {
@@ -44,7 +47,8 @@ void main()
     uvec2 offsetId = workPos.xy + offset;
     offsetId.x = offsetId.x % texSize.x;
     offsetId.y = offsetId.y % texSize.y;
-    float blueNoise2 = whangHashNoise(offsetId.x, offsetId.y, frameData.frameIndex.x);//没有 flower 蓝噪声数据表，见 cloud_common.glsl 顶部说明
+    float blueNoise2 = samplerBlueNoiseErrorDistribution_128x128_OptimizedFor_2d2d2d2d(
+        offsetId.x, offsetId.y, 0u, 0u);
 
     //屏幕UV坐标转换至世界视线方向
     vec4 clipSpace = vec4(uv.x * 2.0f - 1.0f, 1.0f - uv.y * 2.0f, 0.0, 1.0);
