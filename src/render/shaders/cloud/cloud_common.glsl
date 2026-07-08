@@ -73,6 +73,12 @@ layout (set = 0, binding = 30) uniform texture2D inHiz; // 层次化 Z（Hi-Z）
 // Set 2：Heitz Sobol 蓝噪声 SSBO（shared_blue_noise.glsl），由 vk_blue_noise.h 上传，
 // cloud_raymarching.glsl / cloud_composite.glsl 在 include 前 #define BLUE_NOISE_BUFFER_SET 2。
 
+// RS3D Cloud Tuner：updateFaceIndex 复用为 1/4 Bayer 开关（1=1/4+Bayer+reconstruct，0=全分辨率直写重建 RT）
+bool cloudUseQuarterRes()
+{
+    return frameData.sky.atmosphereConfig.updateFaceIndex != 0u;
+}
+
 float getDensity(float heightMeter)//单位为米
 {
     return exp(-heightMeter * 0.001) * 0.001 * 0.001 * frameData.sky.atmosphereConfig.cloudGodRayScale;//可调强度来自 AtmosphereConfig，目前缺frameData与调用方法

@@ -71,6 +71,28 @@ struct FlowerCloudTuneParams {
     // 0=正常渲染；1/2/3/4=调试可视化（借用 cloudSunLitMapOctave 字段传给 shader，
     // 见 cloud_common.glsl::cloudColorCompute 开头的 dbgMode 分支），排查"黑云"用。
     int debugMode = 0;
+
+    // ── 管线 / cloud_common.glsl frameData.sky.atmosphereConfig ─────────────
+    // useQuarterRes → updateFaceIndex（1=Bayer 1/4 + reconstruct，0=全分辨率 raymarch）
+    bool useQuarterRes = true;
+    int  marchingStepNum = 64;              // cloudMarchingStepNum
+    float maxTracingDistanceKm = 350.f;       // cloudMaxTraceingDistance
+    float tracingStartMaxDistanceKm = 1e8f;   // cloudTracingStartMaxDistance
+
+    // 沿太阳方向体积阴影步进（volumetricShadow）
+    float lightStepMul = 1.5f;                // cloudLightStepMul
+    float lightBasicStepKm = 0.033f;          // cloudLightBasicStep (km)
+    int   lightStepNum = 6;                   // cloudLightStepNum
+
+    // 天气 / 风
+    float weatherUVScale = 1.f;               // cloudWeatherUVScale
+    float windDirX = 1.f, windDirY = 0.f, windDirZ = 0.f; // cloudDirection
+
+    // 地面光 / 环境
+    float fogFade = 1.f;                      // cloudFogFade
+    float groundNoiseScale = 1.f;             // cloudNoiseScale
+    bool  enableGroundContribution = true;    // cloudEnableGroundContribution
+    float cloudAlbedo = 1.f;                  // cloudAlbedo.rgb
 };
 
 struct VkCloudSystem {
@@ -249,12 +271,15 @@ struct VkCloudSystem {
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cloudPipelineLayout, 0, 3, sets, 0, nullptr);
 
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, raymarchPipe);
-        dispatch2D(cmd, quarterExt);
+        const VkExtent2D marchExt = tuneParams.useQuarterRes ? quarterExt : extent;
+        dispatch2D(cmd, marchExt);
         computeBarrier(cmd);
 
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, reconstructPipe);
-        dispatch2D(cmd, extent);
-        computeBarrier(cmd);
+        if (tuneParams.useQuarterRes) {
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, reconstructPipe);
+            dispatch2D(cmd, extent);
+            computeBarrier(cmd);
+        }
 
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, compositePipe);
         dispatch2D(cmd, extent);
@@ -375,7 +400,24 @@ private:
         ac.cloudPowderPow = tuneParams.powderPow;
         ac.cloudShadingSunLightScale = tuneParams.sunLightScale;
         ac.cloudSpeed = tuneParams.speed;
-        ac.cloudSunLitMapOctave = tuneParams.debugMode; // 调试可视化模式开关（见 cloud_common.glsl）
+        ac.cloudSunLitMapOctave = tuneParams.debugMode;
+
+        // RS3D：复用 updateFaceIndex 传递 1/4 Bayer 开关（flower 原字段未用）
+        ac.updateFaceIndex = tuneParams.useQuarterRes ? 1u : 0u;
+        ac.cloudMarchingStepNum = tuneParams.marchingStepNum;
+        ac.cloudMaxTraceingDistance = tuneParams.maxTracingDistanceKm;
+        ac.cloudTracingStartMaxDistance = tuneParams.tracingStartMaxDistanceKm;
+        ac.cloudLightStepMul = tuneParams.lightStepMul;
+        ac.cloudLightBasicStep = tuneParams.lightBasicStepKm;
+        ac.cloudLightStepNum = tuneParams.lightStepNum;
+        ac.cloudWeatherUVScale[0] = ac.cloudWeatherUVScale[1] = tuneParams.weatherUVScale;
+        ac.cloudDirection[0] = tuneParams.windDirX;
+        ac.cloudDirection[1] = tuneParams.windDirY;
+        ac.cloudDirection[2] = tuneParams.windDirZ;
+        ac.cloudFogFade = tuneParams.fogFade;
+        ac.cloudNoiseScale = tuneParams.groundNoiseScale;
+        ac.cloudEnableGroundContribution = tuneParams.enableGroundContribution ? 1 : 0;
+        ac.cloudAlbedo[0] = ac.cloudAlbedo[1] = ac.cloudAlbedo[2] = tuneParams.cloudAlbedo;
 
         return fd;
     }

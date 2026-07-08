@@ -70,14 +70,25 @@ inline void FlowerCloudTunerImGui(bool* p_open, FlowerCloudTuneParams& p) {
     if (ImGui::IsKeyPressed(ImGuiKey_F3, false)) *p_open = !*p_open;
     if (!*p_open) return;
 
-    // 和 CloudTunerImGui 同一套默认字号/间距（不 PushFont，跟随全局字体设置），
-    // 窗口允许纵向滚动，避免参数变多时被裁掉。
-    ImGui::SetNextWindowSize(ImVec2(380, 560), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(400, 720), ImGuiCond_FirstUseEver);
     if (!ImGui::Begin("体积云调参 (Flower Phase1)", p_open, ImGuiWindowFlags_None)) {
         ImGui::End();
         return;
     }
 
+    ImGui::Text("管线");
+    ImGui::Checkbox("1/4 分辨率 + Bayer", &p.useQuarterRes);
+    ImGui::TextDisabled("关=全分辨率 raymarch（×16 成本，减盐胡椒）");
+    ImGui::SliderInt("MarchSteps", &p.marchingStepNum, 8, 256);
+    ImGui::SliderFloat("MaxTraceDist (km)", &p.maxTracingDistanceKm, 10.f, 2000.f, "%.0f");
+    if (p.marchingStepNum > 0) {
+        const float stepKm = p.maxTracingDistanceKm / float(p.marchingStepNum);
+        ImGui::TextDisabled("均匀步长约 %.3f km (%.0f m)", stepKm, stepKm * 1000.f);
+    }
+    ImGui::SliderFloat("TraceStartMax (km)", &p.tracingStartMaxDistanceKm, 1e3f, 1e9f, "%.0e", ImGuiSliderFlags_Logarithmic);
+    ImGui::TextDisabled("视线起点距相机超过此值则跳过云 march");
+
+    ImGui::Separator();
     ImGui::Text("覆盖率与密度");
     ImGui::SliderFloat("Coverage",   &p.coverage, 0.0f, 1.0f, "%.3f");
     ImGui::SliderFloat("Density",    &p.density,  0.0f, 4.0f, "%.2f");
@@ -88,6 +99,19 @@ inline void FlowerCloudTunerImGui(bool* p_open, FlowerCloudTuneParams& p) {
     ImGui::SliderFloat("DetailNoiseScale", &p.detailNoiseScale, 0.0001f,  8.0f, "%.3f", ImGuiSliderFlags_Logarithmic);
     ImGui::TextDisabled("近地 flower 参考: Basic≈0.4  Detail≈1.2");
     ImGui::TextDisabled("行星轨道参考: Basic≈0.003  Detail≈0.02");
+
+    ImGui::Separator();
+    ImGui::Text("体积阴影步进 (volumetricShadow)");
+    ImGui::SliderInt("LightStepNum", &p.lightStepNum, 1, 16);
+    ImGui::SliderFloat("LightBasicStep (km)", &p.lightBasicStepKm, 0.001f, 0.5f, "%.4f", ImGuiSliderFlags_Logarithmic);
+    ImGui::SliderFloat("LightStepMul", &p.lightStepMul, 1.0f, 4.0f, "%.2f");
+    ImGui::TextDisabled("沿太阳方向自阴影：步长 = basicStep × mul^i");
+
+    ImGui::Separator();
+    ImGui::Text("天气 / 风");
+    ImGui::SliderFloat("WeatherUVScale", &p.weatherUVScale, 0.1f, 8.0f, "%.2f");
+    ImGui::SliderFloat3("WindDir", &p.windDirX, -1.f, 1.f, "%.2f");
+    ImGui::SliderFloat("Speed", &p.speed, 0.0f, 2.0f, "%.3f");
 
     ImGui::Separator();
     ImGui::Text("多重散射");
@@ -109,7 +133,10 @@ inline void FlowerCloudTunerImGui(bool* p_open, FlowerCloudTuneParams& p) {
     ImGui::SliderFloat("SunLightScale", &p.sunLightScale, 0.0f, 4.0f, "%.2f");
     ImGui::SliderFloat("MinAlt (km)",   &p.minAltKm, 0.5f, 8.0f, "%.2f");
     ImGui::SliderFloat("MaxAlt (km)",   &p.maxAltKm, 8.0f, 30.0f, "%.2f");
-    ImGui::SliderFloat("Speed",         &p.speed,   0.0f, 2.0f, "%.3f");
+    ImGui::SliderFloat("CloudAlbedo",   &p.cloudAlbedo, 0.0f, 4.0f, "%.2f");
+    ImGui::SliderFloat("FogFade",       &p.fogFade, 0.0f, 2.0f, "%.2f");
+    ImGui::SliderFloat("GroundNoiseScale", &p.groundNoiseScale, 0.0f, 4.0f, "%.2f");
+    ImGui::Checkbox("GroundContribution", &p.enableGroundContribution);
 
     ImGui::Separator();
     ImGui::Text("调试可视化（排查黑云用）");

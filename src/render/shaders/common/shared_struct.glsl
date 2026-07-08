@@ -75,7 +75,7 @@ struct AtmosphereConfig
     float cloudShadowExtent; // x4
 
     vec3 camWorldPos; // cameraworld Position, in atmosphere space unit.
-    uint updateFaceIndex; // update face index for cloud cubemap capture
+    uint updateFaceIndex; // flower: cubemap face; RS3D Cloud Tuner: 1=1/4 Bayer, 0=full-res raymarch
 
     // World space to cloud space view project matrix. Unit also is km.
     mat4 cloudSpaceViewProject;
