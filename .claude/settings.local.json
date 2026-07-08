@@ -6,7 +6,8 @@
       "Bash(cmake --build build --config Release --target RocketSim3D)",
       "Bash(awk 'NR>=2082 && NR<=2270' \"c:/antigravity_code/RocketSim3D/src/render/renderer3d.h\")",
       "Bash(powershell -Command \"Get-ChildItem -Path 'C:\\\\antigravity_code\\\\RocketSim3D\\\\src' -Recurse -Filter '*.cpp' | Measure-Object | Select-Object -ExpandProperty Count\")",
-      "Bash(powershell -Command \"Get-ChildItem -Path 'C:\\\\antigravity_code\\\\RocketSim3D\\\\src' -Recurse -Filter '*.h' | Measure-Object | Select-Object -ExpandProperty Count\")"
+      "Bash(powershell -Command \"Get-ChildItem -Path 'C:\\\\antigravity_code\\\\RocketSim3D\\\\src' -Recurse -Filter '*.h' | Measure-Object | Select-Object -ExpandProperty Count\")",
+      "PowerShell(cmd /c \"d:\\\\antigravity_code\\\\RocketSim3D\\\\compile_shaders.bat\" 2>&1)"
     ]
   }
 }
