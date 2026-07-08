@@ -60,14 +60,9 @@ void main()
         if(bUpdateEvaluate)//这个全分辨率像素，正好是本帧 raymarching 写进 1/4 RT 的那一个
         {
             depthZ = curDepthZ;
-        #if 0//已修复：原先这里恒为1，永远走"直接用本帧原始噪点"这条路，下面带方差钳制的
-             //真正时域混合分支（#else）成了死代码——这正是高速飞行时稀疏 raymarch 噪点
-             //花屏、怎么飞怎么不收敛的核心原因之一（另一半是 camViewProjPrev 的修复，
-             //见 fillCloudFrameData()）。下面 fog 一直就是这套"方差钳制混合"在跑，
-             //这里改成和 fog 同样的路径，不是新写逻辑。
-            // Just update color is good enough.
+        #if 1// flower 直出：本帧 raymarch 结果直接写入，不做方差钳制时域混合（试效果）
             color = curColor;
-        #else//执行：与下方 fog 分支同款方差钳制时域混合
+        #else
             if(abs(preDepthZ - curDepthZ) > 0.1)
             {
                 color = curColor;

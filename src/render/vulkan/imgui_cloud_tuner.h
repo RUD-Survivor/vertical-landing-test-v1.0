@@ -83,9 +83,11 @@ inline void FlowerCloudTunerImGui(bool* p_open, FlowerCloudTuneParams& p) {
     ImGui::SliderFloat("Density",    &p.density,  0.0f, 4.0f, "%.2f");
 
     ImGui::Separator();
-    ImGui::Text("噪声频率（周期对应实际公里数的倒数）");
-    ImGui::SliderFloat("BasicNoiseScale",  &p.basicNoiseScale,  0.0005f, 0.05f, "%.4f");
-    ImGui::SliderFloat("DetailNoiseScale", &p.detailNoiseScale, 0.001f,  0.20f, "%.3f");
+    ImGui::Text("噪声频率（周期 ≈ 公里数倒数；越大纹理越密）");
+    ImGui::SliderFloat("BasicNoiseScale",  &p.basicNoiseScale,  0.0001f, 4.0f, "%.4f", ImGuiSliderFlags_Logarithmic);
+    ImGui::SliderFloat("DetailNoiseScale", &p.detailNoiseScale, 0.0001f,  8.0f, "%.3f", ImGuiSliderFlags_Logarithmic);
+    ImGui::TextDisabled("近地 flower 参考: Basic≈0.4  Detail≈1.2");
+    ImGui::TextDisabled("行星轨道参考: Basic≈0.003  Detail≈0.02");
 
     ImGui::Separator();
     ImGui::Text("多重散射");
