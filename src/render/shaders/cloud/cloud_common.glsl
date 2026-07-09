@@ -458,6 +458,11 @@ float fogNoise)
     const uint stepCountHardMax = uint(max(1, frameData.sky.atmosphereConfig.cloudMarchStepHardMax));
     const uint stepCount = min(stepCountHardMax, uint(ceil(segLenKm / max(stepT, 1e-6f))));
 
+    // 第二层：壳内真空跳步。求交已限定 [tMin,tMax]，但壳内仍有 cloudMap==0 的云缝/晴空。
+    // 仅 density==0 时用 emptyStepKm 快进；薄云(>0)一律细步且不算省光照（避免波状欠采样纹）。
+    const bool bEmptySkip = (frameData.sky.atmosphereConfig.cloudMarchEmptySkip != 0);
+    const float emptyStepKm = max(stepT, frameData.sky.atmosphereConfig.cloudMarchEmptyStepKm);
+
     float sampleT=tMin+0.001*stepT;// slightly delta avoid self intersect，不从精确 tMin 开始，减少浮点/壳面自交
 
     //litter by blue noise
@@ -579,10 +584,14 @@ float fogNoise)
         // upScaleColor：近似云底/云内收到的半球环境光强度。
         // 物理：地面与低空大气把天光散射回云底。
 
-        for(uint i=0;i<stepCount;i++)
+        for(uint i=0;i<stepCount && sampleT<tMax;i++)
         // 主云体 ray march：沿视线从近到远逐步积分 in-scattering，同时累积透射率 T_view。
         // 物理模型：参与介质 RTE 的前向离散形式；每步把局部散射光叠到 scatteredLight，并衰减 transmittance。
+        // 第二层：循环内按密度选择 fine stepT 或 emptyStepKm 前进（见循环末尾 stepAdvance）。
         {
+            const float curStepT = min(stepT, max(tMax - sampleT, 0.0));
+            // curStepT：本步用于光照积分的有效细步长（km），末尾可能被透明跳步覆盖。
+
             //World space sample pos,in km uint
             vec3 samplePos=sampleT*worldDir+worldPos;//采样位置
             // samplePos：当前步采样点世界坐标 (km)，大气空间（地心+offset）。
@@ -606,7 +615,7 @@ float fogNoise)
 
             float stepCloudDensity=cloudMap(samplePosMeter,normalizedHeight);
             // stepCloudDensity：该点体积云密度 σ（无量纲标量，近似 σ_t 的密度因子）。
-            // >0 才进入光照计算，省掉空步的 shadow march。
+            // >0 才进入光照计算；薄云也完整算光，不跳过 shadow march。
 
             rayHitPos+=samplePos*transmittance;
             rayHitPosWeight+=transmittance;
@@ -617,9 +626,9 @@ float fogNoise)
 
             if(stepCloudDensity>0.0)
             {
-                float opticalDepth=stepCloudDensity*stepT*1000.0;//转化成米单位
+                float opticalDepth=stepCloudDensity*curStepT*1000.0;//转化成米单位
                 // opticalDepth τ_step = σ × Δs：本步沿视线的光学深度（米）。
-                // stepT(km)×1000 换米；Beer-Lambert 指数里的 ∫σ_t ds。
+                // curStepT(km)×1000 换米；Beer-Lambert 指数里的 ∫σ_t ds。
 
                 //beer's lambert
                 // Siggraph 2017's new step transmittance formula.
@@ -835,8 +844,14 @@ float fogNoise)
                 // RocketSim3D：cloud.frag 用 0.005 阈值，可按性能微调。
 
             }
-            sampleT+=stepT;
-            // 沿射线前进固定步长 stepT (km)。
+
+            float stepAdvance = curStepT;
+            if(bEmptySkip && stepCloudDensity <= 0.0)
+            {
+                stepAdvance = min(max(emptyStepKm, stepT), max(tMax - sampleT, 0.0));
+                // 仅真空：大步穿过云缝/晴空；density>0 一律细步+全光照。
+            }
+            sampleT += stepAdvance;
 
         }
 

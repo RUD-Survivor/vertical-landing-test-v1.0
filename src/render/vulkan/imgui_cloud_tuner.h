@@ -85,6 +85,14 @@ inline void FlowerCloudTunerImGui(bool* p_open, FlowerCloudTuneParams& p) {
     ImGui::SliderFloat("StepMin (km)", &p.stepTMinKm, 0.001f, 2.0f, "%.4f", ImGuiSliderFlags_Logarithmic);
     ImGui::SliderFloat("StepMax (km)", &p.stepTMaxKm, 0.01f, 20.0f, "%.3f", ImGuiSliderFlags_Logarithmic);
     ImGui::SliderFloat("MaxTraceDist (km)", &p.maxTracingDistanceKm, 10.f, 2000.f, "%.0f");
+
+    ImGui::Separator();
+    ImGui::Text("壳内真空跳步（第 2 层）");
+    ImGui::Checkbox("EmptySkip 启用", &p.emptySkipEnabled);
+    ImGui::SliderFloat("EmptyStep (km)", &p.emptyStepKm, 0.05f, 10.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
+    ImGui::TextDisabled("仅 cloudMap==0 时大步；薄云细步且全光照");
+    ImGui::TextDisabled("EmptyStep 至少为 StepMin");
+
     if (p.marchingStepNum > 0) {
         const float segEst = p.maxTracingDistanceKm;
         const float stepBase = segEst / float(p.marchingStepNum);

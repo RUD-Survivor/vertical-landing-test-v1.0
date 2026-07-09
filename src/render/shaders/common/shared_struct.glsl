@@ -121,7 +121,10 @@ struct AtmosphereConfig
     float cloudMarchStepMinKm;
     float cloudMarchStepMaxKm;
     int   cloudMarchStepHardMax;
-    int   cloudMarchPad0;
+    // 第二层：壳内真空跳步（仅 density==0 时大步；薄云不省光照）
+    int   cloudMarchEmptySkip;
+    float cloudMarchEmptyStepKm;
+    float cloudMarchEmptyTauMax; // 保留字段，未使用
 };
 
 struct SkyInfo
