@@ -85,7 +85,7 @@ struct FlowerCloudTuneParams {
     // 第二层：壳内真空跳步（cloudMarchEmptySkip / EmptyStepKm）
     bool  emptySkipEnabled = true;          // cloudMarchEmptySkip
     float emptyStepKm = 1.0f;               // cloudMarchEmptyStepKm
-    float emptyTauThreshold = 0.0001f;      // cloudMarchEmptyTauMax（保留，shader 未使用）
+    float emptyStepJitter = 0.25f;            // cloudMarchEmptyTauMax：空步 ± 比例 (0~0.5)
 
     // 沿太阳方向体积阴影步进（volumetricShadow）
     float lightStepMul = 1.5f;                // cloudLightStepMul
@@ -420,7 +420,7 @@ private:
         ac.cloudMarchStepHardMax = tuneParams.marchStepHardMax;
         ac.cloudMarchEmptySkip = tuneParams.emptySkipEnabled ? 1 : 0;
         ac.cloudMarchEmptyStepKm = tuneParams.emptyStepKm;
-        ac.cloudMarchEmptyTauMax = tuneParams.emptyTauThreshold;
+        ac.cloudMarchEmptyTauMax = tuneParams.emptyStepJitter;
         ac.cloudLightStepMul = tuneParams.lightStepMul;
         ac.cloudLightBasicStep = tuneParams.lightBasicStepKm;
         ac.cloudLightStepNum = tuneParams.lightStepNum;

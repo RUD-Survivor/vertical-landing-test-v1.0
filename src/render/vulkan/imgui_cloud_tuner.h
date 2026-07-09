@@ -90,8 +90,9 @@ inline void FlowerCloudTunerImGui(bool* p_open, FlowerCloudTuneParams& p) {
     ImGui::Text("壳内真空跳步（第 2 层）");
     ImGui::Checkbox("EmptySkip 启用", &p.emptySkipEnabled);
     ImGui::SliderFloat("EmptyStep (km)", &p.emptyStepKm, 0.05f, 10.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
-    ImGui::TextDisabled("仅 cloudMap==0 时大步；薄云细步且全光照");
-    ImGui::TextDisabled("EmptyStep 至少为 StepMin");
+    ImGui::SliderFloat("EmptyJitter ±", &p.emptyStepJitter, 0.0f, 0.5f, "%.2f");
+    ImGui::TextDisabled("仅 density==0；中点+终点探测通过才跳");
+    ImGui::TextDisabled("EmptyJitter: 蓝噪声缩放空步 (1±值)×EmptyStep");
 
     if (p.marchingStepNum > 0) {
         const float segEst = p.maxTracingDistanceKm;

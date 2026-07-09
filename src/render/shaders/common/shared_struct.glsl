@@ -124,7 +124,7 @@ struct AtmosphereConfig
     // 第二层：壳内真空跳步（仅 density==0 时大步；薄云不省光照）
     int   cloudMarchEmptySkip;
     float cloudMarchEmptyStepKm;
-    float cloudMarchEmptyTauMax; // 保留字段，未使用
+    float cloudMarchEmptyTauMax; // 空步长蓝噪声抖动幅度 ±(0~0.5)
 };
 
 struct SkyInfo

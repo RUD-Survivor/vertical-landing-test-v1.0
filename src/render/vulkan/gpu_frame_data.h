@@ -111,7 +111,7 @@ struct GpuAtmosphereConfig {
     int32_t cloudMarchStepHardMax = 2048;
     int32_t cloudMarchEmptySkip = 1;
     float cloudMarchEmptyStepKm = 1.0f;
-    float cloudMarchEmptyTauMax = 0.0001f;
+    float cloudMarchEmptyTauMax = 0.25f;
 };
 static_assert(sizeof(GpuAtmosphereConfig) == 584, "GpuAtmosphereConfig must match std140 AtmosphereConfig");
 

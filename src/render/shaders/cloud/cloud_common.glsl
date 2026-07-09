@@ -322,6 +322,15 @@ ParticipatingMedia volumetricShadow(vec3 posKm,vec3 sunDirection,const in Atmosp
     return participatingMedia;//返回参与介质结构体
 }//各散射阶的 transmittanceToLight，决定该点是亮（顺光薄云）还是暗（厚云阴影里），是体积云自阴影的核心
 
+// 沿主 march 射线参数 t(km) 查 cloudMap；空步中/终点探测用，不算光照。
+float cloudDensityAtRayT(float rayTKm, vec3 worldPos, vec3 worldDir, const in AtmosphereParameters atmosphere)
+{
+    vec3 samplePos = rayTKm * worldDir + worldPos;
+    float sampleHeight = length(samplePos);
+    float normalizedHeight = (sampleHeight - atmosphere.cloudAreaStartHeight) / atmosphere.cloudAreaThickness;
+    return cloudMap(samplePos * 1000.0, normalizedHeight);
+}
+
 //主函数：对一条射线算整朵云，返回RGB散射和A透射
 vec4 cloudColorCompute(const in AtmosphereParameters atmosphere,
 vec2 uv,
@@ -458,10 +467,12 @@ float fogNoise)
     const uint stepCountHardMax = uint(max(1, frameData.sky.atmosphereConfig.cloudMarchStepHardMax));
     const uint stepCount = min(stepCountHardMax, uint(ceil(segLenKm / max(stepT, 1e-6f))));
 
-    // 第二层：壳内真空跳步。求交已限定 [tMin,tMax]，但壳内仍有 cloudMap==0 的云缝/晴空。
-    // 仅 density==0 时用 emptyStepKm 快进；薄云(>0)一律细步且不算省光照（避免波状欠采样纹）。
+    // 第二层：壳内真空跳步。仅 density==0 时候选 emptyStep；中点+终点探测全 0 才跳。
+    // fogNoise（Heitz 蓝噪声）抖动空步长，打破固定栅格纹；薄云(>0)一律细步+全光照。
     const bool bEmptySkip = (frameData.sky.atmosphereConfig.cloudMarchEmptySkip != 0);
     const float emptyStepKm = max(stepT, frameData.sky.atmosphereConfig.cloudMarchEmptyStepKm);
+    const float emptyJitterAmp = clamp(frameData.sky.atmosphereConfig.cloudMarchEmptyTauMax, 0.0, 0.5);
+    const float emptyJitterMul = 1.0 + emptyJitterAmp * (2.0 * fogNoise - 1.0);
 
     float sampleT=tMin+0.001*stepT;// slightly delta avoid self intersect，不从精确 tMin 开始，减少浮点/壳面自交
 
@@ -848,8 +859,18 @@ float fogNoise)
             float stepAdvance = curStepT;
             if(bEmptySkip && stepCloudDensity <= 0.0)
             {
-                stepAdvance = min(max(emptyStepKm, stepT), max(tMax - sampleT, 0.0));
-                // 仅真空：大步穿过云缝/晴空；density>0 一律细步+全光照。
+                const float remainKm = max(tMax - sampleT, 0.0);
+                const float leapTargetKm = max(stepT, emptyStepKm * emptyJitterMul);
+                const float leapKm = min(leapTargetKm, remainKm);
+                if(leapKm > curStepT + 1e-6)
+                {
+                    const float dMid = cloudDensityAtRayT(sampleT + 0.5 * leapKm, worldPos, worldDir, atmosphere);
+                    const float dEnd = cloudDensityAtRayT(sampleT + leapKm, worldPos, worldDir, atmosphere);
+                    if(dMid <= 0.0 && dEnd <= 0.0)
+                    {
+                        stepAdvance = leapKm;
+                    }
+                }
             }
             sampleT += stepAdvance;
 
