@@ -6,6 +6,7 @@
 #include "../cloud_system.h"  // CloudTuneParams
 #include "vk_cloud_system.h"  // FlowerCloudTuneParams
 #include "imgui.h"
+#include <cmath>
 
 inline void CloudTunerImGui(bool* p_open, CloudTuneParams& p) {
     // F2 toggles the window
@@ -79,11 +80,22 @@ inline void FlowerCloudTunerImGui(bool* p_open, FlowerCloudTuneParams& p) {
     ImGui::Text("管线");
     ImGui::Checkbox("1/4 分辨率 + Bayer", &p.useQuarterRes);
     ImGui::TextDisabled("关=全分辨率 raymarch（×16 成本，减盐胡椒）");
-    ImGui::SliderInt("MarchSteps", &p.marchingStepNum, 8, 256);
+    ImGui::SliderInt("MarchSteps (baseline)", &p.marchingStepNum, 8, 2048);
+    ImGui::SliderInt("StepHardMax", &p.marchStepHardMax, 64, 2048);
+    ImGui::SliderFloat("StepMin (km)", &p.stepTMinKm, 0.001f, 2.0f, "%.4f", ImGuiSliderFlags_Logarithmic);
+    ImGui::SliderFloat("StepMax (km)", &p.stepTMaxKm, 0.01f, 20.0f, "%.3f", ImGuiSliderFlags_Logarithmic);
     ImGui::SliderFloat("MaxTraceDist (km)", &p.maxTracingDistanceKm, 10.f, 2000.f, "%.0f");
     if (p.marchingStepNum > 0) {
-        const float stepKm = p.maxTracingDistanceKm / float(p.marchingStepNum);
-        ImGui::TextDisabled("均匀步长约 %.3f km (%.0f m)", stepKm, stepKm * 1000.f);
+        const float segEst = p.maxTracingDistanceKm;
+        const float stepBase = segEst / float(p.marchingStepNum);
+        const float stepT = (stepBase < p.stepTMinKm) ? p.stepTMinKm
+                          : (stepBase > p.stepTMaxKm) ? p.stepTMaxKm : stepBase;
+        const int stepEff = (int)ceilf(segEst / stepT);
+        const int stepClamped = (stepEff > p.marchStepHardMax) ? p.marchStepHardMax : stepEff;
+        ImGui::TextDisabled("估算(MaxTraceDist): seg≈%.0fkm stepT≈%.3fkm (%.0fm)",
+            segEst, stepT, stepT * 1000.f);
+        ImGui::TextDisabled("估算实际步数≈%d (baseline=%d, hardMax=%d)",
+            stepClamped, p.marchingStepNum, p.marchStepHardMax);
     }
     ImGui::SliderFloat("TraceStartMax (km)", &p.tracingStartMaxDistanceKm, 1e3f, 1e9f, "%.0e", ImGuiSliderFlags_Logarithmic);
     ImGui::TextDisabled("视线起点距相机超过此值则跳过云 march");

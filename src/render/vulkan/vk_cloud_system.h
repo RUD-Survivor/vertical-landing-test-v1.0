@@ -75,9 +75,12 @@ struct FlowerCloudTuneParams {
     // ── 管线 / cloud_common.glsl frameData.sky.atmosphereConfig ─────────────
     // useQuarterRes → updateFaceIndex（1=Bayer 1/4 + reconstruct，0=全分辨率 raymarch）
     bool useQuarterRes = true;
-    int  marchingStepNum = 64;              // cloudMarchingStepNum
+    int  marchingStepNum = 64;              // cloudMarchingStepNum（baseline）
     float maxTracingDistanceKm = 350.f;       // cloudMaxTraceingDistance
     float tracingStartMaxDistanceKm = 1e8f;   // cloudTracingStartMaxDistance
+    float stepTMinKm = 0.05f;               // cloudMarchStepMinKm
+    float stepTMaxKm = 0.5f;                // cloudMarchStepMaxKm
+    int   marchStepHardMax = 2048;          // cloudMarchStepHardMax
 
     // 沿太阳方向体积阴影步进（volumetricShadow）
     float lightStepMul = 1.5f;                // cloudLightStepMul
@@ -407,6 +410,9 @@ private:
         ac.cloudMarchingStepNum = tuneParams.marchingStepNum;
         ac.cloudMaxTraceingDistance = tuneParams.maxTracingDistanceKm;
         ac.cloudTracingStartMaxDistance = tuneParams.tracingStartMaxDistanceKm;
+        ac.cloudMarchStepMinKm = tuneParams.stepTMinKm;
+        ac.cloudMarchStepMaxKm = tuneParams.stepTMaxKm;
+        ac.cloudMarchStepHardMax = tuneParams.marchStepHardMax;
         ac.cloudLightStepMul = tuneParams.lightStepMul;
         ac.cloudLightBasicStep = tuneParams.lightBasicStepKm;
         ac.cloudLightStepNum = tuneParams.lightStepNum;

@@ -445,11 +445,20 @@ float fogNoise)
     const float marchingDistance=min(frameData.sky.atmosphereConfig.cloudMaxTraceingDistance,tMax-tMin);//步进距离
     tMax=tMin+marchingDistance;
 
-    const uint stepCountUnit=frameData.sky.atmosphereConfig.cloudMarchingStepNum;//后期可改成自适应步长
-    const float stepCount=float(stepCountUnit);//云视线march步数
-    const float stepT=(tMax-tMin)/stepCount;//步长
+    const uint stepCountUnit = frameData.sky.atmosphereConfig.cloudMarchingStepNum; // Tuner: baseline步数
+    const float segLenKm = (tMax - tMin); // km，实际云段长度
 
-    float sampleT=tMin+0.001*stepT;// slightly delta avoid self intersect不要从精确 tMin 开始，减少浮点/壳面自交
+    // 第一层：固定步数的“步长过大”会导致掠射边缘粉末闪点。
+    // 这里把步长做上限约束：当 segLen 很长时自动增加步数，让单步Δs不至于太大。
+    const float stepTMinKm = max(1e-4f, frameData.sky.atmosphereConfig.cloudMarchStepMinKm);
+    const float stepTMaxKm = max(stepTMinKm, frameData.sky.atmosphereConfig.cloudMarchStepMaxKm);
+    const float stepTBase  = segLenKm / max(1.0f, float(stepCountUnit));
+    const float stepT      = clamp(stepTBase, stepTMinKm, stepTMaxKm);
+
+    const uint stepCountHardMax = uint(max(1, frameData.sky.atmosphereConfig.cloudMarchStepHardMax));
+    const uint stepCount = min(stepCountHardMax, uint(ceil(segLenKm / max(stepT, 1e-6f))));
+
+    float sampleT=tMin+0.001*stepT;// slightly delta avoid self intersect，不从精确 tMin 开始，减少浮点/壳面自交
 
     //litter by blue noise
     sampleT+=stepT*blueNoise;//每像素随机偏移0~1步，减轻带状分层（banding）
@@ -570,7 +579,7 @@ float fogNoise)
         // upScaleColor：近似云底/云内收到的半球环境光强度。
         // 物理：地面与低空大气把天光散射回云底。
 
-        for(uint i=0;i<stepCountUnit;i++)
+        for(uint i=0;i<stepCount;i++)
         // 主云体 ray march：沿视线从近到远逐步积分 in-scattering，同时累积透射率 T_view。
         // 物理模型：参与介质 RTE 的前向离散形式；每步把局部散射光叠到 scatteredLight，并衰减 transmittance。
         {

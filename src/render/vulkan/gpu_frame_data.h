@@ -105,8 +105,13 @@ struct GpuAtmosphereConfig {
     int32_t cloudSunLitMapOctave = 1;
     float cloudNoiseScale = 1.f;
     int32_t cloudGodRay = 0;
+
+    float cloudMarchStepMinKm = 0.05f;
+    float cloudMarchStepMaxKm = 0.5f;
+    int32_t cloudMarchStepHardMax = 2048;
+    int32_t cloudMarchPad0 = 0;
 };
-static_assert(sizeof(GpuAtmosphereConfig) == 560, "GpuAtmosphereConfig must match std140 AtmosphereConfig");
+static_assert(sizeof(GpuAtmosphereConfig) == 576, "GpuAtmosphereConfig must match std140 AtmosphereConfig");
 
 // -----------------------------------------------------------------------
 // SkyInfo — 656 bytes
@@ -121,7 +126,7 @@ struct GpuSkyInfo {
     GpuCascadeShadowConfig cacsadeConfig;
     GpuAtmosphereConfig atmosphereConfig;
 };
-static_assert(sizeof(GpuSkyInfo) == 656, "GpuSkyInfo must match std140 SkyInfo");
+static_assert(sizeof(GpuSkyInfo) == 672, "GpuSkyInfo must match std140 SkyInfo");
 
 // -----------------------------------------------------------------------
 // PerFrameData — 1680 bytes. binding 21 (cloud_common.glsl) / binding 8 (atmosphere_common.glsl).
@@ -171,7 +176,7 @@ struct GpuPerFrameData {
 
     GpuSkyInfo sky;
 };
-static_assert(sizeof(GpuPerFrameData) == 1680, "GpuPerFrameData must match std140 PerFrameData");
+static_assert(sizeof(GpuPerFrameData) == 1696, "GpuPerFrameData must match std140 PerFrameData");
 
 // -----------------------------------------------------------------------
 // CascadeInfo — 176 bytes. SDSM cascade SSBO 元素（binding 29）。

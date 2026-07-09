@@ -116,6 +116,12 @@ struct AtmosphereConfig
     int cloudSunLitMapOctave;
     float cloudNoiseScale;
     int cloudGodRay;
+
+    // RS3D Cloud Tuner：第一层自适应步长（cloud_common.glsl cloudColorCompute）
+    float cloudMarchStepMinKm;
+    float cloudMarchStepMaxKm;
+    int   cloudMarchStepHardMax;
+    int   cloudMarchPad0;
 };
 
 struct SkyInfo
