@@ -6,12 +6,15 @@
 // atmo_inside.frag — 大气渲染重构·壳内路径（相机在大气层以内）
 //
 // 替换旧版 atmo.frag 的全屏嵌套 raymarch（96 外层 × 20 内层 = ~1920 步/像素）：
-//   · 天空背景像素（没有场景几何挡住）：直接查 Sky-View LUT，O(1)，不再 raymarch。
+//   · 天空背景像素（没有场景几何挡住）：直接查 Sky-View LUT，O(1)，不再 raymarch
+//     （这里合法——观察者高度 < topRadius，Sky-View LUT 的有效范围，见
+//     atmo_scatter_common.glsl 顶部注释）。
 //   · 有场景深度的像素（地形/行星表面，见 vk_renderer3d.h 绘制顺序注释——大气
-//     排在火箭/发射台之前，深度缓冲此时只有地形+行星表面+环，够用）：做一次
-//     单趟（非嵌套）raymarch 算空气透视(haze)，太阳方向的光学深度不再现场 20 步
-//     内层 march，改成查这个星球缓存好的 Transmittance LUT（vk_atmosphere_lut.h
-//     的 VkAtmoLutCache，profile 没变就直接复用，不重烤）。
+//     排在火箭/发射台之前，深度缓冲此时只有地形+行星表面+环，够用）：单趟
+//     （非嵌套）raymarch 算空气透视(haze)，太阳方向的光学深度查 Transmittance
+//     LUT（vk_atmosphere_lut.h 的 VkAtmoLutCache，profile 没变就直接复用，
+//     不重烤），不再是每外层步一次 20 步内层 march。raymarch 本体和
+//     atmo_shell.frag 共用 atmo_scatter_common.glsl::raymarchAtmoSegment()。
 //
 // 详见计划 fuzzy-toasting-flurry：大气渲染重构 / 方案 2、4。
 // ==========================================================================
@@ -19,7 +22,7 @@
 #define PI 3.14159265359
 #define PRIMARY_STEPS 48
 
-#include "common/shared_atmosphere.glsl"
+#include "atmo_scatter_common.glsl"
 
 layout(set = 0, binding = 0) uniform FrameUBO {
     mat4  view;
@@ -61,62 +64,13 @@ layout(push_constant) uniform PC {
     float _padTune;
 } pc;
 
-// Set 1：渲染侧采样（VkAtmoLutPipelines::renderSetLayout，每个星球一份实例，
-// 见 vk_atmosphere_lut.h::VkAtmosphereLut::renderSet / updateDepthBinding）。
-layout(set = 1, binding = 0) uniform texture2D inSceneDepth;
-layout(set = 1, binding = 1) uniform texture2D inTransmittanceLut;
-layout(set = 1, binding = 2) uniform texture2D inSkyViewLut;
-layout(set = 1, binding = 3) uniform sampler   samp;
-
 layout(location = 0) in  vec2 vNDC;
 layout(location = 0) out vec4 FragColor;
 
-float ozoneDensity(float h) {
-    float d = (h - pc.ozoneCenter) / pc.ozoneWidth;
-    return exp(-0.5 * d * d);
-}
-
-bool intersectSphere(vec3 ro, vec3 rd, float radius, out float t0, out float t1) {
-    vec3  L    = ro - pc.planetCenter.xyz;
-    float tca  = -dot(L, rd);
-    vec3  perp = L + tca * rd;
-    float d2   = dot(perp, perp);
-    float r2   = radius * radius;
-    if (d2 > r2) return false;
-    float thc = sqrt(r2 - d2);
-    t0 = tca - thc; t1 = tca + thc;
-    return true;
-}
-
-float rayleighPhaseFn(float cosTheta) {
-    return 3.0 / (16.0 * PI) * (1.0 + cosTheta * cosTheta);
-}
-
-float miePhaseFn(float cosTheta) {
-    float g2    = pc.gMie * pc.gMie;
-    float num   = 3.0 * (1.0 - g2) * (1.0 + cosTheta * cosTheta);
-    float denom = 8.0 * PI * (2.0 + g2) * pow(1.0 + g2 - 2.0 * pc.gMie * cosTheta, 1.5);
-    return num / max(denom, 1e-6);
-}
-
-// 用 Transmittance LUT 代替嵌套 raymarch 里的太阳方向内层 march：给定采样点
-// （相对行星中心）和太阳方向，直接查表得到"这点到大气顶之间，太阳光被
-// Rayleigh/Mie/臭氧吃掉多少"。AtmosphereParameters 这里只需要 bottomRadius/
-// topRadius 两个字段（lutTransmittanceParamsToUv 内部只读这两个），不需要
-// 整套 Bruneton 参数化——避免把云管线那个大 UBO(GpuPerFrameData) 也搬进图形管线。
-vec3 sunTransmittanceLUT(vec3 posRelPlanet, vec3 sunDir) {
-    AtmosphereParameters atmo;
-    atmo.bottomRadius = pc.surfaceRadius;
-    atmo.topRadius    = pc.outerRadius;
-
-    float viewHeight = length(posRelPlanet);
-    float sunZenithCosAngle = dot(sunDir, posRelPlanet / max(viewHeight, 1e-4));
-    vec2 uv;
-    lutTransmittanceParamsToUv(atmo, viewHeight, sunZenithCosAngle, uv);
-    return texture(sampler2D(inTransmittanceLut, samp), uv).rgb;
-}
-
 // 天空背景 O(1) 查表：不做任何 raymarch，直接从 Sky-View LUT 里按视线方向取色。
+// 合法条件：viewHeight（这里是相机高度）< topRadius——本文件只在"相机在壳内"
+// 时才会被调度到（见 vk_renderer3d.h::renderAtmoAfterGeometry 的 cameraInside
+// 分支），恒成立。
 vec3 skyViewLUT(vec3 worldDirFromPlanet, vec3 camRelPlanet, vec3 sunDir) {
     AtmosphereParameters atmo;
     atmo.bottomRadius = pc.surfaceRadius;
@@ -164,22 +118,30 @@ void main() {
     float altNorm       = clamp(camAlt / max(atmoThickness, 1e-3), 0.0, 1.0);
 
     float tNear, tFar;
-    if (!intersectSphere(camPos, rayDir, pc.outerRadius, tNear, tFar)) discard;
+    if (!intersectSphereAtCenter(camPos, rayDir, pc.planetCenter.xyz, pc.outerRadius, tNear, tFar)) discard;
     tNear = max(tNear, 0.0);
     if (tFar <= tNear) discard;
 
     // Clip ray at planet surface（行星本体挡住的部分不用再往后传播）
     float tS0, tS1;
-    if (intersectSphere(camPos, rayDir, pc.surfaceRadius, tS0, tS1) && tS0 > 0.0)
+    if (intersectSphereAtCenter(camPos, rayDir, pc.planetCenter.xyz, pc.surfaceRadius, tS0, tS1) && tS0 > 0.0)
         tFar = min(tFar, tS0);
 
     // ── 深度缓冲空气透视（haze）：把 tFar 进一步 clip 到场景深度对应的距离 ──
+    // vNDC 是 Vulkan 原生 NDC（顶部=-1），转 UV 不需要翻转 Y（和 Vulkan UV 方向
+    // 一致），这里没问题。
     vec2  screenUv      = vNDC * 0.5 + 0.5;
     float sceneDepthNdc = texture(sampler2D(inSceneDepth, samp), screenUv).r;
     bool  bHasScene     = sceneDepthNdc < 0.9999;
     if (bHasScene) {
-        // 标准深度（近0远1），从 NDC 反投影出世界坐标，取相机到该点的距离。
-        vec4 clip  = vec4(vNDC, sceneDepthNdc, 1.0);
+        // 已修复：frame.proj 是 OpenGL 习惯的矩阵（math3d.h::Mat4::perspective），
+        // 它的逆矩阵要喂 OpenGL 约定的 NDC 才能正确反投影——① Y 轴要取反
+        // （vNDC 是 Vulkan 约定顶部=-1，OpenGL 约定顶部=+1，和上面 154 行左右
+        // 重建视线方向时的 -vNDC.y 是同一个道理，这里之前漏了）；② z 分量要从
+        // Vulkan 深度缓冲的 [0,1] 换算回 OpenGL NDC 的 [-1,1]（*2-1），之前直接
+        // 把 [0,1] 的深度值当 [-1,1] 用，反投影出来的世界坐标是错的，tScene
+        // 距离算错，haze 裁剪的位置也就跟着错。
+        vec4 clip  = vec4(vNDC.x, -vNDC.y, sceneDepthNdc * 2.0 - 1.0, 1.0);
         vec4 viewP = inverse(frame.proj) * clip;
         viewP     /= viewP.w;
         vec4 worldP = inverse(frame.view) * viewP;
@@ -189,46 +151,12 @@ void main() {
 
     if (tFar - tNear <= 0.0) discard;
 
-    float STEP   = (tFar - tNear) / float(PRIMARY_STEPS);
-    float ign    = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
-    float jitter = fract(ign + float(pc.frameIndex % 64) * 0.6180339887);
-    float tCur   = tNear + jitter * STEP;
-
-    vec3  sumRayleigh = vec3(0.0);
-    vec3  sumMie      = vec3(0.0);
-    float optDepthR = 0.0, optDepthM = 0.0, optDepthO = 0.0;
-    float cosTheta  = dot(rayDir, sunDir);
-
-    for (int i = 0; i < PRIMARY_STEPS; i++) {
-        if (tCur >= tFar) break;
-        float dt  = min(STEP, tFar - tCur);
-        vec3  pos = camPos + rayDir * (tCur + dt * 0.5);
-        vec3  posRelPlanet = pos - pc.planetCenter.xyz;
-        float h   = max(length(posRelPlanet) - pc.surfaceRadius, 0.0);
-
-        float dR = exp(-h / pc.hRayleigh) * dt;
-        float dM = exp(-h / pc.hMie)      * dt;
-        float dO = ozoneDensity(h)         * dt;
-        optDepthR += dR; optDepthM += dM; optDepthO += dO;
-
-        // 已修复：不再是嵌套 raymarch——太阳方向的光学深度不再在每个外层步里
-        // 现算 20 步，而是查这个星球缓存好的 Transmittance LUT（profile 不变
-        // 就不用重烤，逐帧成本只有这一次纹理采样，而不是 20 次密度求值）。
-        vec3 sunT = sunTransmittanceLUT(posRelPlanet, sunDir);
-
-        vec3 tau        = pc.rayleighCoeff * optDepthR + pc.mieCoeff * 1.1 * optDepthM + pc.ozoneCoeff * optDepthO;
-        vec3 selfAtten  = exp(-tau);
-
-        sumRayleigh += dR * selfAtten * sunT;
-        sumMie      += dM * selfAtten * sunT;
-        tCur        += STEP;
-
-        if (max(selfAtten.x, max(selfAtten.y, selfAtten.z)) < 0.01) break;
-    }
-
-    float phaseR = rayleighPhaseFn(cosTheta);
-    float phaseM = miePhaseFn(cosTheta);
-    vec3  hazeColor = sumRayleigh * pc.rayleighCoeff * phaseR + sumMie * pc.mieCoeff * phaseM;
+    float cosTheta = dot(rayDir, sunDir);
+    AtmoMarchResult march = raymarchAtmoSegment(
+        camPos, rayDir, pc.planetCenter.xyz, tNear, tFar, PRIMARY_STEPS,
+        pc.rayleighCoeff, pc.mieCoeff, pc.hRayleigh, pc.hMie, pc.gMie,
+        pc.ozoneCoeff, pc.ozoneCenter, pc.ozoneWidth,
+        pc.surfaceRadius, pc.outerRadius, sunDir, cosTheta);
 
     float nightFactor = mix(0.01, 1.0, pc.sunVisibility);
     float exposure     = mix(10.0, 5.0, smoothstep(0.0, 0.6, altNorm)) * nightFactor;
@@ -243,19 +171,15 @@ void main() {
     vec3  finalColor;
     float alpha;
     if (!bHasScene) {
-        // 天空背景：O(1) 查 Sky-View LUT。
+        // 天空背景：O(1) 查 Sky-View LUT（不用上面 raymarch 的结果）。
         vec3 skyColor = skyViewLUT(rayDir, camRelPlanet, sunDir);
         finalColor = skyColor * exposure;
         alpha = spaceVisibility;
     } else {
         // haze：叠加在地表颜色上方，透明度只由这段路径本身的光学深度决定
-        // （hazeOpacity），和"天该不该透星星"完全独立。
-        finalColor = hazeColor * exposure;
-        vec3  tauView   = pc.rayleighCoeff * optDepthR + pc.mieCoeff * optDepthM + pc.ozoneCoeff * optDepthO;
-        vec3  viewT     = exp(-tauView);
-        float transLuma = dot(viewT, vec3(0.299, 0.587, 0.114));
-        float hazeOpacity = clamp(1.0 - transLuma, 0.0, 1.0);
-        alpha = hazeOpacity;
+        // （march.opacity，即 hazeOpacity），和"天该不该透星星"完全独立。
+        finalColor = march.scattered * exposure;
+        alpha = march.opacity;
     }
 
     // ACES filmic tone mapping（与旧版一致）

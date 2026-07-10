@@ -714,10 +714,17 @@ struct VkAtmoInsidePipeline {
 // VkAtmoShellPipeline — 大气重构·壳外路径（atmo_shell.vert/frag），画
 // vk_scene.h::atmoSphereVbo 那个早就建好但一直没人用的单位球壳网格
 // （position-only，stride=12）。与 VkAtmoInsidePipeline 的关键区别：
-// depthTest=true（深度测试开启，不会画到更近的物体前面）、depthWrite=false
-// （半透明不写深度）、真正的顶点输入（不是无 VBO 全屏三角形）。Set 0/1、
-// push constant 布局和壳内路径完全一致，方便共用同一份 AtmoPushConstants
-// 填充代码（见 vk_renderer3d.h 的 apc 构造）。
+// 真正的顶点输入（不是无 VBO 全屏三角形）。Set 0/1、push constant 布局和
+// 壳内路径完全一致，方便共用同一份 AtmoPushConstants 填充代码（见
+// vk_renderer3d.h 的 apc 构造）。
+//
+// 已修复：depthTest 曾经开着（VK_TRUE），但 vk_renderer3d.h::
+// renderAtmoAfterGeometry 开的 render pass 根本没挂深度 attachment
+// （深度图这时候已经转成只读纹理，不能同时又当 attachment 写），导致
+// 硬件深度测试实际上是未定义行为——表现为壳的正反两面都被画出来、不受
+// 最近物体遮挡，像是"壳没有固定在行星上"。现在关掉硬件深度测试，改成
+// atmo_shell.frag 里手动用采样到的场景深度做判断（同一个 Set 1 里已经
+// 有 inSceneDepth）。
 // -----------------------------------------------------------------------
 struct VkAtmoShellPipeline {
     VkPipelineLayout layout=VK_NULL_HANDLE; VkPipeline pipeline=VK_NULL_HANDLE;
@@ -737,9 +744,11 @@ struct VkAtmoShellPipeline {
         p.blendEnable=true;
         p.srcColor=VK_BLEND_FACTOR_ONE; p.dstColor=VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
         p.srcAlpha=VK_BLEND_FACTOR_ONE; p.dstAlpha=VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-        p.depthTest=VK_TRUE; p.depthWrite=VK_FALSE; p.depthOp=VK_COMPARE_OP_LESS_OR_EQUAL;
-        // 双面渲染：cameraInside 判定是硬切换（无过渡淡出），穿越壳层瞬间可能
-        // 从内外任一面看到网格，不做背面剔除。
+        // depthTest 关闭：这个管线所在的 render pass 没有深度 attachment（见上方
+        // 大注释），深度判断改成 atmo_shell.frag 里手动做。
+        p.depthTest=VK_FALSE; p.depthWrite=VK_FALSE;
+        // 双面渲染：背面剔除改成 atmo_shell.frag 里手动按法线方向 discard
+        // （和三角形绕向无关，更稳）。
         p.cullMode=VK_CULL_MODE_NONE;
         p.pcSize=sizeof(AtmoPushConstants);
         VkDescriptorSetLayout sets[2]={desc.set0Layout, renderSetLayout};

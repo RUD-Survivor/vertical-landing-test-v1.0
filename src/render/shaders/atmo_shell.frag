@@ -5,18 +5,30 @@
 // ==========================================================================
 // atmo_shell.frag — 大气渲染重构·壳外路径（相机在大气层以外看行星）
 //
-// 不再整屏画：这个 frag 只在 atmo_shell.vert 输出的壳网格实际光栅化覆盖的屏幕
-// 像素上跑（一个行星在宽镜头里通常只占一小圈），深度测试开启（vk_pipeline.h::
-// VkAtmoShellPipeline），不会画到更近的物体前面，天然比旧版整屏 raymarch 便宜。
-// 采样这个星球缓存好的 Sky-View LUT（vk_atmosphere_lut.h::VkAtmoLutCache）取
-// limb 光晕颜色，透明度按掠射角（法线 vs 视线夹角）做边缘增强——法线正对相机
-// （从正上方往下看）时大气路径最短、幅亮度低；掠射（贴着边缘看）时大气路径最
-// 长、最亮，这就是"行星边缘发光"的物理直觉来源。
+// 只在 atmo_shell.vert 输出的壳网格实际光栅化覆盖的屏幕像素上跑（一个行星在
+// 宽镜头里通常只占一小圈），比旧版整屏 raymarch 便宜得多。
 //
-// 详见计划 fuzzy-toasting-flurry：大气渲染重构 / 方案 3。
+// 已修复两个 bug（用户实机反馈+分析定位）：
+//   · 黑壳：最初这里照抄壳内路径，直接查 Sky-View LUT——但 Sky-View LUT 的
+//     参数化只在"观察者高度 < 大气顶(topRadius)"时有效（本工程 sky_irradiance_
+//     capture.glsl 自己也有 bCanUseSkyViewLut 这个同款判断），壳外路径的相机
+//     按定义就在 topRadius 以外，越界喂给 acos/sqrt 产出 NaN，NaN 采样纹理在
+//     很多实现下直接读回 0 → 全黑。改成和壳内 haze 一样的单趟 raymarch +
+//     Transmittance LUT（atmo_scatter_common.glsl::raymarchAtmoSegment），
+//     对任意相机位置都成立，不再需要"观察者高度"这个前提。
+//   · "没有锚定在行星上"：VkAtmoShellPipeline 在管线里开了 depthTest=VK_TRUE，
+//     但 vk_renderer3d.h::renderAtmoAfterGeometry 开的这个 render pass 根本
+//     没挂深度 attachment（深度图这时候已经是只读纹理，不能同时又当 attachment
+//     写，见该函数顶部注释）——depthTest 实际上无效/未定义，壳的正反两面
+//     都会被画出来且不受最近物体遮挡，叠加在一起看起来就像壳没有正确固定在
+//     行星位置上。改成手动判断：① 背面（法线背对相机的那半球）直接丢弃；
+//     ② 用采样到的场景深度手动做"这个壳片元是不是被更近的物体挡住"的判断
+//     （管线侧 depthTest 也同步改成了 VK_FALSE，见 vk_pipeline.h）。
 // ==========================================================================
 
-#include "common/shared_atmosphere.glsl"
+#define PRIMARY_STEPS 32
+
+#include "atmo_scatter_common.glsl"
 
 layout(set = 0, binding = 0) uniform FrameUBO {
     mat4  view;
@@ -55,65 +67,88 @@ layout(push_constant) uniform PC {
     float _padTune;
 } pc;
 
-// Set 1：与 atmo_inside.frag 完全同一套渲染侧采样布局（同一个 renderSetLayout，
-// 同一个每星球 renderSet 实例）。壳外路径不需要场景深度（深度测试已经处理了
-// "被更近物体挡住"这件事），inSceneDepth/inTransmittanceLut 这里不采样，
-// 保留绑定只是为了复用同一个 Set 1 布局，不用为壳外单独建一份。
-layout(set = 1, binding = 0) uniform texture2D inSceneDepth;
-layout(set = 1, binding = 1) uniform texture2D inTransmittanceLut;
-layout(set = 1, binding = 2) uniform texture2D inSkyViewLut;
-layout(set = 1, binding = 3) uniform sampler   samp;
-
 layout(location = 0) in  vec3 vWorldPos;
 layout(location = 1) in  vec3 vLocalNormal;
 layout(location = 0) out vec4 FragColor;
-
-vec3 skyViewLUT(vec3 worldDirFromPlanet, vec3 camRelPlanet, vec3 sunDir) {
-    AtmosphereParameters atmo;
-    atmo.bottomRadius = pc.surfaceRadius;
-    atmo.topRadius    = pc.outerRadius;
-
-    float viewHeight = length(camRelPlanet);
-    vec3  upVector   = camRelPlanet / max(viewHeight, 1e-4);
-    float viewZenithCosAngle = dot(worldDirFromPlanet, upVector);
-
-    vec3 sideVector    = normalize(cross(upVector, worldDirFromPlanet));
-    vec3 forwardVector = normalize(cross(sideVector, upVector));
-    vec2 lightOnPlane  = vec2(dot(sunDir, forwardVector), dot(sunDir, sideVector));
-    lightOnPlane = normalize(lightOnPlane);
-    float lightViewCosAngle = lightOnPlane.x;
-
-    bool bIntersectGround = raySphereIntersectNearest(camRelPlanet, worldDirFromPlanet, vec3(0.0), atmo.bottomRadius) >= 0.0;
-
-    vec2 lutSize = vec2(textureSize(inSkyViewLut, 0));
-    vec2 uv;
-    skyViewLutParamsToUv(atmo, bIntersectGround, viewZenithCosAngle, lightViewCosAngle, viewHeight, lutSize, uv);
-    return texture(sampler2D(inSkyViewLut, samp), uv).rgb;
-}
 
 void main() {
     vec3 camPos = frame.viewPos;
     vec3 sunDir = normalize(frame.lightDir);
 
-    vec3  toCam        = camPos - vWorldPos;
-    float distToCam     = length(toCam);
+    vec3  toCam          = camPos - vWorldPos;
+    float distToCam       = length(toCam);
     vec3  viewDirFromFrag = toCam / max(distToCam, 1e-4); // 片元指向相机
-    vec3  rayDirFromCam   = -viewDirFromFrag;             // 相机看向片元（Sky-View LUT 期望的方向）
 
-    vec3 camRelPlanet = camPos - pc.planetCenter.xyz;
-    vec3 skyColor = skyViewLUT(rayDirFromCam, camRelPlanet, sunDir);
+    // ── 背面剔除（手动，和三角形绕向无关）──────────────────────────────────
+    // 法线背对相机（这半球此刻在行星背面，从相机看不到）直接丢弃，避免壳的
+    // 前后两面同时被光栅化、混合两次导致亮度/透明度都不对，也是"看起来没有
+    // 固定在行星上"的一个成因（背面泄露进来的颜色和前面叠在一起，随相机转动
+    // 呈现的花纹会跟着变，像是壳没跟着行星走）。
+    if (dot(vLocalNormal, viewDirFromFrag) < 0.0) discard;
 
-    // 掠射角增强：法线和"看向相机"方向越垂直（掠射/limb），大气路径越长、越亮；
-    // 法线正对相机（俯视行星正中）时大气路径最短，limb 接近 0（该处主要看地表本身）。
+    // ── 手动深度测试（管线侧已关闭 depthTest，见 vk_pipeline.h 顶部注释）──
+    // 用这个壳片元自己的裁剪空间深度，和采样到的场景深度比较；场景深度更近
+    // （更小，标准深度近0远1）说明这里被更近的不透明物体挡住了，丢弃。
+    //
+    // 已修复（实机截图定位）：frame.proj 是 OpenGL 习惯的矩阵，clip.z/clip.w
+    // 直接算出来是 [-1,1]（OpenGL NDC），但 inSceneDepth 里存的是 Vulkan 深度
+    // 缓冲 [0,1]（且是经过 atmo_shell.vert 里那个 *0.5+w*0.5 remap 之后才写进
+    // 深度图的），两者量纲不一样，之前直接比较，效果基本是随机的——有时把叠在
+    // 行星盘面上的大气误判成"被挡住"丢弃掉，有时又把伸到行星轮廓外、正对着
+    // 星空背景的部分误判成"没被挡"留下来，相机一动，这两批"谁被挡住了"的判断
+    // 结果就跟着变，看起来像壳在绕着屏幕中心转。这里把 myNdcDepth 也做同样的
+    // remap 换算成 Vulkan 范围再比较。screenUv 同理要做 Y 翻转（Vulkan 屏幕 v
+    // 向下，clip.y 是 OpenGL 习惯向上），不然采样到的是上下颠倒的深度图。
+    {
+        vec4  clip = frame.proj * frame.view * vec4(vWorldPos, 1.0);
+        float myNdcDepth = (clip.z / clip.w) * 0.5 + 0.5;
+        vec2  ndcXY    = clip.xy / clip.w;
+        vec2  screenUv = vec2(ndcXY.x, -ndcXY.y) * 0.5 + 0.5;
+        float sceneDepthNdc = texture(sampler2D(inSceneDepth, samp), screenUv).r;
+        if (sceneDepthNdc < myNdcDepth) discard;
+    }
+
+    vec3 planetCenter = pc.planetCenter.xyz;
+    vec3 rayDir = -viewDirFromFrag; // 相机看向这个片元的方向
+
+    // vWorldPos 本身就在 outerRadius 球面上（壳网格顶点直接按 outerRadius 放的，
+    // 见 atmo_shell.vert），所以这条视线在大气壳上的近交点距离就是 distToCam；
+    // 远交点需要另外求——可能是壳的另一侧，也可能先被行星本体挡住。
+    float tNear = distToCam;
+    float tFar  = tNear;
+    {
+        float t0, t1;
+        if (intersectSphereAtCenter(camPos, rayDir, planetCenter, pc.outerRadius, t0, t1)) {
+            tFar = max(t0, t1); // 取远交点（近交点就是 tNear，即这个片元本身）
+        }
+        float tS0, tS1;
+        if (intersectSphereAtCenter(camPos, rayDir, planetCenter, pc.surfaceRadius, tS0, tS1) && tS0 > tNear) {
+            tFar = min(tFar, tS0); // 视线在到达壳的另一侧之前先撞到行星本体
+        }
+    }
+
+    if (tFar <= tNear) discard;
+
+    float cosTheta = dot(rayDir, sunDir);
+    AtmoMarchResult march = raymarchAtmoSegment(
+        camPos, rayDir, planetCenter, tNear, tFar, PRIMARY_STEPS,
+        pc.rayleighCoeff, pc.mieCoeff, pc.hRayleigh, pc.hMie, pc.gMie,
+        pc.ozoneCoeff, pc.ozoneCenter, pc.ozoneWidth,
+        pc.surfaceRadius, pc.outerRadius, sunDir, cosTheta);
+
+    // 掠射角增强：法线和"看向相机"方向越垂直（掠射/limb），这条视线在大气壳里
+    // 走的路径越长，raymarch 本身已经算出了更多散射光（march.scattered 自然
+    // 更亮），这里再叠一个柔和的边缘增强，让 limb 轮廓更清晰。
     float grazing = 1.0 - abs(dot(vLocalNormal, viewDirFromFrag));
-    float limb = pow(clamp(grazing, 0.0, 1.0), 2.0);
+    float limbBoost = 0.4 + 0.6 * pow(clamp(grazing, 0.0, 1.0), 2.0);
 
     float nightFactor = mix(0.05, 1.0, pc.sunVisibility);
-    vec3 finalColor = skyColor * limb * nightFactor * pc.limbBrightness;
+    vec3 finalColor = march.scattered * limbBoost * nightFactor * pc.limbBrightness;
+    float alpha = clamp(march.opacity * limbBoost, 0.0, 1.0);
 
     // ACES filmic tone mapping（与壳内路径一致）
     vec3 x = max(finalColor, vec3(0.0));
     finalColor = (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);
 
-    FragColor = vec4(finalColor, limb);
+    FragColor = vec4(finalColor, alpha);
 }

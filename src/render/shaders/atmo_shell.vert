@@ -53,4 +53,13 @@ void main() {
     vWorldPos    = pc.planetCenter.xyz + inPos * pc.outerRadius;
     vLocalNormal = inPos; // 单位球：局部坐标本身就是外法线方向
     gl_Position  = frame.proj * frame.view * vec4(vWorldPos, 1.0);
+
+    // 已修复（实机截图定位）：frame.proj 是 OpenGL 习惯的投影矩阵（math3d.h::
+    // Mat4::perspective，NDC z∈[-1,1]，Y 轴 view-space 向上对应 NDC y 为正），
+    // 引擎里其它所有顶点着色器（mesh.vert 等）在算完 gl_Position 之后都手动做了
+    // 这两步转换成 Vulkan 约定（Y 轴朝下、深度 z∈[0,1]）——这个文件当初漏写了，
+    // 结果是壳网格在屏幕上整体上下镜像，看起来像一个跟行星脱节、悬在下方的
+    // 独立圆盘（而不是套在行星外面），且深度值范围也和场景深度缓冲对不上。
+    gl_Position.y = -gl_Position.y;
+    gl_Position.z = gl_Position.z * 0.5 + gl_Position.w * 0.5;
 }
