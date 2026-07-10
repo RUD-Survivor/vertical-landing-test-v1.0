@@ -87,6 +87,12 @@ struct FlowerCloudTuneParams {
     float emptyStepKm = 1.0f;               // cloudMarchEmptyStepKm
     float emptyStepJitter = 0.25f;            // cloudMarchEmptyTauMax：空步 ± 比例 (0~0.5)
 
+    // 第三层：云缘密度梯度缩步（cloudMarchEdge*）
+    bool  edgeRefineEnabled = true;           // cloudMarchEdgeRefine
+    float edgeScaleMin = 0.25f;               // cloudMarchEdgeScaleMin：边缘步长 = stepT×此值
+    float edgeGradLow = 0.002f;               // cloudMarchEdgeGradLow
+    float edgeGradHigh = 0.018f;              // cloudMarchEdgeGradHigh
+
     // 沿太阳方向体积阴影步进（volumetricShadow）
     float lightStepMul = 1.5f;                // cloudLightStepMul
     float lightBasicStepKm = 0.033f;          // cloudLightBasicStep (km)
@@ -421,6 +427,10 @@ private:
         ac.cloudMarchEmptySkip = tuneParams.emptySkipEnabled ? 1 : 0;
         ac.cloudMarchEmptyStepKm = tuneParams.emptyStepKm;
         ac.cloudMarchEmptyTauMax = tuneParams.emptyStepJitter;
+        ac.cloudMarchEdgeRefine = tuneParams.edgeRefineEnabled ? 1 : 0;
+        ac.cloudMarchEdgeScaleMin = tuneParams.edgeScaleMin;
+        ac.cloudMarchEdgeGradLow = tuneParams.edgeGradLow;
+        ac.cloudMarchEdgeGradHigh = tuneParams.edgeGradHigh;
         ac.cloudLightStepMul = tuneParams.lightStepMul;
         ac.cloudLightBasicStep = tuneParams.lightBasicStepKm;
         ac.cloudLightStepNum = tuneParams.lightStepNum;

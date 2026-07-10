@@ -94,6 +94,15 @@ inline void FlowerCloudTunerImGui(bool* p_open, FlowerCloudTuneParams& p) {
     ImGui::TextDisabled("仅 density==0；中点+终点探测通过才跳");
     ImGui::TextDisabled("EmptyJitter: 蓝噪声缩放空步 (1±值)×EmptyStep");
 
+    ImGui::Separator();
+    ImGui::Text("云缘缩步（第 3 层）");
+    ImGui::Checkbox("EdgeRefine 启用", &p.edgeRefineEnabled);
+    ImGui::SliderFloat("EdgeScaleMin", &p.edgeScaleMin, 0.05f, 1.0f, "%.2f");
+    ImGui::SliderFloat("EdgeGradLow", &p.edgeGradLow, 0.0001f, 0.05f, "%.4f", ImGuiSliderFlags_Logarithmic);
+    ImGui::SliderFloat("EdgeGradHigh", &p.edgeGradHigh, 0.001f, 0.2f, "%.3f", ImGuiSliderFlags_Logarithmic);
+    ImGui::TextDisabled("步长=stepT×mix(1,EdgeScaleMin,edgeSharpness)");
+    ImGui::TextDisabled("edgeSharpness 来自 |Δ(σ·Δs)|/Δs，cloud.frag 同源");
+
     if (p.marchingStepNum > 0) {
         const float segEst = p.maxTracingDistanceKm;
         const float stepBase = segEst / float(p.marchingStepNum);

@@ -125,6 +125,11 @@ struct AtmosphereConfig
     int   cloudMarchEmptySkip;
     float cloudMarchEmptyStepKm;
     float cloudMarchEmptyTauMax; // 空步长蓝噪声抖动幅度 ±(0~0.5)
+    // 第三层：云缘密度梯度缩步（见 cloud_common.glsl 主 march 循环）
+    int   cloudMarchEdgeRefine;     // 0=关，非0=开
+    float cloudMarchEdgeScaleMin;   // 边缘处步长 = stepT×此值（下限 stepTMin）
+    float cloudMarchEdgeGradLow;    // τ 跳变 smoothstep 下界（density×km 量纲，归一化 per km），小于它认为不是云的边缘
+    float cloudMarchEdgeGradHigh;   // τ 跳变 smoothstep 上界，大于它认为是边缘，中间平滑取值
 };
 
 struct SkyInfo

@@ -474,6 +474,14 @@ float fogNoise)
     const float emptyJitterAmp = clamp(frameData.sky.atmosphereConfig.cloudMarchEmptyTauMax, 0.0, 0.5);
     const float emptyJitterMul = 1.0 + emptyJitterAmp * (2.0 * fogNoise - 1.0);
 
+    // 第三层：云缘密度梯度缩步。沿射线维护可变步长 marchStepT（初始=第一层 stepT）。
+    // 检测相邻步光学深度增量跳变 |Δ(σ·Δs)|，在云缘/侵蚀边界把下一步步长缩小。
+    // 算法同源 cloud.frag::edgeSharpness（L195），但用于改步长而非仅调粉末。
+    const bool bEdgeRefine = (frameData.sky.atmosphereConfig.cloudMarchEdgeRefine != 0);
+    const float edgeScaleMin = clamp(frameData.sky.atmosphereConfig.cloudMarchEdgeScaleMin, 0.005, 1.0);//最小缩小到0.005倍步长，最大1倍步长
+    const float edgeGradLow  = max(1e-6f, frameData.sky.atmosphereConfig.cloudMarchEdgeGradLow);//云缘梯度最小值，小于它判定不在云的边缘，不需要变小步长
+    const float edgeGradHigh = max(edgeGradLow, frameData.sky.atmosphereConfig.cloudMarchEdgeGradHigh);//大于它，则必须变小步长
+
     float sampleT=tMin+0.001*stepT;// slightly delta avoid self intersect，不从精确 tMin 开始，减少浮点/壳面自交
 
     //litter by blue noise
@@ -595,13 +603,21 @@ float fogNoise)
         // upScaleColor：近似云底/云内收到的半球环境光强度。
         // 物理：地面与低空大气把天光散射回云底。
 
+        // marchStepT：第三层可变步长（km），每步末尾按 edgeSharpness 更新；第一层 stepT 为基准。
+        float marchStepT = stepT;
+        // prevStepCloudDensity：上一步 cloudMap 密度 σ；-1 表示尚无历史（循环首步）。
+        float prevStepCloudDensity = -1.0;
+        // prevCurStepT：上一步实际用于积分的 Δs（km），与 prevStepCloudDensity 配对算 Δ(σ·Δs)。
+        float prevCurStepT = stepT;
+
         for(uint i=0;i<stepCount && sampleT<tMax;i++)
         // 主云体 ray march：沿视线从近到远逐步积分 in-scattering，同时累积透射率 T_view。
         // 物理模型：参与介质 RTE 的前向离散形式；每步把局部散射光叠到 scatteredLight，并衰减 transmittance。
-        // 第二层：循环内按密度选择 fine stepT 或 emptyStepKm 前进（见循环末尾 stepAdvance）。
+        // 第二层：真空大步跳（循环末尾 stepAdvance）。
+        // 第三层：marchStepT 在云缘自动缩小（循环末尾更新 marchStepT）。
         {
-            const float curStepT = min(stepT, max(tMax - sampleT, 0.0));
-            // curStepT：本步用于光照积分的有效细步长（km），末尾可能被透明跳步覆盖。
+            const float curStepT = min(marchStepT, max(tMax - sampleT, 0.0));
+            // curStepT：本步用于 Beer-Lambert 积分的有效步长 Δs（km）；≤ marchStepT，且不超过射线剩余长度。
 
             //World space sample pos,in km uint
             vec3 samplePos=sampleT*worldDir+worldPos;//采样位置
@@ -860,7 +876,7 @@ float fogNoise)
             if(bEmptySkip && stepCloudDensity <= 0.0)
             {
                 const float remainKm = max(tMax - sampleT, 0.0);
-                const float leapTargetKm = max(stepT, emptyStepKm * emptyJitterMul);
+                const float leapTargetKm = max(marchStepT, emptyStepKm * emptyJitterMul);
                 const float leapKm = min(leapTargetKm, remainKm);
                 if(leapKm > curStepT + 1e-6)
                 {
@@ -872,6 +888,39 @@ float fogNoise)
                     }
                 }
             }
+
+            // ── 第三层：为下一步更新 marchStepT，云边缘处减小步长 ─────────────────────────────────────
+            // stepTauKm：本步光学深度增量 τ≈σ·Δs（density×km），与 cloud.frag 的 dC 同量纲。
+            const float stepTauKm = stepCloudDensity * curStepT;
+            if(bEdgeRefine)//如果开启边缘优化
+            {
+                float edgeSharpness = 0.0;
+                // edgeSharpness∈[0,1]：0=密度平稳（云核内部），1=云缘/噪声边界（需细步）。
+                if(prevStepCloudDensity >= 0.0)//采样到云密度大于0
+                {
+                    const float prevTauKm = prevStepCloudDensity * prevCurStepT;
+                    // tauJumpPerKm：相邻步 τ 增量之差，除以当前步长，得到沿射线的归一化跳变强度。
+                    const float tauJumpPerKm = abs(stepTauKm - prevTauKm) / max(curStepT, 1e-6);//防除0
+                    edgeSharpness = smoothstep(edgeGradLow, edgeGradHigh, tauJumpPerKm);
+                    // 真空↔有云：cloudMap 从 0 变 >0（或反向），必为边界，强制细步。
+                    const bool bPrevCloud = prevStepCloudDensity > 0.0;//前一步是否有云
+                    const bool bCurCloud  = stepCloudDensity > 0.0;//此步是否有云
+                    if(bPrevCloud != bCurCloud)
+                    {
+                        edgeSharpness = 1.0;//从无云变有云或有云变无云，肯定是云边缘
+                    }
+                }
+                // edgeScale：下一步步长相对第一层的缩放；edgeSharpness=1 → stepT×edgeScaleMin。
+                const float edgeScale = mix(1.0, edgeScaleMin, edgeSharpness);//edgeSharpness越接近1，缩放越小
+                marchStepT = max(stepTMinKm, stepT * edgeScale);//必须大于最小步长限定
+            }
+            else//不开就跳过
+            {
+                marchStepT = stepT;
+            }
+
+            prevStepCloudDensity = stepCloudDensity;
+            prevCurStepT = curStepT;
             sampleT += stepAdvance;
 
         }
