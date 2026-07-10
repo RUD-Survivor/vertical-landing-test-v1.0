@@ -110,8 +110,15 @@ struct LensFlarePushConstants {
 };                         //            total: 64 bytes
 
 // -----------------------------------------------------------------------
-// AtmoPushConstants — 大气散射球体（64 bytes, < 128 byte minimum guarantee）
-// std430 layout: vec4(16) + 12×float/int(48) = 64 bytes
+// AtmoPushConstants — 大气散射球体（112 bytes, < 128 byte minimum guarantee）
+// std430 layout: vec4(16) + 12×float/int(48) + 12×float(48) = 112 bytes
+//
+// 尾部新增的 12 个 float（rayleighCoeff..ozoneWidth）是大气重构（壳内/壳外
+// LUT 路径）之后唯一的散射系数数据源：C++ 侧从 vk_atmosphere_lut.h::
+// getPlanetScatteringCoeffs() 取值填入（见 vk_renderer3d.h），shader 侧
+// （atmo_inside.frag / atmo_shell.frag）直接读 pc.rayleighCoeff 等字段，
+// 不再各自维护一份 setupPlanetProfile() 硬编码表——原来 atmo.frag 和
+// vk_atmosphere_lut.h 分别手抄一份同样的 7 组行星系数，现在只有 C++ 这一份。
 // -----------------------------------------------------------------------
 struct AtmoPushConstants {
     float planetCenter[4]; // 16 bytes — offset  0 (.xyz = center, .w unused)
@@ -127,7 +134,21 @@ struct AtmoPushConstants {
     float tuneMaxAlt;      //  4 bytes — offset 52
     float tuneExtinction;  //  4 bytes — offset 56 (云层消光系数)
     float showClouds;      //  4 bytes — offset 60 (0.0=隐藏云, 1.0=显示云)
-};                         //            total: 64 bytes
+    float rayleighCoeff[3];//  12 bytes — offset 64 (km^-1)
+    float mieCoeff;        //  4 bytes  — offset 76 (km^-1)
+    float hRayleigh;       //  4 bytes  — offset 80 (标高 km)
+    float hMie;             //  4 bytes  — offset 84
+    float gMie;             //  4 bytes  — offset 88 (Mie 相位不对称因子)
+    float ozoneCoeff[3];    // 12 bytes  — offset 92 (km^-1)
+    float ozoneCenter;      //  4 bytes  — offset 104 (臭氧层中心高度 km)
+    float ozoneWidth;       //  4 bytes  — offset 108
+    // 大气重构 tuner 可调参数（imgui_atmo_tuner.h），刚好用满剩余的 16 字节
+    // 到 128 字节保证下限，不需要查询设备实际支持的更大 push constant 容量。
+    float spaceVisStart;    //  4 bytes  — offset 112 (altNorm 达到此值开始透出星空)
+    float spaceVisEnd;      //  4 bytes  — offset 116 (altNorm 达到此值完全是深空)
+    float limbBrightness;   //  4 bytes  — offset 120 (壳外 limb 光晕提亮系数)
+    float _padTune;         //  4 bytes  — offset 124 (对齐用，暂未使用)
+};                         //            total: 128 bytes
 
 // Terrain patch 专属 UBO（binding 1 of Set 0）
 // nodePos/nodeSide/nodeUp 已移至 push constants（每 draw call 更新），此处只保留每帧常量

@@ -124,6 +124,11 @@ struct VkCloudSystem {
     VkExtent2D extent     = {};
     VkExtent2D quarterExt = {};
 
+    // atmosphereLut 现在是"单星球 LUT 资源实例"（见 vk_atmosphere_lut.h 重构），
+    // 不再自带 compute pipeline——云管线自己单独持有一份 VkAtmoLutPipelines
+    // （不复用 vk_renderer3d.h 大气重构那边的全局 VkAtmoLutCache，两个子系统各自
+    // 独立初始化/关闭，避免跨子系统生命周期耦合；反正 pipeline 本身很轻量）。
+    VkAtmoLutPipelines cloudLutPipelines;
     VkAtmosphereLut atmosphereLut;
 
     // ── 1/4 分辨率 RT：颜色(L,T) / 深度 / 雾 ─────────────────────────────────
@@ -185,7 +190,8 @@ struct VkCloudSystem {
         quarterExt = { std::max(1u, (ext.width + 3) / 4), std::max(1u, (ext.height + 3) / 4) };
         basicNoiseView = basicNoise; detailNoiseView = detailNoise; weatherView = weather; curlNoiseView = curlNoise;
 
-        if (!atmosphereLut.init(ctx)) return false;
+        if (!cloudLutPipelines.init(ctx))       return false;
+        if (!atmosphereLut.init(ctx, cloudLutPipelines)) return false;
         if (!createSamplers(ctx))     return false;
         if (!createImages(ctx))       return false;
         if (!blueNoise.init(ctx))     return false;
@@ -219,6 +225,7 @@ struct VkCloudSystem {
         for (VkSampler& s : samplers10) if (s) { vkDestroySampler(ctx.device, s, nullptr); s = VK_NULL_HANDLE; }
         if (dummyCascadeBuf) { vmaDestroyBuffer(ctx.allocator, dummyCascadeBuf, dummyCascadeAlloc); dummyCascadeBuf=VK_NULL_HANDLE; }
         atmosphereLut.shutdown(ctx);
+        cloudLutPipelines.shutdown(ctx);
     }
 
     // Called after TAA endGeometryPass — HDR + depth are SHADER_READ_ONLY.

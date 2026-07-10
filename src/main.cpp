@@ -48,6 +48,7 @@ using namespace std;
 #include "render/vulkan/vk_imgui.h"
 #include "render/vulkan/systems/vk_game_ui.h"
 #include "render/vulkan/imgui_cloud_tuner.h"
+#include "render/vulkan/imgui_atmo_tuner.h"
 #include "render/scene_snapshot.h"
 
 // ==========================================
@@ -81,6 +82,7 @@ static VkTAA               g_vkTAA;
 static VkRenderer3D        g_vkR3D;
 static bool                g_vkCloudTunerOpen = false;  // F2 toggles
 static bool                g_flowerCloudTunerOpen = false;  // F3 toggles
+static bool                g_atmoTunerOpen = false;  // F4 toggles
 static VkHUDSystem         g_vkHUD;
 static VkImGuiSystem       g_vkImGui;
 static VkGameUI            g_gameUI;
@@ -287,6 +289,17 @@ static void renderVulkanFrame(GLFWwindow* window) {
     }
     g_vkTAA.endGeometryPass(frame.commandBuffer);
 
+    // 大气重构：壳内/壳外路径，必须排在这里（几何 pass 刚结束、深度已经是只读纹理）
+    // 且必须在体积云之前（云管线要求进来时 HDR 颜色已经是 SHADER_READ_ONLY_OPTIMAL，
+    // 见 vk_renderer3d.h::renderAtmoAfterGeometry 顶部注释）。目前只覆盖 flight 场景
+    // （workshop 的 snap 是上面 else-if 块里的局部变量，这里拿不到；workshop 是船体
+    // 编辑器视角，本就不太需要看远处行星大气，先不管——如果之后发现需要，得把
+    // workshop 的 snap 也提升成能在这里访问到的变量）。
+    if (inFlight) {
+        g_vkR3D.renderAtmoAfterGeometry(g_vkCtx, frame.commandBuffer, g_vkTAA,
+            g_lastFlightSnap, g_frameSync.currentFrame);
+    }
+
     // Flower cloud Phase0: compute stub → composite onto HDR (sky depth >= 0.9995)
     if (inFlight && g_vkR3D.cloudSystem.enabled) {
         g_vkR3D.renderFlowerCloudAfterGeometry(g_vkCtx, frame.commandBuffer, g_vkTAA,
@@ -308,6 +321,7 @@ static void renderVulkanFrame(GLFWwindow* window) {
     g_gameUI.draw(inFlight ? g_flightScene : nullptr, ww, wh);
     CloudTunerImGui(&g_vkCloudTunerOpen, g_vkR3D.scene.cloudTune);
     FlowerCloudTunerImGui(&g_flowerCloudTunerOpen, g_vkR3D.cloudSystem.tuneParams);
+    AtmoTunerImGui(&g_atmoTunerOpen, g_vkR3D.atmoTune, g_vkR3D.scene.atmoLutCache);
     ImGui::Render();
     g_vkImGui.renderToSwapchain(frame.commandBuffer,
         g_vkCtx.swapImages[imageIdx],

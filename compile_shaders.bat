@@ -120,6 +120,12 @@ if %ERRORLEVEL% neq 0 goto :fail
 if %ERRORLEVEL% neq 0 goto :fail
 %GLSLC% %SHADER_DIR%\atmo.frag -o %OUT_DIR%\atmo.frag.spv
 if %ERRORLEVEL% neq 0 goto :fail
+%GLSLC% %SHADER_DIR%\atmo_inside.frag -o %OUT_DIR%\atmo_inside.frag.spv
+if %ERRORLEVEL% neq 0 goto :fail
+%GLSLC% %SHADER_DIR%\atmo_shell.vert -o %OUT_DIR%\atmo_shell.vert.spv
+if %ERRORLEVEL% neq 0 goto :fail
+%GLSLC% %SHADER_DIR%\atmo_shell.frag -o %OUT_DIR%\atmo_shell.frag.spv
+if %ERRORLEVEL% neq 0 goto :fail
 echo [Cloud] cloud.vert + cloud.frag + cloud bake compute
 %GLSLC% %SHADER_DIR%\cloud.vert -o %OUT_DIR%\cloud.vert.spv
 if %ERRORLEVEL% neq 0 goto :fail

@@ -24,6 +24,7 @@ struct VkRenderer3D {
     VkSkySystem     sky;
     VkEffectsSystem effects;
     VkCloudSystem   cloudSystem;
+    AtmoTuneParams  atmoTune; // 大气重构调参（imgui_atmo_tuner.h），见 renderAtmoAfterGeometry
 
     // -----------------------------------------------------------------------
     bool init(VulkanContext& ctx, VkDescriptorManager& desc,
@@ -102,6 +103,117 @@ struct VkRenderer3D {
     // Cloud — legacy fullscreen frag path (disabled when cloudSystem.enabled)
     void drawCloud(VkCommandBuffer cmd, const AtmoPushConstants& pc, double simTime, float camAlt) {
         scene.drawCloud(cmd, pc, simTime, camAlt);
+    }
+
+    // 大气重构·壳内/壳外调度 — 必须在 TAA endGeometryPass() 之后、
+    // renderFlowerCloudAfterGeometry() 之前调用（顺序见 main.cpp）。
+    //
+    // 为什么不能留在几何 pass 内：新的两条路径（atmo_inside.frag/atmo_shell.frag）
+    // 都要采样场景深度做空气透视/深度测试，而深度图只有在几何 pass 结束、
+    // endGeometryPass() 把它转成 SHADER_READ_ONLY_OPTIMAL 之后才能被当纹理采样——
+    // 几何 pass 内它还是"正在写入的 attachment"，Vulkan 不允许同一张图在同一个
+    // render pass 里既是 attachment 又被采样。所以这里单独开一个几何 pass 之后的
+    // 小 render pass，颜色目标复用 TAA 的 HDR 颜色（LOAD，不清空，保留几何 pass
+    // 已经画好的内容），不挂深度 attachment（深度测试改成在 shader 里手动用采样到
+    // 的场景深度比较）。
+    //
+    // 必须排在体积云之前：云管线（renderFlowerCloudAfterGeometry）进来时要求
+    // HDR 颜色已经是 SHADER_READ_ONLY_OPTIMAL（它自己再转成 GENERAL 做 compute
+    // 读写，见 vk_cloud_system.h::renderPhase0 开头的 transitionImage），所以这里
+    // 结束前必须转回同一个 layout，衔接上云管线的假设。
+    void renderAtmoAfterGeometry(VulkanContext& ctx, VkCommandBuffer cmd, VkTAA& taa,
+                                  const SceneSnapshot& snap, int frameSlot) {
+        bool anyAtmo = false;
+        for (const auto& cd : snap.celestials) { if (cd.atmoIdx != 0) { anyAtmo = true; break; } }
+        if (!anyAtmo) return;
+
+        VkImage     colorImg  = taa.colorImages[taa.currentIdx];
+        VkImageView colorView = taa.colorViews[taa.currentIdx];
+
+        // endGeometryPass() 已经把它转成 SHADER_READ_ONLY_OPTIMAL（供 TAA/云读取），
+        // 这里要先转回 COLOR_ATTACHMENT_OPTIMAL 才能重新当渲染目标写入。
+        transitionImage(cmd, colorImg,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT,
+            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+
+        VkRenderingAttachmentInfo colorAI{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+        colorAI.imageView   = colorView;
+        colorAI.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        colorAI.loadOp      = VK_ATTACHMENT_LOAD_OP_LOAD;  // 保留几何 pass 已经画好的内容
+        colorAI.storeOp     = VK_ATTACHMENT_STORE_OP_STORE;
+
+        VkRenderingInfo ri{ VK_STRUCTURE_TYPE_RENDERING_INFO };
+        ri.renderArea           = { {0, 0}, _extent };
+        ri.layerCount           = 1;
+        ri.colorAttachmentCount = 1;
+        ri.pColorAttachments    = &colorAI;
+        // 不挂深度 attachment，理由见函数顶部注释。
+
+        vkCmdBeginRendering(cmd, &ri);
+        {
+            VkViewport vp{ 0.0f, 0.0f, (float)_extent.width, (float)_extent.height, 0.0f, 1.0f };
+            vkCmdSetViewport(cmd, 0, 1, &vp);
+            VkRect2D scissor{ {0, 0}, _extent };
+            vkCmdSetScissor(cmd, 0, 1, &scissor);
+        }
+
+        for (const auto& cd : snap.celestials) {
+            if (cd.atmoIdx == 0) continue;
+
+            // 该星球"指向太阳"的方向（与几何 pass 里 updateLightDir 用的是同一套算法，
+            // 但这里不改全局 light 方向状态——壳内/壳外 shader 直接把方向当参数传，
+            // 不依赖 FrameUBO 里那个会被后续几何/特效覆盖的全局 lightDir）。
+            float lightDirToSun[3] = {
+                snap.sunWorldPos[0] - cd.center[0],
+                snap.sunWorldPos[1] - cd.center[1],
+                snap.sunWorldPos[2] - cd.center[2],
+            };
+            float len = sqrtf(lightDirToSun[0]*lightDirToSun[0] + lightDirToSun[1]*lightDirToSun[1] + lightDirToSun[2]*lightDirToSun[2]);
+            if (len > 1e-4f) { lightDirToSun[0]/=len; lightDirToSun[1]/=len; lightDirToSun[2]/=len; }
+
+            AtmoPushConstants apc{};
+            apc.planetCenter[0] = cd.center[0];
+            apc.planetCenter[1] = cd.center[1];
+            apc.planetCenter[2] = cd.center[2];
+            apc.innerRadius    = cd.radius;
+            apc.outerRadius    = cd.radius + atmoTune.shellThicknessKm;
+            apc.surfaceRadius  = cd.radius;
+            apc.planetIdx      = cd.atmoIdx;
+            apc.sunVisibility  = snap.dayBlend;
+            apc.ringInner      = cd.hasRing ? cd.radius * 1.11f : 0.f;
+            apc.ringOuter      = cd.hasRing ? cd.radius * 2.35f : 0.f;
+            apc.frameIndex     = snap.frameIndex;
+
+            PlanetScatteringCoeffs sc = getPlanetScatteringCoeffs(cd.atmoIdx);
+            apc.rayleighCoeff[0]=sc.rayleighCoeff[0]; apc.rayleighCoeff[1]=sc.rayleighCoeff[1]; apc.rayleighCoeff[2]=sc.rayleighCoeff[2];
+            apc.mieCoeff = sc.mieCoeff;
+            apc.hRayleigh = sc.hRayleigh; apc.hMie = sc.hMie; apc.gMie = sc.gMie;
+            apc.ozoneCoeff[0]=sc.ozoneCoeff[0]; apc.ozoneCoeff[1]=sc.ozoneCoeff[1]; apc.ozoneCoeff[2]=sc.ozoneCoeff[2];
+            apc.ozoneCenter = sc.ozoneCenter; apc.ozoneWidth = sc.ozoneWidth;
+
+            apc.spaceVisStart  = atmoTune.spaceVisStart;
+            apc.spaceVisEnd    = atmoTune.spaceVisEnd;
+            apc.limbBrightness = atmoTune.limbBrightness;
+
+            float camDx = snap.camPos[0]-cd.center[0], camDy = snap.camPos[1]-cd.center[1], camDz = snap.camPos[2]-cd.center[2];
+            float camDist = sqrtf(camDx*camDx + camDy*camDy + camDz*camDz);
+            bool  cameraInside = camDist < apc.outerRadius;
+
+            if (cameraInside) {
+                scene.drawAtmoInside(ctx, cmd, frameSlot, taa.depthView, cd.bodyIdx, apc, snap.camPos, lightDirToSun);
+            } else {
+                scene.drawAtmoShell(ctx, cmd, frameSlot, taa.depthView, cd.bodyIdx, apc, snap.camPos, lightDirToSun);
+            }
+        }
+
+        vkCmdEndRendering(cmd);
+
+        // 转回 SHADER_READ_ONLY_OPTIMAL：云管线期望进来时 HDR 颜色已经是这个 layout。
+        transitionImage(cmd, colorImg,
+            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+            VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
     }
 
     // Flower Phase0 — call after TAA endGeometryPass, before resolve
@@ -298,8 +410,24 @@ struct VkRenderer3D {
             apc.tuneExtinction = 1.f;
             apc.showClouds     = cd.showClouds ? 1.f : 0.f;
 
-            // 大气散射（先渲染，让云层能遮挡后方的大气光）
-            drawAtmosphere(cmd, apc);
+            // 大气散射系数：唯一数据源 getPlanetScatteringCoeffs()（vk_atmosphere_lut.h），
+            // 壳内/壳外新 shader（atmo_inside.frag/atmo_shell.frag）直接读这些字段，
+            // 不再各自硬编码一份 setupPlanetProfile() 系数表。
+            {
+                PlanetScatteringCoeffs sc = getPlanetScatteringCoeffs(cd.atmoIdx);
+                apc.rayleighCoeff[0]=sc.rayleighCoeff[0]; apc.rayleighCoeff[1]=sc.rayleighCoeff[1]; apc.rayleighCoeff[2]=sc.rayleighCoeff[2];
+                apc.mieCoeff = sc.mieCoeff;
+                apc.hRayleigh = sc.hRayleigh; apc.hMie = sc.hMie; apc.gMie = sc.gMie;
+                apc.ozoneCoeff[0]=sc.ozoneCoeff[0]; apc.ozoneCoeff[1]=sc.ozoneCoeff[1]; apc.ozoneCoeff[2]=sc.ozoneCoeff[2];
+                apc.ozoneCenter = sc.ozoneCenter; apc.ozoneWidth = sc.ozoneWidth;
+            }
+
+            // 大气散射：不再在这里画。旧版 drawAtmosphere()（全屏 raymarch，无深度采样）
+            // 需要放在几何 pass 内才能用无深度测试的全屏三角形简单实现；新的壳内/壳外
+            // 路径（atmo_inside.frag/atmo_shell.frag）需要采样场景深度做空气透视/深度
+            // 测试，而深度只有在几何 pass 结束、TAA 转成只读纹理之后才能被采样——两者
+            // 没法在同一个 render pass 里共存。改到 renderAtmoAfterGeometry()（本文件下方），
+            // 由 main.cpp 在 endGeometryPass() 之后、renderFlowerCloudAfterGeometry() 之前调用。
 
             // 云：仅地球；flower Phase0 在 geometry pass 后 compute 合成
             if (cd.atmoIdx == 3 && cd.showClouds && !cloudSystem.enabled) {

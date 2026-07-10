@@ -675,6 +675,84 @@ struct VkAtmoPipeline {
 };
 
 // -----------------------------------------------------------------------
+// VkAtmoInsidePipeline — 大气重构·壳内路径全屏三角形（atmo_inside.frag，
+// 见计划 fuzzy-toasting-flurry）。取代 VkAtmoPipeline 在"相机在大气层以内"
+// 时的全屏绘制——VkAtmoPipeline/atmo.frag 本身没删，先留作参考/回退。
+// Set 0: FrameUBO（与 VkAtmoPipeline 共用同一个 desc.set0Layout）。
+// Set 1: 渲染侧 LUT 采样（VkAtmoLutPipelines::renderSetLayout，调用方传入，
+//        vk_pipeline.h 不直接依赖 vk_atmosphere_lut.h，用裸 VkDescriptorSetLayout
+//        解耦）。
+// Push: AtmoPushConstants（112 bytes，含散射系数尾部字段）。
+// -----------------------------------------------------------------------
+struct VkAtmoInsidePipeline {
+    VkPipelineLayout layout=VK_NULL_HANDLE; VkPipeline pipeline=VK_NULL_HANDLE;
+    bool init(VulkanContext& ctx, VkDescriptorManager& desc, VkDescriptorSetLayout renderSetLayout,
+              VkFormat colorFmt, VkFormat depthFmt, const char* vertSpv, const char* fragSpv) {
+        auto vc=loadSPIRV(vertSpv); auto fc=loadSPIRV(fragSpv);
+        if(vc.empty()||fc.empty()) return false;
+        VkShaderModule vm=createShaderModule(ctx.device,vc), fm=createShaderModule(ctx.device,fc);
+        if(!vm||!fm){if(vm)vkDestroyShaderModule(ctx.device,vm,nullptr);if(fm)vkDestroyShaderModule(ctx.device,fm,nullptr);return false;}
+        // Fullscreen triangle: no vertex buffer, no input attributes（复用 atmo.vert）
+        PipelineInitParams p{}; p.bindings=nullptr; p.bindingCount=0; p.attrs=nullptr; p.attrCount=0;
+        p.blendEnable=true;
+        p.srcColor=VK_BLEND_FACTOR_ONE;  p.dstColor=VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        p.srcAlpha=VK_BLEND_FACTOR_ONE;  p.dstAlpha=VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        p.depthTest=VK_FALSE; p.depthWrite=VK_FALSE; p.depthOp=VK_COMPARE_OP_LESS_OR_EQUAL;
+        p.cullMode=VK_CULL_MODE_NONE;
+        p.pcSize=sizeof(AtmoPushConstants);
+        VkDescriptorSetLayout sets[2]={desc.set0Layout, renderSetLayout};
+        p.setLayouts=sets; p.setCount=2;
+        p.colorFmt=colorFmt; p.depthFmt=depthFmt; p.name="AtmoInside";
+        bool ok=buildPipeline(ctx.device,vm,fm,p,layout,pipeline);
+        vkDestroyShaderModule(ctx.device,vm,nullptr); vkDestroyShaderModule(ctx.device,fm,nullptr); return ok;
+    }
+    void bind(VkCommandBuffer cmd) const{vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,pipeline);}
+    void shutdown(VkDevice d){if(pipeline){vkDestroyPipeline(d,pipeline,nullptr);pipeline=VK_NULL_HANDLE;}if(layout){vkDestroyPipelineLayout(d,layout,nullptr);layout=VK_NULL_HANDLE;}}
+};
+
+// -----------------------------------------------------------------------
+// VkAtmoShellPipeline — 大气重构·壳外路径（atmo_shell.vert/frag），画
+// vk_scene.h::atmoSphereVbo 那个早就建好但一直没人用的单位球壳网格
+// （position-only，stride=12）。与 VkAtmoInsidePipeline 的关键区别：
+// depthTest=true（深度测试开启，不会画到更近的物体前面）、depthWrite=false
+// （半透明不写深度）、真正的顶点输入（不是无 VBO 全屏三角形）。Set 0/1、
+// push constant 布局和壳内路径完全一致，方便共用同一份 AtmoPushConstants
+// 填充代码（见 vk_renderer3d.h 的 apc 构造）。
+// -----------------------------------------------------------------------
+struct VkAtmoShellPipeline {
+    VkPipelineLayout layout=VK_NULL_HANDLE; VkPipeline pipeline=VK_NULL_HANDLE;
+    bool init(VulkanContext& ctx, VkDescriptorManager& desc, VkDescriptorSetLayout renderSetLayout,
+              VkFormat colorFmt, VkFormat depthFmt, const char* vertSpv, const char* fragSpv) {
+        auto vc=loadSPIRV(vertSpv); auto fc=loadSPIRV(fragSpv);
+        if(vc.empty()||fc.empty()) return false;
+        VkShaderModule vm=createShaderModule(ctx.device,vc), fm=createShaderModule(ctx.device,fc);
+        if(!vm||!fm){if(vm)vkDestroyShaderModule(ctx.device,vm,nullptr);if(fm)vkDestroyShaderModule(ctx.device,fm,nullptr);return false;}
+
+        // position-only 顶点输入：vec3 @ location0, binding0, stride=12（与
+        // vk_scene.h::_buildAtmoSphere() 生成的纯 position 浮点数组一一对应）。
+        static const VkVertexInputBindingDescription binding{ 0, 12, VK_VERTEX_INPUT_RATE_VERTEX };
+        static const VkVertexInputAttributeDescription attr{ 0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0 };
+
+        PipelineInitParams p{}; p.bindings=&binding; p.bindingCount=1; p.attrs=&attr; p.attrCount=1;
+        p.blendEnable=true;
+        p.srcColor=VK_BLEND_FACTOR_ONE; p.dstColor=VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        p.srcAlpha=VK_BLEND_FACTOR_ONE; p.dstAlpha=VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        p.depthTest=VK_TRUE; p.depthWrite=VK_FALSE; p.depthOp=VK_COMPARE_OP_LESS_OR_EQUAL;
+        // 双面渲染：cameraInside 判定是硬切换（无过渡淡出），穿越壳层瞬间可能
+        // 从内外任一面看到网格，不做背面剔除。
+        p.cullMode=VK_CULL_MODE_NONE;
+        p.pcSize=sizeof(AtmoPushConstants);
+        VkDescriptorSetLayout sets[2]={desc.set0Layout, renderSetLayout};
+        p.setLayouts=sets; p.setCount=2;
+        p.colorFmt=colorFmt; p.depthFmt=depthFmt; p.name="AtmoShell";
+        bool ok=buildPipeline(ctx.device,vm,fm,p,layout,pipeline);
+        vkDestroyShaderModule(ctx.device,vm,nullptr); vkDestroyShaderModule(ctx.device,fm,nullptr); return ok;
+    }
+    void bind(VkCommandBuffer cmd) const{vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,pipeline);}
+    void shutdown(VkDevice d){if(pipeline){vkDestroyPipeline(d,pipeline,nullptr);pipeline=VK_NULL_HANDLE;}if(layout){vkDestroyPipelineLayout(d,layout,nullptr);layout=VK_NULL_HANDLE;}}
+};
+
+// -----------------------------------------------------------------------
 // VkCloudPipeline — 体积云全屏三角形（预乘 alpha 混合，无深度写入）
 // Set 0: FrameUBO(b0) + CloudParamsUBO(b1)
 // Set 1: 3×sampler3D + 1×sampler2D
