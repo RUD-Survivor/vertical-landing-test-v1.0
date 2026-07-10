@@ -357,9 +357,11 @@ static void _atmoLutComputeBarrier(VkCommandBuffer cmd) {
 // 可见，不包含 FRAGMENT_SHADER——但 bakeFull()/bakeSkyViewOnly() 之后紧接着就是同一个
 // command buffer 里的 atmo_inside.frag/atmo_shell.frag 图形绘制，会在片元着色器阶段
 // 采样刚烤好的 Transmittance/Sky-View LUT。没有这道"compute 写 → fragment 读"的可见性
-// 屏障，GPU 没有任何保证片元着色器读到的是烘焙完成后的数据，理论上可能读到旧内容/
-// 未定义中间状态——这类同步问题的症状往往是"看起来有规律但其实是执行顺序/缓存效应
-// 导致的图案"，和大气壳内那个跟着太阳方向、边界很规整的白色楔形的表现高度吻合。
+// 屏障，GPU 没有任何保证片元着色器读到的是烘焙完成后的数据。这是一个真实、独立的
+// Vulkan 同步问题，无论如何都要修（不修的话是未定义行为，能不能观察到取决于具体
+// GPU/驱动的调度巧合）；曾经怀疑过它和大气壳内那个白色三角形是同一个 bug，后来
+// 确认三角形的真正原因是 atmosphere_common.glsl::getPosScatterLight() 的坐标系
+// 不一致（已在那边修好），这道屏障单独修，不依赖那个结论。
 // 放在每次烘焙链的最后一步，取代原来那个 compute-only 的收尾屏障。
 static void _atmoLutComputeToFragmentBarrier(VkCommandBuffer cmd) {
     VkMemoryBarrier2 b{ VK_STRUCTURE_TYPE_MEMORY_BARRIER_2 };

@@ -95,17 +95,13 @@ vec3 safeOrthoAxis(vec3 v) {
 // 时才会被调度到（见 vk_renderer3d.h::renderAtmoAfterGeometry 的 cameraInside
 // 分支），恒成立。
 //
-// 已修复（实机截图定位：大气壳内出现顶到天顶的巨大白色三角形）：视线方向
-// worldDirFromPlanet 接近当地天顶/天底（upVector）时，cross(upVector,
-// worldDirFromPlanet) 趋近于零向量，normalize(0) = NaN，一路传播到
-// skyViewLutParamsToUv 的 UV 坐标，采样出 Inf/超大值，再乘 exposure(5~10)
-// 过 ACES，基本就是纯白——这就是screen 上那片"越接近天顶越白"、呈三角形
-// 收拢到天顶投影点的区域（不是什么 3D 网格飞出来了，就是天空背景在那一小
-// 片方向算出了 NaN）。天顶/天底本来就是这个参数化的数学奇点（正上方看，
-// "朝向太阳的方位角"这个概念本身没有意义），直接绕过奇点用一个任意但稳定
-// 的辅助轴兜底，只影响这一个奇点周围极小的范围，不影响其余方向的正确性。
-// sunDir≈upVector（太阳几乎在正头顶）同理会让第二个 normalize 也退化，一并
-// 加了同样的兜底。
+// 注：大气壳内出现的那个顶到天顶的巨大白色三角形，真正原因是烘焙侧
+// （atmosphere_common.glsl::getPosScatterLight）用合成的"规范坐标系"和这里
+// 采样用的真实局部系不一致，已经在烘焙侧改成真实局部系修好（该函数注释里
+// 有完整说明）。下面的天顶奇点兜底是另一个独立、范围小得多的问题：正对当地
+// 天顶/天底看时 cross(upVector, worldDirFromPlanet) 趋近零向量，normalize(0)
+// = NaN，是这套参数化本身的数学奇点（那个方向上"朝向太阳的方位角"本来就没
+// 有定义），和上面那个大范围的坐标系错位是两回事，仍然需要保留。
 vec3 skyViewLUT(vec3 worldDirFromPlanet, vec3 camRelPlanet, vec3 sunDir) {
     AtmosphereParameters atmo;
     atmo.bottomRadius = pc.surfaceRadius;
@@ -132,16 +128,7 @@ vec3 skyViewLUT(vec3 worldDirFromPlanet, vec3 camRelPlanet, vec3 sunDir) {
     vec2 lutSize = vec2(textureSize(inSkyViewLut, 0));
     vec2 uv;
     skyViewLutParamsToUv(atmo, bIntersectGround, viewZenithCosAngle, lightViewCosAngle, viewHeight, lutSize, uv);
-    vec3 skyColor = texture(sampler2D(inSkyViewLut, samp), uv).rgb;
-
-    // 安全网：即使前面的兜底没堵住所有情况（比如 LUT 本身烘焙出了极端值，或者
-    // 烘焙/采样之间存在还没排查干净的同步或坐标系问题），也不让 NaN/Inf/异常
-    // 大的有限值一路传到 exposure×ACES 把一大片天空炸成纯白——NaN 的任何比较
-    // 都是 false，用 isnan/isinf 显式挡一下；再用 min() 卡一个物理上不可能超过
-    // 的上限（Sky-View LUT 存的是相对辐亮度，正常量级在个位数，50 已经很宽松）。
-    if (any(isnan(skyColor)) || any(isinf(skyColor))) skyColor = vec3(0.0);
-    skyColor = min(skyColor, vec3(50.0));
-    return skyColor;
+    return texture(sampler2D(inSkyViewLut, samp), uv).rgb;
 }
 
 void main() {
