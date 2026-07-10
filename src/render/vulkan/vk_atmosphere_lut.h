@@ -49,6 +49,12 @@ struct AtmoTuneParams {
     // 基本看不见，表现就是"大气壳是黑的"。默认值先给个数量级上大致对的猜测，
     // 需要在 imgui_atmo_tuner.h 里实机调到视觉正确。
     float outerExposure    = 5.0f;
+    // 壳内曝光（atmo_inside.frag 原来的 mix(10.0,5.0,smoothstep(0,0.6,altNorm))
+    // 硬编码）：贴地（altNorm=0）用 innerExposureNear，接近大气顶（altNorm≥0.6）
+    // 用 innerExposureFar，中间平滑过渡。现在暴露给 tuner，方便和 outerExposure
+    // 一起调，两条路径切换时不会有明显的亮度跳变。
+    float innerExposureNear = 10.0f;
+    float innerExposureFar  = 5.0f;
 };
 
 // ── 单一数据源：每类行星的 Rayleigh/Mie/臭氧散射系数 ─────────────────────────
@@ -347,6 +353,22 @@ static void _atmoLutComputeBarrier(VkCommandBuffer cmd) {
     vkCmdPipelineBarrier2(cmd, &dep);
 }
 
+// 已修复：compute→compute 的 _atmoLutComputeBarrier 只保证 dstStageMask=COMPUTE_SHADER
+// 可见，不包含 FRAGMENT_SHADER——但 bakeFull()/bakeSkyViewOnly() 之后紧接着就是同一个
+// command buffer 里的 atmo_inside.frag/atmo_shell.frag 图形绘制，会在片元着色器阶段
+// 采样刚烤好的 Transmittance/Sky-View LUT。没有这道"compute 写 → fragment 读"的可见性
+// 屏障，GPU 没有任何保证片元着色器读到的是烘焙完成后的数据，理论上可能读到旧内容/
+// 未定义中间状态——这类同步问题的症状往往是"看起来有规律但其实是执行顺序/缓存效应
+// 导致的图案"，和大气壳内那个跟着太阳方向、边界很规整的白色楔形的表现高度吻合。
+// 放在每次烘焙链的最后一步，取代原来那个 compute-only 的收尾屏障。
+static void _atmoLutComputeToFragmentBarrier(VkCommandBuffer cmd) {
+    VkMemoryBarrier2 b{ VK_STRUCTURE_TYPE_MEMORY_BARRIER_2 };
+    b.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT; b.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT;
+    b.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT; b.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
+    VkDependencyInfo dep{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO }; dep.memoryBarrierCount=1; dep.pMemoryBarriers=&b;
+    vkCmdPipelineBarrier2(cmd, &dep);
+}
+
 // ==========================================================================
 // VkAtmosphereLut — 单个星球的 LUT 资源实例：images(trans/multi/skyView/cube) +
 // 每帧 UBO + descriptor set。不再自带 pipeline——那些由 VkAtmoLutPipelines
@@ -467,7 +489,9 @@ struct VkAtmosphereLut {
 
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipes.skyIrradiancePipe);
         vkCmdDispatch(cmd, (kCubeSize+7)/8, (kCubeSize+7)/8, 6);
-        _atmoLutComputeBarrier(cmd);
+        // 最后一步收尾：让片元着色器（紧接着的 atmo_inside.frag/atmo_shell.frag）
+        // 能正确看到这一整条烘焙链（含前面 transmittance/multiScatter）的结果。
+        _atmoLutComputeToFragmentBarrier(cmd);
     }
 
     // 只重烤 Sky-View LUT + Sky-Irradiance cubemap：这两张表把相机高度/太阳-视线角
@@ -490,7 +514,8 @@ struct VkAtmosphereLut {
 
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipes.skyIrradiancePipe);
         vkCmdDispatch(cmd, (kCubeSize+7)/8, (kCubeSize+7)/8, 6);
-        _atmoLutComputeBarrier(cmd);
+        // 同上：收尾用 compute→fragment 可见性屏障，不是 compute→compute。
+        _atmoLutComputeToFragmentBarrier(cmd);
     }
 
 private:

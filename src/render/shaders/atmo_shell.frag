@@ -76,9 +76,11 @@ layout(push_constant) uniform PC {
     float spaceVisStart;   // 本文件不用（壳内专用），保留字段对齐 push constant 布局
     float spaceVisEnd;
     float limbBrightness;  // imgui_atmo_tuner.h 可调，掠射角边缘增强系数
-    float outerExposure;   // imgui_atmo_tuner.h 可调，壳外整体曝光倍率，默认 300
+    float outerExposure;   // imgui_atmo_tuner.h 可调，壳外整体曝光倍率
     float sunDirX, sunDirY, sunDirZ; // "这颗星球→太阳"方向，已归一化
-    float _pad2;
+    float innerExposureNear; // 本文件不用（壳内专用），保留字段对齐 push constant 布局
+    float innerExposureFar;
+    float _pad3;
 } pc;
 
 #define PC_RAYLEIGH vec3(pc.rayleighCoeffX, pc.rayleighCoeffY, pc.rayleighCoeffZ)

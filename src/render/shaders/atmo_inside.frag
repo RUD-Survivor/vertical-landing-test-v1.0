@@ -70,7 +70,9 @@ layout(push_constant) uniform PC {
     float limbBrightness; // 本文件不用（壳外 limb 专用），保留字段对齐 push constant 布局
     float outerExposure;  // 本文件不用（壳外专用）
     float sunDirX, sunDirY, sunDirZ; // "这颗星球→太阳"方向，已归一化
-    float _pad2;
+    float innerExposureNear; // imgui_atmo_tuner.h 可调，贴地(altNorm=0)曝光倍率，默认 10
+    float innerExposureFar;  // imgui_atmo_tuner.h 可调，近大气顶(altNorm≥0.6)曝光倍率，默认 5
+    float _pad3;
 } pc;
 
 // 拼回 vec3，减少下面调用点的改动量。
@@ -81,10 +83,29 @@ layout(push_constant) uniform PC {
 layout(location = 0) in  vec2 vNDC;
 layout(location = 0) out vec4 FragColor;
 
+// 构造一个和 v 不平行的辅助轴，用来在 v≈0 的退化情形下兜底（见 skyViewLUT()
+// 里两处 normalize(cross(...))）。选 |v.x| 更小的那个分量对应的世界轴，
+// 保证辅助轴和 v 之间的夹角不会太小。
+vec3 safeOrthoAxis(vec3 v) {
+    return (abs(v.x) < 0.9) ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0);
+}
+
 // 天空背景 O(1) 查表：不做任何 raymarch，直接从 Sky-View LUT 里按视线方向取色。
 // 合法条件：viewHeight（这里是相机高度）< topRadius——本文件只在"相机在壳内"
 // 时才会被调度到（见 vk_renderer3d.h::renderAtmoAfterGeometry 的 cameraInside
 // 分支），恒成立。
+//
+// 已修复（实机截图定位：大气壳内出现顶到天顶的巨大白色三角形）：视线方向
+// worldDirFromPlanet 接近当地天顶/天底（upVector）时，cross(upVector,
+// worldDirFromPlanet) 趋近于零向量，normalize(0) = NaN，一路传播到
+// skyViewLutParamsToUv 的 UV 坐标，采样出 Inf/超大值，再乘 exposure(5~10)
+// 过 ACES，基本就是纯白——这就是screen 上那片"越接近天顶越白"、呈三角形
+// 收拢到天顶投影点的区域（不是什么 3D 网格飞出来了，就是天空背景在那一小
+// 片方向算出了 NaN）。天顶/天底本来就是这个参数化的数学奇点（正上方看，
+// "朝向太阳的方位角"这个概念本身没有意义），直接绕过奇点用一个任意但稳定
+// 的辅助轴兜底，只影响这一个奇点周围极小的范围，不影响其余方向的正确性。
+// sunDir≈upVector（太阳几乎在正头顶）同理会让第二个 normalize 也退化，一并
+// 加了同样的兜底。
 vec3 skyViewLUT(vec3 worldDirFromPlanet, vec3 camRelPlanet, vec3 sunDir) {
     AtmosphereParameters atmo;
     atmo.bottomRadius = pc.surfaceRadius;
@@ -94,10 +115,16 @@ vec3 skyViewLUT(vec3 worldDirFromPlanet, vec3 camRelPlanet, vec3 sunDir) {
     vec3  upVector   = camRelPlanet / max(viewHeight, 1e-4);
     float viewZenithCosAngle = dot(worldDirFromPlanet, upVector);
 
-    vec3 sideVector    = normalize(cross(upVector, worldDirFromPlanet));
+    vec3  sideCross = cross(upVector, worldDirFromPlanet);
+    float sideLen   = length(sideCross);
+    vec3  sideVector = (sideLen > 1e-5)
+        ? sideCross / sideLen
+        : normalize(cross(upVector, safeOrthoAxis(upVector)));
     vec3 forwardVector = normalize(cross(sideVector, upVector));
-    vec2 lightOnPlane  = vec2(dot(sunDir, forwardVector), dot(sunDir, sideVector));
-    lightOnPlane = normalize(lightOnPlane);
+
+    vec2  lightOnPlane = vec2(dot(sunDir, forwardVector), dot(sunDir, sideVector));
+    float lightOnPlaneLen = length(lightOnPlane);
+    lightOnPlane = (lightOnPlaneLen > 1e-5) ? (lightOnPlane / lightOnPlaneLen) : vec2(1.0, 0.0);
     float lightViewCosAngle = lightOnPlane.x;
 
     bool bIntersectGround = raySphereIntersectNearest(camRelPlanet, worldDirFromPlanet, vec3(0.0), atmo.bottomRadius) >= 0.0;
@@ -105,7 +132,16 @@ vec3 skyViewLUT(vec3 worldDirFromPlanet, vec3 camRelPlanet, vec3 sunDir) {
     vec2 lutSize = vec2(textureSize(inSkyViewLut, 0));
     vec2 uv;
     skyViewLutParamsToUv(atmo, bIntersectGround, viewZenithCosAngle, lightViewCosAngle, viewHeight, lutSize, uv);
-    return texture(sampler2D(inSkyViewLut, samp), uv).rgb;
+    vec3 skyColor = texture(sampler2D(inSkyViewLut, samp), uv).rgb;
+
+    // 安全网：即使前面的兜底没堵住所有情况（比如 LUT 本身烘焙出了极端值，或者
+    // 烘焙/采样之间存在还没排查干净的同步或坐标系问题），也不让 NaN/Inf/异常
+    // 大的有限值一路传到 exposure×ACES 把一大片天空炸成纯白——NaN 的任何比较
+    // 都是 false，用 isnan/isinf 显式挡一下；再用 min() 卡一个物理上不可能超过
+    // 的上限（Sky-View LUT 存的是相对辐亮度，正常量级在个位数，50 已经很宽松）。
+    if (any(isnan(skyColor)) || any(isinf(skyColor))) skyColor = vec3(0.0);
+    skyColor = min(skyColor, vec3(50.0));
+    return skyColor;
 }
 
 void main() {
@@ -173,7 +209,9 @@ void main() {
         pc.surfaceRadius, pc.outerRadius, sunDir, cosTheta);
 
     float nightFactor = mix(0.01, 1.0, pc.sunVisibility);
-    float exposure     = mix(10.0, 5.0, smoothstep(0.0, 0.6, altNorm)) * nightFactor;
+    // pc.innerExposureNear/Far 可在 imgui_atmo_tuner.h 里实时调（默认 10/5，
+    // 和原来硬编码的 mix(10.0,5.0,...) 数值一致，只是现在能调了）。
+    float exposure     = mix(pc.innerExposureNear, pc.innerExposureFar, smoothstep(0.0, 0.6, altNorm)) * nightFactor;
 
     // ── spaceVisibility / hazeOpacity 拆分（不再用 1-transLuma 当唯一 alpha）──
     // spaceVisibility：纯粹由高度驱动，只用在"天空背景该不该透出星空"这件事上；

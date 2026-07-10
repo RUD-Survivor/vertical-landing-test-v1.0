@@ -47,7 +47,9 @@ layout(push_constant) uniform PC {
     float limbBrightness;
     float outerExposure;
     float sunDirX, sunDirY, sunDirZ;
-    float _pad2;
+    float innerExposureNear; // 本文件不用（壳内专用），保留字段对齐 push constant 布局
+    float innerExposureFar;
+    float _pad3;
 } pc;
 
 layout(location = 0) out vec3 vWorldPos;

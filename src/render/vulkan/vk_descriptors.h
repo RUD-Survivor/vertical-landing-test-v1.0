@@ -110,7 +110,7 @@ struct LensFlarePushConstants {
 };                         //            total: 64 bytes
 
 // -----------------------------------------------------------------------
-// AtmoPushConstants — 大气散射球体（144 bytes，超过 128 字节保证下限——本工程
+// AtmoPushConstants — 大气散射球体（152 bytes，超过 128 字节保证下限——本工程
 // 目标硬件是桌面独显（实测 NVIDIA RTX 4060），desktop NVIDIA/AMD 早就普遍支持
 // 到 256 字节，这里就不再费事查询 VkPhysicalDeviceLimits::maxPushConstantsSize
 // 了，直接用）。
@@ -169,8 +169,10 @@ struct AtmoPushConstants {
     // 改成 C++ 侧按每颗星球各自算好的"行星→太阳"方向传进来（vk_renderer3d.h::
     // renderAtmoAfterGeometry 里本来就已经算了这个值，只是之前没接上 shader）。
     float sunDir[3];        // 12 bytes  — offset 128 (已归一化，"指向太阳"的方向)
-    float _pad2;            //  4 bytes  — offset 140 (对齐到 144，暂未使用)
-};                         //            total: 144 bytes
+    float innerExposureNear;//  4 bytes  — offset 140 (壳内路径，贴地 altNorm=0 时的曝光倍率)
+    float innerExposureFar; //  4 bytes  — offset 144 (壳内路径，接近大气顶 altNorm≥0.6 时的曝光倍率)
+    float _pad3;            //  4 bytes  — offset 148 (对齐到 152，暂未使用)
+};                         //            total: 152 bytes
 
 // Terrain patch 专属 UBO（binding 1 of Set 0）
 // nodePos/nodeSide/nodeUp 已移至 push constants（每 draw call 更新），此处只保留每帧常量

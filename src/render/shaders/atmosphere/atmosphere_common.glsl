@@ -338,20 +338,44 @@ vec3 getPosScatterLight(
     float lightViewCosAngle;
     uvToSkyViewLutParams(atmosphere, viewZenithCosAngle, lightViewCosAngle, viewHeight, uv);
 
-    vec3 sunDir;
-    {
-        vec3 upVector = inWorldPos / viewHeight;
-        float sunZenithCosAngle = dot(upVector, -normalize(frameData.sky.direction));
-        sunDir = normalize(vec3(sqrt(1.0 - sunZenithCosAngle * sunZenithCosAngle), sunZenithCosAngle, 0.0));
-    }
+    // 已修复（实机反馈定位：大气壳内出现一个固定在太阳/地平线方位上的巨大白色
+    // 楔形，转头不消失，形状随相机纬度变化）：原来这里烘焙时用一个"规范坐标系"
+    // ——worldPos 锁在 (0, viewHeight, 0)，太阳锁在全局 X-Y 平面（Z=0）——理论上
+    // 靠"高度 + 视天顶角 + 太阳-视线相对方位角"这三个量的旋转不变性，应该和真实
+    // 位置等价；但采样侧（atmo_inside.frag::skyViewLUT()）构造局部基是用真实
+    // camRelPlanet/真实视线方向，只要这两套坐标系的旋转对应关系有任何一点没有
+    // 完全对齐，两边算出来的 (viewZenithCosAngle, lightViewCosAngle) 就会对不上，
+    // 采样时查到错误的 LUT texel——相机不在"规范坐标系"假设的那个纬度/经度时
+    // 尤其明显，正好是一个跟着相机朝向、相对太阳方位固定的楔形误差区。
+    //
+    // 改成烘焙时也用真实局部系：worldPos 就是真实球面位置（不是合成的 (0,H,0)），
+    // {up, side, forward} 这组基由真实 upVector 和真实太阳方向构造（forward=太阳
+    // 水平投影方向），sunDir/worldDir 都在这组真实基里搭，和采样侧完全同构——
+    // 不再依赖"规范坐标系等价"这个假设本身是否严格成立。
+    vec3 upVector = normalize(inWorldPos);
+    vec3 worldPos = upVector * viewHeight;
 
-    vec3 worldPos = vec3(0.0, viewHeight, 0.0);
-    float viewZenithSinAngle = sqrt(1.0 - viewZenithCosAngle * viewZenithCosAngle);
-    vec3 worldDir = vec3(
-        viewZenithSinAngle * lightViewCosAngle,
-        viewZenithCosAngle,
-        viewZenithSinAngle * sqrt(1.0 - lightViewCosAngle * lightViewCosAngle)
-    );
+    vec3 realSunDir = -normalize(frameData.sky.direction); // 指向太阳
+    vec3 sideCross = cross(upVector, realSunDir);
+    float sideLen  = length(sideCross);
+    // 太阳几乎正好在天顶/天底时退化，任选一个不平行的辅助轴兜底（和
+    // atmo_inside.frag::safeOrthoAxis 同款处理，只影响这个奇点附近极小范围）。
+    vec3 side = (sideLen > 1e-5)
+        ? sideCross / sideLen
+        : normalize(cross(upVector, (abs(upVector.x) < 0.9) ? vec3(1.0,0.0,0.0) : vec3(0.0,1.0,0.0)));
+    vec3 forward = normalize(cross(side, upVector)); // 太阳方向的水平投影
+
+    float sunZenithCosAngle = dot(upVector, realSunDir);
+    float sunHorizSin = sqrt(max(0.0, 1.0 - sunZenithCosAngle * sunZenithCosAngle));
+    vec3 sunDir = forward * sunHorizSin + upVector * sunZenithCosAngle;
+
+    float viewZenithSinAngle = sqrt(max(0.0, 1.0 - viewZenithCosAngle * viewZenithCosAngle));
+    // 视线相对太阳的方位角就是 acos(lightViewCosAngle)，直接在真实 {forward,side,up}
+    // 基里把这个视线方向搭出来（forward 分量用 lightViewCosAngle，不再是合成坐标系
+    // 里的 (X,Y,Z) 三元组）。
+    vec3 worldDir = forward  * (viewZenithSinAngle * lightViewCosAngle)
+                  + side     * (viewZenithSinAngle * sqrt(max(0.0, 1.0 - lightViewCosAngle * lightViewCosAngle)))
+                  + upVector * viewZenithCosAngle;
 
     if (!moveToTopAtmosphere(worldPos, worldDir, atmosphere.topRadius))
     {

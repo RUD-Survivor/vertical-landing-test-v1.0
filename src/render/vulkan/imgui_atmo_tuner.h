@@ -11,7 +11,7 @@ inline void AtmoTunerImGui(bool* p_open, AtmoTuneParams& p, VkAtmoLutCache& lutC
     if (ImGui::IsKeyPressed(ImGuiKey_F4, false)) *p_open = !*p_open;
     if (!*p_open) return;
 
-    ImGui::SetNextWindowSize(ImVec2(380, 300), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(400, 420), ImGuiCond_FirstUseEver);
     if (!ImGui::Begin("大气渲染调参 (壳内/壳外)", p_open, ImGuiWindowFlags_None)) {
         ImGui::End();
         return;
@@ -26,6 +26,12 @@ inline void AtmoTunerImGui(bool* p_open, AtmoTuneParams& p, VkAtmoLutCache& lutC
     ImGui::SliderFloat("VisStart (altNorm)", &p.spaceVisStart, 0.0f, 1.0f, "%.2f");
     ImGui::SliderFloat("VisEnd (altNorm)",   &p.spaceVisEnd,   0.0f, 1.5f, "%.2f");
     ImGui::TextDisabled("altNorm=相机高度/壳厚度，0=贴地 1=大气顶。VisStart 开始透星空，VisEnd 完全透明");
+
+    ImGui::Separator();
+    ImGui::Text("壳内曝光（atmo_inside.frag 天空背景/haze 共用）");
+    ImGui::SliderFloat("InnerExposureNear (贴地)", &p.innerExposureNear, 0.5f, 50.0f, "%.1f");
+    ImGui::SliderFloat("InnerExposureFar (近大气顶)", &p.innerExposureFar, 0.5f, 50.0f, "%.1f");
+    ImGui::TextDisabled("altNorm=0(贴地)用 Near，altNorm>=0.6(近大气顶)用 Far，中间平滑过渡");
 
     ImGui::Separator();
     ImGui::Text("壳外 limb 光晕（原来是黑的：raymarch 算出来的散射量级本来就很小，");
