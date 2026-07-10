@@ -110,15 +110,28 @@ struct LensFlarePushConstants {
 };                         //            total: 64 bytes
 
 // -----------------------------------------------------------------------
-// AtmoPushConstants — 大气散射球体（112 bytes, < 128 byte minimum guarantee）
-// std430 layout: vec4(16) + 12×float/int(48) + 12×float(48) = 112 bytes
+// AtmoPushConstants — 大气散射球体（144 bytes，超过 128 字节保证下限——本工程
+// 目标硬件是桌面独显（实测 NVIDIA RTX 4060），desktop NVIDIA/AMD 早就普遍支持
+// 到 256 字节，这里就不再费事查询 VkPhysicalDeviceLimits::maxPushConstantsSize
+// 了，直接用）。
 //
-// 尾部新增的 12 个 float（rayleighCoeff..ozoneWidth）是大气重构（壳内/壳外
-// LUT 路径）之后唯一的散射系数数据源：C++ 侧从 vk_atmosphere_lut.h::
+// 尾部新增的字段（rayleighCoeff..sunDir）是大气重构（壳内/壳外 LUT 路径）
+// 之后唯一的散射系数数据源：C++ 侧从 vk_atmosphere_lut.h::
 // getPlanetScatteringCoeffs() 取值填入（见 vk_renderer3d.h），shader 侧
-// （atmo_inside.frag / atmo_shell.frag）直接读 pc.rayleighCoeff 等字段，
-// 不再各自维护一份 setupPlanetProfile() 硬编码表——原来 atmo.frag 和
-// vk_atmosphere_lut.h 分别手抄一份同样的 7 组行星系数，现在只有 C++ 这一份。
+// （atmo_inside.frag / atmo_shell.frag）直接读这些字段，不再各自维护一份
+// setupPlanetProfile() 硬编码表。
+//
+// 已修复：GLSL push_constant 块默认按 std430 布局，vec3 成员的对齐要求是
+// 16 字节（4N，和 std140 同一条规则，std430 并没有放松这一点，只放松了数组
+// 跨距/结构体对齐）——rayleighCoeff 凑巧落在 offset 64（16 的倍数）所以没
+// 出事，但后面的 ozoneCoeff 本该落在 offset 92（不是 16 的倍数），GLSL 编译器
+// 会在它前面插 4 字节 padding 补齐到 96，而这个 C++ 结构体（打包时按
+// "全部紧密排列、无 padding" 假设手算的偏移）完全不知道这个 padding，导致
+// ozoneCoeff 往后的所有字段在 GLSL 侧读到的其实是 C++ 侧偏移 +4 处的数据——
+// 相当于 ozoneCoeff/ozoneCenter/ozoneWidth/spaceVisStart/spaceVisEnd/
+// limbBrightness 全部错位读串了。改法：C++/GLSL 两侧的 push constant 块都
+// 只用标量 float/int（不再用 vec3——vec4 在偏移 0 处天然 16 对齐，不受影响，
+// 可以保留），彻底避免这一整类对齐陷阱，不需要每次改字段都重新心算 padding。
 // -----------------------------------------------------------------------
 struct AtmoPushConstants {
     float planetCenter[4]; // 16 bytes — offset  0 (.xyz = center, .w unused)
@@ -134,21 +147,30 @@ struct AtmoPushConstants {
     float tuneMaxAlt;      //  4 bytes — offset 52
     float tuneExtinction;  //  4 bytes — offset 56 (云层消光系数)
     float showClouds;      //  4 bytes — offset 60 (0.0=隐藏云, 1.0=显示云)
-    float rayleighCoeff[3];//  12 bytes — offset 64 (km^-1)
+    float rayleighCoeff[3];//  12 bytes — offset 64 (km^-1，标量数组，非 vec3)
     float mieCoeff;        //  4 bytes  — offset 76 (km^-1)
     float hRayleigh;       //  4 bytes  — offset 80 (标高 km)
     float hMie;             //  4 bytes  — offset 84
     float gMie;             //  4 bytes  — offset 88 (Mie 相位不对称因子)
-    float ozoneCoeff[3];    // 12 bytes  — offset 92 (km^-1)
+    float ozoneCoeff[3];    // 12 bytes  — offset 92 (km^-1，标量数组，非 vec3)
     float ozoneCenter;      //  4 bytes  — offset 104 (臭氧层中心高度 km)
     float ozoneWidth;       //  4 bytes  — offset 108
-    // 大气重构 tuner 可调参数（imgui_atmo_tuner.h），刚好用满剩余的 16 字节
-    // 到 128 字节保证下限，不需要查询设备实际支持的更大 push constant 容量。
+    // 大气重构 tuner 可调参数（imgui_atmo_tuner.h）：
     float spaceVisStart;    //  4 bytes  — offset 112 (altNorm 达到此值开始透出星空)
     float spaceVisEnd;      //  4 bytes  — offset 116 (altNorm 达到此值完全是深空)
-    float limbBrightness;   //  4 bytes  — offset 120 (壳外 limb 光晕提亮系数)
-    float _padTune;         //  4 bytes  — offset 124 (对齐用，暂未使用)
-};                         //            total: 128 bytes
+    float limbBrightness;   //  4 bytes  — offset 120 (壳外 limb 边缘增强系数，乘在 outerExposure 之上)
+    float outerExposure;    //  4 bytes  — offset 124 (壳外整体曝光倍率——壳内有同类的
+                             //             exposure=5~10 倍，壳外原来完全没有，raymarch
+                             //             算出来的散射量级本来就很小，不乘一个大倍率
+                             //             ACES 压完基本看不见，见 imgui_atmo_tuner.h)
+    // 已修复：太阳方向不再靠 shader 里现读 frame.lightDir（几何 pass 结束后那个全局
+    // UBO 已经被恢复成"火箭→太阳"方向，全景模式相机离火箭很远时和"当前行星→太阳"
+    // 方向偏差很大，会让 Transmittance 查表和相位函数都算错，散射偏弱更容易发黑）。
+    // 改成 C++ 侧按每颗星球各自算好的"行星→太阳"方向传进来（vk_renderer3d.h::
+    // renderAtmoAfterGeometry 里本来就已经算了这个值，只是之前没接上 shader）。
+    float sunDir[3];        // 12 bytes  — offset 128 (已归一化，"指向太阳"的方向)
+    float _pad2;            //  4 bytes  — offset 140 (对齐到 144，暂未使用)
+};                         //            total: 144 bytes
 
 // Terrain patch 专属 UBO（binding 1 of Set 0）
 // nodePos/nodeSide/nodeUp 已移至 push constants（每 draw call 更新），此处只保留每帧常量

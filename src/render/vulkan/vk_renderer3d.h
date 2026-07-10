@@ -195,6 +195,15 @@ struct VkRenderer3D {
             apc.spaceVisStart  = atmoTune.spaceVisStart;
             apc.spaceVisEnd    = atmoTune.spaceVisEnd;
             apc.limbBrightness = atmoTune.limbBrightness;
+            apc.outerExposure  = atmoTune.outerExposure;
+
+            // 已修复：太阳方向传真正"这颗星球→太阳"的方向（上面刚算好的
+            // lightDirToSun），不再依赖 shader 里读的那个全局 frame.lightDir
+            // UBO（几何 pass 循环结束后已经被重置成"火箭→太阳"，全景模式
+            // 相机离火箭很远时和当前星球的太阳方向偏差很大）。
+            apc.sunDir[0] = lightDirToSun[0];
+            apc.sunDir[1] = lightDirToSun[1];
+            apc.sunDir[2] = lightDirToSun[2];
 
             float camDx = snap.camPos[0]-cd.center[0], camDy = snap.camPos[1]-cd.center[1], camDz = snap.camPos[2]-cd.center[2];
             float camDist = sqrtf(camDx*camDx + camDy*camDy + camDz*camDz);

@@ -17,7 +17,9 @@ layout(set = 0, binding = 0) uniform FrameUBO {
 
 // 与 atmo_shell.frag / atmo_inside.frag 共用同一个 AtmoPushConstants 布局
 // （vk_descriptors.h），壳网格只用到 planetCenter/outerRadius，其余字段传进来
-// 但顶点阶段不读，供片元阶段用。
+// 但顶点阶段不读，供片元阶段用。全部用标量 float（不用 vec3）——GLSL
+// push_constant 块默认 std430 布局，vec3 成员要 16 字节对齐，容易和 C++ 侧
+// 手算的紧凑偏移错位（这个 bug 真实发生过一次），标量没有这个陷阱。
 layout(push_constant) uniform PC {
     vec4  planetCenter;
     float innerRadius;
@@ -32,18 +34,20 @@ layout(push_constant) uniform PC {
     float tuneMaxAlt;
     float tuneExtinction;
     float showClouds;
-    vec3  rayleighCoeff;
+    float rayleighCoeffX, rayleighCoeffY, rayleighCoeffZ;
     float mieCoeff;
     float hRayleigh;
     float hMie;
     float gMie;
-    vec3  ozoneCoeff;
+    float ozoneCoeffX, ozoneCoeffY, ozoneCoeffZ;
     float ozoneCenter;
     float ozoneWidth;
     float spaceVisStart;
     float spaceVisEnd;
     float limbBrightness;
-    float _padTune;
+    float outerExposure;
+    float sunDirX, sunDirY, sunDirZ;
+    float _pad2;
 } pc;
 
 layout(location = 0) out vec3 vWorldPos;

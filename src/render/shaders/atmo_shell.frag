@@ -23,7 +23,16 @@
 //     都会被画出来且不受最近物体遮挡，叠加在一起看起来就像壳没有正确固定在
 //     行星位置上。改成手动判断：① 背面（法线背对相机的那半球）直接丢弃；
 //     ② 用采样到的场景深度手动做"这个壳片元是不是被更近的物体挡住"的判断
-//     （管线侧 depthTest 也同步改成了 VK_FALSE，见 vk_pipeline.h）。
+//     （管线侧 depthTest 也同步改成了 VK_FALSE，见 vk_pipeline.h）。之后又
+//     发现 atmo_shell.vert 漏做了 Vulkan 屏幕空间的 Y 翻转+深度 remap（同一类
+//     "OpenGL 矩阵 vs Vulkan 约定"问题），一并修了。
+//   · 锚定修好之后壳仍然是黑的：raymarch 直接积分出来的散射亮度量级本来就很小
+//     （约 1e-3~1e-2），壳内路径有 exposure=5~10 倍才能看见，壳外原来完全没有
+//     同等量级的曝光倍率——改成 pc.outerExposure（imgui_atmo_tuner.h 可调，
+//     默认 300，具体数值要实机调）。同时太阳方向不再读 frame.lightDir（几何
+//     pass 循环结束后已经被重置成"火箭→太阳"，全景模式下和"这颗星球→太阳"
+//     偏差很大，会让 Transmittance 查表和相位函数都算错，散射更弱），改成
+//     C++ 侧按这颗星球单独算好、随 push constant 传进来的 pc.sunDir。
 // ==========================================================================
 
 #define PRIMARY_STEPS 32
@@ -39,6 +48,9 @@ layout(set = 0, binding = 0) uniform FrameUBO {
     float time;
 } frame;
 
+// 全部用标量 float（不用 vec3）——GLSL push_constant 默认 std430 布局，vec3
+// 成员要 16 字节对齐，容易和 C++ 侧手算的紧凑偏移错位（这个 bug 真实发生过
+// 一次，ozoneCoeff 之后的字段全部读串），标量没有这个陷阱。
 layout(push_constant) uniform PC {
     vec4  planetCenter;
     float innerRadius;
@@ -53,19 +65,25 @@ layout(push_constant) uniform PC {
     float tuneMaxAlt;
     float tuneExtinction;
     float showClouds;
-    vec3  rayleighCoeff;
+    float rayleighCoeffX, rayleighCoeffY, rayleighCoeffZ;
     float mieCoeff;
     float hRayleigh;
     float hMie;
     float gMie;
-    vec3  ozoneCoeff;
+    float ozoneCoeffX, ozoneCoeffY, ozoneCoeffZ;
     float ozoneCenter;
     float ozoneWidth;
     float spaceVisStart;   // 本文件不用（壳内专用），保留字段对齐 push constant 布局
     float spaceVisEnd;
-    float limbBrightness;  // imgui_atmo_tuner.h 可调，默认 6.0
-    float _padTune;
+    float limbBrightness;  // imgui_atmo_tuner.h 可调，掠射角边缘增强系数
+    float outerExposure;   // imgui_atmo_tuner.h 可调，壳外整体曝光倍率，默认 300
+    float sunDirX, sunDirY, sunDirZ; // "这颗星球→太阳"方向，已归一化
+    float _pad2;
 } pc;
+
+#define PC_RAYLEIGH vec3(pc.rayleighCoeffX, pc.rayleighCoeffY, pc.rayleighCoeffZ)
+#define PC_OZONE    vec3(pc.ozoneCoeffX, pc.ozoneCoeffY, pc.ozoneCoeffZ)
+#define PC_SUNDIR   vec3(pc.sunDirX, pc.sunDirY, pc.sunDirZ)
 
 layout(location = 0) in  vec3 vWorldPos;
 layout(location = 1) in  vec3 vLocalNormal;
@@ -73,7 +91,7 @@ layout(location = 0) out vec4 FragColor;
 
 void main() {
     vec3 camPos = frame.viewPos;
-    vec3 sunDir = normalize(frame.lightDir);
+    vec3 sunDir = PC_SUNDIR;
 
     vec3  toCam          = camPos - vWorldPos;
     float distToCam       = length(toCam);
@@ -112,14 +130,17 @@ void main() {
     vec3 rayDir = -viewDirFromFrag; // 相机看向这个片元的方向
 
     // vWorldPos 本身就在 outerRadius 球面上（壳网格顶点直接按 outerRadius 放的，
-    // 见 atmo_shell.vert），所以这条视线在大气壳上的近交点距离就是 distToCam；
-    // 远交点需要另外求——可能是壳的另一侧，也可能先被行星本体挡住。
+    // 见 atmo_shell.vert），这条视线在大气壳上的近交点理论上就是这个片元本身；
+    // 用解析求交算出来的 t0（而不是独立算的 distToCam）当 tNear，避免两次独立
+    // 浮点计算之间的微小误差导致积分区间退化。远交点可能是壳的另一侧，也可能
+    // 先被行星本体挡住。
     float tNear = distToCam;
     float tFar  = tNear;
     {
         float t0, t1;
         if (intersectSphereAtCenter(camPos, rayDir, planetCenter, pc.outerRadius, t0, t1)) {
-            tFar = max(t0, t1); // 取远交点（近交点就是 tNear，即这个片元本身）
+            tNear = max(min(t0, t1), 0.0); // 近交点，和 distToCam 应该几乎相等，用它保证和远交点同源
+            tFar  = max(t0, t1);           // 远交点
         }
         float tS0, tS1;
         if (intersectSphereAtCenter(camPos, rayDir, planetCenter, pc.surfaceRadius, tS0, tS1) && tS0 > tNear) {
@@ -132,8 +153,8 @@ void main() {
     float cosTheta = dot(rayDir, sunDir);
     AtmoMarchResult march = raymarchAtmoSegment(
         camPos, rayDir, planetCenter, tNear, tFar, PRIMARY_STEPS,
-        pc.rayleighCoeff, pc.mieCoeff, pc.hRayleigh, pc.hMie, pc.gMie,
-        pc.ozoneCoeff, pc.ozoneCenter, pc.ozoneWidth,
+        PC_RAYLEIGH, pc.mieCoeff, pc.hRayleigh, pc.hMie, pc.gMie,
+        PC_OZONE, pc.ozoneCenter, pc.ozoneWidth,
         pc.surfaceRadius, pc.outerRadius, sunDir, cosTheta);
 
     // 掠射角增强：法线和"看向相机"方向越垂直（掠射/limb），这条视线在大气壳里
@@ -143,7 +164,9 @@ void main() {
     float limbBoost = 0.4 + 0.6 * pow(clamp(grazing, 0.0, 1.0), 2.0);
 
     float nightFactor = mix(0.05, 1.0, pc.sunVisibility);
-    vec3 finalColor = march.scattered * limbBoost * nightFactor * pc.limbBrightness;
+    // outerExposure：壳外整体曝光倍率，补上壳内路径有、壳外原来没有的那个量级
+    // （raymarch 算出来的物理散射亮度本来就很小，见文件顶部注释）。
+    vec3 finalColor = march.scattered * limbBoost * nightFactor * pc.outerExposure * pc.limbBrightness;
     float alpha = clamp(march.opacity * limbBoost, 0.0, 1.0);
 
     // ACES filmic tone mapping（与壳内路径一致）

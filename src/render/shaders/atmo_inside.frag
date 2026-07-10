@@ -33,9 +33,16 @@ layout(set = 0, binding = 0) uniform FrameUBO {
     float time;
 } frame;
 
-// AtmoPushConstants（vk_descriptors.h）：尾部 12 个 float（rayleighCoeff..ozoneWidth）
-// 是本次重构后唯一的大气散射系数数据源，C++ 侧从 getPlanetScatteringCoeffs() 填，
+// AtmoPushConstants（vk_descriptors.h）：尾部字段（rayleighCoeff..sunDir）是本次
+// 重构后唯一的大气散射系数数据源，C++ 侧从 getPlanetScatteringCoeffs() 填，
 // 不再像旧 atmo.frag::setupPlanetProfile() 那样在 shader 里手抄一份 7 组行星系数。
+//
+// 已修复：这里全部用标量 float（不用 vec3）——GLSL push_constant 块默认走
+// std430 布局，vec3 成员对齐要求是 16 字节，一旦某个 vec3 字段没有落在 16 的
+// 倍数偏移上，编译器会静默插入 padding，而 C++ 那边手算的紧凑偏移完全不知道
+// 这回事，会导致后面所有字段错位读串（这个 bug 真实发生过一次，ozoneCoeff
+// 之后的字段全部读到了相邻字段的值）。标量 float 没有这个陷阱，永远和 C++
+// 结构体的紧凑偏移一一对应。
 layout(push_constant) uniform PC {
     vec4  planetCenter;
     float innerRadius;
@@ -50,19 +57,26 @@ layout(push_constant) uniform PC {
     float tuneMaxAlt;
     float tuneExtinction;
     float showClouds;
-    vec3  rayleighCoeff;
+    float rayleighCoeffX, rayleighCoeffY, rayleighCoeffZ;
     float mieCoeff;
     float hRayleigh;
     float hMie;
     float gMie;
-    vec3  ozoneCoeff;
+    float ozoneCoeffX, ozoneCoeffY, ozoneCoeffZ;
     float ozoneCenter;
     float ozoneWidth;
     float spaceVisStart;
     float spaceVisEnd;
     float limbBrightness; // 本文件不用（壳外 limb 专用），保留字段对齐 push constant 布局
-    float _padTune;
+    float outerExposure;  // 本文件不用（壳外专用）
+    float sunDirX, sunDirY, sunDirZ; // "这颗星球→太阳"方向，已归一化
+    float _pad2;
 } pc;
+
+// 拼回 vec3，减少下面调用点的改动量。
+#define PC_RAYLEIGH vec3(pc.rayleighCoeffX, pc.rayleighCoeffY, pc.rayleighCoeffZ)
+#define PC_OZONE    vec3(pc.ozoneCoeffX, pc.ozoneCoeffY, pc.ozoneCoeffZ)
+#define PC_SUNDIR   vec3(pc.sunDirX, pc.sunDirY, pc.sunDirZ)
 
 layout(location = 0) in  vec2 vNDC;
 layout(location = 0) out vec4 FragColor;
@@ -95,12 +109,12 @@ vec3 skyViewLUT(vec3 worldDirFromPlanet, vec3 camRelPlanet, vec3 sunDir) {
 }
 
 void main() {
-    vec3 camPos   = frame.viewPos;
-    vec3 lightDir = normalize(frame.lightDir);
-    // frame.lightDir 约定同旧 atmo.frag："指向太阳"的方向就是 -lightDir？
-    // 保留旧版原始写法（旧代码直接用 lightDir 当 sunDir 用于相位/光学深度），
-    // 这里同样不做额外取反，避免引入和旧版不一致的方向翻转 bug。
-    vec3 sunDir = lightDir;
+    vec3 camPos = frame.viewPos;
+    // 已修复：不再用 frame.lightDir（几何 pass 那个全局 FrameUBO，循环画完所有
+    // 星球后被重置成"火箭→太阳"方向）。改用 C++ 侧按这颗星球单独算好、随
+    // push constant 传进来的方向（vk_renderer3d.h::renderAtmoAfterGeometry），
+    // 全景模式相机离火箭很远时也不会算错。
+    vec3 sunDir = PC_SUNDIR;
 
     // ── 重建世界空间视线方向（与旧 atmo.frag 完全相同的写法，未改动）──
     // vNDC 是 Vulkan NDC；frame.proj 是 OpenGL Y-up 习惯的投影矩阵，所以要negate Y。
@@ -154,8 +168,8 @@ void main() {
     float cosTheta = dot(rayDir, sunDir);
     AtmoMarchResult march = raymarchAtmoSegment(
         camPos, rayDir, pc.planetCenter.xyz, tNear, tFar, PRIMARY_STEPS,
-        pc.rayleighCoeff, pc.mieCoeff, pc.hRayleigh, pc.hMie, pc.gMie,
-        pc.ozoneCoeff, pc.ozoneCenter, pc.ozoneWidth,
+        PC_RAYLEIGH, pc.mieCoeff, pc.hRayleigh, pc.hMie, pc.gMie,
+        PC_OZONE, pc.ozoneCenter, pc.ozoneWidth,
         pc.surfaceRadius, pc.outerRadius, sunDir, cosTheta);
 
     float nightFactor = mix(0.01, 1.0, pc.sunVisibility);
