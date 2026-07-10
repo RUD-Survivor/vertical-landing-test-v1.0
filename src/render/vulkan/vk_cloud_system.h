@@ -61,13 +61,13 @@ struct FlowerCloudTuneParams {
     float powderScale = 1.0f;
     float powderPow   = 1.0f;
     float sunLightScale = 1.0f;
-    float minAltKm = 2.0f;
-    float maxAltKm = 14.0f;
+    float minAltKm = 1.0f;
+    float maxAltKm = 30.0f;
     float speed = 0.15f;
     // Bruneton/Hillaire 大气积分对"太阳辐照度"的物理量级要求，和引擎其余部分（atmo.frag 等）
     // 手调出来的 sunIntensity(~1.0) 未必是同一套标定；这里单独给一个宽范围倍率，
     // 用来在不改引擎全局曝光的前提下，把云的整体亮度调到合理范围（黑云多半是这里太低）。
-    float sunIntensityMul = 50.0f;
+    float sunIntensityMul = 30.0f;
     // 0=正常渲染；1/2/3/4=调试可视化（借用 cloudSunLitMapOctave 字段传给 shader，
     // 见 cloud_common.glsl::cloudColorCompute 开头的 dbgMode 分支），排查"黑云"用。
     int debugMode = 0;

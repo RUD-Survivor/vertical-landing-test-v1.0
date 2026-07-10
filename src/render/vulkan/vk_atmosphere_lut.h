@@ -42,13 +42,13 @@ struct AtmoTuneParams {
     float shellThicknessKm = 160.0f;  // 大气壳厚度（曾经是所有星球统一硬编码 160km）
     float spaceVisStart    = 0.55f;   // altNorm 达到此值开始透出星空/深空色
     float spaceVisEnd      = 1.0f;    // altNorm 达到此值完全是深空（星空全透出）
-    float limbBrightness   = 6.0f;    // 壳外 limb 掠射角边缘增强系数（乘在 outerExposure 之上）
+    float limbBrightness   = 7.0f;    // 壳外 limb 掠射角边缘增强系数（乘在 outerExposure 之上）
     // 壳外整体曝光倍率：壳内路径有 exposure=5~10 倍（atmo_inside.frag 里的
     // mix(10,5,...)），壳外原来完全没有对应的量——raymarch 直接积分出来的散射
     // 亮度本来就是很小的物理量级（大约 1e-3~1e-2），不乘一个大倍率，ACES 一压
     // 基本看不见，表现就是"大气壳是黑的"。默认值先给个数量级上大致对的猜测，
     // 需要在 imgui_atmo_tuner.h 里实机调到视觉正确。
-    float outerExposure    = 300.0f;
+    float outerExposure    = 5.0f;
 };
 
 // ── 单一数据源：每类行星的 Rayleigh/Mie/臭氧散射系数 ─────────────────────────
