@@ -25,7 +25,7 @@
 // atmo_inside.frag / atmo_shell.frag 共用同一份声明，不用各自重复。
 layout(set = 1, binding = 0) uniform texture2D inSceneDepth;
 layout(set = 1, binding = 1) uniform texture2D inTransmittanceLut;
-layout(set = 1, binding = 2) uniform texture2D inSkyViewLut; // 只有壳内(inside)背景像素用；壳外不再用它
+layout(set = 1, binding = 2) uniform texture2D inSkyViewLut; // 第一版壳内/壳外合成不再采样；保留绑定兼容 layout
 layout(set = 1, binding = 3) uniform sampler   samp;
 
 float ozoneDensityFn(float h, float ozoneCenter, float ozoneWidth) {
@@ -72,7 +72,36 @@ vec3 sunTransmittanceLUT(vec3 posRelPlanet, vec3 sunDir, float bottomRadius, flo
     return texture(sampler2D(inTransmittanceLut, samp), uv).rgb;
 }
 
-struct AtmoMarchResult { vec3 scattered; float opacity; };
+// scattered：路径积分散射光 L_inscatter
+// viewT：视线 RGB 透射率 exp(-τ)（第一版合成用 luma(viewT) 当标量 T，经
+//   ONE/ONE_MINUS_SRC_ALPHA 实现 L_out = scatter*E + scene*T；色度透射留到
+//   读 HDR 的第二版）
+// opacity：1 - luma(viewT)，兼容旧调用点
+struct AtmoMarchResult { vec3 scattered; vec3 viewT; float opacity; };
+
+// 壳内/壳外共用曝光：按相对大气厚度的高度连续插值，避免 camDist==outerRadius
+// 时 innerExposureFar ↔ outerExposure 硬切闪一下。
+float atmoUnifiedExposure(float camDist, float surfaceRadius, float outerRadius,
+                          float innerNear, float innerFar, float outerExposure)
+{
+    float thickness = max(outerRadius - surfaceRadius, 1e-3);
+    float altNorm   = max(camDist - surfaceRadius, 0.0) / thickness; // 壳外可 >1
+    float insideExp = mix(innerNear, innerFar, smoothstep(0.0, 0.6, clamp(altNorm, 0.0, 1.0)));
+    // 0.85→1.15 跨边界平滑接到 outerExposure
+    return mix(insideExp, outerExposure, smoothstep(0.85, 1.15, altNorm));
+}
+
+// 统一合成输出：L_out = scatter*E + scene*T（靠 blend 乘 framebuffer 里的 scene）
+// FragColor=(rgb, a)=(scatter*E, 1-T)，管线 ONE / ONE_MINUS_SRC_ALPHA。
+vec4 atmoCompositeOut(vec3 scattered, vec3 viewT, float exposure)
+{
+    float T     = clamp(dot(viewT, vec3(0.299, 0.587, 0.114)), 0.0, 1.0);
+    vec3  color = max(scattered * exposure, vec3(0.0));
+    // ACES filmic（壳内/壳外一致）
+    vec3 x = color;
+    vec3 toned = (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);
+    return vec4(toned, 1.0 - T);
+}
 
 // 单趟（非嵌套）raymarch：从 rayOrigin 沿 rayDir，在 [tNear,tFar] 区间内积分
 // Rayleigh+Mie+臭氧散射，太阳方向遮蔽查 Transmittance LUT（不再是每外层步
@@ -87,6 +116,7 @@ AtmoMarchResult raymarchAtmoSegment(
 {
     AtmoMarchResult result;
     result.scattered = vec3(0.0);
+    result.viewT     = vec3(1.0);
     result.opacity   = 0.0;
     if (tFar <= tNear || steps <= 0) return result;
 
@@ -124,8 +154,8 @@ AtmoMarchResult raymarchAtmoSegment(
     result.scattered = sumRayleigh * rayleighCoeff * phaseR + sumMie * mieCoeff * phaseM;
 
     vec3  tauView   = rayleighCoeff * optDepthR + mieCoeff * optDepthM + ozoneCoeff * optDepthO;
-    vec3  viewT     = exp(-tauView);
-    float transLuma = dot(viewT, vec3(0.299, 0.587, 0.114));
+    result.viewT    = exp(-tauView);
+    float transLuma = dot(result.viewT, vec3(0.299, 0.587, 0.114));
     result.opacity  = clamp(1.0 - transLuma, 0.0, 1.0);
 
     return result;

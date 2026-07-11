@@ -695,6 +695,7 @@ struct VkAtmoInsidePipeline {
         // Fullscreen triangle: no vertex buffer, no input attributes（复用 atmo.vert）
         PipelineInitParams p{}; p.bindings=nullptr; p.bindingCount=0; p.attrs=nullptr; p.attrCount=0;
         p.blendEnable=true;
+        // 统一合成：FragColor=(scatter*E, 1-T)，L_out = scatter*E + scene*T
         p.srcColor=VK_BLEND_FACTOR_ONE;  p.dstColor=VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
         p.srcAlpha=VK_BLEND_FACTOR_ONE;  p.dstAlpha=VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
         p.depthTest=VK_FALSE; p.depthWrite=VK_FALSE; p.depthOp=VK_COMPARE_OP_LESS_OR_EQUAL;
@@ -742,6 +743,7 @@ struct VkAtmoShellPipeline {
 
         PipelineInitParams p{}; p.bindings=&binding; p.bindingCount=1; p.attrs=&attr; p.attrCount=1;
         p.blendEnable=true;
+        // 统一合成：与 AtmoInside 相同，FragColor=(scatter*E, 1-T)
         p.srcColor=VK_BLEND_FACTOR_ONE; p.dstColor=VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
         p.srcAlpha=VK_BLEND_FACTOR_ONE; p.dstAlpha=VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
         // depthTest 关闭：这个管线所在的 render pass 没有深度 attachment（见上方
