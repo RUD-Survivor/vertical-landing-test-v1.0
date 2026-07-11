@@ -42,6 +42,14 @@ layout (set = 0, binding = 8) uniform UniformFrameData { PerFrameData frameData;
 // 该全局 Set 在本引擎里尚未有 C++ 侧实现，云管线本身也是本次才接入，见 vk_atmosphere_lut.h）。
 layout (set = 0, binding = 9) uniform sampler linearClampSampler;
 
+// Froxel 3D 体积散射 LUT（aerial_perspective_lut.glsl 写入）。只有那一个 bake
+// shader 真正用它写；其余四个 bake shader（transmittance/multiScatter/skyView/
+// skyIrradiance）通过 #include 这个文件也会看到这个绑定声明，但 shader 体内
+// 不引用它，SPIR-V 层面不会因此产生依赖——复用同一个 VkAtmoLutPipelines::setLayout，
+// 不用给这一个 bake 单独开一套 descriptor set 布局。供 vk_cloud_system.h 的
+// cloud_common.glsl::inFroxelScatter（空气透视）消费。
+layout (set = 0, binding = 10, rgba16f) uniform image3D imageFroxelScatter;
+
 AtmosphereParameters getAtmosphereParameters()
 {
     return getAtmosphereParameters(frameData);

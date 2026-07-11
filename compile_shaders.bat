@@ -147,6 +147,8 @@ if %ERRORLEVEL% neq 0 goto :fail
 if %ERRORLEVEL% neq 0 goto :fail
 %GLSLC% -fshader-stage=compute %SHADER_DIR%\atmosphere\sky_irradiance_capture.glsl -o %OUT_DIR%\sky_irradiance_capture.comp.spv
 if %ERRORLEVEL% neq 0 goto :fail
+%GLSLC% -fshader-stage=compute %SHADER_DIR%\atmosphere\aerial_perspective_lut.glsl -o %OUT_DIR%\aerial_perspective_lut.comp.spv
+if %ERRORLEVEL% neq 0 goto :fail
 
 echo [Cloud Phase1] real flower cloud compute passes (raymarch/reconstruct/composite)
 %GLSLC% -fshader-stage=compute %SHADER_DIR%\cloud\cloud_raymarching.glsl -o %OUT_DIR%\cloud_raymarching.comp.spv

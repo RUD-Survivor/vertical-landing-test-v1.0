@@ -973,8 +973,12 @@ float fogNoise)
 
             //apply air perspective
             // 空气透视：相机与云之间的大气散射，使远处云发雾、发蓝、对比度降（观察路径上的雾，非太阳光路径）。
+            // 已接入：inFroxelScatter 现在是真烤出来的 Froxel 3D 体积散射（vk_atmosphere_lut.h::
+            // VkAtmosphereLut::bakeFroxel()，shader 见 atmosphere/aerial_perspective_lut.glsl，
+            // 复用 atmosphere_common.glsl::integrateScatteredLuminance() 沿相机视线积分单次散射，
+            // 每帧重烤——和相机视锥强相关，不像 Transmittance/MultiScatter 那样能跨帧缓存）。
             {
-                float slice =aerialPerspectiveDepthToSlice(rayHitHeight);//aerialPerspectiveDepthToSlice来源未知
+                float slice =aerialPerspectiveDepthToSlice(rayHitHeight);//aerialPerspectiveDepthToSlice：shared_atmosphere.glsl
                 // slice：rayHitHeight → Froxel LUT 深度 slice 索引（浮点），预烘焙体积散射查表用。
 
                 float weight=1.0;
@@ -987,7 +991,7 @@ float fogNoise)
                     slice=0.5;
                     // 同时把 slice 钳到 0.5，LUT 采样不低于此层，近处用 weight 淡出而非 extrapolate。
                 }
-                ivec3 sliceLutSize=textureSize(inFroxelScatter,0);//inFroxelScatter来源未知
+                ivec3 sliceLutSize=textureSize(inFroxelScatter,0);//inFroxelScatter：binding 11，vk_atmosphere_lut.h 烘焙
                 // inFroxelScatter：3D Froxel 体积散射 LUT（屏幕 uv × 深度 w × RGBA）。
                 // .rgb=该位置应叠的大气散射色；.a=原云色应被洗淡的比例。
 
@@ -998,11 +1002,7 @@ float fogNoise)
                 // airPerspective：本像素、该云距离下的空气雾色(RGB)与洗淡量(A)，× weight 处理近距 fade。
                 // uv=屏幕位置；w=深度层。
 
-                // Phase 2 待接入：真正的 Froxel 3D 体积散射 LUT 还没有烘焙 pass，
-                // inFroxelScatter 目前绑定的是中性占位纹理（(0,0,0,0)），airPerspective 恒为
-                // vec4(0)，下面这行按原公式代入的话本就等于不改变 scatteredLight——直接跳过
-                // 混合，保留计算过程（sliceLutSize/w/airPerspective）方便日后接入时对照。
-                // scatteredLight=scatteredLight*(1.0-airPerspective.a)+airPerspective.rgb*(1.0-transmittance);
+                scatteredLight=scatteredLight*(1.0-airPerspective.a)+airPerspective.rgb*(1.0-transmittance);
                 // 混合：原云色 × (1-α) + 雾色 × (1-T_view)。
                 // airPerspective.a：云 RGB 被大气「冲淡」多少；
                 // (1-transmittance)：云越不透明，从观察路径叠进来的雾越少（云本身已挡掉不少）。

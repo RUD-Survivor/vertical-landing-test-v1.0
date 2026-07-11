@@ -14,10 +14,11 @@
 // cloud_common.glsl 顶部 binding 0-30 的声明（Set 0）+ shared_sampler.glsl
 // 的 10 个采样器（Set 1）+ Heitz Sobol 蓝噪声 SSBO（Set 2，shared_blue_noise.glsl）。
 //
-// 30 个 binding 里，SDSM 级联阴影(28/29)、Froxel 空气透视(11)、Hi-Z(30)、
-// G-Buffer A(5) 目前绑定中性占位资源（Phase 2 待接入，见 cloud_common.glsl /
-// cloud_composite.glsl 对应位置的注释），不影响主 march 路径。curl 噪声(9)
-// 已接入真实纹理（vk_scene.h::cloudCurlTex，见 vk_cloud_bake.h::bakeCurlNoise）。
+// 30 个 binding 里，SDSM 级联阴影(28/29)、Hi-Z(30)、G-Buffer A(5) 目前绑定中性
+// 占位资源（Phase 2 待接入，见 cloud_common.glsl / cloud_composite.glsl 对应
+// 位置的注释），不影响主 march 路径。curl 噪声(9) 已接入真实纹理（vk_scene.h::
+// cloudCurlTex，见 vk_cloud_bake.h::bakeCurlNoise）。Froxel 空气透视(11) 已接入
+// 真烤的 3D 体积散射（vk_atmosphere_lut.h::VkAtmosphereLut::bakeFroxel()）。
 // ==========================================================================
 
 #include "vk_context.h"
@@ -130,6 +131,12 @@ struct VkCloudSystem {
     // 独立初始化/关闭，避免跨子系统生命周期耦合；反正 pipeline 本身很轻量）。
     VkAtmoLutPipelines cloudLutPipelines;
     VkAtmosphereLut atmosphereLut;
+    // Froxel 空气透视需要 atmosphereLut 的 Transmittance/MultiScatter LUT 是真烤过的
+    // （aerial_perspective_lut.glsl 内部靠 integrateScatteredLuminance 查这两张表），
+    // 但云本身的大气采样早就改成实时算了（realTimeTransmittance），不需要 Sky-View/
+    // Sky-Irradiance——所以这里只在第一次调用时 bakeFull() 一次（地球大气 profile
+    // 基本不变，不用每帧重烤那两张贵的），之后只每帧刷 Froxel。
+    bool atmosphereLutBaked = false;
 
     // ── 1/4 分辨率 RT：颜色(L,T) / 深度 / 雾 ─────────────────────────────────
     VkImage quarterColorImg=VK_NULL_HANDLE, quarterDepthImg=VK_NULL_HANDLE, quarterFogImg=VK_NULL_HANDLE;
@@ -271,6 +278,17 @@ struct VkCloudSystem {
         // 之前这里整行注释掉 bake() 时漏了这个，导致 frameData 一直是旧值，DebugMode 都
         // 传不进 shader。改成只调用不 dispatch LUT 的轻量上传。
         atmosphereLut.uploadFrameData(ctx, cmd, frameSlot, fd);
+
+        // Froxel 空气透视（cloud_common.glsl::inFroxelScatter，见该文件 airPerspective
+        // 混合段）：首次调用先把 Transmittance/MultiScatter LUT 真正烤一遍（Froxel 烘焙
+        // 内部靠它们查太阳方向的大气衰减，见 aerial_perspective_lut.glsl），之后每帧只
+        // 重烤 Froxel 本身（和相机视锥强相关，不能跨帧缓存）。
+        if (!atmosphereLutBaked) {
+            atmosphereLut.bakeFull(ctx, cmd, frameSlot, cloudLutPipelines, fd);
+            atmosphereLutBaked = true;
+        }
+        atmosphereLut.bakeFroxel(ctx, cmd, frameSlot, cloudLutPipelines);
+
         updateCloudDescriptorSet(ctx, taa, slot, histSlot, fd);
 
         VkDescriptorSet sets[3] = { cloudSet[slot], samplerSet, blueNoise.set };
@@ -646,7 +664,9 @@ private:
         // 之前这里绑定的是 1x1 全零占位纹理，cloudMap() 的 localCoverage 项恒为 0。
         VkDescriptorImageInfo curl{ VK_NULL_HANDLE, curlNoiseView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
         VkDescriptorImageInfo transLut{ VK_NULL_HANDLE, atmosphereLut.transmittanceView(), VK_IMAGE_LAYOUT_GENERAL };
-        VkDescriptorImageInfo froxel{ VK_NULL_HANDLE, dummy3DView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+        // 已接入：真实 Froxel 3D 体积散射（aerial_perspective_lut.glsl 每帧烘焙），
+        // 之前绑定的是中性占位纹理，cloud_common.glsl 的空气透视混合恒等于不生效。
+        VkDescriptorImageInfo froxel{ VK_NULL_HANDLE, atmosphereLut.froxelViewForRender(), VK_IMAGE_LAYOUT_GENERAL };
         VkDescriptorImageInfo qColorRW{ VK_NULL_HANDLE, quarterColorView, VK_IMAGE_LAYOUT_GENERAL };
         VkDescriptorImageInfo qColorRO{ VK_NULL_HANDLE, quarterColorView, VK_IMAGE_LAYOUT_GENERAL };
         VkDescriptorImageInfo fColorRW{ VK_NULL_HANDLE, fullColorView[slot], VK_IMAGE_LAYOUT_GENERAL };
