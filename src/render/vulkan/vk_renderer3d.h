@@ -186,16 +186,10 @@ struct VkRenderer3D {
             apc.frameIndex     = snap.frameIndex;
 
             PlanetScatteringCoeffs sc = getPlanetScatteringCoeffs(cd.atmoIdx);
-            apc.rayleighCoeff[0]=sc.rayleighCoeff[0]*atmoTune.rayleighScale;
-            apc.rayleighCoeff[1]=sc.rayleighCoeff[1]*atmoTune.rayleighScale;
-            apc.rayleighCoeff[2]=sc.rayleighCoeff[2]*atmoTune.rayleighScale;
-            apc.mieCoeff = sc.mieCoeff * atmoTune.mieScale;
-            apc.hRayleigh = sc.hRayleigh * atmoTune.hRayleighScale;
-            apc.hMie = sc.hMie * atmoTune.hMieScale;
-            apc.gMie = (atmoTune.useCustomGMie > 0.5f) ? atmoTune.gMie : sc.gMie;
-            apc.ozoneCoeff[0]=sc.ozoneCoeff[0]*atmoTune.ozoneScale;
-            apc.ozoneCoeff[1]=sc.ozoneCoeff[1]*atmoTune.ozoneScale;
-            apc.ozoneCoeff[2]=sc.ozoneCoeff[2]*atmoTune.ozoneScale;
+            apc.rayleighCoeff[0]=sc.rayleighCoeff[0]; apc.rayleighCoeff[1]=sc.rayleighCoeff[1]; apc.rayleighCoeff[2]=sc.rayleighCoeff[2];
+            apc.mieCoeff = sc.mieCoeff;
+            apc.hRayleigh = sc.hRayleigh; apc.hMie = sc.hMie; apc.gMie = sc.gMie;
+            apc.ozoneCoeff[0]=sc.ozoneCoeff[0]; apc.ozoneCoeff[1]=sc.ozoneCoeff[1]; apc.ozoneCoeff[2]=sc.ozoneCoeff[2];
             apc.ozoneCenter = sc.ozoneCenter; apc.ozoneWidth = sc.ozoneWidth;
 
             apc.spaceVisStart  = atmoTune.spaceVisStart;
@@ -208,15 +202,6 @@ struct VkRenderer3D {
             apc.limbSpaceEnd    = atmoTune.limbSpaceEnd;
             apc.limbBrightnessBottom = atmoTune.limbBrightnessBottom;
             apc.limbPower       = atmoTune.limbPower;
-            apc.pathDebug        = atmoTune.pathDebug;
-            apc.skyDepthThresh   = atmoTune.skyDepthThresh;
-            apc.enableSphereClip = atmoTune.enableSphereClip;
-            apc.enableDepthClip  = atmoTune.enableDepthClip;
-            apc.sphereClipMaxT   = atmoTune.sphereClipMaxT;
-            apc.marchSteps       = atmoTune.marchSteps > 0 ? atmoTune.marchSteps : 48;
-            apc.lowMuScatterMul  = atmoTune.lowMuScatterMul;
-            apc.lowMuSoft        = atmoTune.lowMuSoft;
-            apc.disableAces      = atmoTune.disableAces;
 
             // 已修复：太阳方向传真正"这颗星球→太阳"的方向（上面刚算好的
             // lightDirToSun），不再依赖 shader 里读的那个全局 frame.lightDir
@@ -229,13 +214,6 @@ struct VkRenderer3D {
             float camDx = snap.camPos[0]-cd.center[0], camDy = snap.camPos[1]-cd.center[1], camDz = snap.camPos[2]-cd.center[2];
             float camDist = sqrtf(camDx*camDx + camDy*camDy + camDz*camDz);
             bool  cameraInside = camDist < apc.outerRadius;
-
-            // F4 诊断读数：优先地球；否则更新当前正在画大气的星球
-            if (cd.atmoIdx == 3 || cameraInside) {
-                atmoTune.dbgCamAltKm      = camDist - apc.surfaceRadius;
-                atmoTune.dbgCamInsideSurf = (camDist < apc.surfaceRadius) ? 1.0f : 0.0f;
-                atmoTune.dbgCamInsideAtmo = cameraInside ? 1.0f : 0.0f;
-            }
 
             if (cameraInside) {
                 scene.drawAtmoInside(ctx, cmd, frameSlot, taa.depthView, cd.bodyIdx, apc, snap.camPos, lightDirToSun);

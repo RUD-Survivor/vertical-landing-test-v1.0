@@ -175,17 +175,7 @@ struct AtmoPushConstants {
     float limbSpaceEnd;     //  4 bytes  — offset 152 (保留，当前未用)
     float limbBrightnessBottom; // 4 bytes — offset 156 (大气底边缘增益，altNorm=0)
     float limbPower;        //  4 bytes  — offset 160 (rim 指数，默认 2.0)
-    // 路径诊断（imgui_atmo_tuner / atmo_inside.frag）
-    int   pathDebug;        //  4 bytes  — offset 164
-    float skyDepthThresh;   //  4 bytes  — offset 168
-    float enableSphereClip; //  4 bytes  — offset 172
-    float enableDepthClip;  //  4 bytes  — offset 176
-    float sphereClipMaxT;   //  4 bytes  — offset 180
-    int   marchSteps;       //  4 bytes  — offset 184
-    float lowMuScatterMul;  //  4 bytes  — offset 188
-    float lowMuSoft;        //  4 bytes  — offset 192
-    float disableAces;      //  4 bytes  — offset 196
-};                         //            total: 200 bytes
+};                         //            total: 164 bytes
 
 // Terrain patch 专属 UBO（binding 1 of Set 0）
 // nodePos/nodeSide/nodeUp 已移至 push constants（每 draw call 更新），此处只保留每帧常量

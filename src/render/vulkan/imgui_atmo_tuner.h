@@ -11,69 +11,12 @@ inline void AtmoTunerImGui(bool* p_open, AtmoTuneParams& p, VkAtmoLutCache& lutC
     if (ImGui::IsKeyPressed(ImGuiKey_F4, false)) *p_open = !*p_open;
     if (!*p_open) return;
 
-    ImGui::SetNextWindowSize(ImVec2(440, 720), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(420, 560), ImGuiCond_FirstUseEver);
     if (!ImGui::Begin("大气渲染调参 (壳内/壳外)", p_open, ImGuiWindowFlags_None)) {
         ImGui::End();
         return;
     }
 
-    ImGui::Text("相机（只读，壳内大气帧更新）");
-    ImGui::Text("Alt: %.3f km  (%.0f m)", p.dbgCamAltKm, p.dbgCamAltKm * 1000.0f);
-    ImGui::Text("InsideSurf: %s   InsideAtmo: %s",
-                p.dbgCamInsideSurf > 0.5f ? "YES" : "no",
-                p.dbgCamInsideAtmo > 0.5f ? "YES" : "no");
-
-    ImGui::Separator();
-    ImGui::Text("路径诊断（壳内 atmo_inside）");
-    const char* pathModes[] = {
-        "0 Normal",
-        "1 ForceSky (永不裁 tFar)",
-        "2 ForceGround (强制裁短)",
-        "3 NoSphereClip",
-        "4 NoDepthClip",
-        "5 VizPath (蓝=天空红=地面)",
-        "6 VizInsideWhite (球内白/品红)"
-    };
-    ImGui::Combo("PathDebug", &p.pathDebug, pathModes, 7);
-    ImGui::SliderFloat("SkyDepthThresh", &p.skyDepthThresh, 0.99f, 1.0f, "%.5f");
-    {
-        bool sph = p.enableSphereClip > 0.5f;
-        bool dep = p.enableDepthClip > 0.5f;
-        if (ImGui::Checkbox("EnableSphereClip", &sph)) p.enableSphereClip = sph ? 1.0f : 0.0f;
-        if (ImGui::Checkbox("EnableDepthClip", &dep)) p.enableDepthClip = dep ? 1.0f : 0.0f;
-    }
-    ImGui::SliderFloat("SphereClipMaxT (km)", &p.sphereClipMaxT, 1.0f, 1.0e6f, "%.1f", ImGuiSliderFlags_Logarithmic);
-    ImGui::TextDisabled("ForceSky 棕带消失→地面路径；VizPath 看红/蓝边界；");
-    ImGui::TextDisabled("VizInsideWhite: 钻地天空=白 地面=品红；球外正常。");
-    ImGui::TextDisabled("NoSphereClip 棕带没了→解析球；NoDepthClip→深度。");
-
-    ImGui::Separator();
-    ImGui::Text("掠射天空 / 棕带诊断");
-    ImGui::TextDisabled("地球默认 mie=5e-3 hMie=1 gMie=0.8；调倍率即时影响 raymarch。");
-    ImGui::TextDisabled("sunT LUT 仍用烘焙系数；要一致请点下方强制重烤。");
-    ImGui::SliderFloat("RayleighScale", &p.rayleighScale, 0.0f, 3.0f, "%.2f");
-    ImGui::SliderFloat("MieScale", &p.mieScale, 0.0f, 3.0f, "%.2f");
-    ImGui::SliderFloat("OzoneScale", &p.ozoneScale, 0.0f, 3.0f, "%.2f");
-    ImGui::SliderFloat("HRayleighScale", &p.hRayleighScale, 0.25f, 4.0f, "%.2f");
-    ImGui::SliderFloat("HMieScale", &p.hMieScale, 0.25f, 4.0f, "%.2f");
-    {
-        bool useG = p.useCustomGMie > 0.5f;
-        if (ImGui::Checkbox("Override gMie", &useG)) p.useCustomGMie = useG ? 1.0f : 0.0f;
-        ImGui::BeginDisabled(!useG);
-        ImGui::SliderFloat("gMie", &p.gMie, 0.0f, 0.99f, "%.2f");
-        ImGui::EndDisabled();
-    }
-    ImGui::SliderInt("MarchSteps", &p.marchSteps, 8, 128);
-    ImGui::SliderFloat("LowMuScatterMul", &p.lowMuScatterMul, 0.0f, 2.0f, "%.2f");
-    ImGui::SliderFloat("LowMuSoft", &p.lowMuSoft, 0.01f, 0.5f, "%.3f");
-    ImGui::TextDisabled("LowMuSoft 同时控制掠射 densFloor 仰角宽度（地平→2km地板）。");
-    ImGui::TextDisabled("LowMu Mul=0 可验证低仰角散射；球内已从表面出射再积。");
-    {
-        bool noAces = p.disableAces > 0.5f;
-        if (ImGui::Checkbox("DisableACES (看线性散射)", &noAces)) p.disableAces = noAces ? 1.0f : 0.0f;
-    }
-
-    ImGui::Separator();
     ImGui::Text("大气壳");
     ImGui::SliderFloat("ShellThickness (km)", &p.shellThicknessKm, 20.0f, 500.0f, "%.0f");
     ImGui::TextDisabled("原来所有星球写死 +160km，现在可调；改动只影响新画的帧，不用重烤 LUT");
