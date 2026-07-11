@@ -975,8 +975,8 @@ float fogNoise)
             // 空气透视：相机与云之间的大气散射，使远处云发雾、发蓝、对比度降（观察路径上的雾，非太阳光路径）。
             // 已接入：inFroxelScatter 现在是真烤出来的 Froxel 3D 体积散射（vk_atmosphere_lut.h::
             // VkAtmosphereLut::bakeFroxel()，shader 见 atmosphere/aerial_perspective_lut.glsl，
-            // 复用 atmosphere_common.glsl::integrateScatteredLuminance() 沿相机视线积分单次散射，
-            // 每帧重烤——和相机视锥强相关，不像 Transmittance/MultiScatter 那样能跨帧缓存）。
+            // 对齐 flower air_perspective.glsl；烘焙太阳倍率与云 SunIntensityMul 解耦）。
+            if(frameData.sky.atmosphereConfig.cloudAirPerspectiveEnabled != 0)
             {
                 float slice =aerialPerspectiveDepthToSlice(rayHitHeight);//aerialPerspectiveDepthToSlice：shared_atmosphere.glsl
                 // slice：rayHitHeight → Froxel LUT 深度 slice 索引（浮点），预烘焙体积散射查表用。
@@ -1001,11 +1001,12 @@ float fogNoise)
                 vec4 airPerspective=weight*texture(sampler3D(inFroxelScatter,linearClampEdgeSampler),vec3(uv,w));
                 // airPerspective：本像素、该云距离下的空气雾色(RGB)与洗淡量(A)，× weight 处理近距 fade。
                 // uv=屏幕位置；w=深度层。
-
-                scatteredLight=scatteredLight*(1.0-airPerspective.a)+airPerspective.rgb*(1.0-transmittance);
-                // 混合：原云色 × (1-α) + 雾色 × (1-T_view)。
-                // airPerspective.a：云 RGB 被大气「冲淡」多少；
-                // (1-transmittance)：云越不透明，从观察路径叠进来的雾越少（云本身已挡掉不少）。
+                // 艺术 Scale 只缩放混合权重 α（默认 0.01）：L' = L×(1-α')+fog×α'
+                // 避免旧式 fog×(1-T) 在厚云上整份叠加 HDR 雾，以及高 Scale 时 α 灭云却 RGB≈0 涂黑。
+                float apScale=frameData.sky.atmosphereConfig.cloudAirPerspectiveScale;
+                float apAlpha=saturate(airPerspective.a*apScale);
+                scatteredLight=scatteredLight*(1.0-apAlpha)+airPerspective.rgb*apAlpha;
+                // 标准空气透视 lerp：按 α' 把云色混向雾色；SunScale 仍只影响烘焙 fog.rgb。
             }
         }
     }

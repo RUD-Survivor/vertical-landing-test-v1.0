@@ -159,7 +159,7 @@ inline void FlowerCloudTunerImGui(bool* p_open, FlowerCloudTuneParams& p) {
     ImGui::Separator();
     ImGui::Text("光照与高度");
     ImGui::SliderFloat("SunIntensityMul", &p.sunIntensityMul, 0.1f, 200000.0f, "%.1f", ImGuiSliderFlags_Logarithmic);
-    ImGui::TextDisabled("黑云先调这个：Bruneton 大气积分要的太阳辐照度量级和引擎其它地方不一样");
+    ImGui::TextDisabled("只影响云光照；空气透视用下面的 AirPerspectiveSunScale");
     ImGui::SliderFloat("SunLightScale", &p.sunLightScale, 0.0f, 4.0f, "%.2f");
     ImGui::SliderFloat("MinAlt (km)",   &p.minAltKm, 0.5f, 8.0f, "%.2f");
     ImGui::SliderFloat("MaxAlt (km)",   &p.maxAltKm, 8.0f, 30.0f, "%.2f");
@@ -167,6 +167,14 @@ inline void FlowerCloudTunerImGui(bool* p_open, FlowerCloudTuneParams& p) {
     ImGui::SliderFloat("FogFade",       &p.fogFade, 0.0f, 2.0f, "%.2f");
     ImGui::SliderFloat("GroundNoiseScale", &p.groundNoiseScale, 0.0f, 4.0f, "%.2f");
     ImGui::Checkbox("GroundContribution", &p.enableGroundContribution);
+
+    ImGui::Separator();
+    ImGui::Text("空气透视 (Froxel)");
+    ImGui::Checkbox("AirPerspective Enabled", &p.airPerspectiveEnabled);
+    ImGui::SliderFloat("AirPerspectiveSunScale", &p.airPerspectiveSunScale, 0.001f, 30.0f, "%.3f", ImGuiSliderFlags_Logarithmic);
+    ImGui::TextDisabled("烘焙 Froxel 的太阳倍率（Bruneton 量级，默认 1；勿与 SunIntensityMul 混用）");
+    ImGui::SliderFloat("AirPerspectiveScale", &p.airPerspectiveScale, 0.0f, 1.0f, "%.3f", ImGuiSliderFlags_Logarithmic);
+    ImGui::TextDisabled("混合权重 α'=α×Scale；L'=L×(1-α')+fog×α'（默认 0.01）");
 
     ImGui::Separator();
     ImGui::Text("调试可视化（排查黑云用）");

@@ -130,6 +130,12 @@ struct AtmosphereConfig
     float cloudMarchEdgeScaleMin;   // 边缘处步长 = stepT×此值（下限 stepTMin）
     float cloudMarchEdgeGradLow;    // τ 跳变 smoothstep 下界（density×km 量纲，归一化 per km），小于它认为不是云的边缘
     float cloudMarchEdgeGradHigh;   // τ 跳变 smoothstep 上界，大于它认为是边缘，中间平滑取值
+
+    // Froxel 空气透视（采样侧；烘焙太阳倍率见 CPU airPerspectiveSunScale，不进 UBO）
+    int   cloudAirPerspectiveEnabled; // 0=跳过空气透视混合
+    float cloudAirPerspectiveScale;   // 采样时 α'=α×此值（艺术向；默认 0.01）
+    float cloudAirPerspectivePad0;
+    float cloudAirPerspectivePad1;
 };
 
 struct SkyInfo

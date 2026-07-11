@@ -108,6 +108,11 @@ struct FlowerCloudTuneParams {
     float groundNoiseScale = 1.f;             // cloudNoiseScale
     bool  enableGroundContribution = true;    // cloudEnableGroundContribution
     float cloudAlbedo = 1.f;                  // cloudAlbedo.rgb
+
+    // Froxel 空气透视：与 SunIntensityMul 解耦（后者只影响云光照）
+    bool  airPerspectiveEnabled = true;       // cloudAirPerspectiveEnabled
+    float airPerspectiveSunScale = 1.0f;      // 烘焙 Froxel 时的 sky.intensity 倍率（Bruneton 量级，默认 1）
+    float airPerspectiveScale = 0.01f;        // 采样混合权重倍率（α'=α×此值；默认 0.01）
 };
 
 struct VkCloudSystem {
@@ -136,7 +141,9 @@ struct VkCloudSystem {
     // 但云本身的大气采样早就改成实时算了（realTimeTransmittance），不需要 Sky-View/
     // Sky-Irradiance——所以这里只在第一次调用时 bakeFull() 一次（地球大气 profile
     // 基本不变，不用每帧重烤那两张贵的），之后只每帧刷 Froxel。
+    // AirPerspectiveSunScale 变化时需重烤 MultiScatter（LUT 内含太阳强度）。
     bool atmosphereLutBaked = false;
+    float lastAirPerspectiveSunScale = -1.f;
 
     // ── 1/4 分辨率 RT：颜色(L,T) / 深度 / 雾 ─────────────────────────────────
     VkImage quarterColorImg=VK_NULL_HANDLE, quarterDepthImg=VK_NULL_HANDLE, quarterFogImg=VK_NULL_HANDLE;
@@ -277,17 +284,24 @@ struct VkCloudSystem {
         // 太阳方向、DebugMode 开关都在里面），必须每帧上传，不能跟着 bake() 一起跳过——
         // 之前这里整行注释掉 bake() 时漏了这个，导致 frameData 一直是旧值，DebugMode 都
         // 传不进 shader。改成只调用不 dispatch LUT 的轻量上传。
-        atmosphereLut.uploadFrameData(ctx, cmd, frameSlot, fd);
+        //
+        // Froxel 空气透视：烘焙用独立的太阳倍率（airPerspectiveSunScale，默认 1=Bruneton
+        // 量级），与云光照的 SunIntensityMul 解耦，避免雾色被 ×30 过曝。bake 完再把
+        // 云用的 fd（含 SunIntensityMul）写回 UBO，供 raymarch 读。
+        GpuPerFrameData fdFroxel = fd;
+        fdFroxel.sky.intensity = snap.sunIntensity * tuneParams.airPerspectiveSunScale;
 
-        // Froxel 空气透视（cloud_common.glsl::inFroxelScatter，见该文件 airPerspective
-        // 混合段）：首次调用先把 Transmittance/MultiScatter LUT 真正烤一遍（Froxel 烘焙
-        // 内部靠它们查太阳方向的大气衰减，见 aerial_perspective_lut.glsl），之后每帧只
-        // 重烤 Froxel 本身（和相机视锥强相关，不能跨帧缓存）。
-        if (!atmosphereLutBaked) {
-            atmosphereLut.bakeFull(ctx, cmd, frameSlot, cloudLutPipelines, fd);
+        const bool needLutRebake = !atmosphereLutBaked
+            || (lastAirPerspectiveSunScale != tuneParams.airPerspectiveSunScale);
+        if (needLutRebake) {
+            atmosphereLut.bakeFull(ctx, cmd, frameSlot, cloudLutPipelines, fdFroxel);
             atmosphereLutBaked = true;
+            lastAirPerspectiveSunScale = tuneParams.airPerspectiveSunScale;
+        } else {
+            atmosphereLut.uploadFrameData(ctx, cmd, frameSlot, fdFroxel);
         }
         atmosphereLut.bakeFroxel(ctx, cmd, frameSlot, cloudLutPipelines);
+        atmosphereLut.uploadFrameData(ctx, cmd, frameSlot, fd);
 
         updateCloudDescriptorSet(ctx, taa, slot, histSlot, fd);
 
@@ -467,6 +481,8 @@ private:
         ac.cloudNoiseScale = tuneParams.groundNoiseScale;
         ac.cloudEnableGroundContribution = tuneParams.enableGroundContribution ? 1 : 0;
         ac.cloudAlbedo[0] = ac.cloudAlbedo[1] = ac.cloudAlbedo[2] = tuneParams.cloudAlbedo;
+        ac.cloudAirPerspectiveEnabled = tuneParams.airPerspectiveEnabled ? 1 : 0;
+        ac.cloudAirPerspectiveScale = tuneParams.airPerspectiveScale;
 
         return fd;
     }
