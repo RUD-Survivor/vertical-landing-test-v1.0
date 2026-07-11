@@ -247,6 +247,7 @@ struct VkAtmoLutPipelines {
     VkPipeline skyViewPipe       = VK_NULL_HANDLE;
     VkPipeline skyIrradiancePipe = VK_NULL_HANDLE;
     VkPipeline froxelPipe        = VK_NULL_HANDLE; // aerial_perspective_lut.glsl，供云的空气透视用
+    VkPipeline ambientMusPipe    = VK_NULL_HANDLE; // cloud_ambient_mus_lut.glsl，云环境天光 μs LUT
 
     VkSampler linearClampSampler = VK_NULL_HANDLE;
 
@@ -272,7 +273,7 @@ struct VkAtmoLutPipelines {
         auto destroyPipe = [&](VkPipeline& p){ if(p){vkDestroyPipeline(ctx.device,p,nullptr);p=VK_NULL_HANDLE;} };
         destroyPipe(transmittancePipe); destroyPipe(multiScatterPipe);
         destroyPipe(skyViewPipe); destroyPipe(skyIrradiancePipe);
-        destroyPipe(froxelPipe);
+        destroyPipe(froxelPipe); destroyPipe(ambientMusPipe);
         if (pipelineLayout) { vkDestroyPipelineLayout(ctx.device, pipelineLayout, nullptr); pipelineLayout = VK_NULL_HANDLE; }
         if (setLayout) { vkDestroyDescriptorSetLayout(ctx.device, setLayout, nullptr); setLayout = VK_NULL_HANDLE; }
         if (renderSetLayout) { vkDestroyDescriptorSetLayout(ctx.device, renderSetLayout, nullptr); renderSetLayout = VK_NULL_HANDLE; }
@@ -287,13 +288,11 @@ private:
         return vkCreateSampler(ctx.device, &sci, nullptr, &linearClampSampler) == VK_SUCCESS;
     }
 
-    // 11-binding 布局（0-7 图像 + 8 UBO + 9 采样器 + 10 Froxel 3D 图像）与具体星球
-    // 无关，只建一次。binding 10 只有 aerial_perspective_lut.glsl 真正用，其余四个
-    // bake shader 通过 atmosphere_common.glsl 的 #include 也会看到这个声明，但
-    // shader 体内不引用它，不影响各自的 SPIR-V——复用同一个 pipelineLayout，不用
-    // 为这一个 bake 单独开一套 descriptor set。
+    // 12-binding 布局（0-7 图像 + 8 UBO + 9 采样器 + 10 Froxel + 11 AmbientMus）与具体星球
+    // 无关，只建一次。binding 10/11 分别只有对应 bake shader 真正写；其余 bake 通过
+    // atmosphere_common.glsl 的 #include 也会看到声明，但体内不引用——复用同一套 layout。
     bool createSetLayout(VulkanContext& ctx) {
-        VkDescriptorSetLayoutBinding b[11]{};
+        VkDescriptorSetLayoutBinding b[12]{};
         b[0] = { 0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr };
         b[1] = { 1, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr };
         b[2] = { 2, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr };
@@ -304,9 +303,10 @@ private:
         b[7] = { 7, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr };
         b[8] = { 8, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr };
         b[9] = { 9, VK_DESCRIPTOR_TYPE_SAMPLER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr };
-        b[10] = { 10, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr }; // Froxel（aerial_perspective_lut.glsl）
+        b[10] = { 10, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr }; // Froxel
+        b[11] = { 11, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr }; // Ambient μs LUT
         VkDescriptorSetLayoutCreateInfo lci{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-        lci.bindingCount = 11; lci.pBindings = b;
+        lci.bindingCount = 12; lci.pBindings = b;
         if (vkCreateDescriptorSetLayout(ctx.device, &lci, nullptr, &setLayout) != VK_SUCCESS) return false;
 
         VkPipelineLayoutCreateInfo plci{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
@@ -346,7 +346,8 @@ private:
             && make("src/render/shaders/spirv/multi_scatter_lut.comp.spv", multiScatterPipe)
             && make("src/render/shaders/spirv/skyview_lut.comp.spv", skyViewPipe)
             && make("src/render/shaders/spirv/sky_irradiance_capture.comp.spv", skyIrradiancePipe)
-            && make("src/render/shaders/spirv/aerial_perspective_lut.comp.spv", froxelPipe);
+            && make("src/render/shaders/spirv/aerial_perspective_lut.comp.spv", froxelPipe)
+            && make("src/render/shaders/spirv/cloud_ambient_mus_lut.comp.spv", ambientMusPipe);
     }
 };
 
@@ -391,6 +392,8 @@ struct VkAtmosphereLut {
     // 补细节），深度方向 32 片，配合 shared_atmosphere.glsl::kAirPerspectiveKmPerSlice=4
     // 正好是 32×4=128km 的最大空气透视距离，和 cloud_common.glsl 采样时的假设一致。
     static constexpr uint32_t kFroxelW = 160, kFroxelH = 90, kFroxelD = 32;
+    // 云环境天光：μs∈[-1,1] → 云壳高度天顶散射色（与相机无关）
+    static constexpr uint32_t kAmbientMusW = 128, kAmbientMusH = 1;
     static constexpr VkFormat kFmt = VK_FORMAT_R16G16B16A16_SFLOAT;
 
     VkImage image_[3] = {}; VmaAllocation alloc_[3] = {}; VkImageView view_[3] = {}; // trans/multiscatter/skyview
@@ -399,6 +402,7 @@ struct VkAtmosphereLut {
     // inFroxelScatter 空气透视消费）。和相机视锥强相关，逐帧重烤（bakeFroxel()），
     // 不像 Transmittance/MultiScatter 那样能按 profile 指纹跨帧缓存。
     VkImage froxelImage = VK_NULL_HANDLE; VmaAllocation froxelAlloc = VK_NULL_HANDLE; VkImageView froxelView = VK_NULL_HANDLE;
+    VkImage ambientMusImage = VK_NULL_HANDLE; VmaAllocation ambientMusAlloc = VK_NULL_HANDLE; VkImageView ambientMusView = VK_NULL_HANDLE;
 
     VkBuffer      uboBuf[FRAMES_IN_FLIGHT]   = {};
     VmaAllocation uboAlloc[FRAMES_IN_FLIGHT] = {};
@@ -446,6 +450,8 @@ struct VkAtmosphereLut {
         if (cubeImage) { vmaDestroyImage(ctx.allocator, cubeImage, cubeAlloc); cubeImage=VK_NULL_HANDLE; }
         if (froxelView)  { vkDestroyImageView(ctx.device, froxelView, nullptr); froxelView=VK_NULL_HANDLE; }
         if (froxelImage) { vmaDestroyImage(ctx.allocator, froxelImage, froxelAlloc); froxelImage=VK_NULL_HANDLE; }
+        if (ambientMusView)  { vkDestroyImageView(ctx.device, ambientMusView, nullptr); ambientMusView=VK_NULL_HANDLE; }
+        if (ambientMusImage) { vmaDestroyImage(ctx.allocator, ambientMusImage, ambientMusAlloc); ambientMusImage=VK_NULL_HANDLE; }
     }
 
     // 每帧（对"这一帧实际要渲染"的星球）调用一次，把当前场景深度视图写进渲染侧
@@ -464,6 +470,7 @@ struct VkAtmosphereLut {
     VkImageView transmittanceView() const { return view_[0]; }
     VkImageView skyViewLutView()    const { return view_[2]; }
     VkImageView skyIrradianceCubeView() const { return cubeView; }
+    VkImageView cloudAmbientMusLutView() const { return ambientMusView; }
     VkBuffer    frameUBO(int frameSlot) const { return uboBuf[frameSlot % FRAMES_IN_FLIGHT]; }
 
     // 只做 UBO 上传（memcpy + host->compute 可见性 barrier）。cloud_common.glsl（binding 21）
@@ -560,6 +567,20 @@ struct VkAtmosphereLut {
         _atmoLutComputeBarrier(cmd);
     }
 
+    // 烘焙云环境天光 μs LUT（128×1）。与相机无关，只依赖大气 profile + sky.intensity。
+    // 依赖 Transmittance/MultiScatter；调用方应在 bakeFull 之后、云 raymarch 之前调用。
+    // 不重复 upload UBO（与 bakeFroxel 相同约定）。
+    void bakeAmbientMusLut(VulkanContext& ctx, VkCommandBuffer cmd, int frameSlot,
+                            const VkAtmoLutPipelines& pipes) {
+        int slot = frameSlot % FRAMES_IN_FLIGHT;
+        VkDescriptorSet set = descSet[slot];
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipes.pipelineLayout, 0, 1, &set, 0, nullptr);
+
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipes.ambientMusPipe);
+        vkCmdDispatch(cmd, (kAmbientMusW + 63) / 64, 1, 1);
+        _atmoLutComputeBarrier(cmd);
+    }
+
     VkImageView froxelViewForRender() const { return froxelView; }
 
 private:
@@ -616,6 +637,7 @@ private:
         endSingleTimeCommands(ctx, cmd);
 
         if (!createFroxelImage3D(ctx)) return false;
+        if (!createImage2D(ctx, kAmbientMusW, kAmbientMusH, ambientMusImage, ambientMusAlloc, ambientMusView)) return false;
         return true;
     }
 
@@ -662,7 +684,7 @@ private:
     // 是这个星球自己的。
     bool createDescriptors(VulkanContext& ctx, const VkAtmoLutPipelines& pipes) {
         VkDescriptorPoolSize sizes[] = {
-            { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 5 * FRAMES_IN_FLIGHT }, // trans/sky/multi/cube/froxel
+            { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 6 * FRAMES_IN_FLIGHT }, // trans/sky/multi/cube/froxel/ambientMus
             { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 4 * FRAMES_IN_FLIGHT },
             { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 * FRAMES_IN_FLIGHT },
             { VK_DESCRIPTOR_TYPE_SAMPLER, 1 * FRAMES_IN_FLIGHT },
@@ -682,9 +704,10 @@ private:
             VkDescriptorImageInfo iCube { VK_NULL_HANDLE, cubeView, VK_IMAGE_LAYOUT_GENERAL };
             VkDescriptorImageInfo iSampler{ pipes.linearClampSampler, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED };
             VkDescriptorImageInfo iFroxel{ VK_NULL_HANDLE, froxelView, VK_IMAGE_LAYOUT_GENERAL };
+            VkDescriptorImageInfo iAmbient{ VK_NULL_HANDLE, ambientMusView, VK_IMAGE_LAYOUT_GENERAL };
             VkDescriptorBufferInfo iUbo{ uboBuf[i], 0, sizeof(GpuPerFrameData) };
 
-            VkWriteDescriptorSet w[11]{};
+            VkWriteDescriptorSet w[12]{};
             auto imgWrite = [&](int idx, uint32_t binding, VkDescriptorType type, VkDescriptorImageInfo* info) {
                 w[idx].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; w[idx].dstSet = descSet[i];
                 w[idx].dstBinding = binding; w[idx].descriptorType = type; w[idx].descriptorCount = 1; w[idx].pImageInfo = info;
@@ -703,7 +726,8 @@ private:
             w[8].dstBinding = 8; w[8].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER; w[8].descriptorCount = 1; w[8].pBufferInfo = &iUbo;
             imgWrite(9, 9, VK_DESCRIPTOR_TYPE_SAMPLER, &iSampler);
             imgWrite(10, 10, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, &iFroxel);
-            vkUpdateDescriptorSets(ctx.device, 11, w, 0, nullptr);
+            imgWrite(11, 11, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, &iAmbient);
+            vkUpdateDescriptorSets(ctx.device, 12, w, 0, nullptr);
         }
         return true;
     }

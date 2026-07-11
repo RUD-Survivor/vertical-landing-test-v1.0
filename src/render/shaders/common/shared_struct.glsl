@@ -134,8 +134,12 @@ struct AtmosphereConfig
     // Froxel 空气透视（采样侧；烘焙太阳倍率见 CPU airPerspectiveSunScale，不进 UBO）
     int   cloudAirPerspectiveEnabled; // 0=跳过空气透视混合
     float cloudAirPerspectiveScale;   // 采样时 α'=α×此值（艺术向；默认 0.01）
-    float cloudAmbientExposure;       // inSkyIrradiance 环境光 × 此值（对齐 atmo exposure）
-    int   cloudIrradianceBakeAtShell; // 非0=SkyView/Irradiance 在云壳中点高度烘焙（非相机）
+    float cloudAmbientExposure;       // 环境光总曝光（对齐 atmo）
+    float cloudAmbientAnalyticBlend;  // 与 analyticSkyAmbient 混合 [0,1]
+    int   cloudIrradianceBakeAtShell; // 保留布局；SkyView 烘焙高度（atmo 路径）
+    float padAmbient0;                // 原 AmbientMode/night 已删除，保 std140 尺寸
+    float padAmbient1;
+    float padAmbient2;
 };
 
 struct SkyInfo

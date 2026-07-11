@@ -151,7 +151,8 @@ void main()
         float miePhaseValue = hgPhase(atmosphere.miePhaseG, -VoL);//Mie相位
         float rayleighPhaseValue = rayleighPhase(VoL);//Rayleigh相位
         vec3 sunColor = frameData.sky.color * frameData.sky.intensity;//太阳HDR色*强度
-        vec3 groundToCloudTransfertIsoScatter =  texture(samplerCube(inSkyIrradiance, linearClampEdgeSampler), vec3(0, 1, 0)).rgb;//天空立方体贴图向上(0,1,0)采样，各向同性环境/地面反射底光
+        vec3 groundToCloudTransfertIsoScatter = sampleCloudAmbient(atmosphere,
+            rayPosWP * 0.001 + vec3(0.0, atmosphere.bottomRadius, 0.0), sunDirection);// μs LUT 环境底光
         //接下来循环每步合成sunSkyLuminance = groundToCloudTransfertIsoScatter
         //        + visibilityTerm * sunColor * phase * atmosphereTransmittance;
 

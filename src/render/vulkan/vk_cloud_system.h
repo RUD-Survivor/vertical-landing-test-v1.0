@@ -114,8 +114,9 @@ struct FlowerCloudTuneParams {
     float airPerspectiveSunScale = 1.0f;      // 烘焙 Froxel 时的 sky.intensity 倍率（Bruneton 量级，默认 1）
     float airPerspectiveScale = 0.01f;        // 采样混合权重倍率（α'=α×此值；默认 0.01）
 
-    // 环境天光：inSkyIrradiance × AmbientExposure（默认 5，对齐 atmo innerExposureFar 量级）
+    // 环境天光：相机无关 μs→zenith LUT（可选混入 analytic）
     float ambientExposure = 5.f;
+    float ambientAnalyticBlend = 0.f;
 };
 
 struct VkCloudSystem {
@@ -303,8 +304,8 @@ struct VkCloudSystem {
         } else {
             atmosphereLut.uploadFrameData(ctx, cmd, frameSlot, fdFroxel);
         }
-        // 每帧刷新 Sky-View + inSkyIrradiance（太阳角/云壳高度观察点；32³ 很便宜）
-        atmosphereLut.bakeSkyViewOnly(ctx, cmd, frameSlot, cloudLutPipelines, fdFroxel);
+        // 每帧刷新云环境 μs LUT（与相机无关，128×1，极便宜）+ Froxel
+        atmosphereLut.bakeAmbientMusLut(ctx, cmd, frameSlot, cloudLutPipelines);
         atmosphereLut.bakeFroxel(ctx, cmd, frameSlot, cloudLutPipelines);
         atmosphereLut.uploadFrameData(ctx, cmd, frameSlot, fd);
 
@@ -489,6 +490,7 @@ private:
         ac.cloudAirPerspectiveEnabled = tuneParams.airPerspectiveEnabled ? 1 : 0;
         ac.cloudAirPerspectiveScale = tuneParams.airPerspectiveScale;
         ac.cloudAmbientExposure = tuneParams.ambientExposure;
+        ac.cloudAmbientAnalyticBlend = tuneParams.ambientAnalyticBlend;
         ac.cloudIrradianceBakeAtShell = 1;
 
         return fd;
@@ -619,7 +621,7 @@ private:
             img(22, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE); img(23, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
             img(24, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE); img(25, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
             img(26, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
-            img(27, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE); // textureCube 仍是 SAMPLED_IMAGE 描述符类型
+            img(27, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE); // inCloudAmbientMusLut 2D
             img(28, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
             b[29] = { 29, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr };
             img(30, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
@@ -706,7 +708,7 @@ private:
         VkDescriptorImageInfo fFogRW{ VK_NULL_HANDLE, fullFogView[slot], VK_IMAGE_LAYOUT_GENERAL };
         VkDescriptorImageInfo fFogRO{ VK_NULL_HANDLE, fullFogView[slot], VK_IMAGE_LAYOUT_GENERAL };
         VkDescriptorImageInfo fFogHist{ VK_NULL_HANDLE, fullFogView[histSlot], VK_IMAGE_LAYOUT_GENERAL };
-        VkDescriptorImageInfo skyIrr{ VK_NULL_HANDLE, atmosphereLut.skyIrradianceCubeView(), VK_IMAGE_LAYOUT_GENERAL };
+        VkDescriptorImageInfo skyIrr{ VK_NULL_HANDLE, atmosphereLut.cloudAmbientMusLutView(), VK_IMAGE_LAYOUT_GENERAL };
         VkDescriptorImageInfo sdsm{ VK_NULL_HANDLE, dummy2DView, VK_IMAGE_LAYOUT_GENERAL };
         VkDescriptorImageInfo hiz{ VK_NULL_HANDLE, dummy2DView, VK_IMAGE_LAYOUT_GENERAL };
         VkDescriptorBufferInfo ubo{ atmosphereLut.frameUBO(slot), 0, sizeof(GpuPerFrameData) };

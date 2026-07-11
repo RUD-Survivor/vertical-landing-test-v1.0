@@ -50,6 +50,10 @@ layout (set = 0, binding = 9) uniform sampler linearClampSampler;
 // cloud_common.glsl::inFroxelScatter（空气透视）消费。
 layout (set = 0, binding = 10, rgba16f) uniform image3D imageFroxelScatter;
 
+// 云环境天光 μs→zenith 1D LUT（cloud_ambient_mus_lut.glsl 写入；cloud_common 采样）。
+// 与相机无关：仅编码当地太阳高度 μs 下的天顶散射色。
+layout (set = 0, binding = 11, rgba16f) uniform image2D imageCloudAmbientMusLut;
+
 AtmosphereParameters getAtmosphereParameters()
 {
     return getAtmosphereParameters(frameData);
