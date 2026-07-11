@@ -53,7 +53,10 @@ layout(push_constant) uniform PC {
     float sunDirX, sunDirY, sunDirZ;
     float innerExposureNear;
     float innerExposureFar;
-    float _pad3;
+    float limbSpaceStart;
+    float limbSpaceEnd;
+    float limbInsideScale;
+    float limbPower;
 } pc;
 
 #define PC_RAYLEIGH vec3(pc.rayleighCoeffX, pc.rayleighCoeffY, pc.rayleighCoeffZ)
@@ -110,19 +113,13 @@ void main() {
         pc.surfaceRadius, pc.outerRadius, sunDir, cosTheta);
 
     float camDist = length(camPos - planetCenter);
-    float thickness = max(pc.outerRadius - pc.surfaceRadius, 1e-3);
-    float altNorm = max(camDist - pc.surfaceRadius, 0.0) / thickness;
-
     float nightFactor = mix(0.05, 1.0, pc.sunVisibility);
     float baseE = atmoUnifiedExposure(
         camDist, pc.surfaceRadius, pc.outerRadius,
         pc.innerExposureNear, pc.innerExposureFar, pc.outerExposure);
-
-    // 掠射增强：边界正面(grazing≈0)保持 baseE，与壳内连续；越出壳后 limb 才拉高
-    float grazing   = 1.0 - abs(dot(vLocalNormal, viewDirFromFrag));
-    float limb      = mix(1.0, max(pc.limbBrightness, 1.0), pow(clamp(grazing, 0.0, 1.0), 2.0));
-    float outsideW  = smoothstep(0.9, 1.2, altNorm);
-    float exposure  = baseE * mix(1.0, limb, outsideW) * nightFactor;
+    // 壳法线掠射：正对盘面 rim≈0，轮廓 rim≈1
+    float rim = clamp(1.0 - abs(dot(vLocalNormal, viewDirFromFrag)), 0.0, 1.0);
+    float exposure = baseE * atmoLimbMul(pc.limbBrightness, rim, pc.limbPower) * nightFactor;
 
     FragColor = atmoCompositeOut(march.scattered, march.viewT, exposure);
 }

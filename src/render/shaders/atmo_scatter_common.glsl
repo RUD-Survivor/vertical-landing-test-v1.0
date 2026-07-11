@@ -91,6 +91,22 @@ float atmoUnifiedExposure(float camDist, float surfaceRadius, float outerRadius,
     return mix(insideExp, outerExposure, smoothstep(0.85, 1.15, altNorm));
 }
 
+// 仅边缘增益：rim=0（正对/天顶）→×1；rim=1（掠射轮廓/地平）→×limbBrightness。
+// 无高度/壳内外渐变，Exposure 管整体，Limb 只管边缘。
+float atmoLimbMul(float limbBrightness, float rim, float limbPower)
+{
+    float r = pow(clamp(rim, 0.0, 1.0), max(limbPower, 0.01));
+    return mix(1.0, max(limbBrightness, 1.0), r);
+}
+
+// 壳内 rim：视线相对当地天顶，地平 |mu|≈0 → rim≈1。
+float atmoInsideRim(vec3 rayDir, vec3 camRelPlanet)
+{
+    float len = length(camRelPlanet);
+    vec3  up  = camRelPlanet / max(len, 1e-4);
+    return clamp(1.0 - abs(dot(rayDir, up)), 0.0, 1.0);
+}
+
 // 统一合成输出：L_out = scatter*E + scene*T（靠 blend 乘 framebuffer 里的 scene）
 // FragColor=(rgb, a)=(scatter*E, 1-T)，管线 ONE / ONE_MINUS_SRC_ALPHA。
 vec4 atmoCompositeOut(vec3 scattered, vec3 viewT, float exposure)

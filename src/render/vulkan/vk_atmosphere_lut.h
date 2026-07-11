@@ -40,21 +40,19 @@
 // 尾部（vk_descriptors.h），壳内/壳外 shader 直接读，不再是 shader 里的魔法数字。
 struct AtmoTuneParams {
     float shellThicknessKm = 160.0f;  // 大气壳厚度（曾经是所有星球统一硬编码 160km）
-    float spaceVisStart    = 0.55f;   // altNorm 达到此值开始透出星空/深空色
+    float spaceVisStart    = 0.55f;   // altNorm 达到此值开始透出星空/深空色（旧路径；统一合成后保留）
     float spaceVisEnd      = 1.0f;    // altNorm 达到此值完全是深空（星空全透出）
-    float limbBrightness   = 7.0f;    // 壳外 limb 掠射角边缘增强系数（乘在 outerExposure 之上）
-    // 壳外整体曝光倍率：壳内路径有 exposure=5~10 倍（atmo_inside.frag 里的
-    // mix(10,5,...)），壳外原来完全没有对应的量——raymarch 直接积分出来的散射
-    // 亮度本来就是很小的物理量级（大约 1e-3~1e-2），不乘一个大倍率，ACES 一压
-    // 基本看不见，表现就是"大气壳是黑的"。默认值先给个数量级上大致对的猜测，
-    // 需要在 imgui_atmo_tuner.h 里实机调到视觉正确。
+    float limbBrightness   = 7.0f;    // 边缘最大增益（rim=1 时）；正对 rim=0 时为 ×1
+    // 壳外整体曝光倍率：与壳内共用 atmoUnifiedExposure；建议 InnerFar≈Outer 作基准。
     float outerExposure    = 5.0f;
-    // 壳内曝光（atmo_inside.frag 原来的 mix(10.0,5.0,smoothstep(0,0.6,altNorm))
-    // 硬编码）：贴地（altNorm=0）用 innerExposureNear，接近大气顶（altNorm≥0.6）
-    // 用 innerExposureFar，中间平滑过渡。现在暴露给 tuner，方便和 outerExposure
-    // 一起调，两条路径切换时不会有明显的亮度跳变。
+    // 壳内曝光：贴地 Near，近大气顶 Far；与 Outer 对齐可减少穿壳跳变。
     float innerExposureNear = 10.0f;
     float innerExposureFar  = 5.0f;
+    // Limb 曲线参数（仅边缘；无高度淡入）：
+    float limbSpaceStart  = 1.3f;   // 保留布局，当前未用
+    float limbSpaceEnd    = 3.0f;   // 保留布局，当前未用
+    float limbInsideScale = 0.4f;   // 保留布局，当前未用
+    float limbPower       = 2.0f;   // rim^power，越大边缘越尖
 };
 
 // ── 单一数据源：每类行星的 Rayleigh/Mie/臭氧散射系数 ─────────────────────────

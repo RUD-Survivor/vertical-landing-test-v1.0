@@ -11,7 +11,7 @@ inline void AtmoTunerImGui(bool* p_open, AtmoTuneParams& p, VkAtmoLutCache& lutC
     if (ImGui::IsKeyPressed(ImGuiKey_F4, false)) *p_open = !*p_open;
     if (!*p_open) return;
 
-    ImGui::SetNextWindowSize(ImVec2(400, 420), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(420, 560), ImGuiCond_FirstUseEver);
     if (!ImGui::Begin("大气渲染调参 (壳内/壳外)", p_open, ImGuiWindowFlags_None)) {
         ImGui::End();
         return;
@@ -22,23 +22,23 @@ inline void AtmoTunerImGui(bool* p_open, AtmoTuneParams& p, VkAtmoLutCache& lutC
     ImGui::TextDisabled("原来所有星球写死 +160km，现在可调；改动只影响新画的帧，不用重烤 LUT");
 
     ImGui::Separator();
-    ImGui::Text("spaceVisibility（星空穿透，只影响壳内天空背景）");
+    ImGui::Text("spaceVisibility（旧壳内星空穿透；统一合成后影响较小）");
     ImGui::SliderFloat("VisStart (altNorm)", &p.spaceVisStart, 0.0f, 1.0f, "%.2f");
     ImGui::SliderFloat("VisEnd (altNorm)",   &p.spaceVisEnd,   0.0f, 1.5f, "%.2f");
-    ImGui::TextDisabled("altNorm=相机高度/壳厚度，0=贴地 1=大气顶。VisStart 开始透星空，VisEnd 完全透明");
 
     ImGui::Separator();
-    ImGui::Text("壳内曝光（atmo_inside.frag 天空背景/haze 共用）");
+    ImGui::Text("曝光基准（建议 InnerFar ≈ Outer，减少穿壳跳变）");
     ImGui::SliderFloat("InnerExposureNear (贴地)", &p.innerExposureNear, 0.5f, 50.0f, "%.1f");
     ImGui::SliderFloat("InnerExposureFar (近大气顶)", &p.innerExposureFar, 0.5f, 50.0f, "%.1f");
-    ImGui::TextDisabled("altNorm=0(贴地)用 Near，altNorm>=0.6(近大气顶)用 Far，中间平滑过渡");
+    ImGui::SliderFloat("OuterExposure", &p.outerExposure, 1.0f, 5000.0f, "%.0f", ImGuiSliderFlags_Logarithmic);
+    ImGui::TextDisabled("altNorm=0 用 Near，>=0.6 用 Far，再 smooth 接到 Outer");
 
     ImGui::Separator();
-    ImGui::Text("壳外 limb 光晕（原来是黑的：raymarch 算出来的散射量级本来就很小，");
-    ImGui::Text("壳内有 5~10x exposure，壳外原来完全没有对应倍率，先调 OuterExposure）");
-    ImGui::SliderFloat("OuterExposure", &p.outerExposure, 1.0f, 5000.0f, "%.0f", ImGuiSliderFlags_Logarithmic);
-    ImGui::SliderFloat("LimbBrightness (掠射边缘增强)", &p.limbBrightness, 0.5f, 30.0f, "%.1f");
-    ImGui::TextDisabled("OuterExposure 是整体曝光倍率，LimbBrightness 只影响掠射角边缘的额外提亮");
+    ImGui::Text("Limb（仅边缘；正对方向 ×1）");
+    ImGui::SliderFloat("LimbBrightness", &p.limbBrightness, 0.5f, 30.0f, "%.1f");
+    ImGui::SliderFloat("LimbPower (边缘锐度)", &p.limbPower, 0.5f, 8.0f, "%.1f");
+    ImGui::TextDisabled("E = Exposure * mix(1, Limb, rim^Power)。壳外=法线掠射，壳内=地平。");
+    ImGui::TextDisabled("调 Exposure=整体；调 Limb=只亮轮廓/地平。");
 
     ImGui::Separator();
     ImGui::Text("LUT 缓存");

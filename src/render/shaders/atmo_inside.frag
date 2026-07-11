@@ -54,7 +54,10 @@ layout(push_constant) uniform PC {
     float sunDirX, sunDirY, sunDirZ;
     float innerExposureNear;
     float innerExposureFar;
-    float _pad3;
+    float limbSpaceStart;
+    float limbSpaceEnd;
+    float limbInsideScale;
+    float limbPower;
 } pc;
 
 #define PC_RAYLEIGH vec3(pc.rayleighCoeffX, pc.rayleighCoeffY, pc.rayleighCoeffZ)
@@ -107,9 +110,11 @@ void main() {
 
     float camDist = length(camPos - pc.planetCenter.xyz);
     float nightFactor = mix(0.01, 1.0, pc.sunVisibility);
-    float exposure = atmoUnifiedExposure(
+    float baseE = atmoUnifiedExposure(
         camDist, pc.surfaceRadius, pc.outerRadius,
-        pc.innerExposureNear, pc.innerExposureFar, pc.outerExposure) * nightFactor;
+        pc.innerExposureNear, pc.innerExposureFar, pc.outerExposure);
+    float rim = atmoInsideRim(rayDir, camPos - pc.planetCenter.xyz);
+    float exposure = baseE * atmoLimbMul(pc.limbBrightness, rim, pc.limbPower) * nightFactor;
 
     FragColor = atmoCompositeOut(march.scattered, march.viewT, exposure);
 }

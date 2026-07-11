@@ -171,8 +171,11 @@ struct AtmoPushConstants {
     float sunDir[3];        // 12 bytes  — offset 128 (已归一化，"指向太阳"的方向)
     float innerExposureNear;//  4 bytes  — offset 140 (壳内路径，贴地 altNorm=0 时的曝光倍率)
     float innerExposureFar; //  4 bytes  — offset 144 (壳内路径，接近大气顶 altNorm≥0.6 时的曝光倍率)
-    float _pad3;            //  4 bytes  — offset 148 (对齐到 152，暂未使用)
-};                         //            total: 152 bytes
+    float limbSpaceStart;   //  4 bytes  — offset 148 (壳外 limb 淡入起点 altNorm，默认 1.3)
+    float limbSpaceEnd;     //  4 bytes  — offset 152 (壳外 limb 满增益 altNorm，默认 3.0)
+    float limbInsideScale;  //  4 bytes  — offset 156 (壳内 limb 相对满增益比例，默认 0.4)
+    float limbPower;        //  4 bytes  — offset 160 (rim 指数，默认 2.0)
+};                         //            total: 164 bytes
 
 // Terrain patch 专属 UBO（binding 1 of Set 0）
 // nodePos/nodeSide/nodeUp 已移至 push constants（每 draw call 更新），此处只保留每帧常量
