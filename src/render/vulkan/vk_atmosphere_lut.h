@@ -42,16 +42,15 @@ struct AtmoTuneParams {
     float shellThicknessKm = 160.0f;  // 大气壳厚度（曾经是所有星球统一硬编码 160km）
     float spaceVisStart    = 0.55f;   // altNorm 达到此值开始透出星空/深空色（旧路径；统一合成后保留）
     float spaceVisEnd      = 1.0f;    // altNorm 达到此值完全是深空（星空全透出）
-    float limbBrightness   = 7.0f;    // 边缘最大增益（rim=1 时）；正对 rim=0 时为 ×1
+    float limbBrightness   = 7.0f;    // 大气顶及以外：边缘增益默认值（rim=1）
     // 壳外整体曝光倍率：与壳内共用 atmoUnifiedExposure；建议 InnerFar≈Outer 作基准。
     float outerExposure    = 5.0f;
     // 壳内曝光：贴地 Near，近大气顶 Far；与 Outer 对齐可减少穿壳跳变。
     float innerExposureNear = 10.0f;
     float innerExposureFar  = 5.0f;
-    // Limb 曲线参数（仅边缘；无高度淡入）：
     float limbSpaceStart  = 1.3f;   // 保留布局，当前未用
     float limbSpaceEnd    = 3.0f;   // 保留布局，当前未用
-    float limbInsideScale = 0.4f;   // 保留布局，当前未用
+    float limbBrightnessBottom = 1.0f; // 大气底（altNorm=0）边缘增益，smoothstep 收到顶
     float limbPower       = 2.0f;   // rim^power，越大边缘越尖
 };
 

@@ -34,11 +34,12 @@ inline void AtmoTunerImGui(bool* p_open, AtmoTuneParams& p, VkAtmoLutCache& lutC
     ImGui::TextDisabled("altNorm=0 用 Near，>=0.6 用 Far，再 smooth 接到 Outer");
 
     ImGui::Separator();
-    ImGui::Text("Limb（仅边缘；正对方向 ×1）");
-    ImGui::SliderFloat("LimbBrightness", &p.limbBrightness, 0.5f, 30.0f, "%.1f");
+    ImGui::Text("Limb（仅边缘；高度从底渐变到顶）");
+    ImGui::SliderFloat("LimbBrightnessBottom (大气底)", &p.limbBrightnessBottom, 0.5f, 30.0f, "%.1f");
+    ImGui::SliderFloat("LimbBrightness (大气顶/默认)", &p.limbBrightness, 0.5f, 30.0f, "%.1f");
     ImGui::SliderFloat("LimbPower (边缘锐度)", &p.limbPower, 0.5f, 8.0f, "%.1f");
-    ImGui::TextDisabled("E = Exposure * mix(1, Limb, rim^Power)。壳外=法线掠射，壳内=地平。");
-    ImGui::TextDisabled("调 Exposure=整体；调 Limb=只亮轮廓/地平。");
+    ImGui::TextDisabled("amount = mix(Bottom, Top, smoothstep(0,1,altNorm))；壳外 altNorm>=1 用 Top。");
+    ImGui::TextDisabled("E = Exposure * mix(1, amount, rim^Power)。");
 
     ImGui::Separator();
     ImGui::Text("LUT 缓存");

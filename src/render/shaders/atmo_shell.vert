@@ -51,7 +51,7 @@ layout(push_constant) uniform PC {
     float innerExposureFar;
     float limbSpaceStart;
     float limbSpaceEnd;
-    float limbInsideScale;
+    float limbBrightnessBottom;
     float limbPower;
 } pc;
 

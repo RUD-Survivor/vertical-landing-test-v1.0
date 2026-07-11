@@ -200,7 +200,7 @@ struct VkRenderer3D {
             apc.innerExposureFar  = atmoTune.innerExposureFar;
             apc.limbSpaceStart  = atmoTune.limbSpaceStart;
             apc.limbSpaceEnd    = atmoTune.limbSpaceEnd;
-            apc.limbInsideScale = atmoTune.limbInsideScale;
+            apc.limbBrightnessBottom = atmoTune.limbBrightnessBottom;
             apc.limbPower       = atmoTune.limbPower;
 
             // 已修复：太阳方向传真正"这颗星球→太阳"的方向（上面刚算好的

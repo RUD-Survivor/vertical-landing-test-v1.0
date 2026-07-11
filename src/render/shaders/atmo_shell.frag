@@ -55,7 +55,7 @@ layout(push_constant) uniform PC {
     float innerExposureFar;
     float limbSpaceStart;
     float limbSpaceEnd;
-    float limbInsideScale;
+    float limbBrightnessBottom;
     float limbPower;
 } pc;
 
@@ -113,13 +113,16 @@ void main() {
         pc.surfaceRadius, pc.outerRadius, sunDir, cosTheta);
 
     float camDist = length(camPos - planetCenter);
+    float thickness = max(pc.outerRadius - pc.surfaceRadius, 1e-3);
+    float altNorm = max(camDist - pc.surfaceRadius, 0.0) / thickness;
     float nightFactor = mix(0.05, 1.0, pc.sunVisibility);
     float baseE = atmoUnifiedExposure(
         camDist, pc.surfaceRadius, pc.outerRadius,
         pc.innerExposureNear, pc.innerExposureFar, pc.outerExposure);
     // 壳法线掠射：正对盘面 rim≈0，轮廓 rim≈1
     float rim = clamp(1.0 - abs(dot(vLocalNormal, viewDirFromFrag)), 0.0, 1.0);
-    float exposure = baseE * atmoLimbMul(pc.limbBrightness, rim, pc.limbPower) * nightFactor;
+    float limbAmt = atmoLimbAmount(altNorm, pc.limbBrightnessBottom, pc.limbBrightness);
+    float exposure = baseE * atmoLimbMul(limbAmt, rim, pc.limbPower) * nightFactor;
 
     FragColor = atmoCompositeOut(march.scattered, march.viewT, exposure);
 }

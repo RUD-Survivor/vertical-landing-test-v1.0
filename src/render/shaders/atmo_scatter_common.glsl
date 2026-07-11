@@ -91,12 +91,19 @@ float atmoUnifiedExposure(float camDist, float surfaceRadius, float outerRadius,
     return mix(insideExp, outerExposure, smoothstep(0.85, 1.15, altNorm));
 }
 
-// 仅边缘增益：rim=0（正对/天顶）→×1；rim=1（掠射轮廓/地平）→×limbBrightness。
-// 无高度/壳内外渐变，Exposure 管整体，Limb 只管边缘。
-float atmoLimbMul(float limbBrightness, float rim, float limbPower)
+// 仅边缘增益：rim=0 →×1；rim=1 →×limbAmount。
+// limbAmount 由高度决定：大气底→顶用 smoothstep(0,1,altNorm) 从 bottom 收到 top。
+float atmoLimbAmount(float altNorm, float limbBottom, float limbTop)
+{
+    // Hermite smoothstep：贴地=bottom，大气顶及以外=top，中间 S 形过渡
+    float t = smoothstep(0.0, 1.0, clamp(altNorm, 0.0, 1.0));
+    return mix(limbBottom, limbTop, t);
+}
+
+float atmoLimbMul(float limbAmount, float rim, float limbPower)
 {
     float r = pow(clamp(rim, 0.0, 1.0), max(limbPower, 0.01));
-    return mix(1.0, max(limbBrightness, 1.0), r);
+    return mix(1.0, max(limbAmount, 0.01), r);
 }
 
 // 壳内 rim：视线相对当地天顶，地平 |mu|≈0 → rim≈1。
