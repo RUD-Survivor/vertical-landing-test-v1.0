@@ -53,6 +53,15 @@ layout(push_constant) uniform PC {
     float limbSpaceEnd;
     float limbBrightnessBottom;
     float limbPower;
+    int   pathDebug;
+    float skyDepthThresh;
+    float enableSphereClip;
+    float enableDepthClip;
+    float sphereClipMaxT;
+    int   marchSteps;
+    float lowMuScatterMul;
+    float lowMuSoft;
+    float disableAces;
 } pc;
 
 layout(location = 0) out vec3 vWorldPos;

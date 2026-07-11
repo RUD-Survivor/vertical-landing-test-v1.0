@@ -57,6 +57,15 @@ layout(push_constant) uniform PC {
     float limbSpaceEnd;
     float limbBrightnessBottom;
     float limbPower;
+    int   pathDebug;
+    float skyDepthThresh;
+    float enableSphereClip;
+    float enableDepthClip;
+    float sphereClipMaxT;
+    int   marchSteps;
+    float lowMuScatterMul;
+    float lowMuSoft;
+    float disableAces;
 } pc;
 
 #define PC_RAYLEIGH vec3(pc.rayleighCoeffX, pc.rayleighCoeffY, pc.rayleighCoeffZ)
@@ -110,7 +119,8 @@ void main() {
         camPos, rayDir, planetCenter, tNear, tFar, PRIMARY_STEPS,
         PC_RAYLEIGH, pc.mieCoeff, pc.hRayleigh, pc.hMie, pc.gMie,
         PC_OZONE, pc.ozoneCenter, pc.ozoneWidth,
-        pc.surfaceRadius, pc.outerRadius, sunDir, cosTheta);
+        pc.surfaceRadius, pc.outerRadius, sunDir, cosTheta,
+        0.0);
 
     float camDist = length(camPos - planetCenter);
     float thickness = max(pc.outerRadius - pc.surfaceRadius, 1e-3);
@@ -124,5 +134,5 @@ void main() {
     float limbAmt = atmoLimbAmount(altNorm, pc.limbBrightnessBottom, pc.limbBrightness);
     float exposure = baseE * atmoLimbMul(limbAmt, rim, pc.limbPower) * nightFactor;
 
-    FragColor = atmoCompositeOut(march.scattered, march.viewT, exposure);
+    FragColor = atmoCompositeOut(march.scattered, march.viewT, exposure, pc.disableAces);
 }

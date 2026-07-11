@@ -56,6 +56,15 @@ float miePhaseAtmo(float cosTheta, float gMie) {
     return num / max(denom, 1e-6);
 }
 
+// 相对行星表面的几何高度（km）。
+// 不用 length(p)-R：在 R~6371 时 float32 相减误差可达米级，微小负数被
+// max(.,0) 钳成 0 → 整段按最大密度积分 → 地平线棕带硬切。
+// 恒等式 (r-R)=(r²-R²)/(r+R) 在 r≈R 时数值更稳。
+float atmoAltitudeKm(vec3 posRelPlanet, float bottomRadius) {
+    float r = length(posRelPlanet);
+    return (r * r - bottomRadius * bottomRadius) / max(r + bottomRadius, 1e-4);
+}
+
 // 用 Transmittance LUT 代替嵌套 raymarch 里的太阳方向内层 march：给定采样点
 // （相对行星中心）和太阳方向，直接查表得到"这点到大气顶之间，太阳光被
 // Rayleigh/Mie/臭氧吃掉多少"。AtmosphereParameters 这里只需要 bottomRadius/
@@ -65,7 +74,8 @@ vec3 sunTransmittanceLUT(vec3 posRelPlanet, vec3 sunDir, float bottomRadius, flo
     atmo.bottomRadius = bottomRadius;
     atmo.topRadius    = topRadius;
 
-    float viewHeight = length(posRelPlanet);
+    // LUT 定义域要求 viewHeight ∈ [bottom, top]；进球/精度下探时钳到地面
+    float viewHeight = max(length(posRelPlanet), bottomRadius);
     float sunZenithCosAngle = dot(sunDir, posRelPlanet / max(viewHeight, 1e-4));
     vec2 uv;
     lutTransmittanceParamsToUv(atmo, viewHeight, sunZenithCosAngle, uv);
@@ -116,11 +126,13 @@ float atmoInsideRim(vec3 rayDir, vec3 camRelPlanet)
 
 // 统一合成输出：L_out = scatter*E + scene*T（靠 blend 乘 framebuffer 里的 scene）
 // FragColor=(rgb, a)=(scatter*E, 1-T)，管线 ONE / ONE_MINUS_SRC_ALPHA。
-vec4 atmoCompositeOut(vec3 scattered, vec3 viewT, float exposure)
+// disableAces>0.5 时跳过 tonemap，便于看线性散射（棕带诊断）。
+vec4 atmoCompositeOut(vec3 scattered, vec3 viewT, float exposure, float disableAces)
 {
     float T     = clamp(dot(viewT, vec3(0.299, 0.587, 0.114)), 0.0, 1.0);
     vec3  color = max(scattered * exposure, vec3(0.0));
-    // ACES filmic（壳内/壳外一致）
+    if (disableAces > 0.5)
+        return vec4(color, 1.0 - T);
     vec3 x = color;
     vec3 toned = (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);
     return vec4(toned, 1.0 - T);
@@ -135,7 +147,8 @@ AtmoMarchResult raymarchAtmoSegment(
     vec3 rayOrigin, vec3 rayDir, vec3 planetCenter, float tNear, float tFar, int steps,
     vec3 rayleighCoeff, float mieCoeff, float hRayleigh, float hMie, float gMie,
     vec3 ozoneCoeff, float ozoneCenter, float ozoneWidth,
-    float bottomRadius, float topRadius, vec3 sunDir, float cosTheta)
+    float bottomRadius, float topRadius, vec3 sunDir, float cosTheta,
+    float densFloorKm)
 {
     AtmoMarchResult result;
     result.scattered = vec3(0.0);
@@ -151,9 +164,16 @@ AtmoMarchResult raymarchAtmoSegment(
     float optDepthR = 0.0, optDepthM = 0.0, optDepthO = 0.0;
 
     for (int i = 0; i < steps; i++) {
-        vec3  pos          = rayOrigin + rayDir * tCur;
+        vec3  pos           = rayOrigin + rayDir * tCur;
         vec3  posRelPlanet  = pos - planetCenter;
-        float h             = max(length(posRelPlanet) - bottomRadius, 0.0);
+        float h             = atmoAltitudeKm(posRelPlanet, bottomRadius);
+
+        // 进入行星：停止（不做地下最大密度积分）
+        if (h < 0.0)
+            break;
+
+        // 天空掠射：抬高密度地板，避免地平线附近光学厚度悬崖→饱和棕带
+        h = max(h, densFloorKm);
 
         float dR = exp(-h / hRayleigh) * STEP;
         float dM = exp(-h / hMie)      * STEP;
@@ -169,7 +189,8 @@ AtmoMarchResult raymarchAtmoSegment(
         sumMie      += dM * selfAtten * sunT;
         tCur        += STEP;
 
-        if (max(selfAtten.x, max(selfAtten.y, selfAtten.z)) < 0.01) break;
+        // 略放宽：减少掠射路径过早截断造成的仰角硬边
+        if (max(selfAtten.x, max(selfAtten.y, selfAtten.z)) < 0.002) break;
     }
 
     float phaseR = rayleighPhaseAtmo(cosTheta);

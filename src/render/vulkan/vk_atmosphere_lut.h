@@ -52,6 +52,34 @@ struct AtmoTuneParams {
     float limbSpaceEnd    = 3.0f;   // 保留布局，当前未用
     float limbBrightnessBottom = 1.0f; // 大气底（altNorm=0）边缘增益，smoothstep 收到顶
     float limbPower       = 2.0f;   // rim^power，越大边缘越尖
+
+    // ── 路径诊断（atmo_inside.frag；壳外可忽略）────────────────────────────
+    // pathDebug: 0 Normal 1 ForceSky 2 ForceGround 3 NoSphereClip 4 NoDepthClip 5 VizPath 6 VizInsideWhite
+    int   pathDebug        = 0;
+    float skyDepthThresh   = 0.9999f; // depth >= 此值视为天空（无表面）
+    float enableSphereClip = 1.0f;    // 1=允许解析球面裁 tFar
+    float enableDepthClip  = 1.0f;    // 1=允许场景深度裁 tFar
+    float sphereClipMaxT   = 1.0e6f;  // 仅当 tS0 < 此值(km) 才球面裁；缩小可关掉远距地平线球裁
+
+    // 只读：每帧由 renderAtmoAfterGeometry 写入，供 F4 面板显示
+    float dbgCamAltKm        = 0.0f;
+    float dbgCamInsideSurf   = 0.0f; // 1 = camDist < surfaceRadius
+    float dbgCamInsideAtmo   = 0.0f; // 1 = camDist < outerRadius
+
+    // ── 掠射天空 / 棕带诊断（乘在 getPlanetScatteringCoeffs 之上，仅影响 raymarch）──
+    // 注意：Transmittance LUT 仍按烘焙系数；要 LUT 一致需点「强制重烤」。
+    float rayleighScale   = 1.0f;
+    float mieScale        = 1.0f;
+    float ozoneScale      = 1.0f;
+    float hRayleighScale  = 1.0f;
+    float hMieScale       = 1.0f;
+    float gMie            = 0.8f;   // useCustomGMie>0.5 时覆盖行星默认
+    float useCustomGMie   = 0.0f;
+    int   marchSteps      = 48;     // 壳内主积分步数
+    // 低仰角散射倍率：mu≈0（当地地平）用 lowMuScatterMul，mu≥lowMuSoft 用 1
+    float lowMuScatterMul = 1.0f;
+    float lowMuSoft       = 0.12f;  // 仰角过渡宽度（cos 空间）
+    float disableAces     = 0.0f;   // >0.5 跳过 ACES，看线性散射
 };
 
 // ── 单一数据源：每类行星的 Rayleigh/Mie/臭氧散射系数 ─────────────────────────
