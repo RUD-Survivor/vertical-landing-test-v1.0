@@ -160,8 +160,9 @@ void main() {
     if (tFar <= tNear) discard;
 
     // Clip ray at planet surface（行星本体挡住的部分不用再往后传播）
-    float tS0, tS1;
-    if (intersectSphereAtCenter(camPos, rayDir, pc.planetCenter.xyz, pc.surfaceRadius, tS0, tS1) && tS0 > 0.0)
+    float tS0 = -1.0, tS1;
+    bool rayHitsSurface = intersectSphereAtCenter(camPos, rayDir, pc.planetCenter.xyz, pc.surfaceRadius, tS0, tS1) && tS0 > 0.0;
+    if (rayHitsSurface)
         tFar = min(tFar, tS0);
 
     // ── 深度缓冲空气透视（haze）：把 tFar 进一步 clip 到场景深度对应的距离 ──
@@ -169,6 +170,10 @@ void main() {
     // 一致），这里没问题。
     vec2  screenUv      = vNDC * 0.5 + 0.5;
     float sceneDepthNdc = texture(sampler2D(inSceneDepth, samp), screenUv).r;
+
+    // 射线是否会在深度缓冲未覆盖处（地形 LOD 空洞）碰到行星球面。
+    // 此时 depth 仍为清除值 1.0，不能按天空 LUT 路径处理，应走 haze（tFar 已在
+    // 上面 clip 到 tS0）。
     bool  bHasScene     = sceneDepthNdc < 0.9999;
     if (bHasScene) {
         // 已修复：frame.proj 是 OpenGL 习惯的矩阵（math3d.h::Mat4::perspective），
@@ -207,23 +212,24 @@ void main() {
     // pc.spaceVisStart/spaceVisEnd 可在 imgui_atmo_tuner.h 里实时调（默认 0.55/1.0）。
     float spaceVisibility = (1.0 - smoothstep(pc.spaceVisStart, pc.spaceVisEnd, altNorm)) * nightFactor;
 
-    vec3  finalColor;
-    float alpha;
-    if (!bHasScene) {
-        // 天空背景：O(1) 查 Sky-View LUT（不用上面 raymarch 的结果）。
-        vec3 skyColor = skyViewLUT(rayDir, camRelPlanet, sunDir);
-        finalColor = skyColor * exposure;
-        alpha = spaceVisibility;
-    } else {
-        // haze：叠加在地表颜色上方，透明度只由这段路径本身的光学深度决定
-        // （march.opacity，即 hazeOpacity），和"天该不该透星星"完全独立。
-        finalColor = march.scattered * exposure;
-        alpha = march.opacity;
-    }
+    // ── P0：预乘 alpha + 天空/场景路径选择（颜色不混 LUT+haze，避免洗白）──
+    // 真天空：depth≥0.9999 且射线未碰到球面（朝上的天空）。
+    // LOD 空洞：depth 仍为 1.0 但射线会打到球面（地形没画到）→ 走 haze 而非白 LUT。
+    // 其余（depth<0.9999）：场景 haze。不在颜色上做 smoothstep——把过曝 LUT
+    // 和米色 haze 线性混在一起会把整条地平线洗成一片白。
+    bool isSkyPixel = (sceneDepthNdc >= 0.9999) && !rayHitsSurface;
+
+    vec3 hazeRadiance = march.scattered * exposure;
+    vec3 skyRadiance  = skyViewLUT(rayDir, camRelPlanet, sunDir) * exposure;
+    vec3 inscatter    = isSkyPixel ? skyRadiance : hazeRadiance;
+    float alpha       = isSkyPixel ? spaceVisibility : march.opacity;
 
     // ACES filmic tone mapping（与旧版一致）
-    vec3 x = max(finalColor, vec3(0.0));
-    finalColor = (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);
+    vec3 x = max(inscatter, vec3(0.0));
+    vec3 finalColor = (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);
 
-    FragColor = vec4(finalColor, alpha);
+    // 预乘 alpha：混合模式 ONE / ONE_MINUS_SRC_ALPHA（与 cloud.frag 一致）。
+    // 正确合成：L_atmo * alpha + L_scene * (1 - alpha)，不再把未衰减的 haze
+    // 全亮度叠在地表/火箭上。
+    FragColor = vec4(finalColor * alpha, alpha);
 }

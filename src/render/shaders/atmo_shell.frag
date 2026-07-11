@@ -175,5 +175,9 @@ void main() {
     vec3 x = max(finalColor, vec3(0.0));
     finalColor = (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);
 
+    // 壳外 limb 合成：L_out = L_scatter + L_bg * (1 - opacity)，散射项不乘 opacity。
+    // 管线混合 ONE / ONE_MINUS_SRC_ALPHA + 非预乘 (rgb, a) 正好实现上式。
+    // 不要照搬 atmo_inside.frag 的预乘——壳内是雾叠在地表上的标准 over；
+    // 壳外是从太空看大气辉光，scatter 是主亮度，opacity 只衰减背后的行星/星空。
     FragColor = vec4(finalColor, alpha);
 }
