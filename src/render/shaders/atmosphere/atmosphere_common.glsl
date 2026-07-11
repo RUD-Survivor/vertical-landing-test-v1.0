@@ -65,6 +65,21 @@ vec3 convertToCameraUnit(vec3 o)
     return convertToCameraUnit(o, frameData);
 }
 
+// Sky-View / Sky-Irradiance 烘焙用的观察点 (km，行星中心坐标)。
+// cloudIrradianceBakeAtShell!=0：云壳垂直中点高度 + 沿相机径向（轨道相机也落在云附近天空）。
+// 否则：相机位置（atmo LUT 缓存 / fillAtmoLutFrameData 默认行为）。
+vec3 getSkyLutObserverPosKm(const AtmosphereParameters atmosphere)
+{
+    vec3 camAtmo = convertToAtmosphereUnit(frameData.camWorldPos.xyz);
+    if (frameData.sky.atmosphereConfig.cloudIrradianceBakeAtShell == 0)
+        return camAtmo;
+
+    const float cloudMid = atmosphere.cloudAreaStartHeight + 0.5 * atmosphere.cloudAreaThickness;
+    const float camLen = length(camAtmo);
+    const vec3 radial = (camLen > 1e-4) ? (camAtmo / camLen) : vec3(0.0, 0.0, 1.0);
+    return radial * cloudMid;
+}
+
 // SDSM 级联阴影查询。Phase 2 待接入：本引擎目前没有级联阴影渲染 pass，
 // 云自身的自阴影由 cloud_common.glsl::volumetricShadow() 独立 march 完成，不受影响；
 // 这里固定返回“完全可见”，只影响大气积分里额外的地表阴影项（本就很次要）。

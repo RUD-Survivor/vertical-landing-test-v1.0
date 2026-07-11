@@ -177,12 +177,17 @@ inline void FlowerCloudTunerImGui(bool* p_open, FlowerCloudTuneParams& p) {
     ImGui::TextDisabled("混合权重 α'=α×Scale；L'=L×(1-α')+fog×α'（默认 0.01）");
 
     ImGui::Separator();
+    ImGui::Text("环境天光 (inSkyIrradiance)");
+    ImGui::SliderFloat("AmbientExposure", &p.ambientExposure, 0.1f, 50.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
+    ImGui::TextDisabled("云壳高度烘焙 cubemap × 此值；默认 5≈atmo InnerExposureFar");
+
+    ImGui::Separator();
     ImGui::Text("调试可视化（排查黑云用）");
     const char* dbgItems[] = {
         "Off（正常渲染）",
         "1: 相机位置实时大气透射率",
         "2: 天空背景色（采样自 atmo pass）",
-        "3: 天空环境色近似",
+        "3: 天空环境色 (inSkyIrradiance×AmbientExposure)",
         "4: 太阳色×强度（不经过任何大气衰减）",
         "5: 不透明度 1-T（全黑=没找到云密度）",
         "6: 散射光原始值（未做后处理）",

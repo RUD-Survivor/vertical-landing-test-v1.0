@@ -264,6 +264,14 @@ vec3 lookupSkylight(vec3 worldDir,vec3 worldPos,float viewHeight,vec3 upVector,i
     return luminance;
 }
 
+// 云环境天光：inSkyIrradiance 在云壳中点高度烘焙（sky_irradiance_capture.glsl），
+// 按云点 localUp 方向采样 cubemap；× AmbientExposure 对齐 atmo 曝光量级。
+vec3 sampleCloudSkyIrradiance(vec3 localUp)
+{
+    vec3 irr = texture(samplerCube(inSkyIrradiance, linearClampEdgeSampler), localUp).rgb;
+    return irr * frameData.sky.atmosphereConfig.cloudAmbientExposure;
+}
+
 ParticipatingMedia volumetricShadow(vec3 posKm,vec3 sunDirection,const in AtmosphereParameters atmosphere,int fixNum,float msExtinctionFactor)
 {
     ParticipatingMedia participatingMedia;
@@ -505,17 +513,10 @@ float fogNoise)
     vec3 scatteredLight=vec3(0.0);//沿视线累积的云散射光
     //将在march循环中不断更新
 
-    // 已放弃 Sky Irradiance cubemap：这里要的是"任意方向（当地天顶）的环境天光近似"，
-    // 不是当前视线方向，没法直接从 inHdrSceneColor 采样。改用和 cloud_rs3d_lighting.glsl/
-    // cloud.frag 同一套日/昏/夜三色实时近似（analyticSkyAmbient，shared_atmosphere.glsl）。
-    //
-    // 注意：这里不能用相机位置 normalize(worldPos) 算"当地太阳高度角"——"太阳高度角/当地
-    // 天顶"这套概念本身只有贴着行星表面（有大气可以散射）才成立，相机一旦飞远（轨道甚至
-    // 深空），camera 所在位置周围根本没有大气，算出来的"高度角"没有物理意义。这个环境光项
-    // 描述的是"云附近"的环境天光，应该用云所在的位置算，而不是相机——不管相机飞多远，
-    // 云永远贴在行星表面附近，用光线进入云壳的交点（tMin 处）就稳定落在行星附近。
+    // 环境天光：inSkyIrradiance（云壳高度烘焙，见 getSkyLutObserverPosKm + bakeSkyViewOnly）。
+    // localUp = 云壳入口当地天顶；不能用 inHdrSceneColor（那是视线方向背景）。
     vec3 cloudEntryUp=normalize(tMin*worldDir+worldPos);
-    vec3 groundToCloudTransfertIsoScatter=analyticSkyAmbient(dot(cloudEntryUp,sunDirection));
+    vec3 groundToCloudTransfertIsoScatter=sampleCloudSkyIrradiance(cloudEntryUp);
 
     // ── 调试可视化（借用暂未使用的 cloudSunLitMapOctave 当调试模式开关，由 Cloud Tuner
     // 面板的 DebugMode 下拉框驱动）：直接输出某个中间量，排查"黑云"到底是哪一环出了 0/黑值。
@@ -597,11 +598,8 @@ float fogNoise)
 
 
         // groundToCloudTransfertIsoScatter = skyBackgroundColor;// mix(groundToCloudTransfertIsoScatter, skyBackgroundColor, sunDirection.y);
-        // 同上：改用云入口点（tMin 处，稳定落在行星附近）而不是相机位置算"当地"方向，
-        // 深空/轨道视角下才有意义；cubemap 换成实时日/昏/夜近似（analyticSkyAmbient）。
-        const vec3 upScaleColor=analyticSkyAmbient(dot(cloudEntryUp,sunDirection));
-        // upScaleColor：近似云底/云内收到的半球环境光强度。
-        // 物理：地面与低空大气把天光散射回云底。
+        const vec3 upScaleColor=sampleCloudSkyIrradiance(cloudEntryUp);
+        // upScaleColor：云底/云内环境天光（inSkyIrradiance @ 云壳高度烘焙）。
 
         // marchStepT：第三层可变步长（km），每步末尾按 edgeSharpness 更新；第一层 stepT 为基准。
         float marchStepT = stepT;

@@ -19,9 +19,8 @@ void main()
 
     AtmosphereParameters atmosphere = getAtmosphereParameters();
 
-    // RocketSim3D: camWorldPos 已经是"相机相对当前行星中心"的偏移（C++ 侧 bake() 里减去了
-    // planetCenter），不需要 flower 原版那个假设固定地面参考点的 +bottomRadius 沿 Y 偏移。
-    vec3 worldPos = convertToAtmosphereUnit(frameData.camWorldPos.xyz);
+    // RocketSim3D: 观察点见 getSkyLutObserverPosKm（云管线在云壳高度烘焙）。
+    vec3 worldPos = getSkyLutObserverPosKm(atmosphere);
     vec3 scatteredLight = getPosScatterLight(atmosphere, worldPos, uv, true, pixPos);
     imageStore(imageSkyViewLut, workPos, vec4(scatteredLight, 1.0f));
 }

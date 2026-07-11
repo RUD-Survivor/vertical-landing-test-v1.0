@@ -119,8 +119,8 @@ struct GpuAtmosphereConfig {
 
     int32_t cloudAirPerspectiveEnabled = 1;
     float cloudAirPerspectiveScale = 0.01f;
-    float cloudAirPerspectivePad0 = 0.f;
-    float cloudAirPerspectivePad1 = 0.f;
+    float cloudAmbientExposure = 5.f;
+    int32_t cloudIrradianceBakeAtShell = 1;
 };
 static_assert(sizeof(GpuAtmosphereConfig) == 616, "GpuAtmosphereConfig must match std140 AtmosphereConfig");
 

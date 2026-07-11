@@ -23,8 +23,8 @@ void main()
     vec3 worldDir = getSamplingVector(cubeCoord.z, uv);
     const vec3 sunDirection = -normalize(frameData.sky.direction);
 
-    // RocketSim3D: camWorldPos 已是相对当前行星中心的偏移，见 skyview_lut.glsl 同款注释。
-    vec3 worldPos = convertToAtmosphereUnit(frameData.camWorldPos.xyz);
+    // 观察点：云壳中点高度（见 getSkyLutObserverPosKm），非相机——轨道下环境光仍代表云附近天空。
+    vec3 worldPos = getSkyLutObserverPosKm(atmosphere);
     float viewHeight = length(worldPos);
 
     vec3 result = vec3(0.0);

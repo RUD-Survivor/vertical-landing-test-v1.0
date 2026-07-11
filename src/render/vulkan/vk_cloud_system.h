@@ -113,6 +113,9 @@ struct FlowerCloudTuneParams {
     bool  airPerspectiveEnabled = true;       // cloudAirPerspectiveEnabled
     float airPerspectiveSunScale = 1.0f;      // 烘焙 Froxel 时的 sky.intensity 倍率（Bruneton 量级，默认 1）
     float airPerspectiveScale = 0.01f;        // 采样混合权重倍率（α'=α×此值；默认 0.01）
+
+    // 环境天光：inSkyIrradiance × AmbientExposure（默认 5，对齐 atmo innerExposureFar 量级）
+    float ambientExposure = 5.f;
 };
 
 struct VkCloudSystem {
@@ -300,6 +303,8 @@ struct VkCloudSystem {
         } else {
             atmosphereLut.uploadFrameData(ctx, cmd, frameSlot, fdFroxel);
         }
+        // 每帧刷新 Sky-View + inSkyIrradiance（太阳角/云壳高度观察点；32³ 很便宜）
+        atmosphereLut.bakeSkyViewOnly(ctx, cmd, frameSlot, cloudLutPipelines, fdFroxel);
         atmosphereLut.bakeFroxel(ctx, cmd, frameSlot, cloudLutPipelines);
         atmosphereLut.uploadFrameData(ctx, cmd, frameSlot, fd);
 
@@ -483,6 +488,8 @@ private:
         ac.cloudAlbedo[0] = ac.cloudAlbedo[1] = ac.cloudAlbedo[2] = tuneParams.cloudAlbedo;
         ac.cloudAirPerspectiveEnabled = tuneParams.airPerspectiveEnabled ? 1 : 0;
         ac.cloudAirPerspectiveScale = tuneParams.airPerspectiveScale;
+        ac.cloudAmbientExposure = tuneParams.ambientExposure;
+        ac.cloudIrradianceBakeAtShell = 1;
 
         return fd;
     }
