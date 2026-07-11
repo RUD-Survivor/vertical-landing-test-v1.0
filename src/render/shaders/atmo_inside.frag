@@ -83,10 +83,23 @@ void main() {
     tNear = max(tNear, 0.0);
     if (tFar <= tNear) discard;
 
-    float tS0 = -1.0, tS1;
-    bool rayHitsSurface = intersectSphereAtCenter(camPos, rayDir, pc.planetCenter.xyz, pc.surfaceRadius, tS0, tS1) && tS0 > 0.0;
-    if (rayHitsSurface)
+    float camDist = length(camPos - pc.planetCenter.xyz);
+
+    // 解析球面交点
+    float tS0 = -1.0, tS1 = -1.0;
+    bool hitSurf = intersectSphereAtCenter(camPos, rayDir, pc.planetCenter.xyz, pc.surfaceRadius, tS0, tS1);
+
+    if (camDist < pc.surfaceRadius) {
+        // 球内：禁止地下积分（否则从地下 h=0 积到大气顶 → 整片棕天）。
+        // 只从表面出射点往外积。
+        if (!hitSurf) discard;
+        float tExit = (tS0 > 0.0) ? tS0 : tS1; // 球内一正一负根，取朝前出射
+        if (tExit <= 0.0) discard;
+        tNear = max(tNear, tExit);
+    } else if (hitSurf && tS0 > 0.0) {
+        // 球外：撞到行星表面则截断
         tFar = min(tFar, tS0);
+    }
 
     vec2  screenUv      = vNDC * 0.5 + 0.5;
     float sceneDepthNdc = texture(sampler2D(inSceneDepth, samp), screenUv).r;
@@ -108,7 +121,6 @@ void main() {
         PC_OZONE, pc.ozoneCenter, pc.ozoneWidth,
         pc.surfaceRadius, pc.outerRadius, sunDir, cosTheta);
 
-    float camDist = length(camPos - pc.planetCenter.xyz);
     float thickness = max(pc.outerRadius - pc.surfaceRadius, 1e-3);
     float altNorm = max(camDist - pc.surfaceRadius, 0.0) / thickness;
     float nightFactor = mix(0.01, 1.0, pc.sunVisibility);
