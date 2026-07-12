@@ -138,8 +138,10 @@ if %ERRORLEVEL% neq 0 goto :fail
 %GLSLC% -fshader-stage=compute %SHADER_DIR%\cloud\cloud_curlnoise.glsl -o %OUT_DIR%\cloud_curlnoise.comp.spv
 if %ERRORLEVEL% neq 0 goto :fail
 
-echo [Atmosphere LUT] transmittance/multiScatter/skyView/skyIrradiance (real-time per-frame bake)
+echo [Atmosphere LUT] transmittance/inscatter/multiScatter/skyView/skyIrradiance
 %GLSLC% -fshader-stage=compute %SHADER_DIR%\atmosphere\transmittance_lut.glsl -o %OUT_DIR%\transmittance_lut.comp.spv
+if %ERRORLEVEL% neq 0 goto :fail
+%GLSLC% -fshader-stage=compute %SHADER_DIR%\atmosphere\inscatter_lut.glsl -o %OUT_DIR%\inscatter_lut.comp.spv
 if %ERRORLEVEL% neq 0 goto :fail
 %GLSLC% -fshader-stage=compute %SHADER_DIR%\atmosphere\multi_scatter_lut.glsl -o %OUT_DIR%\multi_scatter_lut.comp.spv
 if %ERRORLEVEL% neq 0 goto :fail

@@ -206,6 +206,7 @@ struct VkRenderer3D {
             apc.limbPower       = atmoTune.limbPower;
             apc.skyDepthThreshold = atmoTune.skyDepthThreshold;
             apc.transmittanceChromaStrength = atmoTune.transmittanceChromaStrength;
+            apc.inscatterDebugExposure = atmoTune.inscatterDebugExposure;
 
             // 已修复：太阳方向传真正"这颗星球→太阳"的方向（上面刚算好的
             // lightDirToSun），不再依赖 shader 里读的那个全局 frame.lightDir

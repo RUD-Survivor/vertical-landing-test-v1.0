@@ -373,4 +373,98 @@ vec3 analyticSkyAmbient(float sunElevation) // sunElevation = dot(localUp, sunDi
 	return mix(mix(skyNight, skyDay, skyVis), skyDusk, twilightLocal * skyVis);
 }
 
+// ── Inscatter 4D LUT（Phase A：单次散射烘焙 + debug 采样）──────────────────────
+// Bruneton 参数 (r, mu, mu_s, nu) 打包进 3D：
+//   width  = RES_MU_S * RES_NU
+//   height = RES_MU
+//   depth  = RES_R
+// 烘焙与采样必须共用同一套 UV；Phase B 再换完整 Bruneton 非线性映射亦可，
+// 但须同步改 bake/sample。
+const int kInscatterResR    = 32;
+const int kInscatterResMu   = 128;
+const int kInscatterResMuS  = 32;
+const int kInscatterResNu   = 8;
+
+float inscatterTexCoordFromUnit(float x, int size)
+{
+	return 0.5 / float(size) + x * (1.0 - 1.0 / float(size));
+}
+
+float inscatterUnitFromTexCoord(float u, int size)
+{
+	return (u - 0.5 / float(size)) / (1.0 - 1.0 / float(size));
+}
+
+// 从 texel 索引解码 (r, mu, mu_s, nu)。r 为地心距 km。
+void inscatterTexelToParams(in const AtmosphereParameters atmosphere,
+	ivec3 texel, ivec3 lutSize,
+	out float r, out float mu, out float mu_s, out float nu)
+{
+	int nuI  = texel.x / kInscatterResMuS;
+	int muSI = texel.x - nuI * kInscatterResMuS;
+	float u_nu   = (kInscatterResNu  <= 1) ? 0.0 : float(nuI)  / float(kInscatterResNu  - 1);
+	float u_mu_s = inscatterUnitFromTexCoord((float(muSI) + 0.5) / float(kInscatterResMuS), kInscatterResMuS);
+	float u_mu   = inscatterUnitFromTexCoord((float(texel.y) + 0.5) / float(lutSize.y), kInscatterResMu);
+	float u_r    = inscatterUnitFromTexCoord((float(texel.z) + 0.5) / float(lutSize.z), kInscatterResR);
+
+	// Phase A：线性高度 + 线性角度（足够验证烘焙/采样通路）
+	r    = mix(atmosphere.bottomRadius, atmosphere.topRadius, clamp(u_r, 0.0, 1.0));
+	mu   = clamp(u_mu * 2.0 - 1.0, -1.0, 1.0);
+	mu_s = clamp(u_mu_s * 1.2 - 0.2, -0.2, 1.0); // 略允许地平线下
+	nu   = clamp(u_nu * 2.0 - 1.0, -1.0, 1.0);
+	// 物理约束：|nu| 不能超过与 mu/mu_s 相容的范围（采样时再 clamp）
+	float muBound = mu * mu_s + sqrt(max(0.0, (1.0 - mu * mu) * (1.0 - mu_s * mu_s)));
+	nu = clamp(nu, -muBound, muBound);
+}
+
+void inscatterParamsToUvw(in const AtmosphereParameters atmosphere,
+	float r, float mu, float mu_s, float nu, out vec3 uvw)
+{
+	float u_r    = clamp((r - atmosphere.bottomRadius) /
+		max(atmosphere.topRadius - atmosphere.bottomRadius, 1e-3), 0.0, 1.0);
+	float u_mu   = clamp(mu * 0.5 + 0.5, 0.0, 1.0);
+	float u_mu_s = clamp((mu_s + 0.2) / 1.2, 0.0, 1.0);
+	float u_nu   = clamp(nu * 0.5 + 0.5, 0.0, 1.0);
+
+	float nuCoord = u_nu * float(kInscatterResNu - 1);
+	float nuI     = floor(nuCoord);
+	float nuF     = nuCoord - nuI;
+	// X：相邻 nu 层之间按 mu_s 插值（与 texel 解码互逆）
+	float x0 = (nuI + inscatterTexCoordFromUnit(u_mu_s, kInscatterResMuS)) / float(kInscatterResNu);
+	float x1 = (min(nuI + 1.0, float(kInscatterResNu - 1)) +
+		inscatterTexCoordFromUnit(u_mu_s, kInscatterResMuS)) / float(kInscatterResNu);
+	uvw.x = mix(x0, x1, nuF);
+	uvw.y = inscatterTexCoordFromUnit(u_mu, kInscatterResMu);
+	uvw.z = inscatterTexCoordFromUnit(u_r, kInscatterResR);
+}
+
+// 由 (mu, mu_s, nu) 构造视线/太阳方向（zenith=+Y）。sunDir 指向太阳。
+void inscatterDirsFromParams(float mu, float mu_s, float nu, out vec3 viewDir, out vec3 sunDir)
+{
+	float sinM = sqrt(max(0.0, 1.0 - mu * mu));
+	viewDir = vec3(sinM, mu, 0.0);
+
+	float sinMs = sqrt(max(0.0, 1.0 - mu_s * mu_s));
+	float cosPhi = 0.0;
+	float denom = max(sinM * sinMs, 1e-4);
+	cosPhi = clamp((nu - mu * mu_s) / denom, -1.0, 1.0);
+	float sinPhi = sqrt(max(0.0, 1.0 - cosPhi * cosPhi));
+	sunDir = vec3(sinMs * cosPhi, mu_s, sinMs * sinPhi);
+}
+
+vec3 sampleInscatterLut(texture3D lut, sampler s,
+	in const AtmosphereParameters atmosphere,
+	float r, float mu, float mu_s, float nu)
+{
+	r = clamp(r, atmosphere.bottomRadius, atmosphere.topRadius);
+	mu = clamp(mu, -1.0, 1.0);
+	mu_s = clamp(mu_s, -0.2, 1.0);
+	float muBound = mu * mu_s + sqrt(max(0.0, (1.0 - mu * mu) * (1.0 - mu_s * mu_s)));
+	nu = clamp(nu, -muBound, muBound);
+
+	vec3 uvw;
+	inscatterParamsToUvw(atmosphere, r, mu, mu_s, nu, uvw);
+	return texture(sampler3D(lut, s), uvw).rgb;
+}
+
 #endif

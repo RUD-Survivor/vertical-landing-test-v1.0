@@ -60,6 +60,7 @@ layout(push_constant) uniform PC {
     float limbPower;
     float skyDepthThreshold;
     float transmittanceChromaStrength;
+    float inscatterDebugExposure; // 0=关；>0=Inscatter 天空 debug 曝光
 } pc;
 
 #define PC_RAYLEIGH vec3(pc.rayleighCoeffX, pc.rayleighCoeffY, pc.rayleighCoeffZ)
@@ -150,6 +151,17 @@ void main() {
     float exposure = baseE * atmoLimbMul(limbAmt, rim, pc.limbPower) * nightFactor;
 
     vec3 sceneColor = texture(sampler2D(inSceneColor, samp), screenUv).rgb;
+
+    // Phase A debug：整屏显示 Inscatter 天空采样（验证烘焙/查表通路）
+    if (pc.inscatterDebugExposure > 0.0) {
+        vec3 Ldbg = atmoSampleInscatterSky(camRel, rayDir, sunDir,
+            pc.surfaceRadius, pc.outerRadius);
+        vec3 x = max(Ldbg * pc.inscatterDebugExposure, vec3(0.0));
+        vec3 toned = (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);
+        FragColor = vec4(toned, 1.0);
+        return;
+    }
+
     FragColor = atmoCompositeOut(march.scattered, march.viewT, exposure, sceneColor,
         pc.transmittanceChromaStrength);
 }

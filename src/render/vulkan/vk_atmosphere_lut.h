@@ -68,6 +68,8 @@ struct AtmoTuneParams {
     float mieAbsFraction = 0.10f; // Mie 吸收 ≈ mieCoeff * 此值
     // scene×T：1=全 RGB LUT 透射；0=仅亮度（不偏暖）
     float transmittanceChromaStrength = 1.0f;
+    // Phase A debug：>0 时 atmo_inside 用 Inscatter 天空采样×此值覆盖输出（0=关）
+    float inscatterDebugExposure = 0.0f;
 };
 
 // ── 单一数据源：每类行星的 Rayleigh/Mie/臭氧散射系数 ─────────────────────────
@@ -329,6 +331,7 @@ struct VkAtmoLutPipelines {
     VkPipeline skyIrradiancePipe = VK_NULL_HANDLE;
     VkPipeline froxelPipe        = VK_NULL_HANDLE; // aerial_perspective_lut.glsl，供云的空气透视用
     VkPipeline ambientMusPipe    = VK_NULL_HANDLE; // cloud_ambient_mus_lut.glsl，云环境天光 μs LUT
+    VkPipeline inscatterPipe     = VK_NULL_HANDLE; // inscatter_lut.glsl，4D→3D 单次散射
 
     VkSampler linearClampSampler = VK_NULL_HANDLE;
 
@@ -354,7 +357,7 @@ struct VkAtmoLutPipelines {
         auto destroyPipe = [&](VkPipeline& p){ if(p){vkDestroyPipeline(ctx.device,p,nullptr);p=VK_NULL_HANDLE;} };
         destroyPipe(transmittancePipe); destroyPipe(multiScatterPipe);
         destroyPipe(skyViewPipe); destroyPipe(skyIrradiancePipe);
-        destroyPipe(froxelPipe); destroyPipe(ambientMusPipe);
+        destroyPipe(froxelPipe); destroyPipe(ambientMusPipe); destroyPipe(inscatterPipe);
         if (pipelineLayout) { vkDestroyPipelineLayout(ctx.device, pipelineLayout, nullptr); pipelineLayout = VK_NULL_HANDLE; }
         if (setLayout) { vkDestroyDescriptorSetLayout(ctx.device, setLayout, nullptr); setLayout = VK_NULL_HANDLE; }
         if (renderSetLayout) { vkDestroyDescriptorSetLayout(ctx.device, renderSetLayout, nullptr); renderSetLayout = VK_NULL_HANDLE; }
@@ -369,11 +372,9 @@ private:
         return vkCreateSampler(ctx.device, &sci, nullptr, &linearClampSampler) == VK_SUCCESS;
     }
 
-    // 12-binding 布局（0-7 图像 + 8 UBO + 9 采样器 + 10 Froxel + 11 AmbientMus）与具体星球
-    // 无关，只建一次。binding 10/11 分别只有对应 bake shader 真正写；其余 bake 通过
-    // atmosphere_common.glsl 的 #include 也会看到声明，但体内不引用——复用同一套 layout。
+    // 13-binding 布局（0-7 图像 + 8 UBO + 9 采样器 + 10 Froxel + 11 AmbientMus + 12 Inscatter）
     bool createSetLayout(VulkanContext& ctx) {
-        VkDescriptorSetLayoutBinding b[12]{};
+        VkDescriptorSetLayoutBinding b[13]{};
         b[0] = { 0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr };
         b[1] = { 1, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr };
         b[2] = { 2, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr };
@@ -386,8 +387,9 @@ private:
         b[9] = { 9, VK_DESCRIPTOR_TYPE_SAMPLER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr };
         b[10] = { 10, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr }; // Froxel
         b[11] = { 11, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr }; // Ambient μs LUT
+        b[12] = { 12, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr }; // Inscatter 3D
         VkDescriptorSetLayoutCreateInfo lci{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-        lci.bindingCount = 12; lci.pBindings = b;
+        lci.bindingCount = 13; lci.pBindings = b;
         if (vkCreateDescriptorSetLayout(ctx.device, &lci, nullptr, &setLayout) != VK_SUCCESS) return false;
 
         VkPipelineLayoutCreateInfo plci{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
@@ -395,17 +397,17 @@ private:
         return vkCreatePipelineLayout(ctx.device, &plci, nullptr, &pipelineLayout) == VK_SUCCESS;
     }
 
-    // 渲染侧 5-binding 布局：0=场景深度 1=Transmittance LUT 2=Sky-View LUT 3=采样器
-    // 4=场景 HDR（与 atmo 写入同图，GENERAL 布局下片元采样 + color attachment 写）。
+    // 渲染侧 6-binding：0=depth 1=Trans 2=SkyView 3=sampler 4=HDR 5=Inscatter
     bool createRenderSetLayout(VulkanContext& ctx) {
-        VkDescriptorSetLayoutBinding b[5]{};
-        b[0] = { 0, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr }; // 场景深度
-        b[1] = { 1, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr }; // Transmittance LUT
-        b[2] = { 2, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr }; // Sky-View LUT
+        VkDescriptorSetLayoutBinding b[6]{};
+        b[0] = { 0, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr };
+        b[1] = { 1, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr };
+        b[2] = { 2, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr };
         b[3] = { 3, VK_DESCRIPTOR_TYPE_SAMPLER, 1, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, nullptr };
-        b[4] = { 4, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr }; // 场景 HDR
+        b[4] = { 4, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr };
+        b[5] = { 5, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr }; // Inscatter
         VkDescriptorSetLayoutCreateInfo lci{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-        lci.bindingCount = 5; lci.pBindings = b;
+        lci.bindingCount = 6; lci.pBindings = b;
         return vkCreateDescriptorSetLayout(ctx.device, &lci, nullptr, &renderSetLayout) == VK_SUCCESS;
     }
 
@@ -428,7 +430,8 @@ private:
             && make("src/render/shaders/spirv/skyview_lut.comp.spv", skyViewPipe)
             && make("src/render/shaders/spirv/sky_irradiance_capture.comp.spv", skyIrradiancePipe)
             && make("src/render/shaders/spirv/aerial_perspective_lut.comp.spv", froxelPipe)
-            && make("src/render/shaders/spirv/cloud_ambient_mus_lut.comp.spv", ambientMusPipe);
+            && make("src/render/shaders/spirv/cloud_ambient_mus_lut.comp.spv", ambientMusPipe)
+            && make("src/render/shaders/spirv/inscatter_lut.comp.spv", inscatterPipe);
     }
 };
 
@@ -475,6 +478,10 @@ struct VkAtmosphereLut {
     static constexpr uint32_t kFroxelW = 160, kFroxelH = 90, kFroxelD = 32;
     // 云环境天光：μs∈[-1,1] → 云壳高度天顶散射色（与相机无关）
     static constexpr uint32_t kAmbientMusW = 128, kAmbientMusH = 1;
+    // Inscatter 4D→3D：MuS*Nu × Mu × R = 256×128×32
+    static constexpr uint32_t kInscatterW = 32u * 8u;  // RES_MU_S * RES_NU
+    static constexpr uint32_t kInscatterH = 128u;      // RES_MU
+    static constexpr uint32_t kInscatterD = 32u;       // RES_R
     static constexpr VkFormat kFmt = VK_FORMAT_R16G16B16A16_SFLOAT;
 
     VkImage image_[3] = {}; VmaAllocation alloc_[3] = {}; VkImageView view_[3] = {}; // trans/multiscatter/skyview
@@ -484,6 +491,7 @@ struct VkAtmosphereLut {
     // 不像 Transmittance/MultiScatter 那样能按 profile 指纹跨帧缓存。
     VkImage froxelImage = VK_NULL_HANDLE; VmaAllocation froxelAlloc = VK_NULL_HANDLE; VkImageView froxelView = VK_NULL_HANDLE;
     VkImage ambientMusImage = VK_NULL_HANDLE; VmaAllocation ambientMusAlloc = VK_NULL_HANDLE; VkImageView ambientMusView = VK_NULL_HANDLE;
+    VkImage inscatterImage = VK_NULL_HANDLE; VmaAllocation inscatterAlloc = VK_NULL_HANDLE; VkImageView inscatterView = VK_NULL_HANDLE;
 
     VkBuffer      uboBuf[FRAMES_IN_FLIGHT]   = {};
     VmaAllocation uboAlloc[FRAMES_IN_FLIGHT] = {};
@@ -528,6 +536,8 @@ struct VkAtmosphereLut {
         if (froxelImage) { vmaDestroyImage(ctx.allocator, froxelImage, froxelAlloc); froxelImage=VK_NULL_HANDLE; }
         if (ambientMusView)  { vkDestroyImageView(ctx.device, ambientMusView, nullptr); ambientMusView=VK_NULL_HANDLE; }
         if (ambientMusImage) { vmaDestroyImage(ctx.allocator, ambientMusImage, ambientMusAlloc); ambientMusImage=VK_NULL_HANDLE; }
+        if (inscatterView)  { vkDestroyImageView(ctx.device, inscatterView, nullptr); inscatterView=VK_NULL_HANDLE; }
+        if (inscatterImage) { vmaDestroyImage(ctx.allocator, inscatterImage, inscatterAlloc); inscatterImage=VK_NULL_HANDLE; }
     }
 
     // 每帧刷新渲染侧 Set 1 的 depth + HDR scene 视图（TAA ping-pong / 同图读写）。
@@ -566,9 +576,8 @@ struct VkAtmosphereLut {
         vkCmdPipelineBarrier2(cmd, &hdep);
     }
 
-    // 全量重烤：Transmittance→MultiScatter→SkyView→SkyIrradiance 依次 dispatch，pass 间
-    // 用 compute->compute 内存屏障同步（后者依赖前者的结果）。只应在 profile 指纹变化时调用
-    // （见 VkAtmoLutCache::getOrCreate）——这是四者中真正"贵"的一次性开销。
+    // 全量重烤：Transmittance→Inscatter→MultiScatter→SkyView→SkyIrradiance。
+    // Inscatter 依赖 Transmittance；只应在 profile 指纹变化时调用。
     void bakeFull(VulkanContext& ctx, VkCommandBuffer cmd, int frameSlot,
                   const VkAtmoLutPipelines& pipes, const GpuPerFrameData& fd) {
         int slot = frameSlot % FRAMES_IN_FLIGHT;
@@ -579,6 +588,10 @@ struct VkAtmosphereLut {
 
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipes.transmittancePipe);
         vkCmdDispatch(cmd, (kTransW+7)/8, (kTransH+7)/8, 1);
+        _atmoLutComputeBarrier(cmd);
+
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipes.inscatterPipe);
+        vkCmdDispatch(cmd, (kInscatterW+7)/8, (kInscatterH+7)/8, kInscatterD);
         _atmoLutComputeBarrier(cmd);
 
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipes.multiScatterPipe);
@@ -716,6 +729,30 @@ private:
 
         if (!createFroxelImage3D(ctx)) return false;
         if (!createImage2D(ctx, kAmbientMusW, kAmbientMusH, ambientMusImage, ambientMusAlloc, ambientMusView)) return false;
+        if (!createInscatterImage3D(ctx)) return false;
+        return true;
+    }
+
+    bool createInscatterImage3D(VulkanContext& ctx) {
+        VkImageCreateInfo ici{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+        ici.imageType = VK_IMAGE_TYPE_3D; ici.format = kFmt; ici.extent = {kInscatterW,kInscatterH,kInscatterD};
+        ici.mipLevels = 1; ici.arrayLayers = 1; ici.samples = VK_SAMPLE_COUNT_1_BIT;
+        ici.tiling = VK_IMAGE_TILING_OPTIMAL;
+        ici.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        VmaAllocationCreateInfo aci{}; aci.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+        if (vmaCreateImage(ctx.allocator, &ici, &aci, &inscatterImage, &inscatterAlloc, nullptr) != VK_SUCCESS) return false;
+
+        VkImageViewCreateInfo vci{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+        vci.image = inscatterImage; vci.viewType = VK_IMAGE_VIEW_TYPE_3D; vci.format = kFmt;
+        vci.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0,1,0,1 };
+        if (vkCreateImageView(ctx.device, &vci, nullptr, &inscatterView) != VK_SUCCESS) return false;
+
+        VkCommandBuffer cmd2 = beginSingleTimeCommands(ctx);
+        transitionImage(cmd2, inscatterImage, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+            VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE,
+            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT);
+        endSingleTimeCommands(ctx, cmd2);
         return true;
     }
 
@@ -762,7 +799,7 @@ private:
     // 是这个星球自己的。
     bool createDescriptors(VulkanContext& ctx, const VkAtmoLutPipelines& pipes) {
         VkDescriptorPoolSize sizes[] = {
-            { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 6 * FRAMES_IN_FLIGHT }, // trans/sky/multi/cube/froxel/ambientMus
+            { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 7 * FRAMES_IN_FLIGHT }, // +inscatter
             { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 4 * FRAMES_IN_FLIGHT },
             { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 * FRAMES_IN_FLIGHT },
             { VK_DESCRIPTOR_TYPE_SAMPLER, 1 * FRAMES_IN_FLIGHT },
@@ -783,9 +820,10 @@ private:
             VkDescriptorImageInfo iSampler{ pipes.linearClampSampler, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED };
             VkDescriptorImageInfo iFroxel{ VK_NULL_HANDLE, froxelView, VK_IMAGE_LAYOUT_GENERAL };
             VkDescriptorImageInfo iAmbient{ VK_NULL_HANDLE, ambientMusView, VK_IMAGE_LAYOUT_GENERAL };
+            VkDescriptorImageInfo iInscatter{ VK_NULL_HANDLE, inscatterView, VK_IMAGE_LAYOUT_GENERAL };
             VkDescriptorBufferInfo iUbo{ uboBuf[i], 0, sizeof(GpuPerFrameData) };
 
-            VkWriteDescriptorSet w[12]{};
+            VkWriteDescriptorSet w[13]{};
             auto imgWrite = [&](int idx, uint32_t binding, VkDescriptorType type, VkDescriptorImageInfo* info) {
                 w[idx].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; w[idx].dstSet = descSet[i];
                 w[idx].dstBinding = binding; w[idx].descriptorType = type; w[idx].descriptorCount = 1; w[idx].pImageInfo = info;
@@ -796,8 +834,6 @@ private:
             imgWrite(3, 3, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, &iSky);
             imgWrite(4, 4, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, &iMulti);
             imgWrite(5, 5, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, &iMulti);
-            // binding 6 (inDepth) 只在 depthBufferValue>=0 分支被采样，本管线始终传 -1，绑同一张
-            // transmittance view 充数即可（未被实际读取，只是满足 layout 合法性）。
             imgWrite(6, 6, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, &iTrans);
             imgWrite(7, 7, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, &iCube);
             w[8].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; w[8].dstSet = descSet[i];
@@ -805,16 +841,16 @@ private:
             imgWrite(9, 9, VK_DESCRIPTOR_TYPE_SAMPLER, &iSampler);
             imgWrite(10, 10, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, &iFroxel);
             imgWrite(11, 11, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, &iAmbient);
-            vkUpdateDescriptorSets(ctx.device, 12, w, 0, nullptr);
+            imgWrite(12, 12, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, &iInscatter);
+            vkUpdateDescriptorSets(ctx.device, 13, w, 0, nullptr);
         }
         return true;
     }
 
-    // 渲染侧采样 Set（Set 1）：binding 0=场景深度 1=Transmittance 2=Sky-View 3=采样器
-    // 4=场景 HDR（占位，每帧 updateRenderBindings 写入）。1/2 创建后固定不变。
+    // 渲染侧采样 Set（Set 1）：0=depth 1=Trans 2=SkyView 3=sampler 4=HDR 5=Inscatter
     bool createRenderDescriptors(VulkanContext& ctx, const VkAtmoLutPipelines& pipes) {
         VkDescriptorPoolSize sizes[] = {
-            { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 4 * FRAMES_IN_FLIGHT },
+            { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 5 * FRAMES_IN_FLIGHT },
             { VK_DESCRIPTOR_TYPE_SAMPLER, 1 * FRAMES_IN_FLIGHT },
         };
         VkDescriptorPoolCreateInfo pci{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
@@ -826,14 +862,14 @@ private:
             ai.descriptorPool = renderPool; ai.descriptorSetCount = 1; ai.pSetLayouts = &pipes.renderSetLayout;
             if (vkAllocateDescriptorSets(ctx.device, &ai, &renderSet[i]) != VK_SUCCESS) return false;
 
-            // binding 0/4 占位（真正视图在几何 pass 后由 updateRenderBindings() 每帧写入）。
             VkDescriptorImageInfo iDepthPlaceholder{ VK_NULL_HANDLE, view_[0], VK_IMAGE_LAYOUT_GENERAL };
             VkDescriptorImageInfo iTrans{ VK_NULL_HANDLE, view_[0], VK_IMAGE_LAYOUT_GENERAL };
             VkDescriptorImageInfo iSky  { VK_NULL_HANDLE, view_[2], VK_IMAGE_LAYOUT_GENERAL };
             VkDescriptorImageInfo iScenePlaceholder{ VK_NULL_HANDLE, view_[0], VK_IMAGE_LAYOUT_GENERAL };
+            VkDescriptorImageInfo iInscatter{ VK_NULL_HANDLE, inscatterView, VK_IMAGE_LAYOUT_GENERAL };
             VkDescriptorImageInfo iSampler{ pipes.linearClampSampler, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED };
 
-            VkWriteDescriptorSet w[5]{};
+            VkWriteDescriptorSet w[6]{};
             auto imgWrite = [&](int idx, uint32_t binding, VkDescriptorType type, VkDescriptorImageInfo* info) {
                 w[idx].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; w[idx].dstSet = renderSet[i];
                 w[idx].dstBinding = binding; w[idx].descriptorType = type; w[idx].descriptorCount = 1; w[idx].pImageInfo = info;
@@ -843,7 +879,8 @@ private:
             imgWrite(2, 2, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, &iSky);
             imgWrite(3, 3, VK_DESCRIPTOR_TYPE_SAMPLER, &iSampler);
             imgWrite(4, 4, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, &iScenePlaceholder);
-            vkUpdateDescriptorSets(ctx.device, 5, w, 0, nullptr);
+            imgWrite(5, 5, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, &iInscatter);
+            vkUpdateDescriptorSets(ctx.device, 6, w, 0, nullptr);
         }
         return true;
     }

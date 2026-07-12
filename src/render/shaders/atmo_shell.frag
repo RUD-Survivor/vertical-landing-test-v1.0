@@ -59,6 +59,7 @@ layout(push_constant) uniform PC {
     float limbPower;
     float skyDepthThreshold;
     float transmittanceChromaStrength;
+    float inscatterDebugExposure;
 } pc;
 
 #define PC_RAYLEIGH vec3(pc.rayleighCoeffX, pc.rayleighCoeffY, pc.rayleighCoeffZ)

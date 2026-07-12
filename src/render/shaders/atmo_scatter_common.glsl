@@ -28,6 +28,7 @@ layout(set = 1, binding = 1) uniform texture2D inTransmittanceLut;
 layout(set = 1, binding = 2) uniform texture2D inSkyViewLut; // 壳内天空像素采样；须与 skyview_lut 烘焙同基
 layout(set = 1, binding = 3) uniform sampler   samp;
 layout(set = 1, binding = 4) uniform texture2D inSceneColor; // 几何 pass HDR，与 atmo 同帧同图（GENERAL 布局读写）
+layout(set = 1, binding = 5) uniform texture3D inInscatterLut; // Phase A：4D inscatter（单次散射）
 
 float ozoneDensityFn(float h, float ozoneCenter, float ozoneWidth) {
     float d = (h - ozoneCenter) / ozoneWidth;
@@ -113,6 +114,28 @@ vec3 atmoSampleSkyViewLut(vec3 camRelPlanetKm, vec3 rayDir, vec3 sunDirToPlanet,
     skyViewLutParamsToUv(atmo, bIntersectGround, viewZenithCosAngle, lightViewCosAngle,
                          viewHeight, vec2(textureSize(inSkyViewLut, 0)), sampleUv);
     return texture(sampler2D(inSkyViewLut, samp), sampleUv).rgb;
+}
+
+// Phase A：查 Inscatter LUT 的天空散射（观察点=相机相对行星中心）。
+// sunDirToPlanet = 指向太阳；与 PC_SUNDIR / fillAtmoLutFrameData 约定一致。
+vec3 atmoSampleInscatterSky(vec3 camRelPlanetKm, vec3 rayDir, vec3 sunDirToPlanet,
+                             float bottomRadius, float topRadius)
+{
+    AtmosphereParameters atmo;
+    atmo.bottomRadius = bottomRadius;
+    atmo.topRadius    = topRadius;
+
+    vec3 observer = atmoObserverPosKm(camRelPlanetKm);
+    float r = length(observer);
+    if (r >= topRadius)
+        return vec3(0.0);
+    r = max(r, bottomRadius + 1e-3);
+
+    vec3 up = observer / r;
+    float mu   = clamp(dot(rayDir, up), -1.0, 1.0);
+    float mu_s = clamp(dot(sunDirToPlanet, up), -0.2, 1.0);
+    float nu   = clamp(dot(rayDir, sunDirToPlanet), -1.0, 1.0);
+    return sampleInscatterLut(inInscatterLut, samp, atmo, r, mu, mu_s, nu);
 }
 
 // 沿视线方向的 Transmittance LUT（mu = dot(view, up)）。

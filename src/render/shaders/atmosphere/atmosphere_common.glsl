@@ -54,6 +54,9 @@ layout (set = 0, binding = 10, rgba16f) uniform image3D imageFroxelScatter;
 // 与相机无关：仅编码当地太阳高度 μs 下的天顶散射色。
 layout (set = 0, binding = 11, rgba16f) uniform image2D imageCloudAmbientMusLut;
 
+// Inscatter 4D→3D（inscatter_lut.glsl 写入；atmo_inside debug / 后续 ToPoint 采样）。
+layout (set = 0, binding = 12, rgba16f) uniform image3D imageInscatterLut;
+
 AtmosphereParameters getAtmosphereParameters()
 {
     return getAtmosphereParameters(frameData);
