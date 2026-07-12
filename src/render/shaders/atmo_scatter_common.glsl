@@ -21,12 +21,13 @@
 #include "common/shared_atmosphere.glsl"
 
 // Set 1：渲染侧采样（VkAtmoLutPipelines::renderSetLayout，每个星球一份实例，
-// 见 vk_atmosphere_lut.h::VkAtmosphereLut::renderSet / updateDepthBinding）。
+// 见 vk_atmosphere_lut.h::VkAtmosphereLut::renderSet / updateRenderBindings）。
 // atmo_inside.frag / atmo_shell.frag 共用同一份声明，不用各自重复。
 layout(set = 1, binding = 0) uniform texture2D inSceneDepth;
 layout(set = 1, binding = 1) uniform texture2D inTransmittanceLut;
 layout(set = 1, binding = 2) uniform texture2D inSkyViewLut; // 壳内天空像素采样；须与 skyview_lut 烘焙同基
 layout(set = 1, binding = 3) uniform sampler   samp;
+layout(set = 1, binding = 4) uniform texture2D inSceneColor; // 几何 pass HDR，与 atmo 同帧同图（GENERAL 布局读写）
 
 float ozoneDensityFn(float h, float ozoneCenter, float ozoneWidth) {
     float d = (h - ozoneCenter) / ozoneWidth;
@@ -198,16 +199,16 @@ float atmoInsideRim(vec3 rayDir, vec3 camRelPlanet)
     return clamp(1.0 - abs(dot(rayDir, up)), 0.0, 1.0);
 }
 
-// 统一合成输出：L_out = scatter*E + scene*T（靠 blend 乘 framebuffer 里的 scene）
-// FragColor=(rgb, a)=(scatter*E, 1-T)，管线 ONE / ONE_MINUS_SRC_ALPHA。
-vec4 atmoCompositeOut(vec3 scattered, vec3 viewT, float exposure)
+// 统一合成输出：L_out = ACES(scatter*E) + scene * T_rgb
+// 天空/地形/光晕等几何 pass 已写入 HDR 的内容都作为 scene，乘 RGB 透射后叠加。
+// isSkyPixel 只决定散射用 LUT 还是 raymarch，不影响是否合成 scene。
+vec4 atmoCompositeOut(vec3 scattered, vec3 viewT, float exposure, vec3 sceneColor)
 {
-    float T     = clamp(dot(viewT, vec3(0.299, 0.587, 0.114)), 0.0, 1.0);
-    vec3  color = max(scattered * exposure, vec3(0.0));
-    // ACES filmic（壳内/壳外一致）
-    vec3 x = color;
-    vec3 toned = (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);
-    return vec4(toned, 1.0 - T);
+    vec3  T      = clamp(viewT, vec3(0.0), vec3(1.0));
+    vec3  color  = max(scattered * exposure, vec3(0.0));
+    vec3  x      = color;
+    vec3  toned  = (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);
+    return vec4(toned + sceneColor * T, 1.0);
 }
 
 // 单趟（非嵌套）raymarch：从 rayOrigin 沿 rayDir，在 [tNear,tFar] 区间内积分

@@ -6,9 +6,9 @@
 // atmo_inside.frag — 大气壳内路径（相机在大气层以内）
 //
 // 第一版统一合成（与 atmo_shell.frag / 云 composite 同公式）：
-//   L_out = L_scatter * E + L_scene * T
-// 天空像素（无场景几何）：Sky-View LUT + Transmittance LUT（与 skyview_lut 烘焙同坐标系）。
-// 有场景深度：仍 raymarch 到表面（Phase B 再拆 depth AP pass）。
+//   L_out = L_scatter * E + L_scene * T_rgb
+// 天空像素（depth=clear）：Sky-View LUT 散射 + skybox/光晕 * T_rgb。
+// 有场景深度：raymarch 雾 + 地形/太阳 * T_rgb（Phase B 再拆 depth AP pass）。
 // ==========================================================================
 
 #define PI 3.14159265359
@@ -145,5 +145,6 @@ void main() {
     float limbAmt = atmoLimbAmount(altNorm, pc.limbBrightnessBottom, pc.limbBrightness);
     float exposure = baseE * atmoLimbMul(limbAmt, rim, pc.limbPower) * nightFactor;
 
-    FragColor = atmoCompositeOut(march.scattered, march.viewT, exposure);
+    vec3 sceneColor = texture(sampler2D(inSceneColor, samp), screenUv).rgb;
+    FragColor = atmoCompositeOut(march.scattered, march.viewT, exposure, sceneColor);
 }

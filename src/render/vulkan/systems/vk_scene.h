@@ -437,7 +437,8 @@ struct VkSceneSystem {
     // bodyIdx：稳定的星球场景索引（CelestialDraw::bodyIdx），LUT 缓存的 key。
     // camPosKm/lightDirToSun：调用方已经算好的相机世界坐标 / 该星球"指向太阳"
     // 方向（vk_renderer3d.h 循环里已经在为每颗星球重算 light 方向，直接传进来）。
-    void drawAtmoInside(VulkanContext& ctx, VkCommandBuffer cmd, int frameSlot, VkImageView depthView,
+    void drawAtmoInside(VulkanContext& ctx, VkCommandBuffer cmd, int frameSlot,
+                        VkImageView depthView, VkImageView sceneColorView,
                         int32_t bodyIdx, const AtmoPushConstants& pc,
                         const float camPosKm[3], const float lightDirToSun[3]) {
         if (atmoInsidePipe.pipeline == VK_NULL_HANDLE) return;
@@ -449,7 +450,7 @@ struct VkSceneSystem {
                                                           pc.surfaceRadius, thicknessKm, fd);
         if (!lut) return;
         lut->bakeSkyViewOnly(ctx, cmd, frameSlot, atmoLutCache.pipelines, fd);
-        lut->updateDepthBinding(ctx, frameSlot, depthView);
+        lut->updateRenderBindings(ctx, frameSlot, depthView, sceneColorView);
 
         atmoInsidePipe.bind(cmd);
         VkDescriptorSet sets[2] = { desc->set0[_frameIdx], lut->renderSet[frameSlot % FRAMES_IN_FLIGHT] };
@@ -467,7 +468,8 @@ struct VkSceneSystem {
     // atmoSphereVbo（_buildAtmoSphere() 早就建好、之前从未被使用的单位球壳网格），
     // 只在这颗星球实际占的那一小圈屏幕像素上跑 frag，深度测试开启，比全屏 raymarch
     // 便宜得多。LUT 获取/刷新逻辑与 drawAtmoInside 完全一致（同一个 atmoLutCache）。
-    void drawAtmoShell(VulkanContext& ctx, VkCommandBuffer cmd, int frameSlot, VkImageView depthView,
+    void drawAtmoShell(VulkanContext& ctx, VkCommandBuffer cmd, int frameSlot,
+                       VkImageView depthView, VkImageView sceneColorView,
                        int32_t bodyIdx, const AtmoPushConstants& pc,
                        const float camPosKm[3], const float lightDirToSun[3]) {
         if (atmoShellPipe.pipeline == VK_NULL_HANDLE || atmoSphereVbo == VK_NULL_HANDLE) return;
@@ -481,7 +483,7 @@ struct VkSceneSystem {
         lut->bakeSkyViewOnly(ctx, cmd, frameSlot, atmoLutCache.pipelines, fd);
         // 壳外 frag 不采样场景深度（深度测试本身已经处理了"被更近物体挡住"），
         // 但 Set 1 的 binding 0 仍需要一个合法视图满足布局要求，同样刷新一下。
-        lut->updateDepthBinding(ctx, frameSlot, depthView);
+        lut->updateRenderBindings(ctx, frameSlot, depthView, sceneColorView);
 
         atmoShellPipe.bind(cmd);
         VkDescriptorSet sets[2] = { desc->set0[_frameIdx], lut->renderSet[frameSlot % FRAMES_IN_FLIGHT] };

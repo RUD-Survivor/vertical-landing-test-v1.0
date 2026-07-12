@@ -77,14 +77,12 @@ void main() {
 
     if (dot(vLocalNormal, viewDirFromFrag) < 0.0) discard;
 
-    {
-        vec4  clip = frame.proj * frame.view * vec4(vWorldPos, 1.0);
-        float myNdcDepth = (clip.z / clip.w) * 0.5 + 0.5;
-        vec2  ndcXY    = clip.xy / clip.w;
-        vec2  screenUv = vec2(ndcXY.x, -ndcXY.y) * 0.5 + 0.5;
-        float sceneDepthNdc = texture(sampler2D(inSceneDepth, samp), screenUv).r;
-        if (sceneDepthNdc < myNdcDepth) discard;
-    }
+    vec4  clip = frame.proj * frame.view * vec4(vWorldPos, 1.0);
+    float myNdcDepth = (clip.z / clip.w) * 0.5 + 0.5;
+    vec2  ndcXY    = clip.xy / clip.w;
+    vec2  screenUv = vec2(ndcXY.x, -ndcXY.y) * 0.5 + 0.5;
+    float sceneDepthNdc = texture(sampler2D(inSceneDepth, samp), screenUv).r;
+    if (sceneDepthNdc < myNdcDepth) discard;
 
     vec3 planetCenter = pc.planetCenter.xyz;
     vec3 rayDir = -viewDirFromFrag;
@@ -124,5 +122,6 @@ void main() {
     float limbAmt = atmoLimbAmount(altNorm, pc.limbBrightnessBottom, pc.limbBrightness);
     float exposure = baseE * atmoLimbMul(limbAmt, rim, pc.limbPower) * nightFactor;
 
-    FragColor = atmoCompositeOut(march.scattered, march.viewT, exposure);
+    vec3 sceneColor = texture(sampler2D(inSceneColor, samp), screenUv).rgb;
+    FragColor = atmoCompositeOut(march.scattered, march.viewT, exposure, sceneColor);
 }

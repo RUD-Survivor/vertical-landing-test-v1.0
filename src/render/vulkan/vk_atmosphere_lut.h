@@ -319,17 +319,17 @@ private:
         return vkCreatePipelineLayout(ctx.device, &plci, nullptr, &pipelineLayout) == VK_SUCCESS;
     }
 
-    // 渲染侧 4-binding 布局：0=场景深度(只读) 1=Transmittance LUT 2=Sky-View LUT 3=采样器。
-    // 只给 atmo_inside.frag / atmo_shell.frag 用，VERTEX+FRAGMENT 都声明可见性方便
-    // 以后壳网格顶点着色器如果也要查表（比如按海拔做顶点位移）不用再改布局。
+    // 渲染侧 5-binding 布局：0=场景深度 1=Transmittance LUT 2=Sky-View LUT 3=采样器
+    // 4=场景 HDR（与 atmo 写入同图，GENERAL 布局下片元采样 + color attachment 写）。
     bool createRenderSetLayout(VulkanContext& ctx) {
-        VkDescriptorSetLayoutBinding b[4]{};
+        VkDescriptorSetLayoutBinding b[5]{};
         b[0] = { 0, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr }; // 场景深度
         b[1] = { 1, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr }; // Transmittance LUT
         b[2] = { 2, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr }; // Sky-View LUT
         b[3] = { 3, VK_DESCRIPTOR_TYPE_SAMPLER, 1, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, nullptr };
+        b[4] = { 4, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr }; // 场景 HDR
         VkDescriptorSetLayoutCreateInfo lci{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-        lci.bindingCount = 4; lci.pBindings = b;
+        lci.bindingCount = 5; lci.pBindings = b;
         return vkCreateDescriptorSetLayout(ctx.device, &lci, nullptr, &renderSetLayout) == VK_SUCCESS;
     }
 
@@ -459,17 +459,19 @@ struct VkAtmosphereLut {
         if (ambientMusImage) { vmaDestroyImage(ctx.allocator, ambientMusImage, ambientMusAlloc); ambientMusImage=VK_NULL_HANDLE; }
     }
 
-    // 每帧（对"这一帧实际要渲染"的星球）调用一次，把当前场景深度视图写进渲染侧
-    // 采样 Set——Transmittance/Sky-View LUT 的 view 句柄本身不变（同一批 image，
-    // 只是内容被 compute 重烤），不需要重复写；只有 depthView 会随 TAA ping-pong
-    // 逐帧变化，所以每帧都要刷新这一项。
-    void updateDepthBinding(VulkanContext& ctx, int frameSlot, VkImageView depthView) {
+    // 每帧刷新渲染侧 Set 1 的 depth + HDR scene 视图（TAA ping-pong / 同图读写）。
+    void updateRenderBindings(VulkanContext& ctx, int frameSlot, VkImageView depthView, VkImageView sceneColorView) {
         int slot = frameSlot % FRAMES_IN_FLIGHT;
         VkDescriptorImageInfo iDepth{ VK_NULL_HANDLE, depthView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
-        VkWriteDescriptorSet w{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-        w.dstSet = renderSet[slot]; w.dstBinding = 0;
-        w.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE; w.descriptorCount = 1; w.pImageInfo = &iDepth;
-        vkUpdateDescriptorSets(ctx.device, 1, &w, 0, nullptr);
+        VkDescriptorImageInfo iScene{ VK_NULL_HANDLE, sceneColorView, VK_IMAGE_LAYOUT_GENERAL };
+        VkWriteDescriptorSet w[2]{};
+        w[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        w[0].dstSet = renderSet[slot]; w[0].dstBinding = 0;
+        w[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE; w[0].descriptorCount = 1; w[0].pImageInfo = &iDepth;
+        w[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        w[1].dstSet = renderSet[slot]; w[1].dstBinding = 4;
+        w[1].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE; w[1].descriptorCount = 1; w[1].pImageInfo = &iScene;
+        vkUpdateDescriptorSets(ctx.device, 2, w, 0, nullptr);
     }
 
     VkImageView transmittanceView() const { return view_[0]; }
@@ -737,13 +739,11 @@ private:
         return true;
     }
 
-    // 渲染侧采样 Set（Set 1）：binding 0=场景深度(占位，真正视图由每帧 updateDepthBinding
-    // 写入) 1=Transmittance LUT 2=Sky-View LUT 3=采样器。1/2 号绑定的 view 句柄创建后
-    // 就固定不变（compute 只重写内容，不重建 image），所以这里写一次就够，不用像
-    // binding 0 那样每帧刷新。
+    // 渲染侧采样 Set（Set 1）：binding 0=场景深度 1=Transmittance 2=Sky-View 3=采样器
+    // 4=场景 HDR（占位，每帧 updateRenderBindings 写入）。1/2 创建后固定不变。
     bool createRenderDescriptors(VulkanContext& ctx, const VkAtmoLutPipelines& pipes) {
         VkDescriptorPoolSize sizes[] = {
-            { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 3 * FRAMES_IN_FLIGHT },
+            { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 4 * FRAMES_IN_FLIGHT },
             { VK_DESCRIPTOR_TYPE_SAMPLER, 1 * FRAMES_IN_FLIGHT },
         };
         VkDescriptorPoolCreateInfo pci{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
@@ -755,14 +755,14 @@ private:
             ai.descriptorPool = renderPool; ai.descriptorSetCount = 1; ai.pSetLayouts = &pipes.renderSetLayout;
             if (vkAllocateDescriptorSets(ctx.device, &ai, &renderSet[i]) != VK_SUCCESS) return false;
 
-            // binding 0 占位（真正的场景深度视图在几何 pass 结束、TAA ping-pong 确定后
-            // 由 updateDepthBinding() 每帧写入），先随便指一张已有的图满足 layout 合法性。
+            // binding 0/4 占位（真正视图在几何 pass 后由 updateRenderBindings() 每帧写入）。
             VkDescriptorImageInfo iDepthPlaceholder{ VK_NULL_HANDLE, view_[0], VK_IMAGE_LAYOUT_GENERAL };
             VkDescriptorImageInfo iTrans{ VK_NULL_HANDLE, view_[0], VK_IMAGE_LAYOUT_GENERAL };
             VkDescriptorImageInfo iSky  { VK_NULL_HANDLE, view_[2], VK_IMAGE_LAYOUT_GENERAL };
+            VkDescriptorImageInfo iScenePlaceholder{ VK_NULL_HANDLE, view_[0], VK_IMAGE_LAYOUT_GENERAL };
             VkDescriptorImageInfo iSampler{ pipes.linearClampSampler, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED };
 
-            VkWriteDescriptorSet w[4]{};
+            VkWriteDescriptorSet w[5]{};
             auto imgWrite = [&](int idx, uint32_t binding, VkDescriptorType type, VkDescriptorImageInfo* info) {
                 w[idx].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; w[idx].dstSet = renderSet[i];
                 w[idx].dstBinding = binding; w[idx].descriptorType = type; w[idx].descriptorCount = 1; w[idx].pImageInfo = info;
@@ -771,7 +771,8 @@ private:
             imgWrite(1, 1, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, &iTrans);
             imgWrite(2, 2, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, &iSky);
             imgWrite(3, 3, VK_DESCRIPTOR_TYPE_SAMPLER, &iSampler);
-            vkUpdateDescriptorSets(ctx.device, 4, w, 0, nullptr);
+            imgWrite(4, 4, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, &iScenePlaceholder);
+            vkUpdateDescriptorSets(ctx.device, 5, w, 0, nullptr);
         }
         return true;
     }

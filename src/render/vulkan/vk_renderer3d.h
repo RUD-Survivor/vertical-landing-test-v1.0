@@ -131,15 +131,16 @@ struct VkRenderer3D {
         VkImageView colorView = taa.colorViews[taa.currentIdx];
 
         // endGeometryPass() 已经把它转成 SHADER_READ_ONLY_OPTIMAL（供 TAA/云读取），
-        // 这里要先转回 COLOR_ATTACHMENT_OPTIMAL 才能重新当渲染目标写入。
+        // RGB 透射要在片元里采样同一张 HDR，所以 atmo pass 用 GENERAL 同时读写。
         transitionImage(cmd, colorImg,
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
             VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT,
-            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+            VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+            VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
 
         VkRenderingAttachmentInfo colorAI{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
         colorAI.imageView   = colorView;
-        colorAI.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        colorAI.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
         colorAI.loadOp      = VK_ATTACHMENT_LOAD_OP_LOAD;  // 保留几何 pass 已经画好的内容
         colorAI.storeOp     = VK_ATTACHMENT_STORE_OP_STORE;
 
@@ -217,9 +218,9 @@ struct VkRenderer3D {
             bool  cameraInside = camDist < apc.outerRadius;
 
             if (cameraInside) {
-                scene.drawAtmoInside(ctx, cmd, frameSlot, taa.depthView, cd.bodyIdx, apc, snap.camPos, lightDirToSun);
+                scene.drawAtmoInside(ctx, cmd, frameSlot, taa.depthView, colorView, cd.bodyIdx, apc, snap.camPos, lightDirToSun);
             } else {
-                scene.drawAtmoShell(ctx, cmd, frameSlot, taa.depthView, cd.bodyIdx, apc, snap.camPos, lightDirToSun);
+                scene.drawAtmoShell(ctx, cmd, frameSlot, taa.depthView, colorView, cd.bodyIdx, apc, snap.camPos, lightDirToSun);
             }
         }
 
@@ -227,7 +228,7 @@ struct VkRenderer3D {
 
         // 转回 SHADER_READ_ONLY_OPTIMAL：云管线期望进来时 HDR 颜色已经是这个 layout。
         transitionImage(cmd, colorImg,
-            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
             VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
             VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
     }
