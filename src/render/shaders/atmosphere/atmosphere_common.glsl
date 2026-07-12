@@ -71,16 +71,16 @@ vec3 convertToCameraUnit(vec3 o)
 
 // Sky-View / Sky-Irradiance 烘焙用的观察点 (km，行星中心坐标)。
 // cloudIrradianceBakeAtShell!=0：云壳垂直中点高度 + 沿相机径向（轨道相机也落在云附近天空）。
-// 否则：相机位置（atmo LUT 缓存 / fillAtmoLutFrameData 默认行为）。
+// 否则：相机位置 + 沿径向 0.5 km（cameraPosToAtmosphereObserverKm，与 atmo_inside 采样一致）。
 vec3 getSkyLutObserverPosKm(const AtmosphereParameters atmosphere)
 {
-    vec3 camAtmo = convertToAtmosphereUnit(frameData.camWorldPos.xyz);
+    vec3 camRelKm = frameData.camWorldPos.xyz * 0.001f;
     if (frameData.sky.atmosphereConfig.cloudIrradianceBakeAtShell == 0)
-        return camAtmo;
+        return cameraPosToAtmosphereObserverKm(camRelKm);
 
     const float cloudMid = atmosphere.cloudAreaStartHeight + 0.5 * atmosphere.cloudAreaThickness;
-    const float camLen = length(camAtmo);
-    const vec3 radial = (camLen > 1e-4) ? (camAtmo / camLen) : vec3(0.0, 0.0, 1.0);
+    const float camLen = length(camRelKm);
+    const vec3 radial = (camLen > 1e-4) ? (camRelKm / camLen) : vec3(0.0, 0.0, 1.0);
     return radial * cloudMid;
 }
 

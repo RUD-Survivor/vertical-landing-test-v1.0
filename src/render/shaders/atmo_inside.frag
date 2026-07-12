@@ -7,8 +7,8 @@
 //
 // 第一版统一合成（与 atmo_shell.frag / 云 composite 同公式）：
 //   L_out = L_scatter * E + L_scene * T
-// 其中 T = luma(viewT)，靠管线 ONE / ONE_MINUS_SRC_ALPHA + LOAD 已有场景色实现，
-// 不读 HDR（色度透射留第二版）。全程 raymarch，不再用 Sky-View LUT 天空硬分支。
+// 天空像素（无场景几何）：Sky-View LUT + Transmittance LUT（与 skyview_lut 烘焙同坐标系）。
+// 有场景深度：仍 raymarch 到表面（Phase B 再拆 depth AP pass）。
 // ==========================================================================
 
 #define PI 3.14159265359
@@ -114,12 +114,24 @@ void main() {
 
     if (tFar - tNear <= 0.0) discard;
 
-    float cosTheta = dot(rayDir, sunDir);
-    AtmoMarchResult march = raymarchAtmoSegment(
-        camPos, rayDir, pc.planetCenter.xyz, tNear, tFar, PRIMARY_STEPS,
-        PC_RAYLEIGH, pc.mieCoeff, pc.hRayleigh, pc.hMie, pc.gMie,
-        PC_OZONE, pc.ozoneCenter, pc.ozoneWidth,
-        pc.surfaceRadius, pc.outerRadius, sunDir, cosTheta);
+    vec3 camRel = camPos - pc.planetCenter.xyz;
+    bool isSkyPixel = sceneDepthNdc >= 0.9999;
+
+    AtmoMarchResult march;
+    if (isSkyPixel) {
+        march.scattered = atmoSampleSkyViewLut(camRel, rayDir, sunDir,
+            pc.surfaceRadius, pc.outerRadius);
+        march.viewT = atmoSegmentViewTransmittance(camRel, rayDir, tNear, tFar,
+            pc.surfaceRadius, pc.outerRadius);
+        march.opacity = clamp(1.0 - dot(march.viewT, vec3(0.299, 0.587, 0.114)), 0.0, 1.0);
+    } else {
+        float cosTheta = dot(rayDir, sunDir);
+        march = raymarchAtmoSegment(
+            camPos, rayDir, pc.planetCenter.xyz, tNear, tFar, PRIMARY_STEPS,
+            PC_RAYLEIGH, pc.mieCoeff, pc.hRayleigh, pc.hMie, pc.gMie,
+            PC_OZONE, pc.ozoneCenter, pc.ozoneWidth,
+            pc.surfaceRadius, pc.outerRadius, sunDir, cosTheta);
+    }
 
     float thickness = max(pc.outerRadius - pc.surfaceRadius, 1e-3);
     float altNorm = max(camDist - pc.surfaceRadius, 0.0) / thickness;

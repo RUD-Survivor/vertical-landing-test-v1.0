@@ -25,7 +25,7 @@
 // atmo_inside.frag / atmo_shell.frag 共用同一份声明，不用各自重复。
 layout(set = 1, binding = 0) uniform texture2D inSceneDepth;
 layout(set = 1, binding = 1) uniform texture2D inTransmittanceLut;
-layout(set = 1, binding = 2) uniform texture2D inSkyViewLut; // 第一版壳内/壳外合成不再采样；保留绑定兼容 layout
+layout(set = 1, binding = 2) uniform texture2D inSkyViewLut; // 壳内天空像素采样；须与 skyview_lut 烘焙同基
 layout(set = 1, binding = 3) uniform sampler   samp;
 
 float ozoneDensityFn(float h, float ozoneCenter, float ozoneWidth) {
@@ -54,6 +54,86 @@ float miePhaseAtmo(float cosTheta, float gMie) {
     float num   = 3.0 * (1.0 - g2) * (1.0 + cosTheta * cosTheta);
     float denom = 8.0 * 3.14159265359 * (2.0 + g2) * pow(1.0 + g2 - 2.0 * gMie * cosTheta, 1.5);
     return num / max(denom, 1e-6);
+}
+
+// 与 convertToAtmosphereUnit / getSkyLutObserverPosKm 一致：沿 camRel 径向抬高 0.5 km。
+vec3 atmoObserverPosKm(vec3 camRelPlanetKm)
+{
+    return cameraPosToAtmosphereObserverKm(camRelPlanetKm);
+}
+
+// 与 getPosScatterLight() 烘焙完全同构的 {up, side, forward}（太阳水平前向基）。
+void atmoSkyLutBasis(vec3 observerAtmoKm, vec3 sunDirToPlanet,
+                      out vec3 up, out vec3 side, out vec3 forward)
+{
+    up = normalize(observerAtmoKm);
+    vec3 sideCross = cross(up, sunDirToPlanet);
+    float sideLen  = length(sideCross);
+    if (sideLen > 1e-5)
+        side = sideCross / sideLen;
+    else
+        side = normalize(cross(up, (abs(up.x) < 0.9) ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0)));
+    forward = normalize(cross(side, up));
+}
+
+// 视线 → Sky-View LUT 参数（须与烘焙侧 worldDir 分解同式）。
+void atmoRayToSkyViewParams(vec3 rayDir, vec3 up, vec3 forward,
+                             out float viewZenithCosAngle, out float lightViewCosAngle)
+{
+    viewZenithCosAngle = dot(rayDir, up);
+    float sinV = sqrt(max(0.0, 1.0 - viewZenithCosAngle * viewZenithCosAngle));
+    lightViewCosAngle = (sinV > 1e-5) ? clamp(dot(rayDir, forward) / sinV, -1.0, 1.0) : 1.0;
+}
+
+// 查 Sky-View LUT（壳内天空像素）。坐标系与 skyview_lut / getPosScatterLight 一致。
+vec3 atmoSampleSkyViewLut(vec3 camRelPlanetKm, vec3 rayDir, vec3 sunDirToPlanet,
+                           float bottomRadius, float topRadius)
+{
+    vec3 observer = atmoObserverPosKm(camRelPlanetKm);
+    float viewHeight = length(observer);
+    if (viewHeight >= topRadius)
+        return vec3(0.0);
+
+    AtmosphereParameters atmo;
+    atmo.bottomRadius = bottomRadius;
+    atmo.topRadius    = topRadius;
+
+    vec3 up, side, fwd;
+    atmoSkyLutBasis(observer, sunDirToPlanet, up, side, fwd);
+
+    float viewZenithCosAngle, lightViewCosAngle;
+    atmoRayToSkyViewParams(rayDir, up, fwd, viewZenithCosAngle, lightViewCosAngle);
+
+    vec2 sampleUv;
+    skyViewLutParamsToUv(atmo, false, viewZenithCosAngle, lightViewCosAngle,
+                         viewHeight, vec2(textureSize(inSkyViewLut, 0)), sampleUv);
+    return texture(sampler2D(inSkyViewLut, samp), sampleUv).rgb;
+}
+
+// 沿视线方向的 Transmittance LUT（mu = dot(view, up)）。
+vec3 viewTransmittanceLUT(vec3 posRelAtmoKm, vec3 viewDir, float bottomRadius, float topRadius)
+{
+    AtmosphereParameters atmo;
+    atmo.bottomRadius = bottomRadius;
+    atmo.topRadius    = topRadius;
+
+    float viewHeight = length(posRelAtmoKm);
+    float mu = dot(viewDir, posRelAtmoKm / max(viewHeight, 1e-4));
+    vec2 uv;
+    lutTransmittanceParamsToUv(atmo, viewHeight, mu, uv);
+    return texture(sampler2D(inTransmittanceLut, samp), uv).rgb;
+}
+
+// 段 [tNear,tFar] 视线透射（LUT 比值）。Bruneton 约定 T(r,μ) 为沿视线到大气边界的
+// 透射率，段内透射 = T(p0)/T(p1)（p1 沿射线更远），勿写成 T1/T0。
+vec3 atmoSegmentViewTransmittance(vec3 camRelKm, vec3 rayDir, float tNear, float tFar,
+                                  float bottomRadius, float topRadius)
+{
+    vec3 p0 = camRelKm + rayDir * tNear;
+    vec3 p1 = camRelKm + rayDir * tFar;
+    vec3 T0 = viewTransmittanceLUT(p0, rayDir, bottomRadius, topRadius);
+    vec3 T1 = viewTransmittanceLUT(p1, rayDir, bottomRadius, topRadius);
+    return clamp(T0 / max(T1, vec3(1e-4)), vec3(0.0), vec3(1.0));
 }
 
 // 用 Transmittance LUT 代替嵌套 raymarch 里的太阳方向内层 march：给定采样点

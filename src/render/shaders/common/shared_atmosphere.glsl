@@ -203,18 +203,29 @@ float aerialPerspectiveSliceToDepth(float slice) { return slice * kAirPerspectiv
 // TODO: Compute this by camera height.
 const float kPlanetRadiusOffset = 0.001f; // Offset 1 m.
 
+// 相机相对行星中心位置 (km) → Sky-View 烘焙/采样观察点：沿径向抬高 0.5 km，
+// 避免世界 +Y 偏移在非极点纬度扭曲当地天顶方向（贴地白色楔形）。
+const float kAtmoCameraOffsetKm = 0.5f;
+
+vec3 cameraPosToAtmosphereObserverKm(vec3 camRelPlanetKm)
+{
+	float len = length(camRelPlanetKm);
+	vec3 radial = (len > 1e-4f) ? (camRelPlanetKm / len) : vec3(0.0f, 0.0f, 1.0f);
+	return camRelPlanetKm + radial * kAtmoCameraOffsetKm;
+}
+
 // Camera unit to atmosphere unit convert. meter -> kilometers.
 vec3 convertToAtmosphereUnit(vec3 o, in const PerFrameData frame)
 {
-	const float cameraOffset = 0.5f;
-	return o * 0.001f + vec3(0.0, cameraOffset, 0.0);
+	return cameraPosToAtmosphereObserverKm(o * 0.001f);
 }  
 
 // atmosphere unit to camera unit convert. kilometers -> meter.
 vec3 convertToCameraUnit(vec3 o, in const PerFrameData frame)
 {
-	const float cameraOffset = 0.5f;
-	return (o - vec3(0.0, cameraOffset, 0.0)) * 1000.0f;
+	float len = length(o);
+	vec3 radial = (len > 1e-4f) ? (o / len) : vec3(0.0f, 0.0f, 1.0f);
+	return (o - radial * kAtmoCameraOffsetKm) * 1000.0f;
 }  
 
 // Participating media functions and struct.

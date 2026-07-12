@@ -229,6 +229,9 @@ inline GpuPerFrameData fillAtmoLutFrameData(const float camPosKm[3], const float
     fd.sky.intensity = 1.0f;
 
     fillPlanetAtmosphereProfile(fd.sky.atmosphereConfig, atmoIdx, radiusKm, thicknessKm, 0.0f, 0.0f, 0.0f);
+    // 大气 Sky-View 必须在相机高度烘焙（与 atmo_inside 采样同观察点）。
+    // 云管线 fillCloudFrameData 会置 1（云壳中点）；这里显式关，避免楔形/错位。
+    fd.sky.atmosphereConfig.cloudIrradianceBakeAtShell = 0;
     return fd;
 }
 
