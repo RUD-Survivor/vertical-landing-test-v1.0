@@ -58,6 +58,7 @@ layout(push_constant) uniform PC {
     float limbSpaceEnd;
     float limbBrightnessBottom;
     float limbPower;
+    float skyDepthThreshold;
 } pc;
 
 #define PC_RAYLEIGH vec3(pc.rayleighCoeffX, pc.rayleighCoeffY, pc.rayleighCoeffZ)
@@ -103,7 +104,8 @@ void main() {
 
     vec2  screenUv      = vNDC * 0.5 + 0.5;
     float sceneDepthNdc = texture(sampler2D(inSceneDepth, samp), screenUv).r;
-    if (sceneDepthNdc < 0.9999) {
+    float skyDepthThresh = clamp(pc.skyDepthThreshold, 0.0, 1.0);
+    if (sceneDepthNdc < skyDepthThresh) {
         vec4 clip  = vec4(vNDC.x, -vNDC.y, sceneDepthNdc * 2.0 - 1.0, 1.0);
         vec4 viewP = inverse(frame.proj) * clip;
         viewP     /= viewP.w;
@@ -115,7 +117,7 @@ void main() {
     if (tFar - tNear <= 0.0) discard;
 
     vec3 camRel = camPos - pc.planetCenter.xyz;
-    bool isSkyPixel = sceneDepthNdc >= 0.9999;
+    bool isSkyPixel = sceneDepthNdc >= skyDepthThresh;
 
     AtmoMarchResult march;
     if (isSkyPixel) {

@@ -52,6 +52,8 @@ struct AtmoTuneParams {
     float limbSpaceEnd    = 3.0f;   // 保留布局，当前未用
     float limbBrightnessBottom = 1.0f; // 大气底（altNorm=0）边缘增益，smoothstep 收到顶
     float limbPower       = 2.0f;   // rim^power，越大边缘越尖
+    // atmo_inside：sceneDepth >= 阈值走 Sky-View LUT，否则 raymarch 雾（1.0=仅 clear depth）
+    float skyDepthThreshold = 1.0f;
 };
 
 // ── 单一数据源：每类行星的 Rayleigh/Mie/臭氧散射系数 ─────────────────────────

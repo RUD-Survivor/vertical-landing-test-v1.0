@@ -42,6 +42,12 @@ inline void AtmoTunerImGui(bool* p_open, AtmoTuneParams& p, VkAtmoLutCache& lutC
     ImGui::TextDisabled("E = Exposure * mix(1, amount, rim^Power)。");
 
     ImGui::Separator();
+    ImGui::Text("壳内天空分支 (atmo_inside)");
+    ImGui::SliderFloat("SkyDepthThreshold", &p.skyDepthThreshold, 0.9999f, 1.0f, "%.6f",
+                       ImGuiSliderFlags_Logarithmic);
+    ImGui::TextDisabled("sceneDepth >= 阈值 → Sky-View LUT；否则 raymarch。默认 1.0（仅天空盒 depth=1）。");
+
+    ImGui::Separator();
     ImGui::Text("LUT 缓存");
     ImGui::Text("已缓存星球数: %d", (int)lutCache.byBodyIdx.size());
     if (ImGui::Button("强制重烤全部 Transmittance/MultiScatter")) {

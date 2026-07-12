@@ -175,7 +175,8 @@ struct AtmoPushConstants {
     float limbSpaceEnd;     //  4 bytes  — offset 152 (保留，当前未用)
     float limbBrightnessBottom; // 4 bytes — offset 156 (大气底边缘增益，altNorm=0)
     float limbPower;        //  4 bytes  — offset 160 (rim 指数，默认 2.0)
-};                         //            total: 164 bytes
+    float skyDepthThreshold;//  4 bytes  — offset 164 (壳内天空/LUT 深度阈值 NDC，默认 1.0)
+};                         //            total: 168 bytes
 
 // Terrain patch 专属 UBO（binding 1 of Set 0）
 // nodePos/nodeSide/nodeUp 已移至 push constants（每 draw call 更新），此处只保留每帧常量

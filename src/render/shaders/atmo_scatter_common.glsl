@@ -104,8 +104,12 @@ vec3 atmoSampleSkyViewLut(vec3 camRelPlanetKm, vec3 rayDir, vec3 sunDirToPlanet,
     float viewZenithCosAngle, lightViewCosAngle;
     atmoRayToSkyViewParams(rayDir, up, fwd, viewZenithCosAngle, lightViewCosAngle);
 
+    // LUT V 轴分两半：上半=地平以上，下半=地平以下/撞地。须与 skyview_lut 烘焙及
+    // sky_irradiance_capture.glsl 一致，勿写死 false（贴地时地下楔形白块）。
+    bool bIntersectGround = raySphereIntersectNearest(observer, rayDir, vec3(0.0), bottomRadius) >= 0.0;
+
     vec2 sampleUv;
-    skyViewLutParamsToUv(atmo, false, viewZenithCosAngle, lightViewCosAngle,
+    skyViewLutParamsToUv(atmo, bIntersectGround, viewZenithCosAngle, lightViewCosAngle,
                          viewHeight, vec2(textureSize(inSkyViewLut, 0)), sampleUv);
     return texture(sampler2D(inSkyViewLut, samp), sampleUv).rgb;
 }
