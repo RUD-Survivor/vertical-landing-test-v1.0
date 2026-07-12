@@ -110,7 +110,7 @@ struct LensFlarePushConstants {
 };                         //            total: 64 bytes
 
 // -----------------------------------------------------------------------
-// AtmoPushConstants — 大气散射球体（152 bytes，超过 128 字节保证下限——本工程
+// AtmoPushConstants — 大气散射球体（172 bytes，超过 128 字节保证下限——本工程
 // 目标硬件是桌面独显（实测 NVIDIA RTX 4060），desktop NVIDIA/AMD 早就普遍支持
 // 到 256 字节，这里就不再费事查询 VkPhysicalDeviceLimits::maxPushConstantsSize
 // 了，直接用）。
@@ -176,7 +176,8 @@ struct AtmoPushConstants {
     float limbBrightnessBottom; // 4 bytes — offset 156 (大气底边缘增益，altNorm=0)
     float limbPower;        //  4 bytes  — offset 160 (rim 指数，默认 2.0)
     float skyDepthThreshold;//  4 bytes  — offset 164 (壳内天空/LUT 深度阈值 NDC，默认 1.0)
-};                         //            total: 168 bytes
+    float transmittanceChromaStrength; // 4 — offset 168 (scene×T RGB 色度 [0,1])
+};                         //            total: 172 bytes
 
 // Terrain patch 专属 UBO（binding 1 of Set 0）
 // nodePos/nodeSide/nodeUp 已移至 push constants（每 draw call 更新），此处只保留每帧常量

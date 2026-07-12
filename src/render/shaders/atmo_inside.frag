@@ -8,7 +8,7 @@
 // 第一版统一合成（与 atmo_shell.frag / 云 composite 同公式）：
 //   L_out = L_scatter * E + L_scene * T_rgb
 // 天空像素（depth=clear）：Sky-View LUT 散射 + skybox/光晕 * T_rgb。
-// 有场景深度：raymarch 雾 + 地形/太阳 * T_rgb（Phase B 再拆 depth AP pass）。
+// 有场景深度：raymarch 散射 + Transmittance LUT 段透射（与天空 T 同源）。
 // ==========================================================================
 
 #define PI 3.14159265359
@@ -59,6 +59,7 @@ layout(push_constant) uniform PC {
     float limbBrightnessBottom;
     float limbPower;
     float skyDepthThreshold;
+    float transmittanceChromaStrength;
 } pc;
 
 #define PC_RAYLEIGH vec3(pc.rayleighCoeffX, pc.rayleighCoeffY, pc.rayleighCoeffZ)
@@ -133,6 +134,9 @@ void main() {
             PC_RAYLEIGH, pc.mieCoeff, pc.hRayleigh, pc.hMie, pc.gMie,
             PC_OZONE, pc.ozoneCenter, pc.ozoneWidth,
             pc.surfaceRadius, pc.outerRadius, sunDir, cosTheta);
+        // 视线 T：不用 march 内 exp(-τ)，与天空同走 Transmittance LUT
+        atmoOverrideViewTFromLut(march, camRel, rayDir, tNear, tFar,
+            pc.surfaceRadius, pc.outerRadius);
     }
 
     float thickness = max(pc.outerRadius - pc.surfaceRadius, 1e-3);
@@ -146,5 +150,6 @@ void main() {
     float exposure = baseE * atmoLimbMul(limbAmt, rim, pc.limbPower) * nightFactor;
 
     vec3 sceneColor = texture(sampler2D(inSceneColor, samp), screenUv).rgb;
-    FragColor = atmoCompositeOut(march.scattered, march.viewT, exposure, sceneColor);
+    FragColor = atmoCompositeOut(march.scattered, march.viewT, exposure, sceneColor,
+        pc.transmittanceChromaStrength);
 }

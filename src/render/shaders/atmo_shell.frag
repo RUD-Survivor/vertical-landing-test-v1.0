@@ -57,6 +57,8 @@ layout(push_constant) uniform PC {
     float limbSpaceEnd;
     float limbBrightnessBottom;
     float limbPower;
+    float skyDepthThreshold;
+    float transmittanceChromaStrength;
 } pc;
 
 #define PC_RAYLEIGH vec3(pc.rayleighCoeffX, pc.rayleighCoeffY, pc.rayleighCoeffZ)
@@ -109,6 +111,9 @@ void main() {
         PC_RAYLEIGH, pc.mieCoeff, pc.hRayleigh, pc.hMie, pc.gMie,
         PC_OZONE, pc.ozoneCenter, pc.ozoneWidth,
         pc.surfaceRadius, pc.outerRadius, sunDir, cosTheta);
+    vec3 camRel = camPos - planetCenter;
+    atmoOverrideViewTFromLut(march, camRel, rayDir, tNear, tFar,
+        pc.surfaceRadius, pc.outerRadius);
 
     float camDist = length(camPos - planetCenter);
     float thickness = max(pc.outerRadius - pc.surfaceRadius, 1e-3);
@@ -123,5 +128,6 @@ void main() {
     float exposure = baseE * atmoLimbMul(limbAmt, rim, pc.limbPower) * nightFactor;
 
     vec3 sceneColor = texture(sampler2D(inSceneColor, samp), screenUv).rgb;
-    FragColor = atmoCompositeOut(march.scattered, march.viewT, exposure, sceneColor);
+    FragColor = atmoCompositeOut(march.scattered, march.viewT, exposure, sceneColor,
+        pc.transmittanceChromaStrength);
 }

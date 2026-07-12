@@ -54,6 +54,20 @@ struct AtmoTuneParams {
     float limbPower       = 2.0f;   // rim^power，越大边缘越尖
     // atmo_inside：sceneDepth >= 阈值走 Sky-View LUT，否则 raymarch 雾（1.0=仅 clear depth）
     float skyDepthThreshold = 1.0f;
+
+    // ── Transmittance LUT / 大气 profile（改动会触发重烤 T+MultiScatter）──
+    // 乘在 getPlanetScatteringCoeffs() 结果上；1=星球默认。
+    float rayleighMul = 1.0f;
+    float mieMul      = 1.0f;
+    float ozoneMul    = 1.0f;
+    float hRayleighMul = 1.0f;
+    float hMieMul      = 1.0f;
+    float gMieOverride = -1.0f;   // <0 用星球默认；否则覆盖 Mie g
+    float groundAlbedo = 0.3f;
+    float multipleScatteringFactor = 1.0f;
+    float mieAbsFraction = 0.10f; // Mie 吸收 ≈ mieCoeff * 此值
+    // scene×T：1=全 RGB LUT 透射；0=仅亮度（不偏暖）
+    float transmittanceChromaStrength = 1.0f;
 };
 
 // ── 单一数据源：每类行星的 Rayleigh/Mie/臭氧散射系数 ─────────────────────────
@@ -65,6 +79,62 @@ struct PlanetScatteringCoeffs {
     float rayleighCoeff[3]; float mieCoeff;
     float hRayleigh, hMie, gMie;
     float ozoneCoeff[3]; float ozoneCenter, ozoneWidth;
+};
+
+// 把 F4 profile 倍率/覆盖叠到星球默认系数上（raymarch push constant 与 LUT 烘焙共用）。
+inline void applyAtmoTuneToCoeffs(PlanetScatteringCoeffs& c, const AtmoTuneParams& t) {
+    for (int i = 0; i < 3; i++) c.rayleighCoeff[i] *= t.rayleighMul;
+    c.mieCoeff *= t.mieMul;
+    for (int i = 0; i < 3; i++) c.ozoneCoeff[i] *= t.ozoneMul;
+    c.hRayleigh *= t.hRayleighMul;
+    c.hMie      *= t.hMieMul;
+    if (t.gMieOverride >= 0.0f) c.gMie = t.gMieOverride;
+}
+
+// LUT 缓存指纹：半径/atmoIdx + profile 调参；任一变化 → bakeFull。
+struct AtmoLutProfileKey {
+    int32_t atmoIdx = -1;
+    float radiusKm = 0.f;
+    float thicknessKm = 0.f;
+    float rayleighMul = 1.f;
+    float mieMul = 1.f;
+    float ozoneMul = 1.f;
+    float hRayleighMul = 1.f;
+    float hMieMul = 1.f;
+    float gMieOverride = -1.f;
+    float groundAlbedo = 0.3f;
+    float multipleScatteringFactor = 1.f;
+    float mieAbsFraction = 0.1f;
+
+    static AtmoLutProfileKey fromTune(int32_t atmoIdx, float radiusKm, float thicknessKm,
+                                      const AtmoTuneParams& t) {
+        AtmoLutProfileKey k{};
+        k.atmoIdx = atmoIdx;
+        k.radiusKm = radiusKm;
+        k.thicknessKm = thicknessKm;
+        k.rayleighMul = t.rayleighMul;
+        k.mieMul = t.mieMul;
+        k.ozoneMul = t.ozoneMul;
+        k.hRayleighMul = t.hRayleighMul;
+        k.hMieMul = t.hMieMul;
+        k.gMieOverride = t.gMieOverride;
+        k.groundAlbedo = t.groundAlbedo;
+        k.multipleScatteringFactor = t.multipleScatteringFactor;
+        k.mieAbsFraction = t.mieAbsFraction;
+        return k;
+    }
+
+    bool differsFrom(const AtmoLutProfileKey& o) const {
+        auto ne = [](float a, float b) { return fabsf(a - b) > 1e-4f; };
+        return atmoIdx != o.atmoIdx
+            || ne(radiusKm, o.radiusKm) || ne(thicknessKm, o.thicknessKm)
+            || ne(rayleighMul, o.rayleighMul) || ne(mieMul, o.mieMul) || ne(ozoneMul, o.ozoneMul)
+            || ne(hRayleighMul, o.hRayleighMul) || ne(hMieMul, o.hMieMul)
+            || ne(gMieOverride, o.gMieOverride)
+            || ne(groundAlbedo, o.groundAlbedo)
+            || ne(multipleScatteringFactor, o.multipleScatteringFactor)
+            || ne(mieAbsFraction, o.mieAbsFraction);
+    }
 };
 
 inline PlanetScatteringCoeffs getPlanetScatteringCoeffs(int32_t atmoIdx) {
@@ -118,8 +188,10 @@ inline PlanetScatteringCoeffs getPlanetScatteringCoeffs(int32_t atmoIdx) {
 // 需要的 密度 profile 参数"这一步。
 inline void fillPlanetAtmosphereProfile(GpuAtmosphereConfig& cfg, int32_t atmoIdx,
                                         float surfaceRadiusKm, float atmosphereThicknessKm,
-                                        float cloudMinAltKm, float cloudMaxAltKm, float cloudExtinction) {
-    const PlanetScatteringCoeffs pc = getPlanetScatteringCoeffs(atmoIdx);
+                                        float cloudMinAltKm, float cloudMaxAltKm, float cloudExtinction,
+                                        const AtmoTuneParams* tune = nullptr) {
+    PlanetScatteringCoeffs pc = getPlanetScatteringCoeffs(atmoIdx);
+    if (tune) applyAtmoTuneToCoeffs(pc, *tune);
     const float (&rayleighCoeff)[3] = pc.rayleighCoeff;
     const float mieCoeff = pc.mieCoeff;
     const float hRayleigh = pc.hRayleigh, hMie = pc.hMie, gMie = pc.gMie;
@@ -129,11 +201,12 @@ inline void fillPlanetAtmosphereProfile(GpuAtmosphereConfig& cfg, int32_t atmoId
     cfg.atmospherePreExposure = 1.0f;
     cfg.bottomRadius = surfaceRadiusKm;
     cfg.topRadius    = surfaceRadiusKm + atmosphereThicknessKm;
-    cfg.multipleScatteringFactor = 1.0f;
+    cfg.multipleScatteringFactor = tune ? tune->multipleScatteringFactor : 1.0f;
     cfg.miePhaseFunctionG = gMie;
     cfg.viewRayMarchMinSPP = 4;
     cfg.viewRayMarchMaxSPP = 14;
-    cfg.groundAlbedo[0] = cfg.groundAlbedo[1] = cfg.groundAlbedo[2] = 0.3f;
+    const float albedo = tune ? tune->groundAlbedo : 0.3f;
+    cfg.groundAlbedo[0] = cfg.groundAlbedo[1] = cfg.groundAlbedo[2] = albedo;
 
     // color*length 分解：直接把系数塞进 color，length 恒为 1，与
     // shared_atmosphere.glsl::getAtmosphereParameters() 的读法（color*length）对应。
@@ -141,8 +214,9 @@ inline void fillPlanetAtmosphereProfile(GpuAtmosphereConfig& cfg, int32_t atmoId
     cfg.rayleighScatterLength = 1.0f;
     for (int i=0;i<3;i++) cfg.mieScatteringColor[i] = mieCoeff;
     cfg.mieScatteringLength = 1.0f;
-    // Mie 吸收取散射的 10% 作为近似（rs3d 原模型未拆分 mie 散射/吸收）。
-    for (int i=0;i<3;i++) cfg.mieAbsColor[i] = mieCoeff * 0.10f;
+    // Mie 吸收取散射的比例（F4 mieAbsFraction，默认 10%）。
+    const float mieAbsFrac = tune ? tune->mieAbsFraction : 0.10f;
+    for (int i=0;i<3;i++) cfg.mieAbsColor[i] = mieCoeff * mieAbsFrac;
     cfg.mieAbsLength = 1.0f;
     for (int i=0;i<3;i++) cfg.absorptionColor[i] = ozoneCoeff[i];
     cfg.absorptionLength = 1.0f;
@@ -213,7 +287,8 @@ inline void fillPlanetAtmosphereProfile(GpuAtmosphereConfig& cfg, int32_t atmoId
 // LUT（bakeSkyViewOnly）之前调用。
 inline GpuPerFrameData fillAtmoLutFrameData(const float camPosKm[3], const float planetCenterKm[3],
                                              float radiusKm, float thicknessKm, int32_t atmoIdx,
-                                             const float lightDirToSun[3]) {
+                                             const float lightDirToSun[3],
+                                             const AtmoTuneParams* tune = nullptr) {
     GpuPerFrameData fd{};
     float camRelKm[3] = { camPosKm[0]-planetCenterKm[0], camPosKm[1]-planetCenterKm[1], camPosKm[2]-planetCenterKm[2] };
     // camWorldPos 期望"米"为单位（shared_atmosphere.glsl::convertToAtmosphereUnit 内部
@@ -230,7 +305,8 @@ inline GpuPerFrameData fillAtmoLutFrameData(const float camPosKm[3], const float
     // atmo_shell.frag），不需要在这里重复一遍引擎级物理光照那套换算（另一个独立课题）。
     fd.sky.intensity = 1.0f;
 
-    fillPlanetAtmosphereProfile(fd.sky.atmosphereConfig, atmoIdx, radiusKm, thicknessKm, 0.0f, 0.0f, 0.0f);
+    fillPlanetAtmosphereProfile(fd.sky.atmosphereConfig, atmoIdx, radiusKm, thicknessKm,
+                                0.0f, 0.0f, 0.0f, tune);
     // 大气 Sky-View 必须在相机高度烘焙（与 atmo_inside 采样同观察点）。
     // 云管线 fillCloudFrameData 会置 1（云壳中点）；这里显式关，避免楔形/错位。
     fd.sky.atmosphereConfig.cloudIrradianceBakeAtShell = 0;
@@ -424,14 +500,9 @@ struct VkAtmosphereLut {
     VkDescriptorSet  renderSet[FRAMES_IN_FLIGHT] = {};
 
     // ── Profile 指纹（按星球缓存的核心机制）───────────────────────────────
-    // 记录"上次真正 dispatch Transmittance/MultiScatter 时"用的大气 profile 输入。
-    // VkAtmoLutCache::getOrCreate() 每次被访问都会比较当前 profile 与这三个字段，
-    // 不同才触发 bakeFull()（重烤 Transmittance+MultiScatter，贵）；相同则跳过，
-    // 只由调用方另外调 bakeSkyViewOnly()（逐帧、便宜）刷新相机高度/太阳角相关的部分。
-    // bakedAtmoIdx=-1（未烤过）保证首次访问必定触发一次 bakeFull()。
-    int32_t bakedAtmoIdx    = -1;
-    float   bakedRadiusKm   = 0.0f;
-    float   bakedThicknessKm= 0.0f;
+    // 记录上次 bakeFull 的 AtmoLutProfileKey；半径/atmoIdx/F4 profile 任一变 → 重烤。
+    // atmoIdx=-1（默认）保证首次访问必定触发一次 bakeFull()。
+    AtmoLutProfileKey bakedProfile{};
 
     bool init(VulkanContext& ctx, const VkAtmoLutPipelines& pipes) {
         if (!createImages(ctx))              return false;
@@ -806,7 +877,7 @@ struct VkAtmoLutCache {
     // 自动重烤 Transmittance/MultiScatter。失败返回 nullptr（调用方应跳过该星球
     // 这一帧的大气渲染，而不是崩溃——LUT 创建失败通常意味着显存/句柄耗尽）。
     VkAtmosphereLut* getOrCreate(VulkanContext& ctx, VkCommandBuffer cmd, int frameSlot,
-                                  int32_t bodyIdx, int32_t atmoIdx, float radiusKm, float thicknessKm,
+                                  int32_t bodyIdx, const AtmoLutProfileKey& key,
                                   const GpuPerFrameData& fd) {
         auto it = byBodyIdx.find(bodyIdx);
         if (it == byBodyIdx.end()) {
@@ -817,28 +888,20 @@ struct VkAtmoLutCache {
             }
             it = byBodyIdx.emplace(bodyIdx, lut).first;
             printf("[VkAtmoLutCache] New cached LUT instance: bodyIdx=%d atmoIdx=%d radius=%.1fkm\n",
-                   bodyIdx, atmoIdx, radiusKm);
+                   bodyIdx, key.atmoIdx, key.radiusKm);
         }
 
         VkAtmosphereLut& lut = it->second;
-        const bool profileChanged =
-            (lut.bakedAtmoIdx != atmoIdx) ||
-            (fabsf(lut.bakedRadiusKm - radiusKm) > 0.01f) ||
-            (fabsf(lut.bakedThicknessKm - thicknessKm) > 0.01f);
-        if (profileChanged) {
+        if (lut.bakedProfile.differsFrom(key)) {
             lut.bakeFull(ctx, cmd, frameSlot, pipelines, fd);
-            lut.bakedAtmoIdx     = atmoIdx;
-            lut.bakedRadiusKm    = radiusKm;
-            lut.bakedThicknessKm = thicknessKm;
+            lut.bakedProfile = key;
         }
         return &lut;
     }
 
     // 强制下一次 getOrCreate() 对所有已缓存星球重烤 Transmittance/MultiScatter——
-    // 供 imgui_atmo_tuner.h 的"强制重烤"按钮用，比如手动改了 getPlanetScatteringCoeffs()
-    // 之后不想等自然的 profile 指纹比较（那只在半径/atmoIdx 变化时触发，散射系数
-    // 本身改了不会被现有指纹感知到）。
+    // 供 imgui_atmo_tuner.h 的"强制重烤"按钮用。
     void invalidateAll() {
-        for (auto& kv : byBodyIdx) kv.second.bakedAtmoIdx = -1;
+        for (auto& kv : byBodyIdx) kv.second.bakedProfile.atmoIdx = -1;
     }
 };

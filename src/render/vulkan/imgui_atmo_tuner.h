@@ -11,15 +11,48 @@ inline void AtmoTunerImGui(bool* p_open, AtmoTuneParams& p, VkAtmoLutCache& lutC
     if (ImGui::IsKeyPressed(ImGuiKey_F4, false)) *p_open = !*p_open;
     if (!*p_open) return;
 
-    ImGui::SetNextWindowSize(ImVec2(420, 560), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(440, 640), ImGuiCond_FirstUseEver);
     if (!ImGui::Begin("大气渲染调参 (壳内/壳外)", p_open, ImGuiWindowFlags_None)) {
         ImGui::End();
         return;
     }
 
+    bool profileEdited = false;
+
     ImGui::Text("大气壳");
-    ImGui::SliderFloat("ShellThickness (km)", &p.shellThicknessKm, 20.0f, 500.0f, "%.0f");
-    ImGui::TextDisabled("原来所有星球写死 +160km，现在可调；改动只影响新画的帧，不用重烤 LUT");
+    profileEdited |= ImGui::SliderFloat("ShellThickness (km)", &p.shellThicknessKm, 20.0f, 500.0f, "%.0f");
+    ImGui::TextDisabled("改厚度会重烤 Transmittance LUT（topRadius 变了）。");
+
+    ImGui::Separator();
+    ImGui::Text("Transmittance LUT / Profile（改动自动重烤 T+MultiScatter）");
+    profileEdited |= ImGui::SliderFloat("RayleighMul", &p.rayleighMul, 0.1f, 5.0f, "%.2f");
+    profileEdited |= ImGui::SliderFloat("MieMul", &p.mieMul, 0.1f, 5.0f, "%.2f");
+    profileEdited |= ImGui::SliderFloat("OzoneMul", &p.ozoneMul, 0.0f, 5.0f, "%.2f");
+    profileEdited |= ImGui::SliderFloat("HRayleighMul", &p.hRayleighMul, 0.25f, 4.0f, "%.2f");
+    profileEdited |= ImGui::SliderFloat("HMieMul", &p.hMieMul, 0.25f, 4.0f, "%.2f");
+    profileEdited |= ImGui::SliderFloat("GMieOverride", &p.gMieOverride, -1.0f, 0.99f, "%.2f");
+    ImGui::TextDisabled("GMie < 0 = 用星球默认；>=0 覆盖 Mie 相位 g。");
+    profileEdited |= ImGui::SliderFloat("GroundAlbedo", &p.groundAlbedo, 0.0f, 1.0f, "%.2f");
+    profileEdited |= ImGui::SliderFloat("MultiScatterFactor", &p.multipleScatteringFactor, 0.0f, 2.0f, "%.2f");
+    profileEdited |= ImGui::SliderFloat("MieAbsFraction", &p.mieAbsFraction, 0.0f, 0.5f, "%.2f");
+    ImGui::TextDisabled("Mie 吸收 ≈ mieCoeff × MieAbsFraction（默认 0.10）。");
+
+    ImGui::SliderFloat("TransmittanceChroma", &p.transmittanceChromaStrength, 0.0f, 1.0f, "%.2f");
+    ImGui::TextDisabled("scene×T：1=全 RGB LUT 透射；0=仅亮度（减轻地平线偏暖）。不重烤 LUT。");
+
+    if (ImGui::Button("Reset Profile Multipliers")) {
+        p.rayleighMul = 1.0f;
+        p.mieMul = 1.0f;
+        p.ozoneMul = 1.0f;
+        p.hRayleighMul = 1.0f;
+        p.hMieMul = 1.0f;
+        p.gMieOverride = -1.0f;
+        p.groundAlbedo = 0.3f;
+        p.multipleScatteringFactor = 1.0f;
+        p.mieAbsFraction = 0.10f;
+        p.transmittanceChromaStrength = 1.0f;
+        profileEdited = true;
+    }
 
     ImGui::Separator();
     ImGui::Text("spaceVisibility（旧壳内星空穿透；统一合成后影响较小）");
@@ -45,15 +78,17 @@ inline void AtmoTunerImGui(bool* p_open, AtmoTuneParams& p, VkAtmoLutCache& lutC
     ImGui::Text("壳内天空分支 (atmo_inside)");
     ImGui::SliderFloat("SkyDepthThreshold", &p.skyDepthThreshold, 0.9999f, 1.0f, "%.6f",
                        ImGuiSliderFlags_Logarithmic);
-    ImGui::TextDisabled("sceneDepth >= 阈值 → Sky-View LUT；否则 raymarch。默认 1.0（仅天空盒 depth=1）。");
+    ImGui::TextDisabled("sceneDepth >= 阈值 → Sky-View LUT；否则 raymarch+LUT T。默认 1.0。");
 
     ImGui::Separator();
     ImGui::Text("LUT 缓存");
     ImGui::Text("已缓存星球数: %d", (int)lutCache.byBodyIdx.size());
-    if (ImGui::Button("强制重烤全部 Transmittance/MultiScatter")) {
+    if (ImGui::Button("强制重烤全部 Transmittance/MultiScatter"))
         lutCache.invalidateAll();
-    }
-    ImGui::TextDisabled("散射系数(getPlanetScatteringCoeffs)本身改了代码才需要点这个；半径/atmoIdx 变化会自动触发");
+    // Profile 滑条变化时标脏；下一帧 getOrCreate 比对指纹也会 bakeFull（双保险）。
+    if (profileEdited)
+        lutCache.invalidateAll();
+    ImGui::TextDisabled("Profile/厚度变化会自动重烤；按钮用于手动强制。");
 
     ImGui::Separator();
     ImGui::TextDisabled("F4: 开关面板");

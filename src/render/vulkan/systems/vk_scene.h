@@ -440,14 +440,15 @@ struct VkSceneSystem {
     void drawAtmoInside(VulkanContext& ctx, VkCommandBuffer cmd, int frameSlot,
                         VkImageView depthView, VkImageView sceneColorView,
                         int32_t bodyIdx, const AtmoPushConstants& pc,
-                        const float camPosKm[3], const float lightDirToSun[3]) {
+                        const float camPosKm[3], const float lightDirToSun[3],
+                        const AtmoTuneParams& tune) {
         if (atmoInsidePipe.pipeline == VK_NULL_HANDLE) return;
 
         const float thicknessKm = pc.outerRadius - pc.surfaceRadius;
         GpuPerFrameData fd = fillAtmoLutFrameData(camPosKm, pc.planetCenter, pc.surfaceRadius,
-                                                   thicknessKm, pc.planetIdx, lightDirToSun);
-        VkAtmosphereLut* lut = atmoLutCache.getOrCreate(ctx, cmd, frameSlot, bodyIdx, pc.planetIdx,
-                                                          pc.surfaceRadius, thicknessKm, fd);
+                                                   thicknessKm, pc.planetIdx, lightDirToSun, &tune);
+        AtmoLutProfileKey key = AtmoLutProfileKey::fromTune(pc.planetIdx, pc.surfaceRadius, thicknessKm, tune);
+        VkAtmosphereLut* lut = atmoLutCache.getOrCreate(ctx, cmd, frameSlot, bodyIdx, key, fd);
         if (!lut) return;
         lut->bakeSkyViewOnly(ctx, cmd, frameSlot, atmoLutCache.pipelines, fd);
         lut->updateRenderBindings(ctx, frameSlot, depthView, sceneColorView);
@@ -471,14 +472,15 @@ struct VkSceneSystem {
     void drawAtmoShell(VulkanContext& ctx, VkCommandBuffer cmd, int frameSlot,
                        VkImageView depthView, VkImageView sceneColorView,
                        int32_t bodyIdx, const AtmoPushConstants& pc,
-                       const float camPosKm[3], const float lightDirToSun[3]) {
+                       const float camPosKm[3], const float lightDirToSun[3],
+                       const AtmoTuneParams& tune) {
         if (atmoShellPipe.pipeline == VK_NULL_HANDLE || atmoSphereVbo == VK_NULL_HANDLE) return;
 
         const float thicknessKm = pc.outerRadius - pc.surfaceRadius;
         GpuPerFrameData fd = fillAtmoLutFrameData(camPosKm, pc.planetCenter, pc.surfaceRadius,
-                                                   thicknessKm, pc.planetIdx, lightDirToSun);
-        VkAtmosphereLut* lut = atmoLutCache.getOrCreate(ctx, cmd, frameSlot, bodyIdx, pc.planetIdx,
-                                                          pc.surfaceRadius, thicknessKm, fd);
+                                                   thicknessKm, pc.planetIdx, lightDirToSun, &tune);
+        AtmoLutProfileKey key = AtmoLutProfileKey::fromTune(pc.planetIdx, pc.surfaceRadius, thicknessKm, tune);
+        VkAtmosphereLut* lut = atmoLutCache.getOrCreate(ctx, cmd, frameSlot, bodyIdx, key, fd);
         if (!lut) return;
         lut->bakeSkyViewOnly(ctx, cmd, frameSlot, atmoLutCache.pipelines, fd);
         // 壳外 frag 不采样场景深度（深度测试本身已经处理了"被更近物体挡住"），

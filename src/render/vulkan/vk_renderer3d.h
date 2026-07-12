@@ -187,6 +187,7 @@ struct VkRenderer3D {
             apc.frameIndex     = snap.frameIndex;
 
             PlanetScatteringCoeffs sc = getPlanetScatteringCoeffs(cd.atmoIdx);
+            applyAtmoTuneToCoeffs(sc, atmoTune);
             apc.rayleighCoeff[0]=sc.rayleighCoeff[0]; apc.rayleighCoeff[1]=sc.rayleighCoeff[1]; apc.rayleighCoeff[2]=sc.rayleighCoeff[2];
             apc.mieCoeff = sc.mieCoeff;
             apc.hRayleigh = sc.hRayleigh; apc.hMie = sc.hMie; apc.gMie = sc.gMie;
@@ -204,6 +205,7 @@ struct VkRenderer3D {
             apc.limbBrightnessBottom = atmoTune.limbBrightnessBottom;
             apc.limbPower       = atmoTune.limbPower;
             apc.skyDepthThreshold = atmoTune.skyDepthThreshold;
+            apc.transmittanceChromaStrength = atmoTune.transmittanceChromaStrength;
 
             // 已修复：太阳方向传真正"这颗星球→太阳"的方向（上面刚算好的
             // lightDirToSun），不再依赖 shader 里读的那个全局 frame.lightDir
@@ -218,9 +220,9 @@ struct VkRenderer3D {
             bool  cameraInside = camDist < apc.outerRadius;
 
             if (cameraInside) {
-                scene.drawAtmoInside(ctx, cmd, frameSlot, taa.depthView, colorView, cd.bodyIdx, apc, snap.camPos, lightDirToSun);
+                scene.drawAtmoInside(ctx, cmd, frameSlot, taa.depthView, colorView, cd.bodyIdx, apc, snap.camPos, lightDirToSun, atmoTune);
             } else {
-                scene.drawAtmoShell(ctx, cmd, frameSlot, taa.depthView, colorView, cd.bodyIdx, apc, snap.camPos, lightDirToSun);
+                scene.drawAtmoShell(ctx, cmd, frameSlot, taa.depthView, colorView, cd.bodyIdx, apc, snap.camPos, lightDirToSun, atmoTune);
             }
         }
 

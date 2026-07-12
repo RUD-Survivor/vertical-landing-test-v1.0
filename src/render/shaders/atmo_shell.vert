@@ -53,6 +53,8 @@ layout(push_constant) uniform PC {
     float limbSpaceEnd;
     float limbBrightnessBottom;
     float limbPower;
+    float skyDepthThreshold;
+    float transmittanceChromaStrength;
 } pc;
 
 layout(location = 0) out vec3 vWorldPos;

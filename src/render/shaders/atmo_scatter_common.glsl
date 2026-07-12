@@ -158,11 +158,18 @@ vec3 sunTransmittanceLUT(vec3 posRelPlanet, vec3 sunDir, float bottomRadius, flo
 }
 
 // scattered：路径积分散射光 L_inscatter
-// viewT：视线 RGB 透射率 exp(-τ)（第一版合成用 luma(viewT) 当标量 T，经
-//   ONE/ONE_MINUS_SRC_ALPHA 实现 L_out = scatter*E + scene*T；色度透射留到
-//   读 HDR 的第二版）
+// viewT：视线 RGB 透射（地形/天空统一用 Transmittance LUT 段比值；raymarch 内
+//   exp(-τ) 仅作中间量，合成前会被 atmoOverrideViewTFromLut 覆盖）
 // opacity：1 - luma(viewT)，兼容旧调用点
 struct AtmoMarchResult { vec3 scattered; vec3 viewT; float opacity; };
+
+// 地形/壳外：散射可继续 raymarch，视线 T 必须用 Transmittance LUT（与天空分支一致）。
+void atmoOverrideViewTFromLut(inout AtmoMarchResult march, vec3 camRelKm, vec3 rayDir,
+                              float tNear, float tFar, float bottomRadius, float topRadius)
+{
+    march.viewT   = atmoSegmentViewTransmittance(camRelKm, rayDir, tNear, tFar, bottomRadius, topRadius);
+    march.opacity = clamp(1.0 - dot(march.viewT, vec3(0.299, 0.587, 0.114)), 0.0, 1.0);
+}
 
 // 壳内/壳外共用曝光：按相对大气厚度的高度连续插值，避免 camDist==outerRadius
 // 时 innerExposureFar ↔ outerExposure 硬切闪一下。
@@ -199,16 +206,24 @@ float atmoInsideRim(vec3 rayDir, vec3 camRelPlanet)
     return clamp(1.0 - abs(dot(rayDir, up)), 0.0, 1.0);
 }
 
-// 统一合成输出：L_out = ACES(scatter*E) + scene * T_rgb
-// 天空/地形/光晕等几何 pass 已写入 HDR 的内容都作为 scene，乘 RGB 透射后叠加。
-// isSkyPixel 只决定散射用 LUT 还是 raymarch，不影响是否合成 scene。
-vec4 atmoCompositeOut(vec3 scattered, vec3 viewT, float exposure, vec3 sceneColor)
+// scene 乘 T：mix(亮度, RGB, chromaStrength)，减轻地平线偏暖（1=全 RGB LUT T）。
+vec3 atmoSceneTransmittance(vec3 viewT, float chromaStrength)
 {
     vec3  T      = clamp(viewT, vec3(0.0), vec3(1.0));
+    float T_luma = dot(T, vec3(0.299, 0.587, 0.114));
+    float w      = clamp(chromaStrength, 0.0, 1.0);
+    return mix(vec3(T_luma), T, w);
+}
+
+// 统一合成输出：L_out = ACES(scatter*E) + scene * T_scene
+vec4 atmoCompositeOut(vec3 scattered, vec3 viewT, float exposure, vec3 sceneColor,
+                      float chromaStrength)
+{
+    vec3  T_scene = atmoSceneTransmittance(viewT, chromaStrength);
     vec3  color  = max(scattered * exposure, vec3(0.0));
     vec3  x      = color;
     vec3  toned  = (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);
-    return vec4(toned + sceneColor * T, 1.0);
+    return vec4(toned + sceneColor * T_scene, 1.0);
 }
 
 // 单趟（非嵌套）raymarch：从 rayOrigin 沿 rayDir，在 [tNear,tFar] 区间内积分
