@@ -400,7 +400,7 @@ float inscatterUnitFromTexCoord(float u, int size)
 float inscatterSafeSqrt(float a)
 {
 	return sqrt(max(a, 0.0));
-}//返回根号a，如果a小于0就返回0
+}
 
 // DistanceToTopAtmosphereBoundary(r, mu) — Bruneton
 float inscatterDistanceToTop(float topRadius, float r, float mu)

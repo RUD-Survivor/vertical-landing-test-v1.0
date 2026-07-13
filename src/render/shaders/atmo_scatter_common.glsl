@@ -4,18 +4,10 @@
 
 // ==========================================================================
 // atmo_scatter_common.glsl — 大气重构·壳内(atmo_inside.frag)/壳外(atmo_shell.frag)
-// 共用的单趟（非嵌套）raymarch + Transmittance LUT 查表。
+// 共用 GetSkyRadianceToPoint 段散射（Inscatter LUT 双查表相减 + Transmittance LUT）。
 //
-// 抽出来一是避免两份重复代码，二是修了壳外路径最初的一个真实 bug：壳外最早
-// 直接照抄 Sky-View LUT 查表（和壳内一样），但 Sky-View LUT 的参数化只在
-// "观察者高度 < 大气顶(topRadius)" 时有效——这是 Bruneton/UE Sky Atmosphere
-// 的标准限制，本工程自己的 sky_irradiance_capture.glsl 也有同样的
-// `bCanUseSkyViewLut = viewHeight < atmosphere.topRadius` 判断，超出这个范围
-// 时它自己都会退回真正的散射积分，不再查表。壳外路径的相机按定义就在
-// topRadius 以外，所以直接查 Sky-View LUT 参数会越界（对应到 acos/sqrt 的
-// 无效输入域），产出 NaN，NaN 喂给纹理采样在很多实现下直接读回 0——这就是
-// "大气壳是黑的"的根因。改成这里的物理积分，对任意相机位置（壳内/壳外）都
-// 成立，不再需要区分。
+// 壳外曾直接查 Sky-View LUT 导致参数越界（观察者高度须 < topRadius），
+// 现改为段散射 LUT，对壳内/壳外任意相机位置成立。
 // ==========================================================================
 
 #include "common/shared_atmosphere.glsl"
@@ -28,7 +20,11 @@ layout(set = 1, binding = 1) uniform texture2D inTransmittanceLut;
 layout(set = 1, binding = 2) uniform texture2D inSkyViewLut; // 壳内天空像素采样；须与 skyview_lut 烘焙同基
 layout(set = 1, binding = 3) uniform sampler   samp;
 layout(set = 1, binding = 4) uniform texture2D inSceneColor; // 几何 pass HDR，与 atmo 同帧同图（GENERAL 布局读写）
-layout(set = 1, binding = 5) uniform texture3D inInscatterLut; // Phase A：4D inscatter（单次散射）
+layout(set = 1, binding = 5) uniform texture3D inInscatterLut; // Phase B：4D inscatter（单次散射，含相位）
+
+// scattered：路径积分散射光 L_inscatter
+// viewT：视线 RGB 透射
+struct AtmoMarchResult { vec3 scattered; vec3 viewT; float opacity; };
 
 float ozoneDensityFn(float h, float ozoneCenter, float ozoneWidth) {
     float d = (h - ozoneCenter) / ozoneWidth;
@@ -116,28 +112,6 @@ vec3 atmoSampleSkyViewLut(vec3 camRelPlanetKm, vec3 rayDir, vec3 sunDirToPlanet,
     return texture(sampler2D(inSkyViewLut, samp), sampleUv).rgb;
 }
 
-// Phase B：查 Inscatter LUT 的天空散射（Bruneton 非线性 UV；观察点=相机相对行星中心）。
-// sunDirToPlanet = 指向太阳；与 PC_SUNDIR / fillAtmoLutFrameData 约定一致。
-vec3 atmoSampleInscatterSky(vec3 camRelPlanetKm, vec3 rayDir, vec3 sunDirToPlanet,
-                             float bottomRadius, float topRadius)
-{
-    AtmosphereParameters atmo;
-    atmo.bottomRadius = bottomRadius;
-    atmo.topRadius    = topRadius;
-
-    vec3 observer = atmoObserverPosKm(camRelPlanetKm);
-    float r = length(observer);
-    if (r >= topRadius)
-        return vec3(0.0);
-    r = max(r, bottomRadius + 1e-3);
-
-    vec3 up = observer / r;
-    float mu   = clamp(dot(rayDir, up), -1.0, 1.0);
-    float mu_s = clamp(dot(sunDirToPlanet, up), kInscatterMuSMin, 1.0);
-    float nu   = clamp(dot(rayDir, sunDirToPlanet), -1.0, 1.0);
-    return sampleInscatterLut(inInscatterLut, samp, atmo, r, mu, mu_s, nu);
-}
-
 // 沿视线方向的 Transmittance LUT（mu = dot(view, up)）。
 vec3 viewTransmittanceLUT(vec3 posRelAtmoKm, vec3 viewDir, float bottomRadius, float topRadius)
 {
@@ -154,14 +128,113 @@ vec3 viewTransmittanceLUT(vec3 posRelAtmoKm, vec3 viewDir, float bottomRadius, f
 
 // 段 [tNear,tFar] 视线透射（LUT 比值）。Bruneton 约定 T(r,μ) 为沿视线到大气边界的
 // 透射率，段内透射 = T(p0)/T(p1)（p1 沿射线更远），勿写成 T1/T0。
+vec3 atmoPointSegmentTransmittance(vec3 p0Rel, vec3 p1Rel, vec3 viewDir,
+                                    float bottomRadius, float topRadius)
+{
+    vec3 T0 = viewTransmittanceLUT(p0Rel, viewDir, bottomRadius, topRadius);
+    vec3 T1 = viewTransmittanceLUT(p1Rel, viewDir, bottomRadius, topRadius);
+    return clamp(T0 / max(T1, vec3(1e-4)), vec3(0.0), vec3(1.0));
+}
+
 vec3 atmoSegmentViewTransmittance(vec3 camRelKm, vec3 rayDir, float tNear, float tFar,
                                   float bottomRadius, float topRadius)
 {
+    return atmoPointSegmentTransmittance(
+        camRelKm + rayDir * tNear, camRelKm + rayDir * tFar, rayDir, bottomRadius, topRadius);
+}
+
+// 相对行星中心位置 → Inscatter 查表参数 (r,μ,μ_s,ν)。
+void atmoInscatterParamsAtRelPos(vec3 posRel, vec3 viewDir, vec3 sunDir,
+                                  float bottomRadius, float topRadius,
+                                  out float r, out float mu, out float mu_s, out float nu,
+                                  out bool hitGround)
+{
+    AtmosphereParameters atmo;
+    atmo.bottomRadius = bottomRadius;
+    atmo.topRadius    = topRadius;
+
+    float len = length(posRel);
+    r = clamp(len, bottomRadius, topRadius);
+    vec3 up = posRel / max(len, 1e-4);
+    mu   = clamp(dot(viewDir, up), -1.0, 1.0);
+    mu_s = clamp(dot(sunDir, up), kInscatterMuSMin, 1.0);
+    nu   = clamp(dot(viewDir, sunDir), -1.0, 1.0);
+    hitGround = inscatterRayIntersectsGround(atmo, r, mu);
+    float muBound = mu * mu_s + sqrt(max(0.0, (1.0 - mu * mu) * (1.0 - mu_s * mu_s)));
+    nu = clamp(nu, -muBound, muBound);
+}
+
+// 从 posRel 沿 viewDir 积到大气边界/地面的预烘焙散射（Inscatter LUT 一次查表）。
+vec3 atmoInscatterToBoundary(vec3 posRel, vec3 viewDir, vec3 sunDir,
+                              float bottomRadius, float topRadius)
+{
+    AtmosphereParameters atmo;
+    atmo.bottomRadius = bottomRadius;
+    atmo.topRadius    = topRadius;
+
+    float r, mu, mu_s, nu;
+    bool hitGround;
+    atmoInscatterParamsAtRelPos(posRel, viewDir, sunDir, bottomRadius, topRadius,
+                                r, mu, mu_s, nu, hitGround);
+    return sampleInscatterLut(inInscatterLut, samp, atmo, r, mu, mu_s, nu);
+}
+
+// Phase B：查 Inscatter LUT 的天空散射（单点→边界；太空相机先投影到大气顶）。
+vec3 atmoSampleInscatterSky(vec3 camRelPlanetKm, vec3 rayDir, vec3 sunDirToPlanet,
+                             float bottomRadius, float topRadius)
+{
+    vec3 observer = atmoObserverPosKm(camRelPlanetKm);
+    if (length(observer) > topRadius) {
+        if (!moveToTopAtmosphere(observer, rayDir, topRadius))
+            return vec3(0.0);
+    }
+    return atmoInscatterToBoundary(observer, rayDir, sunDirToPlanet, bottomRadius, topRadius);
+}
+
+// Bruneton GetSkyRadianceToPoint（无 shadow_length）：
+//   S(p0→p1) = S_lut(p0→边界) − T(p0,p1) · S_lut(p1→边界)
+// p0 若在大气外，先沿 viewDir 投影到大气顶。
+vec3 atmoGetSkyRadianceToPoint(vec3 p0Rel, vec3 p1Rel, vec3 viewDir, vec3 sunDir,
+                                float bottomRadius, float topRadius)
+{
+    vec3 p0 = p0Rel;
+    if (length(p0) > topRadius) {
+        if (!moveToTopAtmosphere(p0, viewDir, topRadius))
+            return vec3(0.0);
+    }
+
+    vec3 S0   = atmoInscatterToBoundary(p0, viewDir, sunDir, bottomRadius, topRadius);
+    vec3 S1   = atmoInscatterToBoundary(p1Rel, viewDir, sunDir, bottomRadius, topRadius);
+    vec3 Tseg = atmoPointSegmentTransmittance(p0, p1Rel, viewDir, bottomRadius, topRadius);
+    return max(S0 - Tseg * S1, vec3(0.0));
+}
+
+// [tNear,tFar] 段散射 + 段透射（壳内/壳外共用；GetSkyRadianceToPoint + T_LUT）。
+AtmoMarchResult atmoSegmentInscatterMarch(vec3 camRelKm, vec3 rayDir,
+                                         float tNear, float tFar, vec3 sunDir,
+                                         float bottomRadius, float topRadius)
+{
+    AtmoMarchResult result;
+    result.scattered = vec3(0.0);
+    result.viewT     = vec3(1.0);
+    result.opacity   = 0.0;
+    if (tFar <= tNear)
+        return result;
+
     vec3 p0 = camRelKm + rayDir * tNear;
     vec3 p1 = camRelKm + rayDir * tFar;
-    vec3 T0 = viewTransmittanceLUT(p0, rayDir, bottomRadius, topRadius);
-    vec3 T1 = viewTransmittanceLUT(p1, rayDir, bottomRadius, topRadius);
-    return clamp(T0 / max(T1, vec3(1e-4)), vec3(0.0), vec3(1.0));
+    if (length(p0) > topRadius) {
+        if (!moveToTopAtmosphere(p0, rayDir, topRadius))
+            return result;
+    }
+
+    vec3 S0   = atmoInscatterToBoundary(p0, rayDir, sunDir, bottomRadius, topRadius);
+    vec3 S1   = atmoInscatterToBoundary(p1, rayDir, sunDir, bottomRadius, topRadius);
+    vec3 Tseg = atmoPointSegmentTransmittance(p0, p1, rayDir, bottomRadius, topRadius);
+    result.scattered = max(S0 - Tseg * S1, vec3(0.0));
+    result.viewT     = Tseg;
+    result.opacity   = clamp(1.0 - dot(result.viewT, vec3(0.299, 0.587, 0.114)), 0.0, 1.0);
+    return result;
 }
 
 // 用 Transmittance LUT 代替嵌套 raymarch 里的太阳方向内层 march：给定采样点
@@ -180,13 +253,7 @@ vec3 sunTransmittanceLUT(vec3 posRelPlanet, vec3 sunDir, float bottomRadius, flo
     return texture(sampler2D(inTransmittanceLut, samp), uv).rgb;
 }
 
-// scattered：路径积分散射光 L_inscatter
-// viewT：视线 RGB 透射（地形/天空统一用 Transmittance LUT 段比值；raymarch 内
-//   exp(-τ) 仅作中间量，合成前会被 atmoOverrideViewTFromLut 覆盖）
-// opacity：1 - luma(viewT)，兼容旧调用点
-struct AtmoMarchResult { vec3 scattered; vec3 viewT; float opacity; };
-
-// 地形/壳外：散射可继续 raymarch，视线 T 必须用 Transmittance LUT（与天空分支一致）。
+// 射线段透射覆盖（raymarch 路径遗留；ToPoint 段散射已自带 viewT）。
 void atmoOverrideViewTFromLut(inout AtmoMarchResult march, vec3 camRelKm, vec3 rayDir,
                               float tNear, float tFar, float bottomRadius, float topRadius)
 {

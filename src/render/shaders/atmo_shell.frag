@@ -7,8 +7,7 @@
 //
 // 第一版统一合成（与 atmo_inside.frag 同公式）：
 //   L_out = L_scatter * E + L_scene * T
-// 曝光用 atmoUnifiedExposure() 与壳内连续；limbBoost 只做轻微掠射增强。
-// 几何仍是壳 mesh（像素覆盖优化），合成不再与壳内分叉。
+// 散射：GetSkyRadianceToPoint 段 Inscatter LUT；曝光用 atmoUnifiedExposure()。
 // ==========================================================================
 
 #define PRIMARY_STEPS 32
@@ -106,14 +105,9 @@ void main() {
 
     if (tFar <= tNear) discard;
 
-    float cosTheta = dot(rayDir, sunDir);
-    AtmoMarchResult march = raymarchAtmoSegment(
-        camPos, rayDir, planetCenter, tNear, tFar, PRIMARY_STEPS,
-        PC_RAYLEIGH, pc.mieCoeff, pc.hRayleigh, pc.hMie, pc.gMie,
-        PC_OZONE, pc.ozoneCenter, pc.ozoneWidth,
-        pc.surfaceRadius, pc.outerRadius, sunDir, cosTheta);
     vec3 camRel = camPos - planetCenter;
-    atmoOverrideViewTFromLut(march, camRel, rayDir, tNear, tFar,
+    AtmoMarchResult march = atmoSegmentInscatterMarch(
+        camRel, rayDir, tNear, tFar, sunDir,
         pc.surfaceRadius, pc.outerRadius);
 
     float camDist = length(camPos - planetCenter);

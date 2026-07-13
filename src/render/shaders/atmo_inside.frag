@@ -8,7 +8,7 @@
 // 第一版统一合成（与 atmo_shell.frag / 云 composite 同公式）：
 //   L_out = L_scatter * E + L_scene * T_rgb
 // 天空像素（depth=clear）：Sky-View LUT 散射 + skybox/光晕 * T_rgb。
-// 有场景深度：raymarch 散射 + Transmittance LUT 段透射（与天空 T 同源）。
+// 有场景深度：GetSkyRadianceToPoint 段 Inscatter LUT + Transmittance LUT 段透射。
 // ==========================================================================
 
 #define PI 3.14159265359
@@ -129,14 +129,7 @@ void main() {
             pc.surfaceRadius, pc.outerRadius);
         march.opacity = clamp(1.0 - dot(march.viewT, vec3(0.299, 0.587, 0.114)), 0.0, 1.0);
     } else {
-        float cosTheta = dot(rayDir, sunDir);
-        march = raymarchAtmoSegment(
-            camPos, rayDir, pc.planetCenter.xyz, tNear, tFar, PRIMARY_STEPS,
-            PC_RAYLEIGH, pc.mieCoeff, pc.hRayleigh, pc.hMie, pc.gMie,
-            PC_OZONE, pc.ozoneCenter, pc.ozoneWidth,
-            pc.surfaceRadius, pc.outerRadius, sunDir, cosTheta);
-        // 视线 T：不用 march 内 exp(-τ)，与天空同走 Transmittance LUT
-        atmoOverrideViewTFromLut(march, camRel, rayDir, tNear, tFar,
+        march = atmoSegmentInscatterMarch(camRel, rayDir, tNear, tFar, sunDir,
             pc.surfaceRadius, pc.outerRadius);
     }
 
