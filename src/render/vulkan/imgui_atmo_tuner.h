@@ -41,14 +41,14 @@ inline void AtmoTunerImGui(bool* p_open, AtmoTuneParams& p, VkAtmoLutCache& lutC
     ImGui::TextDisabled("scene×T：1=全 RGB LUT 透射；0=仅亮度（减轻地平线偏暖）。不重烤 LUT。");
 
     ImGui::Separator();
-    ImGui::Text("Inscatter LUT (Phase A debug)");
+    ImGui::Text("Inscatter LUT (Phase B debug)");
     bool dbgOn = p.inscatterDebugExposure > 0.0f;
     if (ImGui::Checkbox("DebugViz (sky sample)", &dbgOn))
         p.inscatterDebugExposure = dbgOn ? 10.0f : 0.0f;
     if (dbgOn)
         ImGui::SliderFloat("DebugExposure", &p.inscatterDebugExposure, 0.1f, 100.0f, "%.1f",
                            ImGuiSliderFlags_Logarithmic);
-    ImGui::TextDisabled("开启后壳内整屏显示 Inscatter 天空采样（ACES）；验证烤表/查表。");
+    ImGui::TextDisabled("Bruneton 非线性 UV；开启后壳内整屏显示 Inscatter 天空采样（ACES）。");
     ImGui::TextDisabled("表尺寸 256×128×32，随 Profile 重烤（bakeFull）。");
 
     if (ImGui::Button("Reset Profile Multipliers")) {

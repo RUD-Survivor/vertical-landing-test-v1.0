@@ -373,17 +373,19 @@ vec3 analyticSkyAmbient(float sunElevation) // sunElevation = dot(localUp, sunDi
 	return mix(mix(skyNight, skyDay, skyVis), skyDusk, twilightLocal * skyVis);
 }
 
-// ── Inscatter 4D LUT（Phase A：单次散射烘焙 + debug 采样）──────────────────────
-// Bruneton 参数 (r, mu, mu_s, nu) 打包进 3D：
+// ── Inscatter 4D LUT（Phase B：Bruneton 非线性映射）────────────────────────────
+// 参数 (r, mu, mu_s, nu) 打包进 3D（与 Bruneton SCATTERING 表同构）：
 //   width  = RES_MU_S * RES_NU
-//   height = RES_MU
+//   height = RES_MU   （上半：不击地；下半：击地）
 //   depth  = RES_R
-// 烘焙与采样必须共用同一套 UV；Phase B 再换完整 Bruneton 非线性映射亦可，
-// 但须同步改 bake/sample。
+// 映射对齐 GetScatteringTextureUvwzFromRMuMuSNu /
+// GetRMuMuSNuFromScatteringTextureUvwz（functions.glsl）。
 const int kInscatterResR    = 32;
 const int kInscatterResMu   = 128;
 const int kInscatterResMuS  = 32;
 const int kInscatterResNu   = 8;
+// Bruneton AtmosphereParameters::mu_s_min：太阳天顶角下限（略低于地平线）。
+const float kInscatterMuSMin = -0.2;
 
 float inscatterTexCoordFromUnit(float x, int size)
 {
@@ -395,47 +397,155 @@ float inscatterUnitFromTexCoord(float u, int size)
 	return (u - 0.5 / float(size)) / (1.0 - 1.0 / float(size));
 }
 
+float inscatterSafeSqrt(float a)
+{
+	return sqrt(max(a, 0.0));
+}//返回根号a，如果a小于0就返回0
+
+// DistanceToTopAtmosphereBoundary(r, mu) — Bruneton
+float inscatterDistanceToTop(float topRadius, float r, float mu)
+{
+	float discriminant = r * r * (mu * mu - 1.0) + topRadius * topRadius;
+	return max(0.0, -r * mu + inscatterSafeSqrt(discriminant));
+}
+
+bool inscatterRayIntersectsGround(in const AtmosphereParameters atmosphere, float r, float mu)
+{
+	return mu < 0.0 &&
+		(r * r * (mu * mu - 1.0) + atmosphere.bottomRadius * atmosphere.bottomRadius) >= 0.0;
+}
+
+// (r,mu,mu_s,nu) → 归一化 4D 坐标 (u_nu, u_mu_s, u_mu, u_r)
+// 对齐 Bruneton GetScatteringTextureUvwzFromRMuMuSNu。
+vec4 inscatterParamsToUvwz(in const AtmosphereParameters atmosphere,
+	float r, float mu, float mu_s, float nu, bool rayIntersectsGround)
+{
+	float H = sqrt(max(0.0,
+		atmosphere.topRadius * atmosphere.topRadius -
+		atmosphere.bottomRadius * atmosphere.bottomRadius));
+	float rho = inscatterSafeSqrt(r * r - atmosphere.bottomRadius * atmosphere.bottomRadius);
+	float u_r = inscatterTexCoordFromUnit(clamp(rho / max(H, 1e-6), 0.0, 1.0), kInscatterResR);
+
+	float r_mu = r * mu;
+	float discriminant = r_mu * r_mu - r * r + atmosphere.bottomRadius * atmosphere.bottomRadius;
+	float u_mu;
+	if (rayIntersectsGround)
+	{
+		float d = -r_mu - inscatterSafeSqrt(discriminant);
+		float d_min = r - atmosphere.bottomRadius;
+		float d_max = rho;
+		float x = (d_max == d_min) ? 0.0 : clamp((d - d_min) / max(d_max - d_min, 1e-6), 0.0, 1.0);
+		u_mu = 0.5 - 0.5 * inscatterTexCoordFromUnit(x, kInscatterResMu / 2);
+	}
+	else
+	{
+		float d = -r_mu + inscatterSafeSqrt(discriminant + H * H);
+		float d_min = atmosphere.topRadius - r;
+		float d_max = rho + H;
+		float x = clamp((d - d_min) / max(d_max - d_min, 1e-6), 0.0, 1.0);
+		u_mu = 0.5 + 0.5 * inscatterTexCoordFromUnit(x, kInscatterResMu / 2);
+	}
+
+	// mu_s：到大气顶距离参数化，地平线附近加密
+	float d = inscatterDistanceToTop(atmosphere.topRadius, atmosphere.bottomRadius, mu_s);
+	float d_min = atmosphere.topRadius - atmosphere.bottomRadius;
+	float d_max = H;
+	float a = (d - d_min) / max(d_max - d_min, 1e-6);
+	float D = inscatterDistanceToTop(atmosphere.topRadius, atmosphere.bottomRadius, kInscatterMuSMin);
+	float A = (D - d_min) / max(d_max - d_min, 1e-6);
+	float u_mu_s = inscatterTexCoordFromUnit(
+		clamp(max(1.0 - a / max(A, 1e-6), 0.0) / (1.0 + a), 0.0, 1.0),
+		kInscatterResMuS);
+
+	float u_nu = clamp(nu * 0.5 + 0.5, 0.0, 1.0);
+	return vec4(u_nu, u_mu_s, u_mu, u_r);
+}
+
+// 归一化 4D 坐标 → (r,mu,mu_s,nu)；对齐 GetRMuMuSNuFromScatteringTextureUvwz。
+void inscatterUvwzToParams(in const AtmosphereParameters atmosphere,
+	vec4 uvwz,
+	out float r, out float mu, out float mu_s, out float nu,
+	out bool rayIntersectsGround)
+{
+	float H = sqrt(max(0.0,
+		atmosphere.topRadius * atmosphere.topRadius -
+		atmosphere.bottomRadius * atmosphere.bottomRadius));
+	float rho = H * inscatterUnitFromTexCoord(uvwz.w, kInscatterResR);
+	r = sqrt(rho * rho + atmosphere.bottomRadius * atmosphere.bottomRadius);
+
+	if (uvwz.z < 0.5)
+	{
+		float d_min = r - atmosphere.bottomRadius;
+		float d_max = rho;
+		float d = d_min + (d_max - d_min) * inscatterUnitFromTexCoord(
+			1.0 - 2.0 * uvwz.z, kInscatterResMu / 2);
+		mu = (d == 0.0) ? -1.0 :
+			clamp(-(rho * rho + d * d) / (2.0 * r * d), -1.0, 1.0);
+		rayIntersectsGround = true;
+	}
+	else
+	{
+		float d_min = atmosphere.topRadius - r;
+		float d_max = rho + H;
+		float d = d_min + (d_max - d_min) * inscatterUnitFromTexCoord(
+			2.0 * uvwz.z - 1.0, kInscatterResMu / 2);
+		mu = (d == 0.0) ? 1.0 :
+			clamp((H * H - rho * rho - d * d) / (2.0 * r * d), -1.0, 1.0);
+		rayIntersectsGround = false;
+	}
+
+	float x_mu_s = inscatterUnitFromTexCoord(uvwz.y, kInscatterResMuS);
+	float d_min = atmosphere.topRadius - atmosphere.bottomRadius;
+	float d_max = H;
+	float D = inscatterDistanceToTop(atmosphere.topRadius, atmosphere.bottomRadius, kInscatterMuSMin);
+	float A = (D - d_min) / max(d_max - d_min, 1e-6);
+	float a = (A - x_mu_s * A) / (1.0 + x_mu_s * A);
+	float d = d_min + min(a, A) * (d_max - d_min);
+	mu_s = (d == 0.0) ? 1.0 :
+		clamp((H * H - d * d) / (2.0 * atmosphere.bottomRadius * d), -1.0, 1.0);
+
+	nu = clamp(uvwz.x * 2.0 - 1.0, -1.0, 1.0);
+}
+
 // 从 texel 索引解码 (r, mu, mu_s, nu)。r 为地心距 km。
+// 对齐 Bruneton GetRMuMuSNuFromScatteringTextureFragCoord（半 texel 中心）。
 void inscatterTexelToParams(in const AtmosphereParameters atmosphere,
 	ivec3 texel, ivec3 lutSize,
-	out float r, out float mu, out float mu_s, out float nu)
+	out float r, out float mu, out float mu_s, out float nu,
+	out bool rayIntersectsGround)
 {
-	int nuI  = texel.x / kInscatterResMuS;
-	int muSI = texel.x - nuI * kInscatterResMuS;
-	float u_nu   = (kInscatterResNu  <= 1) ? 0.0 : float(nuI)  / float(kInscatterResNu  - 1);
-	float u_mu_s = inscatterUnitFromTexCoord((float(muSI) + 0.5) / float(kInscatterResMuS), kInscatterResMuS);
-	float u_mu   = inscatterUnitFromTexCoord((float(texel.y) + 0.5) / float(lutSize.y), kInscatterResMu);
-	float u_r    = inscatterUnitFromTexCoord((float(texel.z) + 0.5) / float(lutSize.z), kInscatterResR);
+	float fx = float(texel.x) + 0.5;
+	float fy = float(texel.y) + 0.5;
+	float fz = float(texel.z) + 0.5;
+	float frag_nu   = floor(fx / float(kInscatterResMuS));
+	float frag_mu_s = mod(fx, float(kInscatterResMuS));
+	vec4 uvwz = vec4(frag_nu, frag_mu_s, fy, fz) /
+		vec4(float(max(kInscatterResNu - 1, 1)), float(kInscatterResMuS),
+			float(kInscatterResMu), float(kInscatterResR));
 
-	// Phase A：线性高度 + 线性角度（足够验证烘焙/采样通路）
-	r    = mix(atmosphere.bottomRadius, atmosphere.topRadius, clamp(u_r, 0.0, 1.0));
-	mu   = clamp(u_mu * 2.0 - 1.0, -1.0, 1.0);
-	mu_s = clamp(u_mu_s * 1.2 - 0.2, -0.2, 1.0); // 略允许地平线下
-	nu   = clamp(u_nu * 2.0 - 1.0, -1.0, 1.0);
-	// 物理约束：|nu| 不能超过与 mu/mu_s 相容的范围（采样时再 clamp）
+	inscatterUvwzToParams(atmosphere, uvwz, r, mu, mu_s, nu, rayIntersectsGround);
+
+	// nu 与 (mu, mu_s) 几何相容
 	float muBound = mu * mu_s + sqrt(max(0.0, (1.0 - mu * mu) * (1.0 - mu_s * mu_s)));
 	nu = clamp(nu, -muBound, muBound);
 }
 
-void inscatterParamsToUvw(in const AtmosphereParameters atmosphere,
-	float r, float mu, float mu_s, float nu, out vec3 uvw)
+// 4D 归一化坐标打包为 3D 采样 UV（nu 维双线性）；对齐 Bruneton GetScattering。
+void inscatterUvwzToPackedUvw(vec4 uvwz, out vec3 uvw0, out vec3 uvw1, out float nuLerp)
 {
-	float u_r    = clamp((r - atmosphere.bottomRadius) /
-		max(atmosphere.topRadius - atmosphere.bottomRadius, 1e-3), 0.0, 1.0);
-	float u_mu   = clamp(mu * 0.5 + 0.5, 0.0, 1.0);
-	float u_mu_s = clamp((mu_s + 0.2) / 1.2, 0.0, 1.0);
-	float u_nu   = clamp(nu * 0.5 + 0.5, 0.0, 1.0);
+	float tex_coord_x = uvwz.x * float(kInscatterResNu - 1);
+	float tex_x = floor(tex_coord_x);
+	nuLerp = tex_coord_x - tex_x;
+	uvw0 = vec3((tex_x + uvwz.y) / float(kInscatterResNu), uvwz.z, uvwz.w);
+	uvw1 = vec3((tex_x + 1.0 + uvwz.y) / float(kInscatterResNu), uvwz.z, uvwz.w);
+}
 
-	float nuCoord = u_nu * float(kInscatterResNu - 1);
-	float nuI     = floor(nuCoord);
-	float nuF     = nuCoord - nuI;
-	// X：相邻 nu 层之间按 mu_s 插值（与 texel 解码互逆）
-	float x0 = (nuI + inscatterTexCoordFromUnit(u_mu_s, kInscatterResMuS)) / float(kInscatterResNu);
-	float x1 = (min(nuI + 1.0, float(kInscatterResNu - 1)) +
-		inscatterTexCoordFromUnit(u_mu_s, kInscatterResMuS)) / float(kInscatterResNu);
-	uvw.x = mix(x0, x1, nuF);
-	uvw.y = inscatterTexCoordFromUnit(u_mu, kInscatterResMu);
-	uvw.z = inscatterTexCoordFromUnit(u_r, kInscatterResR);
+void inscatterParamsToUvw(in const AtmosphereParameters atmosphere,
+	float r, float mu, float mu_s, float nu, bool rayIntersectsGround,
+	out vec3 uvw0, out vec3 uvw1, out float nuLerp)
+{
+	vec4 uvwz = inscatterParamsToUvwz(atmosphere, r, mu, mu_s, nu, rayIntersectsGround);
+	inscatterUvwzToPackedUvw(uvwz, uvw0, uvw1, nuLerp);
 }
 
 // 由 (mu, mu_s, nu) 构造视线/太阳方向（zenith=+Y）。sunDir 指向太阳。
@@ -458,13 +568,16 @@ vec3 sampleInscatterLut(texture3D lut, sampler s,
 {
 	r = clamp(r, atmosphere.bottomRadius, atmosphere.topRadius);
 	mu = clamp(mu, -1.0, 1.0);
-	mu_s = clamp(mu_s, -0.2, 1.0);
+	mu_s = clamp(mu_s, kInscatterMuSMin, 1.0);
 	float muBound = mu * mu_s + sqrt(max(0.0, (1.0 - mu * mu) * (1.0 - mu_s * mu_s)));
 	nu = clamp(nu, -muBound, muBound);
 
-	vec3 uvw;
-	inscatterParamsToUvw(atmosphere, r, mu, mu_s, nu, uvw);
-	return texture(sampler3D(lut, s), uvw).rgb;
+	bool hitGround = inscatterRayIntersectsGround(atmosphere, r, mu);
+	vec3 uvw0, uvw1;
+	float nuLerp;
+	inscatterParamsToUvw(atmosphere, r, mu, mu_s, nu, hitGround, uvw0, uvw1, nuLerp);
+	return texture(sampler3D(lut, s), uvw0).rgb * (1.0 - nuLerp) +
+		texture(sampler3D(lut, s), uvw1).rgb * nuLerp;
 }
 
 #endif

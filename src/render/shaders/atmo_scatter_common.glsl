@@ -116,7 +116,7 @@ vec3 atmoSampleSkyViewLut(vec3 camRelPlanetKm, vec3 rayDir, vec3 sunDirToPlanet,
     return texture(sampler2D(inSkyViewLut, samp), sampleUv).rgb;
 }
 
-// Phase A：查 Inscatter LUT 的天空散射（观察点=相机相对行星中心）。
+// Phase B：查 Inscatter LUT 的天空散射（Bruneton 非线性 UV；观察点=相机相对行星中心）。
 // sunDirToPlanet = 指向太阳；与 PC_SUNDIR / fillAtmoLutFrameData 约定一致。
 vec3 atmoSampleInscatterSky(vec3 camRelPlanetKm, vec3 rayDir, vec3 sunDirToPlanet,
                              float bottomRadius, float topRadius)
@@ -133,7 +133,7 @@ vec3 atmoSampleInscatterSky(vec3 camRelPlanetKm, vec3 rayDir, vec3 sunDirToPlane
 
     vec3 up = observer / r;
     float mu   = clamp(dot(rayDir, up), -1.0, 1.0);
-    float mu_s = clamp(dot(sunDirToPlanet, up), -0.2, 1.0);
+    float mu_s = clamp(dot(sunDirToPlanet, up), kInscatterMuSMin, 1.0);
     float nu   = clamp(dot(rayDir, sunDirToPlanet), -1.0, 1.0);
     return sampleInscatterLut(inInscatterLut, samp, atmo, r, mu, mu_s, nu);
 }

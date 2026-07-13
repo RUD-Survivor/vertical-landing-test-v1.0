@@ -2,11 +2,12 @@
 #extension GL_GOOGLE_include_directive : enable
 
 // ==========================================================================
-// inscatter_lut.glsl — Phase A：Inscatter 4D（打包 3D）单次散射烘焙。
+// inscatter_lut.glsl — Phase B：Inscatter 4D（打包 3D）单次散射烘焙。
 //
-// 每个 texel 对应 Bruneton 参数 (r, mu, mu_s, nu)，用已有
+// 每个 texel 对应 Bruneton 非线性参数 (r, mu, mu_s, nu)，用已有
 // integrateScatteredLuminance 沿该视线积分（依赖 Transmittance LUT）。
-// 多次散射阶迭代留到 Phase D；本 pass 只验证「能烤 / 能采」。
+// UV 映射见 shared_atmosphere.glsl::inscatterTexelToParams（击地半表 / 不击地半表）。
+// 多次散射阶迭代留到 Phase D。
 //
 // 生成顺序：transmittance → **inscatter** → multiScatter → skyView → ...
 // ==========================================================================
@@ -25,7 +26,8 @@ void main()
     AtmosphereParameters atmosphere = getAtmosphereParameters();
 
     float r, mu, mu_s, nu;
-    inscatterTexelToParams(atmosphere, workPos, lutSize, r, mu, mu_s, nu);
+    bool rayIntersectsGround;
+    inscatterTexelToParams(atmosphere, workPos, lutSize, r, mu, mu_s, nu, rayIntersectsGround);
 
     vec3 viewDir, sunDir;
     inscatterDirsFromParams(mu, mu_s, nu, viewDir, sunDir);
@@ -34,7 +36,7 @@ void main()
     vec3 worldPos = vec3(0.0, r, 0.0);
     vec2 pixPos = vec2(workPos.xy) + vec2(0.5);
 
-    // 略随高度增加步数；Phase A 用固定积分足够看出天空形状
+    // 略随高度增加步数；击地射线积分到地面，不击地积到大气顶
     float sampleCount = mix(16.0, 48.0, clamp(workPos.z / float(max(lutSize.z - 1, 1)), 0.0, 1.0));
 
     SingleScatteringResult ss = integrateScatteredLuminance(
@@ -43,7 +45,7 @@ void main()
         viewDir,
         sunDir,
         atmosphere,
-        /*bGround*/ false,
+        /*bGround*/ rayIntersectsGround,
         sampleCount,
         /*depthBufferValue*/ -1.0,
         /*bMieRayPhase*/ true,
