@@ -50,6 +50,7 @@ inline void invertMat4(const float in[16], float out[16]) {
 // Flower 云管线（cloud_common.glsl 系）的可调参数，供 imgui_cloud_tuner.h 的
 // FlowerCloudTunerImGui() 实时调节。默认值对应 fillCloudFrameData() 里原先写死的常量。
 struct FlowerCloudTuneParams {
+    bool flowerCloudEnabled = true;
     float coverage = 0.45f;
     float density   = 1.00f;
     float basicNoiseScale  = 0.003f;
@@ -251,6 +252,7 @@ struct VkCloudSystem {
     void renderPhase0(VulkanContext& ctx, VkCommandBuffer cmd, VkTAA& taa,
                       const SceneSnapshot& snap, int frameSlot, bool drawClouds) {
         if (!enabled) return;
+        if (!tuneParams.flowerCloudEnabled) return;
         if (!drawClouds) {
             if (skipLogOnce) {
                 fprintf(stderr, "[VkCloudSystem] Phase1 skip: drawClouds=false (need Earth atmoIdx=3 + showClouds)\n");

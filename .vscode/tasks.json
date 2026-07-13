@@ -2,11 +2,11 @@
     "tasks": [
         {
             "type": "shell",
-            "label": "Build RocketSim3D (MSVC)",
+            "label": "Build RocketSim3D Debug",
             "command": "cmd.exe",
             "args": [
                 "/C",
-                "build.cmd"
+                "build_debug.cmd"
             ],
             "options": {
                 "cwd": "${workspaceFolder}"
@@ -18,6 +18,22 @@
                 "kind": "build",
                 "isDefault": true
             }
+        },
+        {
+            "type": "shell",
+            "label": "Build RocketSim3D Release",
+            "command": "cmd.exe",
+            "args": [
+                "/C",
+                "build_release.cmd"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [
+                "$msCompile"
+            ],
+            "group": "build"
         }
     ],
     "version": "2.0.0"

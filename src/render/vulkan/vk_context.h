@@ -80,6 +80,7 @@ struct VulkanContext {
     VkSwapchainKHR           swapchain = VK_NULL_HANDLE;
     VkFormat                 swapFormat{};
     VkExtent2D               swapExtent{};
+    VkPresentModeKHR         swapPresentMode = VK_PRESENT_MODE_FIFO_KHR;
     std::vector<VkImage>     swapImages;
     std::vector<VkImageView> swapImageViews;
 
@@ -431,6 +432,7 @@ private:
         VkPresentModeKHR pm = VK_PRESENT_MODE_FIFO_KHR;
         for (auto& p : sc.presentModes)
             if (p == VK_PRESENT_MODE_MAILBOX_KHR) { pm = p; break; }
+        swapPresentMode = pm;
 
         // 计算 extent
         if (sc.caps.currentExtent.width != UINT32_MAX) {

@@ -78,6 +78,8 @@ inline void FlowerCloudTunerImGui(bool* p_open, FlowerCloudTuneParams& p) {
     }
 
     ImGui::Text("管线");
+    ImGui::Checkbox("flower体积云启用总开关", &p.flowerCloudEnabled);
+    ImGui::TextDisabled("如果关闭，则不会渲染任何云");
     ImGui::Checkbox("1/4 分辨率 + Bayer", &p.useQuarterRes);
     ImGui::TextDisabled("关=全分辨率 raymarch（×16 成本，减盐胡椒）");
     ImGui::SliderInt("MarchSteps (baseline)", &p.marchingStepNum, 8, 2048);

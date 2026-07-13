@@ -49,6 +49,7 @@ using namespace std;
 #include "render/vulkan/systems/vk_game_ui.h"
 #include "render/vulkan/imgui_cloud_tuner.h"
 #include "render/vulkan/imgui_atmo_tuner.h"
+#include "render/vulkan/imgui_perf_overlay.h"
 #include "render/scene_snapshot.h"
 
 // ==========================================
@@ -80,6 +81,7 @@ static FrameSync           g_frameSync;
 static VkDescriptorManager g_vkDesc;
 static VkTAA               g_vkTAA;
 static VkRenderer3D        g_vkR3D;
+static bool                g_perfOverlayOpen = false;  // F1 toggles
 static bool                g_vkCloudTunerOpen = false;  // F2 toggles
 static bool                g_flowerCloudTunerOpen = false;  // F3 toggles
 static bool                g_atmoTunerOpen = false;  // F4 toggles
@@ -319,6 +321,17 @@ static void renderVulkanFrame(GLFWwindow* window) {
     // Pass 3: ImGui UI / HUD（覆盖在 TAA 结果之上）
     g_vkImGui.newFrame();
     g_gameUI.draw(inFlight ? g_flightScene : nullptr, ww, wh);
+    {
+        const char* presentName = "FIFO";
+        switch (g_vkCtx.swapPresentMode) {
+            case VK_PRESENT_MODE_IMMEDIATE_KHR:    presentName = "IMMEDIATE"; break;
+            case VK_PRESENT_MODE_MAILBOX_KHR:      presentName = "MAILBOX"; break;
+            case VK_PRESENT_MODE_FIFO_KHR:         presentName = "FIFO"; break;
+            case VK_PRESENT_MODE_FIFO_RELAXED_KHR: presentName = "FIFO_RELAXED"; break;
+            default: break;
+        }
+        PerfOverlayImGui(&g_perfOverlayOpen, ww, wh, presentName);
+    }
     CloudTunerImGui(&g_vkCloudTunerOpen, g_vkR3D.scene.cloudTune);
     FlowerCloudTunerImGui(&g_flowerCloudTunerOpen, g_vkR3D.cloudSystem.tuneParams);
     AtmoTunerImGui(&g_atmoTunerOpen, g_vkR3D.atmoTune, g_vkR3D.scene.atmoLutCache);

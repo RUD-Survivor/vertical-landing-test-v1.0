@@ -99,9 +99,25 @@ echo.
 :: ================================================================
 echo [3/3] Compiling C++ source...
 
-set "OUTPUT_DIR=build"
-set "OUTPUT_EXE=%OUTPUT_DIR%\vertical-landing-test.exe"
+:: --- Config: debug (this script) | release via build_release.cmd ---
+set "CFG=debug"
+if /I "%~1"=="release" set "CFG=release"
+if /I "%~1"=="debug" set "CFG=debug"
+
+if /I "%CFG%"=="release" (
+    set "CFLAGS=/nologo /utf-8 /std:c++17 /EHsc /MD /O2 /W3 /DNDEBUG"
+) else (
+    :: Use /MD (same as glfw3.lib). Do not use /MDd or /D_DEBUG.
+    set "CFLAGS=/nologo /utf-8 /std:c++17 /EHsc /MD /Od /Zi /FS /W3"
+)
+
+:: Separate obj/exe trees so debug/release never share stale objects
+set "OUTPUT_DIR=build\%CFG%"
+set "OBJ_DIR=build\obj\%CFG%"
+set "OUTPUT_EXE=%OUTPUT_DIR%\Stella_Ascend.exe"
 set "BUILD_LOG=%OUTPUT_DIR%\build_%TIMESTAMP%.log"
+if not exist "%OUTPUT_DIR%" mkdir "%OUTPUT_DIR%"
+if not exist "%OBJ_DIR%" mkdir "%OBJ_DIR%"
 
 :: --- Source files ---
 set "SRC=src\main.cpp"
@@ -130,24 +146,58 @@ set "SRC=%SRC% vendor\imgui\imgui_tables.cpp"
 set "SRC=%SRC% vendor\imgui\backends\imgui_impl_glfw.cpp"
 set "SRC=%SRC% vendor\imgui\backends\imgui_impl_vulkan.cpp"
 
-:: --- Compiler flags ---
-set "CFLAGS=/nologo /utf-8 /std:c++17 /EHsc /MD /O2 /W3"
+:: --- Includes ---
 set "INCLUDES=/I dependencires\include /I vendor /I vendor\imgui /I vendor\imgui\backends /I src"
-set "OBJ_OUT=/Fo"%OUTPUT_DIR%\\""
 
 :: --- Libraries ---
 set "LIBS=dependencires\lib\glfw3.lib opengl32.lib user32.lib gdi32.lib shell32.lib"
 
+echo   Config:   %CFG%
 echo   Compiler:  cl
 echo   Flags:     %CFLAGS% %VK_FLAG%
 echo   .exe:      %OUTPUT_EXE%
-echo   .obj dir:  %OUTPUT_DIR%\
+echo   .obj dir:  %OBJ_DIR%\
 echo   Log:       %BUILD_LOG%
 echo.
 
-cl %CFLAGS% %VK_FLAG% %INCLUDES% %VK_INC% %OBJ_OUT% %SRC% /link /OUT:"%OUTPUT_EXE%" %LIBS% %VK_LINK% > "%BUILD_LOG%" 2>&1
-set BUILD_RESULT=%ERRORLEVEL%
+:: æ‰¾å‡ºè¿‡æœŸ .cppï¼ˆæ—  .objï¼Œæˆ– .cpp æ¯” .obj æ–°ï¼‰
+:: PowerShell æ•°ç»„å…ƒç´ ä¹‹é—´å¿…é¡»ç”¨é€—å·ï¼š@('a','b') è€Œä¸æ˜¯ @('a' 'b')
+set "STALE="
+for %%F in (%SRC%) do (
+    set "OBJ_PATH=%OBJ_DIR%\%%~nF.obj"
+    if not exist "!OBJ_PATH!" (
+        set "STALE=!STALE! %%F"
+    ) else (
+        powershell -NoProfile -Command "if ((Get-Item -LiteralPath '%%F').LastWriteTime -gt (Get-Item -LiteralPath '!OBJ_PATH!').LastWriteTime) { exit 0 } else { exit 1 }" >nul 2>&1
+        if !ERRORLEVEL! equ 0 set "STALE=!STALE! %%F"
+    )
+)
+echo. > "%BUILD_LOG%"
+set "BUILD_RESULT=0"
+if not "!STALE!"=="" (
+    echo   Compiling stale units:!STALE!
+    cl %CFLAGS% /c /MP %VK_FLAG% %INCLUDES% %VK_INC% /Fo"%OBJ_DIR%\\" /Fd"%OBJ_DIR%\vc.pdb" !STALE! >> "%BUILD_LOG%" 2>&1
+    set BUILD_RESULT=!ERRORLEVEL!
+) else (
+    echo   All .obj up to date, skip compile.
+)
 
+:: æŒ‰ SRC é¡ºåºæ‹¼å‡ºå…¨éƒ¨ .objï¼›ç¼ºä»»ä½•ä¸€ä¸ªå°±ä¸è¦ link
+set "OBJS="
+set "MISSING_OBJ="
+for %%F in (%SRC%) do (
+    set "OBJS=!OBJS! "%OBJ_DIR%\%%~nF.obj""
+    if not exist "%OBJ_DIR%\%%~nF.obj" set "MISSING_OBJ=1"
+)
+if defined MISSING_OBJ (
+    echo   [ERROR] Missing .obj files - compile did not produce all units. See log.
+    if !BUILD_RESULT! equ 0 set BUILD_RESULT=1
+)
+if !BUILD_RESULT! equ 0 (
+    echo   Linking...
+    link /nologo /OUT:"%OUTPUT_EXE%" !OBJS! %LIBS% %VK_LINK% >> "%BUILD_LOG%" 2>&1
+    set BUILD_RESULT=!ERRORLEVEL!
+)
 :: ================================================================
 :: Generate build report
 :: ================================================================
@@ -180,7 +230,7 @@ set "REPORT=%OUTPUT_DIR%\build_report.txt"
     echo.
     echo --- Output ---
     echo   .exe: %OUTPUT_EXE%
-    echo   .obj: %OUTPUT_DIR%\
+    echo   .obj: %OBJ_DIR%\
     echo.
     echo ================================================================
     if %BUILD_RESULT% equ 0 (
@@ -207,14 +257,15 @@ if %BUILD_RESULT% equ 0 (
     echo   Run: %OUTPUT_EXE%
     echo ================================================================
     :: Copy exe to root for convenience
-    copy /Y "%OUTPUT_EXE%" "vertical-landing-test.exe" > nul
-    echo   ^(also copied to root: vertical-landing-test.exe^)
+    copy /Y "%OUTPUT_EXE%" "Stella_Ascend.exe" > nul
+    echo   ^(also copied to root: Stella_Ascend.exe^)
 ) else (
     echo ================================================================
     echo   BUILD FAILED!
     echo   Full log: %BUILD_LOG%
     echo   Report:   %REPORT%
     echo ================================================================
+    :: åŒå‡»è¿è¡Œè‹¥ä¸€é—ªè€Œè¿‡ï¼Œè¯·ç”¨:  cmd /k build.cmd
     exit /b %BUILD_RESULT%
 )
 
