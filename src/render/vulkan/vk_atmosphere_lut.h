@@ -593,8 +593,9 @@ struct VkAtmosphereLut {
         vkCmdPipelineBarrier2(cmd, &hdep);
     }
 
-    // 全量重烤：Transmittance→Inscatter→MultiScatter→SkyView→SkyIrradiance。
-    // Inscatter 依赖 Transmittance；只应在 profile 指纹变化时调用。
+    // 全量重烤：Transmittance→MultiScatter→Inscatter→SkyView→SkyIrradiance。
+    // Inscatter 依赖 Transmittance + MultiScatter（烘焙时折入多重散射）；
+    // 只应在 profile 指纹变化时调用。
     void bakeFull(VulkanContext& ctx, VkCommandBuffer cmd, int frameSlot,
                   const VkAtmoLutPipelines& pipes, const GpuPerFrameData& fd) {
         int slot = frameSlot % FRAMES_IN_FLIGHT;
@@ -607,12 +608,12 @@ struct VkAtmosphereLut {
         vkCmdDispatch(cmd, (kTransW+7)/8, (kTransH+7)/8, 1);
         _atmoLutComputeBarrier(cmd);
 
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipes.inscatterPipe);
-        vkCmdDispatch(cmd, (kInscatterW+7)/8, (kInscatterH+7)/8, kInscatterD);
-        _atmoLutComputeBarrier(cmd);
-
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipes.multiScatterPipe);
         vkCmdDispatch(cmd, kMultiScatterSize, kMultiScatterSize, 1); // local_size_z = 64 覆盖采样循环
+        _atmoLutComputeBarrier(cmd);
+
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipes.inscatterPipe);
+        vkCmdDispatch(cmd, (kInscatterW+7)/8, (kInscatterH+7)/8, kInscatterD);
         _atmoLutComputeBarrier(cmd);
 
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipes.skyViewPipe);

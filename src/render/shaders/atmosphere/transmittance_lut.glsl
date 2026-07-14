@@ -6,8 +6,8 @@
 // 行星刷新），解决飞船从地表起飞到深空时行星尺度突变的问题——不能像 flower
 // 原版那样只在加载时静态烘焙一次。
 //
-// 生成顺序（必须先于 multi_scatter_lut / skyview_lut / sky_irradiance_capture）：
-//   transmittance_lut → multi_scatter_lut → skyview_lut → sky_irradiance_capture
+// 生成顺序（必须先于 multi_scatter_lut / inscatter_lut / skyview_lut / sky_irradiance_capture）：
+//   transmittance_lut → multi_scatter_lut → inscatter_lut → skyview_lut → ...
 #define NO_MULTISCATAPPROX_ENABLED
 #include "atmosphere_common.glsl"
 

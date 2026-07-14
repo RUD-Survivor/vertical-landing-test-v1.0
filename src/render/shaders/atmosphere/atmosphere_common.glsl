@@ -158,9 +158,12 @@ struct SingleScatteringResult
     vec3 newMultiScatStep0Out;
     vec3 newMultiScatStep1Out;
 
-    // Bruneton reduced single scattering（无相位、无多重、无地面反射）
+    // Bruneton reduced scattering（无相位、无地面反射）
+    // rayleighLight：单次 Rayleigh；multiLight：Hillaire 多重路径积分（各向同性）
+    // 写入 Inscatter LUT 时 RGB = rayleigh + multi / RayleighPhase(ν)
     vec3 rayleighLight;
     vec3 mieLight;
+    vec3 multiLight;
 };
 
 SingleScatteringResult buildSingleScatteringResultDefault()
@@ -174,6 +177,7 @@ SingleScatteringResult buildSingleScatteringResultDefault()
     result.newMultiScatStep1Out = vec3(0.0);
     result.rayleighLight = vec3(0.0);
     result.mieLight      = vec3(0.0);
+    result.multiLight    = vec3(0.0);
     return result;
 }
 
@@ -279,6 +283,7 @@ SingleScatteringResult integrateScatteredLuminance(
     vec3 L = vec3(0.0);
     vec3 L_ray = vec3(0.0);
     vec3 L_mie = vec3(0.0);
+    vec3 L_multi = vec3(0.0);
     vec3 throughput = vec3(1.0);
     vec3 opticalDepth = vec3(0.0);
     float t = 0.0f;
@@ -331,13 +336,23 @@ SingleScatteringResult integrateScatteredLuminance(
             vec3 sunTerm = globalL * earthShadow * shadow * transmittanceToSun;
             vec3 S_ray = sunTerm * medium.scatteringRay;
             vec3 S_mie = sunTerm * medium.scatteringMie;
+            // Hillaire MultiScatter LUT：路径积分后按 Bruneton 方式并入 RGB
+            // （存 multi/RayleighPhase，运行时 ×phase 还原）。与 SkyView 同标度。
+            vec3 S_multi = vec3(0.0);
+#ifndef NO_MULTISCATAPPROX_ENABLED
+            vec3 multiScatteredLuminance = getMultipleScattering(
+                atmosphere, medium.scattering, medium.extinction, P, sunZenithCosAngle);
+            S_multi = globalL * multiScatteredLuminance * medium.scattering;
+#endif
             // ext→0 时 (S-S*T)/ext → S*dt，避免 NaN 写进 LUT
             vec3 safeExt = max(medium.extinction, vec3(1e-8));
             vec3 sint_ray = (S_ray - S_ray * sampleTransmittance) / safeExt;
             vec3 sint_mie = (S_mie - S_mie * sampleTransmittance) / safeExt;
+            vec3 sint_multi = (S_multi - S_multi * sampleTransmittance) / safeExt;
             L_ray += throughput * sint_ray;
             L_mie += throughput * sint_mie;
-            S = S_ray + S_mie;
+            L_multi += throughput * sint_multi;
+            S = S_ray + S_mie + S_multi;
         }
         else
         {
@@ -395,6 +410,7 @@ SingleScatteringResult integrateScatteredLuminance(
     result.scatteredLight = L;
     result.rayleighLight  = L_ray;
     result.mieLight       = L_mie;
+    result.multiLight     = L_multi;
     result.opticalDepth  = opticalDepth;
     result.transmittance = throughput;
     return result;

@@ -2,16 +2,16 @@
 #extension GL_GOOGLE_include_directive : enable
 
 // ==========================================================================
-// inscatter_lut.glsl — Phase C：Bruneton reduced single scattering 烘焙。
+// inscatter_lut.glsl — Bruneton reduced scattering 烘焙（单次 + 多重）。
 //
-// 每个 texel 存无相位 Rayleigh（RGB）+ Mie 亮度（A）；多重散射与相位在
-// 运行时由 atmo_scatter_common.glsl 处理（对齐 GetCombinedScattering）。
+// 每个 texel：RGB = Rayleigh_reduced + Multi / RayleighPhase(ν)
+//           A   = Mie 亮度（无相位）
+// 运行时 atmoApplyBrunetonPhases：RGB×phaseR + Mie×phaseM，与
+// Bruneton COMBINED_SCATTERING_TEXTURES 同构（多重已折进 RGB）。
 // UV 映射见 shared_atmosphere.glsl::inscatterTexelToParams。
 //
-// 生成顺序：transmittance → **inscatter** → multiScatter → skyView → ...
+// 生成顺序：transmittance → multiScatter → **inscatter** → skyView → ...
 // ==========================================================================
-
-#define NO_MULTISCATAPPROX_ENABLED
 
 #include "atmosphere_common.glsl"
 
@@ -57,7 +57,9 @@ void main()
         /*bVariableSampleCount*/ false,
         /*bBrunetonReducedBake*/ true);
 
-    vec3 rayleigh = min(ss.rayleighLight, vec3(kMaxHalfFloat));
+    // Bruneton：多重进 RGB 时除以 Rayleigh 相位，运行时再乘回。
+    float phaseR = max(rayleighPhase(nu), 1e-4);
+    vec3 rayleigh = min(ss.rayleighLight + ss.multiLight / phaseR, vec3(kMaxHalfFloat));
     float mieLuma = min(dot(ss.mieLight, vec3(0.299, 0.587, 0.114)), kMaxHalfFloat);
     imageStore(imageInscatterLut, workPos, vec4(rayleigh, mieLuma));
 }

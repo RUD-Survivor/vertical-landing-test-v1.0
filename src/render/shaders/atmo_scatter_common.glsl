@@ -4,7 +4,8 @@
 
 // ==========================================================================
 // atmo_scatter_common.glsl — 大气重构·壳内(atmo_inside.frag)/壳外(atmo_shell.frag)
-// 共用 GetSkyRadianceToPoint 段散射（Bruneton reduced LUT + 运行时相位）。
+// 共用 GetSkyRadianceToPoint 段散射（Bruneton reduced LUT：单次+多重已折入 RGB，
+// 运行时乘相位）。
 //
 // 壳外曾直接查 Sky-View LUT 导致参数越界（观察者高度须 < topRadius），
 // 现改为段散射 LUT，对壳内/壳外任意相机位置成立。
@@ -20,7 +21,7 @@ layout(set = 1, binding = 1) uniform texture2D inTransmittanceLut;
 layout(set = 1, binding = 2) uniform texture2D inSkyViewLut; // 壳内天空像素采样；须与 skyview_lut 烘焙同基
 layout(set = 1, binding = 3) uniform sampler   samp;
 layout(set = 1, binding = 4) uniform texture2D inSceneColor; // 几何 pass HDR，与 atmo 同帧同图（GENERAL 布局读写）
-layout(set = 1, binding = 5) uniform texture3D inInscatterLut; // Phase C：RGB=Rayleigh reduced, A=Mie luma
+layout(set = 1, binding = 5) uniform texture3D inInscatterLut; // RGB=Rayleigh+Multi/phaseR，A=Mie luma
 
 // scattered：路径积分散射光 L_inscatter
 // viewT：视线 RGB 透射

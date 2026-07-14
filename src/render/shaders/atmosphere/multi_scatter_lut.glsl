@@ -3,7 +3,7 @@
 
 // Multi-Scatter LUT：对每个 (太阳天顶角 cos, 视高度) texel，在整个球面方向上
 // 采样 64 条射线求平均多次散射贡献（幂级数求和近似，见文末推导）。依赖
-// Transmittance LUT，须在其之后烘焙；每帧重新烘焙，理由同 transmittance_lut.glsl。
+// Transmittance LUT，须在其之后、Inscatter/SkyView 之前烘焙。
 #define NO_MULTISCATAPPROX_ENABLED
 #include "atmosphere_common.glsl"
 

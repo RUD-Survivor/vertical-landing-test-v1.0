@@ -579,7 +579,7 @@ vec3 sampleInscatterLut(texture3D lut, sampler s,
 		texture(sampler3D(lut, s), uvw1).rgb * nuLerp;
 }
 
-// Bruneton reduced scattering：RGB=Rayleigh 单次（无相位），A=Mie 亮度（无相位）
+// Bruneton reduced scattering：RGB = Rayleigh_reduced + Multi/RayleighPhase(ν)，A = Mie 亮度
 struct BrunetonReducedScattering {
 	vec3 scattering;
 	float mieLuminance;
