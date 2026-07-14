@@ -76,6 +76,8 @@ struct AtmoTuneParams {
     int segmentScatterMode = 0;
     // 壳内天空像素（clear depth）。0=Sky-View LUT，1=Inscatter 天空查表。
     int skyScatterMode = 0;
+    // 壳外盘面：0=对齐壳内（深度截断段散射 + scene×T 合成）；1=旧·深度 discard（盘心无 AP）。
+    int shellDiskMode = 0;
 
     // ── ToPoint 内部量 debug（壳内/壳外；>0 覆盖合成输出）──────────────────
     // 0=关 1=S0 2=S1 3=T 4=T*S1 5=S0-T*S1(相位前) 6=最终phased 7=段长d 8=hitGround

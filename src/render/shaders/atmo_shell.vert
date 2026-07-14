@@ -60,6 +60,7 @@ layout(push_constant) uniform PC {
     int   skyScatterMode;
     int   toPointDebugMode;
     float toPointDebugExposure;
+    int   shellDiskMode;
 } pc;
 
 layout(location = 0) out vec3 vWorldPos;

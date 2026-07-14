@@ -193,7 +193,8 @@ struct AtmoPushConstants {
     int   skyScatterMode;              // 4 — offset 180 (0=Sky-View LUT，1=Inscatter 天空)
     int   toPointDebugMode;            // 4 — offset 184 (0=关；见 AtmoTuneParams)
     float toPointDebugExposure;        // 4 — offset 188
-};                         //            total: 192 bytes
+    int   shellDiskMode;               // 4 — offset 192 (0=盘面 AP 对齐壳内；1=旧 discard)
+};                         //            total: 196 bytes
 
 // Terrain patch 专属 UBO（binding 1 of Set 0）
 // nodePos/nodeSide/nodeUp 已移至 push constants（每 draw call 更新），此处只保留每帧常量

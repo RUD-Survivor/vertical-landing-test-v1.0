@@ -22,6 +22,7 @@ inline void AtmoTunerImGui(bool* p_open, AtmoTuneParams& p, VkAtmoLutCache& lutC
     // 置顶：算法开关（不滚动也能看见）。改完只需重编宿主，不必重烤 LUT。
     if (p.segmentScatterMode < 0 || p.segmentScatterMode > 1) p.segmentScatterMode = 0;
     if (p.skyScatterMode < 0 || p.skyScatterMode > 1) p.skyScatterMode = 0;
+    if (p.shellDiskMode < 0 || p.shellDiskMode > 1) p.shellDiskMode = 0;
 
     ImGui::TextColored(ImVec4(0.55f, 0.85f, 1.0f, 1.0f), "渲染算法");
     ImGui::Text("段散射（壳外 / 壳内有深度）");
@@ -38,13 +39,23 @@ inline void AtmoTunerImGui(bool* p_open, AtmoTuneParams& p, VkAtmoLutCache& lutC
     if (ImGui::RadioButton("Inscatter Sky##sky", p.skyScatterMode == 1))
         p.skyScatterMode = 1;
 
-    if (ImGui::Button("Reset Algorithm -> ToPoint + Sky-View")) {
+    ImGui::Text("壳外盘面");
+    if (ImGui::RadioButton("Disk AP (align inside)##disk", p.shellDiskMode == 0))
+        p.shellDiskMode = 0;
+    ImGui::SameLine();
+    if (ImGui::RadioButton("Depth discard (legacy)##disk", p.shellDiskMode == 1))
+        p.shellDiskMode = 1;
+    ImGui::TextDisabled("Disk AP：太空→地表弦做段散射+合成；legacy：场景比壳片近则丢弃（盘心无蓝雾）。");
+
+    if (ImGui::Button("Reset Algorithm -> ToPoint + Sky-View + Disk AP")) {
         p.segmentScatterMode = 0;
         p.skyScatterMode = 0;
+        p.shellDiskMode = 0;
     }
-    ImGui::TextDisabled("当前: Segment=%s | Sky=%s",
+    ImGui::TextDisabled("当前: Segment=%s | Sky=%s | Disk=%s",
         p.segmentScatterMode == 1 ? "Raymarch" : "ToPoint",
-        p.skyScatterMode == 1 ? "Inscatter" : "Sky-View");
+        p.skyScatterMode == 1 ? "Inscatter" : "Sky-View",
+        p.shellDiskMode == 1 ? "LegacyDiscard" : "DiskAP");
 
     ImGui::Separator();
     ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.35f, 1.0f), "ToPoint Debug（中间量）");
@@ -64,7 +75,7 @@ inline void AtmoTunerImGui(bool* p_open, AtmoTuneParams& p, VkAtmoLutCache& lutC
     if (p.toPointDebugMode > 0) {
         ImGui::SliderFloat("ToPointDbgExposure", &p.toPointDebugExposure, 0.1f, 200.0f, "%.1f",
                            ImGuiSliderFlags_Logarithmic);
-        ImGui::TextDisabled("壳外 debug 时不过滤地表 depth，可看盘心弦。");
+        ImGui::TextDisabled("Debug 强制 Disk AP（无视 legacy discard），可看盘心弦。");
         ImGui::TextDisabled("判读: S0黑=LUT烘黑/查表坏; S0亮但5黑=相减/T坏; 7绿短红长。");
         ImGui::TextDisabled("若 S0 仍全黑：点下方「强制重烤」刷新 Inscatter（top 边界 tMax 修复）。");
     }

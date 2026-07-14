@@ -65,6 +65,7 @@ layout(push_constant) uniform PC {
     int   skyScatterMode;         // 0=Sky-View LUT，1=Inscatter 天空
     int   toPointDebugMode;       // 0=关；1..8 见 atmo_scatter_common
     float toPointDebugExposure;
+    int   shellDiskMode;          // 壳外专用；布局对齐 AtmoPushConstants
 } pc;
 
 #define PC_RAYLEIGH vec3(pc.rayleighCoeffX, pc.rayleighCoeffY, pc.rayleighCoeffZ)
