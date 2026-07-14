@@ -4,7 +4,7 @@
 
 // ==========================================================================
 // atmo_scatter_common.glsl — 大气重构·壳内(atmo_inside.frag)/壳外(atmo_shell.frag)
-// 共用 GetSkyRadianceToPoint 段散射（Inscatter LUT 双查表相减 + Transmittance LUT）。
+// 共用 GetSkyRadianceToPoint 段散射（Bruneton reduced LUT + 运行时相位）。
 //
 // 壳外曾直接查 Sky-View LUT 导致参数越界（观察者高度须 < topRadius），
 // 现改为段散射 LUT，对壳内/壳外任意相机位置成立。
@@ -20,11 +20,51 @@ layout(set = 1, binding = 1) uniform texture2D inTransmittanceLut;
 layout(set = 1, binding = 2) uniform texture2D inSkyViewLut; // 壳内天空像素采样；须与 skyview_lut 烘焙同基
 layout(set = 1, binding = 3) uniform sampler   samp;
 layout(set = 1, binding = 4) uniform texture2D inSceneColor; // 几何 pass HDR，与 atmo 同帧同图（GENERAL 布局读写）
-layout(set = 1, binding = 5) uniform texture3D inInscatterLut; // Phase B：4D inscatter（单次散射，含相位）
+layout(set = 1, binding = 5) uniform texture3D inInscatterLut; // Phase C：RGB=Rayleigh reduced, A=Mie luma
 
 // scattered：路径积分散射光 L_inscatter
 // viewT：视线 RGB 透射
 struct AtmoMarchResult { vec3 scattered; vec3 viewT; float opacity; };
+
+// Mie 亮度（A 通道）→ RGB；mieTint 与烘焙侧 mieScattering 同色标
+vec3 atmoMieFromLuminance(float luma, vec3 mieTint)
+{
+    vec3 t = max(mieTint, vec3(1e-6));
+    float tl = dot(t, vec3(0.299, 0.587, 0.114));
+    return vec3(luma) * t / tl;
+}
+
+// Transmittance LUT：沿 (r,μ) 射线到大气顶的透射率
+vec3 atmoTransmittanceToTop(float r, float mu, float bottomRadius, float topRadius)
+{
+    AtmosphereParameters atmo;
+    atmo.bottomRadius = bottomRadius;
+    atmo.topRadius    = topRadius;
+    vec2 uv;
+    lutTransmittanceParamsToUv(atmo, r, mu, uv);
+    return texture(sampler2D(inTransmittanceLut, samp), uv).rgb;
+}
+
+// Bruneton GetTransmittance(r,μ,d,hitGround)
+vec3 atmoGetTransmittanceBruneton(float r, float mu, float d, bool hitGround,
+                                   float bottomRadius, float topRadius)
+{
+    AtmosphereParameters atmo;
+    atmo.bottomRadius = bottomRadius;
+    atmo.topRadius    = topRadius;
+
+    float r_d, mu_d, mu_s_d;
+    inscatterParamsAfterDistance(atmo, r, mu, 0.0, 0.0, d, r_d, mu_d, mu_s_d);
+
+    if (hitGround) {
+        vec3 Td = atmoTransmittanceToTop(r_d, -mu_d, bottomRadius, topRadius);
+        vec3 T0 = atmoTransmittanceToTop(r, -mu, bottomRadius, topRadius);
+        return clamp(Td / max(T0, vec3(1e-4)), vec3(0.0), vec3(1.0));
+    }
+    vec3 T0 = atmoTransmittanceToTop(r, mu, bottomRadius, topRadius);
+    vec3 Td = atmoTransmittanceToTop(r_d, mu_d, bottomRadius, topRadius);
+    return clamp(T0 / max(Td, vec3(1e-4)), vec3(0.0), vec3(1.0));
+}
 
 float ozoneDensityFn(float h, float ozoneCenter, float ozoneWidth) {
     float d = (h - ozoneCenter) / ozoneWidth;
@@ -126,21 +166,28 @@ vec3 viewTransmittanceLUT(vec3 posRelAtmoKm, vec3 viewDir, float bottomRadius, f
     return texture(sampler2D(inTransmittanceLut, samp), uv).rgb;
 }
 
-// 段 [tNear,tFar] 视线透射（LUT 比值）。Bruneton 约定 T(r,μ) 为沿视线到大气边界的
-// 透射率，段内透射 = T(p0)/T(p1)（p1 沿射线更远），勿写成 T1/T0。
+// 段 [tNear,tFar] 视线透射（Bruneton GetTransmittance）。
 vec3 atmoPointSegmentTransmittance(vec3 p0Rel, vec3 p1Rel, vec3 viewDir,
-                                    float bottomRadius, float topRadius)
+                                    float bottomRadius, float topRadius, bool hitGround)
 {
-    vec3 T0 = viewTransmittanceLUT(p0Rel, viewDir, bottomRadius, topRadius);
-    vec3 T1 = viewTransmittanceLUT(p1Rel, viewDir, bottomRadius, topRadius);
-    return clamp(T0 / max(T1, vec3(1e-4)), vec3(0.0), vec3(1.0));
+    float r = length(p0Rel);
+    float mu = dot(viewDir, p0Rel / max(r, 1e-4));
+    float d = max(dot(p1Rel - p0Rel, viewDir), 0.0);
+    return atmoGetTransmittanceBruneton(r, mu, d, hitGround, bottomRadius, topRadius);
 }
 
 vec3 atmoSegmentViewTransmittance(vec3 camRelKm, vec3 rayDir, float tNear, float tFar,
                                   float bottomRadius, float topRadius)
 {
+    vec3 p0 = camRelKm + rayDir * tNear;
+    AtmosphereParameters atmo;
+    atmo.bottomRadius = bottomRadius;
+    atmo.topRadius    = topRadius;
+    float r = length(p0);
+    float mu = dot(rayDir, p0 / max(r, 1e-4));
+    bool hitGround = inscatterRayIntersectsGround(atmo, r, mu);
     return atmoPointSegmentTransmittance(
-        camRelKm + rayDir * tNear, camRelKm + rayDir * tFar, rayDir, bottomRadius, topRadius);
+        p0, camRelKm + rayDir * tFar, rayDir, bottomRadius, topRadius, hitGround);
 }
 
 // 相对行星中心位置 → Inscatter 查表参数 (r,μ,μ_s,ν)。
@@ -164,38 +211,72 @@ void atmoInscatterParamsAtRelPos(vec3 posRel, vec3 viewDir, vec3 sunDir,
     nu = clamp(nu, -muBound, muBound);
 }
 
-// 从 posRel 沿 viewDir 积到大气边界/地面的预烘焙散射（Inscatter LUT 一次查表）。
-vec3 atmoInscatterToBoundary(vec3 posRel, vec3 viewDir, vec3 sunDir,
-                              float bottomRadius, float topRadius)
+// Bruneton GetCombinedScattering：无相位 reduced 查表
+void atmoGetCombinedReducedScattering(float r, float mu, float mu_s, float nu, bool hitGround,
+                                       float bottomRadius, float topRadius, vec3 mieTint,
+                                       out vec3 scattering, out vec3 singleMie)
 {
     AtmosphereParameters atmo;
     atmo.bottomRadius = bottomRadius;
     atmo.topRadius    = topRadius;
 
-    float r, mu, mu_s, nu;
-    bool hitGround;
-    atmoInscatterParamsAtRelPos(posRel, viewDir, sunDir, bottomRadius, topRadius,
-                                r, mu, mu_s, nu, hitGround);
-    return sampleInscatterLut(inInscatterLut, samp, atmo, r, mu, mu_s, nu);
+    BrunetonReducedScattering s = sampleBrunetonReducedInscatterLut(
+        inInscatterLut, samp, atmo, r, mu, mu_s, nu, hitGround);
+    scattering = s.scattering;
+    singleMie  = atmoMieFromLuminance(s.mieLuminance, mieTint);
 }
 
-// Phase B：查 Inscatter LUT 的天空散射（单点→边界；太空相机先投影到大气顶）。
+vec3 atmoApplyBrunetonPhases(vec3 scattering, vec3 singleMie, float nu, float mu_s, float gMie)
+{
+    singleMie *= smoothstep(0.0, 0.01, mu_s);
+    return scattering * rayleighPhaseAtmo(nu) + singleMie * miePhaseAtmo(nu, gMie);
+}
+
+// 从 posRel 沿 viewDir 积到大气边界的预烘焙散射（单次查表 + 运行时相位）
+vec3 atmoInscatterToBoundary(vec3 posRel, vec3 viewDir, vec3 sunDir,
+                              float bottomRadius, float topRadius,
+                              bool hitGround, vec3 mieTint, float gMie)
+{
+    float r = length(posRel);
+    vec3 up = posRel / max(r, 1e-4);
+    float mu   = dot(viewDir, up);
+    float mu_s = clamp(dot(sunDir, up), kInscatterMuSMin, 1.0);
+    float nu   = dot(viewDir, sunDir);
+    float muBound = mu * mu_s + sqrt(max(0.0, (1.0 - mu * mu) * (1.0 - mu_s * mu_s)));
+    nu = clamp(nu, -muBound, muBound);
+
+    vec3 scattering, singleMie;
+    atmoGetCombinedReducedScattering(r, mu, mu_s, nu, hitGround,
+        bottomRadius, topRadius, mieTint, scattering, singleMie);
+    return atmoApplyBrunetonPhases(scattering, singleMie, nu, mu_s, gMie);
+}
+
+// GetSkyRadiance：太空相机先投影到大气顶，再单次查表 + 相位
 vec3 atmoSampleInscatterSky(vec3 camRelPlanetKm, vec3 rayDir, vec3 sunDirToPlanet,
-                             float bottomRadius, float topRadius)
+                             float bottomRadius, float topRadius,
+                             vec3 mieTint, float gMie)
 {
     vec3 observer = atmoObserverPosKm(camRelPlanetKm);
     if (length(observer) > topRadius) {
         if (!moveToTopAtmosphere(observer, rayDir, topRadius))
             return vec3(0.0);
     }
-    return atmoInscatterToBoundary(observer, rayDir, sunDirToPlanet, bottomRadius, topRadius);
+
+    AtmosphereParameters atmo;
+    atmo.bottomRadius = bottomRadius;
+    atmo.topRadius    = topRadius;
+
+    float r = length(observer);
+    float mu = dot(rayDir, observer / max(r, 1e-4));
+    bool hitGround = inscatterRayIntersectsGround(atmo, r, mu);
+    return atmoInscatterToBoundary(observer, rayDir, sunDirToPlanet,
+        bottomRadius, topRadius, hitGround, mieTint, gMie);
 }
 
-// Bruneton GetSkyRadianceToPoint（无 shadow_length）：
-//   S(p0→p1) = S_lut(p0→边界) − T(p0,p1) · S_lut(p1→边界)
-// p0 若在大气外，先沿 viewDir 投影到大气顶。
+// Bruneton GetSkyRadianceToPoint：hitGround 仅在 p0 算一次；p1 用 (r_p,μ_p,μ_s_p) 同 ν
 vec3 atmoGetSkyRadianceToPoint(vec3 p0Rel, vec3 p1Rel, vec3 viewDir, vec3 sunDir,
-                                float bottomRadius, float topRadius)
+                                float bottomRadius, float topRadius,
+                                vec3 mieTint, float gMie)
 {
     vec3 p0 = p0Rel;
     if (length(p0) > topRadius) {
@@ -203,16 +284,42 @@ vec3 atmoGetSkyRadianceToPoint(vec3 p0Rel, vec3 p1Rel, vec3 viewDir, vec3 sunDir
             return vec3(0.0);
     }
 
-    vec3 S0   = atmoInscatterToBoundary(p0, viewDir, sunDir, bottomRadius, topRadius);
-    vec3 S1   = atmoInscatterToBoundary(p1Rel, viewDir, sunDir, bottomRadius, topRadius);
-    vec3 Tseg = atmoPointSegmentTransmittance(p0, p1Rel, viewDir, bottomRadius, topRadius);
-    return max(S0 - Tseg * S1, vec3(0.0));
+    AtmosphereParameters atmo;
+    atmo.bottomRadius = bottomRadius;
+    atmo.topRadius    = topRadius;
+
+    float r = length(p0);
+    vec3 up = p0 / max(r, 1e-4);
+    float mu   = dot(viewDir, up);
+    float mu_s = clamp(dot(sunDir, up), kInscatterMuSMin, 1.0);
+    float nu   = dot(viewDir, sunDir);
+    float muBound = mu * mu_s + sqrt(max(0.0, (1.0 - mu * mu) * (1.0 - mu_s * mu_s)));
+    nu = clamp(nu, -muBound, muBound);
+
+    bool hitGround = inscatterRayIntersectsGround(atmo, r, mu);
+    float d = max(dot(p1Rel - p0, viewDir), 0.0);
+
+    vec3 transmittance = atmoGetTransmittanceBruneton(r, mu, d, hitGround, bottomRadius, topRadius);
+
+    vec3 scattering0, mie0, scattering1, mie1;
+    atmoGetCombinedReducedScattering(r, mu, mu_s, nu, hitGround,
+        bottomRadius, topRadius, mieTint, scattering0, mie0);
+
+    float r_p, mu_p, mu_s_p;
+    inscatterParamsAfterDistance(atmo, r, mu, mu_s, nu, d, r_p, mu_p, mu_s_p);
+    atmoGetCombinedReducedScattering(r_p, mu_p, mu_s_p, nu, hitGround,
+        bottomRadius, topRadius, mieTint, scattering1, mie1);
+
+    vec3 scattering = scattering0 - transmittance * scattering1;
+    vec3 singleMie  = mie0 - transmittance * mie1;
+    return atmoApplyBrunetonPhases(max(scattering, vec3(0.0)), max(singleMie, vec3(0.0)), nu, mu_s, gMie);
 }
 
-// [tNear,tFar] 段散射 + 段透射（壳内/壳外共用；GetSkyRadianceToPoint + T_LUT）。
+// [tNear,tFar] 段散射 + 段透射（Bruneton ToPoint）
 AtmoMarchResult atmoSegmentInscatterMarch(vec3 camRelKm, vec3 rayDir,
                                          float tNear, float tFar, vec3 sunDir,
-                                         float bottomRadius, float topRadius)
+                                         float bottomRadius, float topRadius,
+                                         vec3 mieTint, float gMie)
 {
     AtmoMarchResult result;
     result.scattered = vec3(0.0);
@@ -228,12 +335,17 @@ AtmoMarchResult atmoSegmentInscatterMarch(vec3 camRelKm, vec3 rayDir,
             return result;
     }
 
-    vec3 S0   = atmoInscatterToBoundary(p0, rayDir, sunDir, bottomRadius, topRadius);
-    vec3 S1   = atmoInscatterToBoundary(p1, rayDir, sunDir, bottomRadius, topRadius);
-    vec3 Tseg = atmoPointSegmentTransmittance(p0, p1, rayDir, bottomRadius, topRadius);
-    result.scattered = max(S0 - Tseg * S1, vec3(0.0));
-    result.viewT     = Tseg;
-    result.opacity   = clamp(1.0 - dot(result.viewT, vec3(0.299, 0.587, 0.114)), 0.0, 1.0);
+    result.scattered = atmoGetSkyRadianceToPoint(p0, p1, rayDir, sunDir,
+        bottomRadius, topRadius, mieTint, gMie);
+
+    AtmosphereParameters atmo;
+    atmo.bottomRadius = bottomRadius;
+    atmo.topRadius    = topRadius;
+    float r = length(p0);
+    float mu = dot(rayDir, p0 / max(r, 1e-4));
+    bool hitGround = inscatterRayIntersectsGround(atmo, r, mu);
+    result.viewT = atmoPointSegmentTransmittance(p0, p1, rayDir, bottomRadius, topRadius, hitGround);
+    result.opacity = clamp(1.0 - dot(result.viewT, vec3(0.299, 0.587, 0.114)), 0.0, 1.0);
     return result;
 }
 
@@ -257,7 +369,15 @@ vec3 sunTransmittanceLUT(vec3 posRelPlanet, vec3 sunDir, float bottomRadius, flo
 void atmoOverrideViewTFromLut(inout AtmoMarchResult march, vec3 camRelKm, vec3 rayDir,
                               float tNear, float tFar, float bottomRadius, float topRadius)
 {
-    march.viewT   = atmoSegmentViewTransmittance(camRelKm, rayDir, tNear, tFar, bottomRadius, topRadius);
+    vec3 p0 = camRelKm + rayDir * tNear;
+    AtmosphereParameters atmo;
+    atmo.bottomRadius = bottomRadius;
+    atmo.topRadius    = topRadius;
+    float r = length(p0);
+    float mu = dot(rayDir, p0 / max(r, 1e-4));
+    bool hitGround = inscatterRayIntersectsGround(atmo, r, mu);
+    march.viewT = atmoPointSegmentTransmittance(
+        p0, camRelKm + rayDir * tFar, rayDir, bottomRadius, topRadius, hitGround);
     march.opacity = clamp(1.0 - dot(march.viewT, vec3(0.299, 0.587, 0.114)), 0.0, 1.0);
 }
 

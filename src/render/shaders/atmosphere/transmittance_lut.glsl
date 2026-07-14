@@ -34,7 +34,8 @@ void main()
     vec3 opticalDepth = integrateScatteredLuminance(
         pixPos, worldPos, worldDir, sunDir, atmosphere,
         /*bGround*/ false, /*sampleCountIni*/ 40.0, /*depthBufferValue*/ -1.0,
-        /*bMieRayPhase*/ false, /*tMaxMax*/ kDefaultMaxT, /*bVariableSampleCount*/ false
+        /*bMieRayPhase*/ false, /*tMaxMax*/ kDefaultMaxT, /*bVariableSampleCount*/ false,
+        false
     ).opticalDepth;
 
     vec3 transmittance = min(exp(-opticalDepth), vec3(kMaxHalfFloat));

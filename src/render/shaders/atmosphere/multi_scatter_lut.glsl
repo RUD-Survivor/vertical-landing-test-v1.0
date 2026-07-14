@@ -66,7 +66,8 @@ void main()
 
         SingleScatteringResult result = integrateScatteredLuminance(
             pixPos, worldPos, worldDir, sunDir, atmosphere,
-            bGround, sampleCountIni, depthBufferValue, bMieRayPhase, tMaxMax, bVariableSampleCount
+            bGround, sampleCountIni, depthBufferValue, bMieRayPhase, tMaxMax, bVariableSampleCount,
+            false
         );
 
         sharedMultiScatAs1[flattenId] = result.multiScatAs1 * sphereSolidAngle / (sqrtSample * sqrtSample);

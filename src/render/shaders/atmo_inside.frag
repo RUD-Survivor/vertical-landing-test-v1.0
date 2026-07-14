@@ -61,6 +61,8 @@ layout(push_constant) uniform PC {
     float skyDepthThreshold;
     float transmittanceChromaStrength;
     float inscatterDebugExposure; // 0=关；>0=Inscatter 天空 debug 曝光
+    int   segmentScatterMode;     // 0=Inscatter ToPoint，1=Raymarch
+    int   skyScatterMode;         // 0=Sky-View LUT，1=Inscatter 天空
 } pc;
 
 #define PC_RAYLEIGH vec3(pc.rayleighCoeffX, pc.rayleighCoeffY, pc.rayleighCoeffZ)
@@ -123,14 +125,26 @@ void main() {
 
     AtmoMarchResult march;
     if (isSkyPixel) {
-        march.scattered = atmoSampleSkyViewLut(camRel, rayDir, sunDir,
-            pc.surfaceRadius, pc.outerRadius);
+        if (pc.skyScatterMode == 1) {
+            march.scattered = atmoSampleInscatterSky(camRel, rayDir, sunDir,
+                pc.surfaceRadius, pc.outerRadius, vec3(pc.mieCoeff), pc.gMie);
+        } else {
+            march.scattered = atmoSampleSkyViewLut(camRel, rayDir, sunDir,
+                pc.surfaceRadius, pc.outerRadius);
+        }
         march.viewT = atmoSegmentViewTransmittance(camRel, rayDir, tNear, tFar,
             pc.surfaceRadius, pc.outerRadius);
         march.opacity = clamp(1.0 - dot(march.viewT, vec3(0.299, 0.587, 0.114)), 0.0, 1.0);
+    } else if (pc.segmentScatterMode == 1) {
+        float cosTheta = dot(rayDir, sunDir);
+        march = raymarchAtmoSegment(
+            camPos, rayDir, pc.planetCenter.xyz, tNear, tFar, PRIMARY_STEPS,
+            PC_RAYLEIGH, pc.mieCoeff, pc.hRayleigh, pc.hMie, pc.gMie,
+            PC_OZONE, pc.ozoneCenter, pc.ozoneWidth,
+            pc.surfaceRadius, pc.outerRadius, sunDir, cosTheta);
     } else {
         march = atmoSegmentInscatterMarch(camRel, rayDir, tNear, tFar, sunDir,
-            pc.surfaceRadius, pc.outerRadius);
+            pc.surfaceRadius, pc.outerRadius, vec3(pc.mieCoeff), pc.gMie);
     }
 
     float thickness = max(pc.outerRadius - pc.surfaceRadius, 1e-3);
@@ -148,7 +162,7 @@ void main() {
     // Phase A debug：整屏显示 Inscatter 天空采样（验证烘焙/查表通路）
     if (pc.inscatterDebugExposure > 0.0) {
         vec3 Ldbg = atmoSampleInscatterSky(camRel, rayDir, sunDir,
-            pc.surfaceRadius, pc.outerRadius);
+            pc.surfaceRadius, pc.outerRadius, vec3(pc.mieCoeff), pc.gMie);
         vec3 x = max(Ldbg * pc.inscatterDebugExposure, vec3(0.0));
         vec3 toned = (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);
         FragColor = vec4(toned, 1.0);

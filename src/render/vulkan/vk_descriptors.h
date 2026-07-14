@@ -178,7 +178,10 @@ struct AtmoPushConstants {
     float skyDepthThreshold;//  4 bytes  — offset 164 (壳内天空/LUT 深度阈值 NDC，默认 1.0)
     float transmittanceChromaStrength; // 4 — offset 168 (scene×T RGB 色度 [0,1])
     float inscatterDebugExposure;      // 4 — offset 172 (0=关；>0=Inscatter debug 曝光)
-};                         //            total: 176 bytes
+    // 渲染算法（imgui_atmo_tuner）：0/1 枚举，见 AtmoTuneParams。
+    int   segmentScatterMode;          // 4 — offset 176 (0=Inscatter ToPoint，1=Raymarch)
+    int   skyScatterMode;              // 4 — offset 180 (0=Sky-View LUT，1=Inscatter 天空)
+};                         //            total: 184 bytes
 
 // Terrain patch 专属 UBO（binding 1 of Set 0）
 // nodePos/nodeSide/nodeUp 已移至 push constants（每 draw call 更新），此处只保留每帧常量

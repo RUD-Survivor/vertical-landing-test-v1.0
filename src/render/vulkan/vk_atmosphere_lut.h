@@ -70,6 +70,12 @@ struct AtmoTuneParams {
     float transmittanceChromaStrength = 1.0f;
     // Phase A debug：>0 时 atmo_inside 用 Inscatter 天空采样×此值覆盖输出（0=关）
     float inscatterDebugExposure = 0.0f;
+
+    // ── 渲染算法选择（F4 tuner；不触发 LUT 重烤）────────────────────────────
+    // 段散射：壳外全部像素 + 壳内有场景深度。0=Inscatter ToPoint，1=Raymarch。
+    int segmentScatterMode = 0;
+    // 壳内天空像素（clear depth）。0=Sky-View LUT，1=Inscatter 天空查表。
+    int skyScatterMode = 0;
 };
 
 // ── 单一数据源：每类行星的 Rayleigh/Mie/臭氧散射系数 ─────────────────────────

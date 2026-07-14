@@ -52,7 +52,8 @@ void main()
         result = integrateScatteredLuminance(
             pixPos, worldPos, worldDir, sunDirection, atmosphere,
             /*bGround*/ false, /*sampleCountIni*/ 0.0, /*depthBufferValue*/ -1.0,
-            /*bMieRayPhase*/ true, /*tMaxMax*/ kDefaultMaxT, /*bVariableSampleCount*/ true
+            /*bMieRayPhase*/ true, /*tMaxMax*/ kDefaultMaxT, /*bVariableSampleCount*/ true,
+            false
         ).scatteredLight;
     }
 

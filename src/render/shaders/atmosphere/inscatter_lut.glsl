@@ -2,15 +2,16 @@
 #extension GL_GOOGLE_include_directive : enable
 
 // ==========================================================================
-// inscatter_lut.glsl — Phase B：Inscatter 4D（打包 3D）单次散射烘焙。
+// inscatter_lut.glsl — Phase C：Bruneton reduced single scattering 烘焙。
 //
-// 每个 texel 对应 Bruneton 非线性参数 (r, mu, mu_s, nu)，用已有
-// integrateScatteredLuminance 沿该视线积分（依赖 Transmittance LUT）。
-// UV 映射见 shared_atmosphere.glsl::inscatterTexelToParams（击地半表 / 不击地半表）。
-// 多次散射阶迭代留到 Phase D。
+// 每个 texel 存无相位 Rayleigh（RGB）+ Mie 亮度（A）；多重散射与相位在
+// 运行时由 atmo_scatter_common.glsl 处理（对齐 GetCombinedScattering）。
+// UV 映射见 shared_atmosphere.glsl::inscatterTexelToParams。
 //
 // 生成顺序：transmittance → **inscatter** → multiScatter → skyView → ...
 // ==========================================================================
+
+#define NO_MULTISCATAPPROX_ENABLED
 
 #include "atmosphere_common.glsl"
 
@@ -45,13 +46,15 @@ void main()
         viewDir,
         sunDir,
         atmosphere,
-        /*bGround*/ rayIntersectsGround,
+        /*bGround*/ false,
         sampleCount,
         /*depthBufferValue*/ -1.0,
-        /*bMieRayPhase*/ true,
+        /*bMieRayPhase*/ false,
         /*tMaxMax*/ kDefaultMaxT,
-        /*bVariableSampleCount*/ false);
+        /*bVariableSampleCount*/ false,
+        /*bBrunetonReducedBake*/ true);
 
-    vec3 L = min(ss.scatteredLight, vec3(kMaxHalfFloat));
-    imageStore(imageInscatterLut, workPos, vec4(L, 1.0));
+    vec3 rayleigh = min(ss.rayleighLight, vec3(kMaxHalfFloat));
+    float mieLuma = min(dot(ss.mieLight, vec3(0.299, 0.587, 0.114)), kMaxHalfFloat);
+    imageStore(imageInscatterLut, workPos, vec4(rayleigh, mieLuma));
 }

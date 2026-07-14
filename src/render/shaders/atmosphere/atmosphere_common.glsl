@@ -157,6 +157,10 @@ struct SingleScatteringResult
     vec3 multiScatAs1;
     vec3 newMultiScatStep0Out;
     vec3 newMultiScatStep1Out;
+
+    // Bruneton reduced single scattering（无相位、无多重、无地面反射）
+    vec3 rayleighLight;
+    vec3 mieLight;
 };
 
 SingleScatteringResult buildSingleScatteringResultDefault()
@@ -168,6 +172,8 @@ SingleScatteringResult buildSingleScatteringResultDefault()
     result.multiScatAs1         = vec3(0.0);
     result.newMultiScatStep0Out = vec3(0.0);
     result.newMultiScatStep1Out = vec3(0.0);
+    result.rayleighLight = vec3(0.0);
+    result.mieLight      = vec3(0.0);
     return result;
 }
 
@@ -186,7 +192,8 @@ SingleScatteringResult integrateScatteredLuminance(
     in float depthBufferValue,
     in bool  bMieRayPhase,
     in float tMaxMax,
-    in bool  bVariableSampleCount)
+    in bool  bVariableSampleCount,
+    in bool  bBrunetonReducedBake)
 {
     SingleScatteringResult result = buildSingleScatteringResultDefault();
 
@@ -251,6 +258,8 @@ SingleScatteringResult integrateScatteredLuminance(
     vec3 globalL = frameData.sky.color * frameData.sky.intensity;
 
     vec3 L = vec3(0.0);
+    vec3 L_ray = vec3(0.0);
+    vec3 L_mie = vec3(0.0);
     vec3 throughput = vec3(1.0);
     vec3 opticalDepth = vec3(0.0);
     float t = 0.0f;
@@ -293,38 +302,53 @@ SingleScatteringResult integrateScatteredLuminance(
         lutTransmittanceParamsToUv(atmosphere, pHeight, sunZenithCosAngle, uv);
         vec3 transmittanceToSun = texture(sampler2D(inTransmittanceLut, linearClampSampler), uv).rgb;
 
-        vec3 phaseTimesScattering;
-        if (bMieRayPhase)
+        float tEarth = raySphereIntersectNearest(P, sunDir, kEarthOrigin + kPlanetRadiusOffset * upVector, atmosphere.bottomRadius);
+        float earthShadow = tEarth >= 0.0f ? 0.0f : 1.0f;
+        float shadow = getShadow(atmosphere, P);
+
+        vec3 S;
+        if (bBrunetonReducedBake)
         {
-            phaseTimesScattering = medium.scatteringMie * miePhaseValue + medium.scatteringRay * rayleighPhaseValue;
+            vec3 sunTerm = globalL * earthShadow * shadow * transmittanceToSun;
+            vec3 S_ray = sunTerm * medium.scatteringRay;
+            vec3 S_mie = sunTerm * medium.scatteringMie;
+            vec3 sint_ray = (S_ray - S_ray * sampleTransmittance) / medium.extinction;
+            vec3 sint_mie = (S_mie - S_mie * sampleTransmittance) / medium.extinction;
+            L_ray += throughput * sint_ray;
+            L_mie += throughput * sint_mie;
+            S = S_ray + S_mie;
         }
         else
         {
-            phaseTimesScattering = medium.scattering * uniformPhase;
-        }
+            vec3 phaseTimesScattering;
+            if (bMieRayPhase)
+            {
+                phaseTimesScattering = medium.scatteringMie * miePhaseValue + medium.scatteringRay * rayleighPhaseValue;
+            }
+            else
+            {
+                phaseTimesScattering = medium.scattering * uniformPhase;
+            }
 
-        float tEarth = raySphereIntersectNearest(P, sunDir, kEarthOrigin + kPlanetRadiusOffset * upVector, atmosphere.bottomRadius);
-        float earthShadow = tEarth >= 0.0f ? 0.0f : 1.0f;
-
-        vec3 multiScatteredLuminance = vec3(0.0);
+            vec3 multiScatteredLuminance = vec3(0.0);
 #ifndef NO_MULTISCATAPPROX_ENABLED
-        multiScatteredLuminance = getMultipleScattering(atmosphere, medium.scattering, medium.extinction, P, sunZenithCosAngle);
+            multiScatteredLuminance = getMultipleScattering(atmosphere, medium.scattering, medium.extinction, P, sunZenithCosAngle);
 #endif
-        float shadow = getShadow(atmosphere, P);
+            S = globalL * (earthShadow * shadow * transmittanceToSun * phaseTimesScattering +
+                           (multiScatteredLuminance * medium.scattering));
 
-        vec3 S = globalL * (earthShadow * shadow * transmittanceToSun * phaseTimesScattering + (multiScatteredLuminance * medium.scattering));
+            vec3 ms = medium.scattering;
+            vec3 msint = (ms - ms * sampleTransmittance) / medium.extinction;
+            result.multiScatAs1 += throughput * msint;
 
-        vec3 ms = medium.scattering;
-        vec3 msint = (ms - ms * sampleTransmittance) / medium.extinction;
-        result.multiScatAs1 += throughput * msint;
+            {
+                vec3 newMS;
+                newMS = earthShadow * transmittanceToSun * medium.scattering * uniformPhase;
+                result.newMultiScatStep0Out += throughput * (newMS - newMS * sampleTransmittance) / medium.extinction;
 
-        {
-            vec3 newMS;
-            newMS = earthShadow * transmittanceToSun * medium.scattering * uniformPhase;
-            result.newMultiScatStep0Out += throughput * (newMS - newMS * sampleTransmittance) / medium.extinction;
-
-            newMS = medium.scattering * uniformPhase * multiScatteredLuminance;
-            result.newMultiScatStep1Out += throughput * (newMS - newMS * sampleTransmittance) / medium.extinction;
+                newMS = medium.scattering * uniformPhase * multiScatteredLuminance;
+                result.newMultiScatStep1Out += throughput * (newMS - newMS * sampleTransmittance) / medium.extinction;
+            }
         }
 
         vec3 sint = (S - S * sampleTransmittance) / medium.extinction;
@@ -332,7 +356,7 @@ SingleScatteringResult integrateScatteredLuminance(
         throughput *= sampleTransmittance;
     }
 
-    if (bGround && (tMax == tBottom) && (tBottom > 0.0))
+    if (!bBrunetonReducedBake && bGround && (tMax == tBottom) && (tBottom > 0.0))
     {
         vec3 P = worldPos + tBottom * worldDir;
         float pHeight = length(P);
@@ -348,6 +372,8 @@ SingleScatteringResult integrateScatteredLuminance(
     }
 
     result.scatteredLight = L;
+    result.rayleighLight  = L_ray;
+    result.mieLight       = L_mie;
     result.opticalDepth  = opticalDepth;
     result.transmittance = throughput;
     return result;
@@ -420,8 +446,8 @@ vec3 getPosScatterLight(
 
     SingleScatteringResult ss = integrateScatteredLuminance(
         pixPos, worldPos, worldDir, sunDir, atmosphere,
-        bGround, sampleCountIni, depthBufferValue, bMieRayPhase, tMaxMax, bVariableSampleCount
-    );
+        bGround, sampleCountIni, depthBufferValue, bMieRayPhase, tMaxMax, bVariableSampleCount,
+        false);
     return min(ss.scatteredLight, vec3(kMaxHalfFloat));
 }
 

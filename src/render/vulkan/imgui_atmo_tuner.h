@@ -19,6 +19,34 @@ inline void AtmoTunerImGui(bool* p_open, AtmoTuneParams& p, VkAtmoLutCache& lutC
 
     bool profileEdited = false;
 
+    // 置顶：算法开关（不滚动也能看见）。改完只需重编宿主，不必重烤 LUT。
+    if (p.segmentScatterMode < 0 || p.segmentScatterMode > 1) p.segmentScatterMode = 0;
+    if (p.skyScatterMode < 0 || p.skyScatterMode > 1) p.skyScatterMode = 0;
+
+    ImGui::TextColored(ImVec4(0.55f, 0.85f, 1.0f, 1.0f), "渲染算法");
+    ImGui::Text("段散射（壳外 / 壳内有深度）");
+    if (ImGui::RadioButton("ToPoint LUT##seg", p.segmentScatterMode == 0))
+        p.segmentScatterMode = 0;
+    ImGui::SameLine();
+    if (ImGui::RadioButton("Raymarch##seg", p.segmentScatterMode == 1))
+        p.segmentScatterMode = 1;
+
+    ImGui::Text("壳内天空（clear depth）");
+    if (ImGui::RadioButton("Sky-View LUT##sky", p.skyScatterMode == 0))
+        p.skyScatterMode = 0;
+    ImGui::SameLine();
+    if (ImGui::RadioButton("Inscatter Sky##sky", p.skyScatterMode == 1))
+        p.skyScatterMode = 1;
+
+    if (ImGui::Button("Reset Algorithm -> ToPoint + Sky-View")) {
+        p.segmentScatterMode = 0;
+        p.skyScatterMode = 0;
+    }
+    ImGui::TextDisabled("当前: Segment=%s | Sky=%s",
+        p.segmentScatterMode == 1 ? "Raymarch" : "ToPoint",
+        p.skyScatterMode == 1 ? "Inscatter" : "Sky-View");
+
+    ImGui::Separator();
     ImGui::Text("大气壳");
     profileEdited |= ImGui::SliderFloat("ShellThickness (km)", &p.shellThicknessKm, 20.0f, 500.0f, "%.0f");
     ImGui::TextDisabled("改厚度会重烤 Transmittance LUT（topRadius 变了）。");
@@ -41,7 +69,7 @@ inline void AtmoTunerImGui(bool* p_open, AtmoTuneParams& p, VkAtmoLutCache& lutC
     ImGui::TextDisabled("scene×T：1=全 RGB LUT 透射；0=仅亮度（减轻地平线偏暖）。不重烤 LUT。");
 
     ImGui::Separator();
-    ImGui::Text("Inscatter LUT (Phase B debug)");
+    ImGui::Text("Inscatter LUT (Phase C Bruneton debug)");
     bool dbgOn = p.inscatterDebugExposure > 0.0f;
     if (ImGui::Checkbox("DebugViz (sky sample)", &dbgOn))
         p.inscatterDebugExposure = dbgOn ? 10.0f : 0.0f;
@@ -89,7 +117,7 @@ inline void AtmoTunerImGui(bool* p_open, AtmoTuneParams& p, VkAtmoLutCache& lutC
     ImGui::Text("壳内天空分支 (atmo_inside)");
     ImGui::SliderFloat("SkyDepthThreshold", &p.skyDepthThreshold, 0.9999f, 1.0f, "%.6f",
                        ImGuiSliderFlags_Logarithmic);
-    ImGui::TextDisabled("sceneDepth >= 阈值 → Sky-View LUT；否则 raymarch+LUT T。默认 1.0。");
+    ImGui::TextDisabled("sceneDepth >= 阈值 → 天空算法（上表 Sky）；否则段散射（上表 Segment）。");
 
     ImGui::Separator();
     ImGui::Text("LUT 缓存");

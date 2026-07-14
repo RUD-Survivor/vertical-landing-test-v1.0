@@ -34,7 +34,7 @@ void main()
     SingleScatteringResult ss = integrateScatteredLuminance(
         pixPos, worldPos, worldDir, sunDir, atmosphere,
         false, /*sampleCountIni*/ 16.0, /*depth*/ -1.0,
-        true, kDefaultMaxT, true);
+        true, kDefaultMaxT, true, false);
 
     imageStore(imageCloudAmbientMusLut, ivec2(x, 0), vec4(ss.scatteredLight, 1.0));
 }

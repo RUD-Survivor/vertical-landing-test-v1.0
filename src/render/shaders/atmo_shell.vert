@@ -56,6 +56,8 @@ layout(push_constant) uniform PC {
     float skyDepthThreshold;
     float transmittanceChromaStrength;
     float inscatterDebugExposure;
+    int   segmentScatterMode;
+    int   skyScatterMode;
 } pc;
 
 layout(location = 0) out vec3 vWorldPos;

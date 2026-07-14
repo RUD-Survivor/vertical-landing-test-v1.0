@@ -59,6 +59,8 @@ layout(push_constant) uniform PC {
     float skyDepthThreshold;
     float transmittanceChromaStrength;
     float inscatterDebugExposure;
+    int   segmentScatterMode;     // 0=Inscatter ToPoint，1=Raymarch
+    int   skyScatterMode;         // 壳外未用；与 inside 对齐布局
 } pc;
 
 #define PC_RAYLEIGH vec3(pc.rayleighCoeffX, pc.rayleighCoeffY, pc.rayleighCoeffZ)
@@ -106,9 +108,19 @@ void main() {
     if (tFar <= tNear) discard;
 
     vec3 camRel = camPos - planetCenter;
-    AtmoMarchResult march = atmoSegmentInscatterMarch(
-        camRel, rayDir, tNear, tFar, sunDir,
-        pc.surfaceRadius, pc.outerRadius);
+    AtmoMarchResult march;
+    if (pc.segmentScatterMode == 1) {
+        float cosTheta = dot(rayDir, sunDir);
+        march = raymarchAtmoSegment(
+            camPos, rayDir, planetCenter, tNear, tFar, PRIMARY_STEPS,
+            PC_RAYLEIGH, pc.mieCoeff, pc.hRayleigh, pc.hMie, pc.gMie,
+            PC_OZONE, pc.ozoneCenter, pc.ozoneWidth,
+            pc.surfaceRadius, pc.outerRadius, sunDir, cosTheta);
+    } else {
+        march = atmoSegmentInscatterMarch(
+            camRel, rayDir, tNear, tFar, sunDir,
+            pc.surfaceRadius, pc.outerRadius, vec3(pc.mieCoeff), pc.gMie);
+    }
 
     float camDist = length(camPos - planetCenter);
     float thickness = max(pc.outerRadius - pc.surfaceRadius, 1e-3);

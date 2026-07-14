@@ -373,7 +373,7 @@ vec3 analyticSkyAmbient(float sunElevation) // sunElevation = dot(localUp, sunDi
 	return mix(mix(skyNight, skyDay, skyVis), skyDusk, twilightLocal * skyVis);
 }
 
-// ── Inscatter 4D LUT（Phase B：Bruneton 非线性映射）────────────────────────────
+// ── Inscatter 4D LUT（Phase C：Bruneton reduced scattering）────────────────────
 // 参数 (r, mu, mu_s, nu) 打包进 3D（与 Bruneton SCATTERING 表同构）：
 //   width  = RES_MU_S * RES_NU
 //   height = RES_MU   （上半：不击地；下半：击地）
@@ -564,7 +564,7 @@ void inscatterDirsFromParams(float mu, float mu_s, float nu, out vec3 viewDir, o
 
 vec3 sampleInscatterLut(texture3D lut, sampler s,
 	in const AtmosphereParameters atmosphere,
-	float r, float mu, float mu_s, float nu)
+	float r, float mu, float mu_s, float nu, bool hitGround)
 {
 	r = clamp(r, atmosphere.bottomRadius, atmosphere.topRadius);
 	mu = clamp(mu, -1.0, 1.0);
@@ -572,12 +572,53 @@ vec3 sampleInscatterLut(texture3D lut, sampler s,
 	float muBound = mu * mu_s + sqrt(max(0.0, (1.0 - mu * mu) * (1.0 - mu_s * mu_s)));
 	nu = clamp(nu, -muBound, muBound);
 
-	bool hitGround = inscatterRayIntersectsGround(atmosphere, r, mu);
 	vec3 uvw0, uvw1;
 	float nuLerp;
 	inscatterParamsToUvw(atmosphere, r, mu, mu_s, nu, hitGround, uvw0, uvw1, nuLerp);
 	return texture(sampler3D(lut, s), uvw0).rgb * (1.0 - nuLerp) +
 		texture(sampler3D(lut, s), uvw1).rgb * nuLerp;
+}
+
+// Bruneton reduced scattering：RGB=Rayleigh 单次（无相位），A=Mie 亮度（无相位）
+struct BrunetonReducedScattering {
+	vec3 scattering;
+	float mieLuminance;
+};
+
+BrunetonReducedScattering sampleBrunetonReducedInscatterLut(texture3D lut, sampler s,
+	in const AtmosphereParameters atmosphere,
+	float r, float mu, float mu_s, float nu, bool hitGround)
+{
+	r = clamp(r, atmosphere.bottomRadius, atmosphere.topRadius);
+	mu = clamp(mu, -1.0, 1.0);
+	mu_s = clamp(mu_s, kInscatterMuSMin, 1.0);
+	float muBound = mu * mu_s + sqrt(max(0.0, (1.0 - mu * mu) * (1.0 - mu_s * mu_s)));
+	nu = clamp(nu, -muBound, muBound);
+
+	vec3 uvw0, uvw1;
+	float nuLerp;
+	inscatterParamsToUvw(atmosphere, r, mu, mu_s, nu, hitGround, uvw0, uvw1, nuLerp);
+	vec4 s0 = texture(sampler3D(lut, s), uvw0);
+	vec4 s1 = texture(sampler3D(lut, s), uvw1);
+	BrunetonReducedScattering outS;
+	outS.scattering = mix(s0.rgb, s1.rgb, nuLerp);
+	outS.mieLuminance = mix(s0.a, s1.a, nuLerp);
+	return outS;
+}
+
+float inscatterClampRadius(in const AtmosphereParameters atmosphere, float r)
+{
+	return clamp(r, atmosphere.bottomRadius, atmosphere.topRadius);
+}
+
+// 沿视线前进 d 后的 (r_p, mu_p, mu_s_p)；nu 与 hitGround 在两次查表间不变（Bruneton）。
+void inscatterParamsAfterDistance(in const AtmosphereParameters atmosphere,
+	float r, float mu, float mu_s, float nu, float d,
+	out float r_p, out float mu_p, out float mu_s_p)
+{
+	r_p = inscatterClampRadius(atmosphere, sqrt(d * d + 2.0 * r * mu * d + r * r));
+	mu_p = clamp((r * mu + d) / r_p, -1.0, 1.0);
+	mu_s_p = clamp((r * mu_s + d * nu) / r_p, kInscatterMuSMin, 1.0);
 }
 
 #endif

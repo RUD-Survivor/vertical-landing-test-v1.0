@@ -103,7 +103,8 @@ void main()
         depthBufferValue,
         bMieRayPhase,
         tMaxMax,
-        bVariableSampleCount
+        bVariableSampleCount,
+        false
     );
 
     ss.scatteredLight = min(ss.scatteredLight, vec3(kMaxHalfFloat));
