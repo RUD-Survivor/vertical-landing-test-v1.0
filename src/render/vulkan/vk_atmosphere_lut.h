@@ -76,6 +76,11 @@ struct AtmoTuneParams {
     int segmentScatterMode = 0;
     // 壳内天空像素（clear depth）。0=Sky-View LUT，1=Inscatter 天空查表。
     int skyScatterMode = 0;
+
+    // ── ToPoint 内部量 debug（壳内/壳外；>0 覆盖合成输出）──────────────────
+    // 0=关 1=S0 2=S1 3=T 4=T*S1 5=S0-T*S1(相位前) 6=最终phased 7=段长d 8=hitGround
+    int   toPointDebugMode = 0;
+    float toPointDebugExposure = 10.0f;
 };
 
 // ── 单一数据源：每类行星的 Rayleigh/Mie/臭氧散射系数 ─────────────────────────
@@ -113,6 +118,8 @@ struct AtmoLutProfileKey {
     float groundAlbedo = 0.3f;
     float multipleScatteringFactor = 1.f;
     float mieAbsFraction = 0.1f;
+    // 烘焙语义修订号：改 Inscatter 烘焙公式时 bump，强制全量 bakeFull。
+    float inscatterBakeRev = 2.f; // 2 = 修复 top 边界 tMax≈0 烘黑
 
     static AtmoLutProfileKey fromTune(int32_t atmoIdx, float radiusKm, float thicknessKm,
                                       const AtmoTuneParams& t) {
@@ -129,6 +136,7 @@ struct AtmoLutProfileKey {
         k.groundAlbedo = t.groundAlbedo;
         k.multipleScatteringFactor = t.multipleScatteringFactor;
         k.mieAbsFraction = t.mieAbsFraction;
+        k.inscatterBakeRev = 2.f;
         return k;
     }
 
@@ -141,7 +149,8 @@ struct AtmoLutProfileKey {
             || ne(gMieOverride, o.gMieOverride)
             || ne(groundAlbedo, o.groundAlbedo)
             || ne(multipleScatteringFactor, o.multipleScatteringFactor)
-            || ne(mieAbsFraction, o.mieAbsFraction);
+            || ne(mieAbsFraction, o.mieAbsFraction)
+            || ne(inscatterBakeRev, o.inscatterBakeRev);
     }
 };
 

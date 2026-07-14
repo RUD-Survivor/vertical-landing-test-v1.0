@@ -273,16 +273,39 @@ vec3 atmoSampleInscatterSky(vec3 camRelPlanetKm, vec3 rayDir, vec3 sunDirToPlane
         bottomRadius, topRadius, hitGround, mieTint, gMie);
 }
 
-// Bruneton GetSkyRadianceToPoint：hitGround 仅在 p0 算一次；p1 用 (r_p,μ_p,μ_s_p) 同 ν
-vec3 atmoGetSkyRadianceToPoint(vec3 p0Rel, vec3 p1Rel, vec3 viewDir, vec3 sunDir,
-                                float bottomRadius, float topRadius,
-                                vec3 mieTint, float gMie)
+// ToPoint 中间量（F4 debug：区分 S0≈0 vs 相减归零）
+struct AtmoToPointDebug {
+    vec3  S0;          // LUT Rayleigh at p0（无相位）
+    vec3  S1;          // LUT Rayleigh at p1'
+    vec3  mie0;
+    vec3  mie1;
+    vec3  T;           // 段透射
+    vec3  T_S1;        // T * S1
+    vec3  diffR;       // max(S0 - T*S1, 0) 相位前
+    vec3  diffMie;     // max(mie0 - T*mie1, 0)
+    vec3  finalScattered;
+    float d;           // 段长 km
+    float hitGround;   // 0/1
+    float ok;          // 0=射线未碰大气
+};
+
+AtmoToPointDebug atmoEvalSkyRadianceToPointDebug(vec3 p0Rel, vec3 p1Rel, vec3 viewDir, vec3 sunDir,
+                                                  float bottomRadius, float topRadius,
+                                                  vec3 mieTint, float gMie)
 {
+    AtmoToPointDebug dbg;
+    dbg.S0 = dbg.S1 = dbg.mie0 = dbg.mie1 = dbg.T = dbg.T_S1 =
+        dbg.diffR = dbg.diffMie = dbg.finalScattered = vec3(0.0);
+    dbg.d = 0.0;
+    dbg.hitGround = 0.0;
+    dbg.ok = 0.0;
+
     vec3 p0 = p0Rel;
     if (length(p0) > topRadius) {
         if (!moveToTopAtmosphere(p0, viewDir, topRadius))
-            return vec3(0.0);
+            return dbg;
     }
+    dbg.ok = 1.0;
 
     AtmosphereParameters atmo;
     atmo.bottomRadius = bottomRadius;
@@ -297,29 +320,63 @@ vec3 atmoGetSkyRadianceToPoint(vec3 p0Rel, vec3 p1Rel, vec3 viewDir, vec3 sunDir
     nu = clamp(nu, -muBound, muBound);
 
     bool hitGround = inscatterRayIntersectsGround(atmo, r, mu);
-    float d = max(dot(p1Rel - p0, viewDir), 0.0);
+    dbg.hitGround = hitGround ? 1.0 : 0.0;
+    dbg.d = max(dot(p1Rel - p0, viewDir), 0.0);
 
-    vec3 transmittance = atmoGetTransmittanceBruneton(r, mu, d, hitGround, bottomRadius, topRadius);
+    dbg.T = atmoGetTransmittanceBruneton(r, mu, dbg.d, hitGround, bottomRadius, topRadius);
 
-    vec3 scattering0, mie0, scattering1, mie1;
     atmoGetCombinedReducedScattering(r, mu, mu_s, nu, hitGround,
-        bottomRadius, topRadius, mieTint, scattering0, mie0);
+        bottomRadius, topRadius, mieTint, dbg.S0, dbg.mie0);
 
     float r_p, mu_p, mu_s_p;
-    inscatterParamsAfterDistance(atmo, r, mu, mu_s, nu, d, r_p, mu_p, mu_s_p);
+    inscatterParamsAfterDistance(atmo, r, mu, mu_s, nu, dbg.d, r_p, mu_p, mu_s_p);
     atmoGetCombinedReducedScattering(r_p, mu_p, mu_s_p, nu, hitGround,
-        bottomRadius, topRadius, mieTint, scattering1, mie1);
+        bottomRadius, topRadius, mieTint, dbg.S1, dbg.mie1);
 
-    vec3 scattering = scattering0 - transmittance * scattering1;
-    vec3 singleMie  = mie0 - transmittance * mie1;
-    return atmoApplyBrunetonPhases(max(scattering, vec3(0.0)), max(singleMie, vec3(0.0)), nu, mu_s, gMie);
+    dbg.T_S1  = dbg.T * dbg.S1;
+    dbg.diffR = max(dbg.S0 - dbg.T_S1, vec3(0.0));
+    dbg.diffMie = max(dbg.mie0 - dbg.T * dbg.mie1, vec3(0.0));
+    dbg.finalScattered = atmoApplyBrunetonPhases(dbg.diffR, dbg.diffMie, nu, mu_s, gMie);
+    return dbg;
+}
+
+// 0=关 1=S0 2=S1 3=T 4=T*S1 5=diffR 6=final 7=d 8=hitGround
+vec3 atmoToPointDebugColor(int mode, AtmoToPointDebug dbg)
+{
+    if (dbg.ok < 0.5)
+        return vec3(0.2, 0.0, 0.2); // 紫：未进大气
+    if (mode == 1) return dbg.S0;
+    if (mode == 2) return dbg.S1;
+    if (mode == 3) return dbg.T;
+    if (mode == 4) return dbg.T_S1;
+    if (mode == 5) return dbg.diffR;
+    if (mode == 6) return dbg.finalScattered;
+    if (mode == 7) {
+        // 段长：绿=短(<50km) 红=很长(>=2000km)
+        float t = clamp(dbg.d / 2000.0, 0.0, 1.0);
+        return vec3(t, 1.0 - t, 0.05);
+    }
+    if (mode == 8)
+        return dbg.hitGround > 0.5 ? vec3(1.0, 0.2, 0.1) : vec3(0.1, 0.8, 1.0);
+    return dbg.finalScattered;
+}
+
+// Bruneton GetSkyRadianceToPoint：hitGround 仅在 p0 算一次；p1 用 (r_p,μ_p,μ_s_p) 同 ν
+vec3 atmoGetSkyRadianceToPoint(vec3 p0Rel, vec3 p1Rel, vec3 viewDir, vec3 sunDir,
+                                float bottomRadius, float topRadius,
+                                vec3 mieTint, float gMie)
+{
+    return atmoEvalSkyRadianceToPointDebug(p0Rel, p1Rel, viewDir, sunDir,
+        bottomRadius, topRadius, mieTint, gMie).finalScattered;
 }
 
 // [tNear,tFar] 段散射 + 段透射（Bruneton ToPoint）
+// debugMode>0 时 scattered 为中间量（由 frag 单独曝光可视化，不走 scene 合成）。
 AtmoMarchResult atmoSegmentInscatterMarch(vec3 camRelKm, vec3 rayDir,
                                          float tNear, float tFar, vec3 sunDir,
                                          float bottomRadius, float topRadius,
-                                         vec3 mieTint, float gMie)
+                                         vec3 mieTint, float gMie,
+                                         int debugMode)
 {
     AtmoMarchResult result;
     result.scattered = vec3(0.0);
@@ -335,8 +392,13 @@ AtmoMarchResult atmoSegmentInscatterMarch(vec3 camRelKm, vec3 rayDir,
             return result;
     }
 
-    result.scattered = atmoGetSkyRadianceToPoint(p0, p1, rayDir, sunDir,
-        bottomRadius, topRadius, mieTint, gMie);
+    AtmoToPointDebug dbg = atmoEvalSkyRadianceToPointDebug(
+        p0, p1, rayDir, sunDir, bottomRadius, topRadius, mieTint, gMie);
+
+    if (debugMode > 0)
+        result.scattered = atmoToPointDebugColor(debugMode, dbg);
+    else
+        result.scattered = dbg.finalScattered;
 
     AtmosphereParameters atmo;
     atmo.bottomRadius = bottomRadius;

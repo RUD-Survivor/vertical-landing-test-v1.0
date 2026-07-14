@@ -181,7 +181,9 @@ struct AtmoPushConstants {
     // 渲染算法（imgui_atmo_tuner）：0/1 枚举，见 AtmoTuneParams。
     int   segmentScatterMode;          // 4 — offset 176 (0=Inscatter ToPoint，1=Raymarch)
     int   skyScatterMode;              // 4 — offset 180 (0=Sky-View LUT，1=Inscatter 天空)
-};                         //            total: 184 bytes
+    int   toPointDebugMode;            // 4 — offset 184 (0=关；见 AtmoTuneParams)
+    float toPointDebugExposure;        // 4 — offset 188
+};                         //            total: 192 bytes
 
 // Terrain patch 专属 UBO（binding 1 of Set 0）
 // nodePos/nodeSide/nodeUp 已移至 push constants（每 draw call 更新），此处只保留每帧常量

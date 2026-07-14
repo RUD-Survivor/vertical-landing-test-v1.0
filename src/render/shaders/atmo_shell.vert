@@ -58,6 +58,8 @@ layout(push_constant) uniform PC {
     float inscatterDebugExposure;
     int   segmentScatterMode;
     int   skyScatterMode;
+    int   toPointDebugMode;
+    float toPointDebugExposure;
 } pc;
 
 layout(location = 0) out vec3 vWorldPos;

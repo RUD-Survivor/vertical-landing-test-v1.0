@@ -202,6 +202,20 @@ SingleScatteringResult integrateScatteredLuminance(
     float tBottom = raySphereIntersectNearest(worldPos, worldDir, kEarthOrigin, atmosphere.bottomRadius);
     float tTop = raySphereIntersectNearest(worldPos, worldDir, kEarthOrigin, atmosphere.topRadius);
 
+    // 观察点恰在大气顶球面时，raySphereIntersectNearest 对 top 的最近根为 t≈0
+    // （起点本身）。朝内（μ<0）的掠射/入射线会把 tMax 算成 0 → 整段 LUT 烘成黑。
+    // 太空看行星时 p0 落在 top 层，S0/S1 全黑即由此而来。改用到大气顶远侧出射距离。
+    {
+        float viewHeight = length(worldPos);
+        if (tTop >= 0.0 && tTop < 1e-3 && viewHeight > atmosphere.bottomRadius + 1e-3)
+        {
+            float muView = dot(worldDir, worldPos / max(viewHeight, 1e-4));
+            float tTopFar = inscatterDistanceToTop(atmosphere.topRadius, viewHeight, muView);
+            if (tTopFar > tTop)
+                tTop = tTopFar;
+        }
+    }
+
     float tMax = 0.0f;
     if (tBottom < 0.0f)
     {
@@ -219,6 +233,11 @@ SingleScatteringResult integrateScatteredLuminance(
         if (tTop > 0.0f)
         {
             tMax = min(tTop, tBottom);
+        }
+        else if (tTop == 0.0f && tBottom > 0.0f)
+        {
+            // top 根仍为 0 时：至少积到地面
+            tMax = tBottom;
         }
     }
 
@@ -312,8 +331,10 @@ SingleScatteringResult integrateScatteredLuminance(
             vec3 sunTerm = globalL * earthShadow * shadow * transmittanceToSun;
             vec3 S_ray = sunTerm * medium.scatteringRay;
             vec3 S_mie = sunTerm * medium.scatteringMie;
-            vec3 sint_ray = (S_ray - S_ray * sampleTransmittance) / medium.extinction;
-            vec3 sint_mie = (S_mie - S_mie * sampleTransmittance) / medium.extinction;
+            // ext→0 时 (S-S*T)/ext → S*dt，避免 NaN 写进 LUT
+            vec3 safeExt = max(medium.extinction, vec3(1e-8));
+            vec3 sint_ray = (S_ray - S_ray * sampleTransmittance) / safeExt;
+            vec3 sint_mie = (S_mie - S_mie * sampleTransmittance) / safeExt;
             L_ray += throughput * sint_ray;
             L_mie += throughput * sint_mie;
             S = S_ray + S_mie;

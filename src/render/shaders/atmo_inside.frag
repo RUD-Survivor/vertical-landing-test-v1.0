@@ -63,6 +63,8 @@ layout(push_constant) uniform PC {
     float inscatterDebugExposure; // 0=关；>0=Inscatter 天空 debug 曝光
     int   segmentScatterMode;     // 0=Inscatter ToPoint，1=Raymarch
     int   skyScatterMode;         // 0=Sky-View LUT，1=Inscatter 天空
+    int   toPointDebugMode;       // 0=关；1..8 见 atmo_scatter_common
+    float toPointDebugExposure;
 } pc;
 
 #define PC_RAYLEIGH vec3(pc.rayleighCoeffX, pc.rayleighCoeffY, pc.rayleighCoeffZ)
@@ -124,6 +126,24 @@ void main() {
     bool isSkyPixel = sceneDepthNdc >= skyDepthThresh;
 
     AtmoMarchResult march;
+    // ToPoint debug：强制段路径并输出中间量（覆盖天空/Raymarch 分支）
+    if (pc.toPointDebugMode > 0) {
+        march = atmoSegmentInscatterMarch(camRel, rayDir, tNear, tFar, sunDir,
+            pc.surfaceRadius, pc.outerRadius, vec3(pc.mieCoeff), pc.gMie,
+            pc.toPointDebugMode);
+        vec3 x = march.scattered;
+        // T / d / hitGround 已是可视化编码，不再乘曝光；其余 ACES×exposure
+        if (pc.toPointDebugMode != 3 && pc.toPointDebugMode != 7 && pc.toPointDebugMode != 8)
+            x = max(x * pc.toPointDebugExposure, vec3(0.0));
+        if (pc.toPointDebugMode == 3 || pc.toPointDebugMode == 7 || pc.toPointDebugMode == 8)
+            FragColor = vec4(clamp(x, vec3(0.0), vec3(1.0)), 1.0);
+        else {
+            vec3 toned = (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);
+            FragColor = vec4(toned, 1.0);
+        }
+        return;
+    }
+
     if (isSkyPixel) {
         if (pc.skyScatterMode == 1) {
             march.scattered = atmoSampleInscatterSky(camRel, rayDir, sunDir,
@@ -144,7 +164,7 @@ void main() {
             pc.surfaceRadius, pc.outerRadius, sunDir, cosTheta);
     } else {
         march = atmoSegmentInscatterMarch(camRel, rayDir, tNear, tFar, sunDir,
-            pc.surfaceRadius, pc.outerRadius, vec3(pc.mieCoeff), pc.gMie);
+            pc.surfaceRadius, pc.outerRadius, vec3(pc.mieCoeff), pc.gMie, 0);
     }
 
     float thickness = max(pc.outerRadius - pc.surfaceRadius, 1e-3);

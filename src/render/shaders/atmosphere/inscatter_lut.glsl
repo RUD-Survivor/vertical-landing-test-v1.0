@@ -33,8 +33,11 @@ void main()
     vec3 viewDir, sunDir;
     inscatterDirsFromParams(mu, mu_s, nu, viewDir, sunDir);
 
-    // 行星中心坐标系：观察点在 +Y 轴上（与 Transmittance bake 同约定）
-    vec3 worldPos = vec3(0.0, r, 0.0);
+    // 行星中心坐标系：观察点在 +Y 轴上（与 Transmittance bake 同约定）。
+    // 严格夹在 top 内侧，避免 r==topRadius 时 raySphere 最近根 t=0 导致整 texel 烘黑。
+    float rTrace = min(r, atmosphere.topRadius - max(kPlanetRadiusOffset, 0.01));
+    rTrace = max(rTrace, atmosphere.bottomRadius + kPlanetRadiusOffset);
+    vec3 worldPos = vec3(0.0, rTrace, 0.0);
     vec2 pixPos = vec2(workPos.xy) + vec2(0.5);
 
     // 略随高度增加步数；击地射线积分到地面，不击地积到大气顶

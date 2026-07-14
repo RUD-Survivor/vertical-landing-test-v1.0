@@ -47,6 +47,31 @@ inline void AtmoTunerImGui(bool* p_open, AtmoTuneParams& p, VkAtmoLutCache& lutC
         p.skyScatterMode == 1 ? "Inscatter" : "Sky-View");
 
     ImGui::Separator();
+    ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.35f, 1.0f), "ToPoint Debug（中间量）");
+    const char* tpDbg[] = {
+        "Off",
+        "1 S0 (LUT Rayleigh @p0)",
+        "2 S1 (LUT Rayleigh @p1')",
+        "3 T (segment transmittance)",
+        "4 T*S1",
+        "5 S0-T*S1 (pre-phase)",
+        "6 final phased",
+        "7 segment length d",
+        "8 hitGround (red=yes cyan=no)",
+    };
+    if (p.toPointDebugMode < 0 || p.toPointDebugMode > 8) p.toPointDebugMode = 0;
+    ImGui::Combo("ToPoint Viz", &p.toPointDebugMode, tpDbg, IM_ARRAYSIZE(tpDbg));
+    if (p.toPointDebugMode > 0) {
+        ImGui::SliderFloat("ToPointDbgExposure", &p.toPointDebugExposure, 0.1f, 200.0f, "%.1f",
+                           ImGuiSliderFlags_Logarithmic);
+        ImGui::TextDisabled("壳外 debug 时不过滤地表 depth，可看盘心弦。");
+        ImGui::TextDisabled("判读: S0黑=LUT烘黑/查表坏; S0亮但5黑=相减/T坏; 7绿短红长。");
+        ImGui::TextDisabled("若 S0 仍全黑：点下方「强制重烤」刷新 Inscatter（top 边界 tMax 修复）。");
+    }
+    if (ImGui::Button("Clear ToPoint Debug"))
+        p.toPointDebugMode = 0;
+
+    ImGui::Separator();
     ImGui::Text("大气壳");
     profileEdited |= ImGui::SliderFloat("ShellThickness (km)", &p.shellThicknessKm, 20.0f, 500.0f, "%.0f");
     ImGui::TextDisabled("改厚度会重烤 Transmittance LUT（topRadius 变了）。");

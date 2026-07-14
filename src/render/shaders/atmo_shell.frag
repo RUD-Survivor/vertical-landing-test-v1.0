@@ -61,6 +61,8 @@ layout(push_constant) uniform PC {
     float inscatterDebugExposure;
     int   segmentScatterMode;     // 0=Inscatter ToPoint，1=Raymarch
     int   skyScatterMode;         // 壳外未用；与 inside 对齐布局
+    int   toPointDebugMode;       // 0=关；1..8 ToPoint 中间量
+    float toPointDebugExposure;
 } pc;
 
 #define PC_RAYLEIGH vec3(pc.rayleighCoeffX, pc.rayleighCoeffY, pc.rayleighCoeffZ)
@@ -86,7 +88,8 @@ void main() {
     vec2  ndcXY    = clip.xy / clip.w;
     vec2  screenUv = vec2(ndcXY.x, -ndcXY.y) * 0.5 + 0.5;
     float sceneDepthNdc = texture(sampler2D(inSceneDepth, samp), screenUv).r;
-    if (sceneDepthNdc < myNdcDepth) discard;
+    // ToPoint debug：不过滤盘面 depth，才能可视化「太空→地表」弦
+    if (pc.toPointDebugMode == 0 && sceneDepthNdc < myNdcDepth) discard;
 
     vec3 planetCenter = pc.planetCenter.xyz;
     vec3 rayDir = -viewDirFromFrag;
@@ -109,6 +112,23 @@ void main() {
 
     vec3 camRel = camPos - planetCenter;
     AtmoMarchResult march;
+    if (pc.toPointDebugMode > 0) {
+        march = atmoSegmentInscatterMarch(
+            camRel, rayDir, tNear, tFar, sunDir,
+            pc.surfaceRadius, pc.outerRadius, vec3(pc.mieCoeff), pc.gMie,
+            pc.toPointDebugMode);
+        vec3 x = march.scattered;
+        if (pc.toPointDebugMode != 3 && pc.toPointDebugMode != 7 && pc.toPointDebugMode != 8)
+            x = max(x * pc.toPointDebugExposure, vec3(0.0));
+        if (pc.toPointDebugMode == 3 || pc.toPointDebugMode == 7 || pc.toPointDebugMode == 8)
+            FragColor = vec4(clamp(x, vec3(0.0), vec3(1.0)), 1.0);
+        else {
+            vec3 toned = (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);
+            FragColor = vec4(toned, 1.0);
+        }
+        return;
+    }
+
     if (pc.segmentScatterMode == 1) {
         float cosTheta = dot(rayDir, sunDir);
         march = raymarchAtmoSegment(
@@ -119,7 +139,7 @@ void main() {
     } else {
         march = atmoSegmentInscatterMarch(
             camRel, rayDir, tNear, tFar, sunDir,
-            pc.surfaceRadius, pc.outerRadius, vec3(pc.mieCoeff), pc.gMie);
+            pc.surfaceRadius, pc.outerRadius, vec3(pc.mieCoeff), pc.gMie, 0);
     }
 
     float camDist = length(camPos - planetCenter);
