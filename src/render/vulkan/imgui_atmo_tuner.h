@@ -22,7 +22,7 @@ inline void AtmoTunerImGui(bool* p_open, AtmoTuneParams& p, VkAtmoLutCache& lutC
     // 置顶：算法开关（不滚动也能看见）。改完只需重编宿主，不必重烤 LUT。
     if (p.segmentScatterMode < 0 || p.segmentScatterMode > 1) p.segmentScatterMode = 0;
     if (p.skyScatterMode < 0 || p.skyScatterMode > 1) p.skyScatterMode = 0;
-    if (p.shellDiskMode < 0 || p.shellDiskMode > 1) p.shellDiskMode = 0;
+    if (p.shellDiskMode < 0 || p.shellDiskMode > 2) p.shellDiskMode = 0;
 
     ImGui::TextColored(ImVec4(0.55f, 0.85f, 1.0f, 1.0f), "渲染算法");
     ImGui::Text("段散射（壳外 / 壳内有深度）");
@@ -40,23 +40,39 @@ inline void AtmoTunerImGui(bool* p_open, AtmoTuneParams& p, VkAtmoLutCache& lutC
         p.skyScatterMode = 1;
 
     ImGui::Text("壳外盘面");
-    if (ImGui::RadioButton("Disk AP (align inside)##disk", p.shellDiskMode == 0))
+    if (ImGui::RadioButton("Disk AP##disk", p.shellDiskMode == 0))
         p.shellDiskMode = 0;
     ImGui::SameLine();
-    if (ImGui::RadioButton("Depth discard (legacy)##disk", p.shellDiskMode == 1))
+    if (ImGui::RadioButton("Legacy discard##disk", p.shellDiskMode == 1))
         p.shellDiskMode = 1;
-    ImGui::TextDisabled("Disk AP：太空→地表弦做段散射+合成；legacy：场景比壳片近则丢弃（盘心无蓝雾）。");
+    ImGui::SameLine();
+    if (ImGui::RadioButton("Depth/Analytic blend##disk", p.shellDiskMode == 2))
+        p.shellDiskMode = 2;
+    ImGui::TextDisabled("0=全深 AP；1=盘心无 AP；2=出大气后 Depth→解析球混合（远距消同心纹）。");
+    if (p.shellDiskMode == 2) {
+        ImGui::SliderFloat("BlendStart (km past outer)", &p.depthApBlendStartKm, 0.0f, 5000.0f, "%.0f");
+        ImGui::SliderFloat("BlendEnd (km past outer)", &p.depthApBlendEndKm, 1.0f, 20000.0f, "%.0f");
+        if (p.depthApBlendEndKm < p.depthApBlendStartKm + 1.0f)
+            p.depthApBlendEndKm = p.depthApBlendStartKm + 1.0f;
+        ImGui::TextDisabled("camR∈[outer+Start, outer+End]：wDepth 1→0；再远全解析球。");
+    }
 
-    if (ImGui::Button("Reset Algorithm -> ToPoint + Sky-View + Disk AP")) {
+    if (ImGui::Button("Reset Algorithm -> ToPoint + Sky-View + Blend")) {
         p.segmentScatterMode = 0;
         p.skyScatterMode = 0;
-        p.shellDiskMode = 0;
+        p.shellDiskMode = 2;
+        p.depthApBlendStartKm = 0.0f;
+        p.depthApBlendEndKm = 1000.0f;
     }
-    ImGui::TextDisabled("当前: Segment=%s | Sky=%s | Disk=%s",
-        p.segmentScatterMode == 1 ? "Raymarch" : "ToPoint",
-        p.skyScatterMode == 1 ? "Inscatter" : "Sky-View",
-        p.shellDiskMode == 1 ? "LegacyDiscard" : "DiskAP");
-
+    {
+        const char* diskName = "DiskAP";
+        if (p.shellDiskMode == 1) diskName = "LegacyDiscard";
+        else if (p.shellDiskMode == 2) diskName = "DepthBlend";
+        ImGui::TextDisabled("当前: Segment=%s | Sky=%s | Disk=%s",
+            p.segmentScatterMode == 1 ? "Raymarch" : "ToPoint",
+            p.skyScatterMode == 1 ? "Inscatter" : "Sky-View",
+            diskName);
+    }
     ImGui::Separator();
     ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.35f, 1.0f), "ToPoint Debug（中间量）");
     const char* tpDbg[] = {

@@ -10,8 +10,9 @@
 // 散射：GetSkyRadianceToPoint 段 Inscatter LUT；曝光用 atmoUnifiedExposure()。
 //
 // 壳外盘面（F4 shellDiskMode）：
-//   0 Disk AP：对齐壳内——用地表/场景深度截断 [tNear,tFar]，盘心有空气透视
-//   1 Legacy ：场景 NDC 比壳片近则 discard（旧行为，盘心无 AP）
+//   0 Disk AP：场景深度截 [tNear,tFar]
+//   1 Legacy ：场景 NDC 比壳片近则 discard（盘心无 AP）
+//   2 Blend  ：出大气后 Depth↔解析球渐进混合（消远距同心纹）
 // ==========================================================================
 
 #define PRIMARY_STEPS 32
@@ -67,7 +68,9 @@ layout(push_constant) uniform PC {
     int   skyScatterMode;         // 壳外未用；与 inside 对齐布局
     int   toPointDebugMode;       // 0=关；1..8 ToPoint 中间量
     float toPointDebugExposure;
-    int   shellDiskMode;          // 0=Disk AP；1=legacy depth discard
+    int   shellDiskMode;          // 0=Disk AP；1=legacy discard；2=Depth↔解析球混合
+    float depthApBlendStartKm;    // mode2：相对 outer 的混合起点 km
+    float depthApBlendEndKm;      // mode2：相对 outer 的混合终点 km
 } pc;
 
 #define PC_RAYLEIGH vec3(pc.rayleighCoeffX, pc.rayleighCoeffY, pc.rayleighCoeffZ)
@@ -118,7 +121,9 @@ void main() {
         }
     }
 
-    // Disk AP（对齐壳内）：用场景深度再截一次；遮挡物在大气入口前则丢弃
+    // Disk AP / Blend：用场景深度截断；遮挡物在大气入口前则丢弃
+    // mode 0：全深；mode 2：出大气后混到解析球；mode 1 走上方 legacy discard
+    float camDist = length(camPos - planetCenter);
     if (!useLegacyDiscard) {
         float skyDepthThresh = clamp(pc.skyDepthThreshold, 0.0, 1.0);
         if (sceneDepthNdc < skyDepthThresh) {
@@ -127,11 +132,11 @@ void main() {
             vec4 viewP = inverse(frame.proj) * depthClip;
             viewP /= viewP.w;
             vec4 worldP = inverse(frame.view) * viewP;
-            float tScene = length(worldP.xyz - camPos);
-            // 飞船等挡在大气前：不画壳
-            if (tScene < tNear)
+            float tScene = max(dot(worldP.xyz - camPos, rayDir), 0.0);
+            int diskMode = (pc.shellDiskMode == 2) ? 2 : 0;
+            if (!atmoApplyDepthFarMix(tFar, tNear, tScene, camDist, pc.outerRadius,
+                    diskMode, pc.depthApBlendStartKm, pc.depthApBlendEndKm))
                 discard;
-            tFar = min(tFar, tScene);
         }
     }
 
@@ -169,7 +174,6 @@ void main() {
             pc.surfaceRadius, pc.outerRadius, vec3(pc.mieCoeff), pc.gMie, 0);
     }
 
-    float camDist = length(camPos - planetCenter);
     float thickness = max(pc.outerRadius - pc.surfaceRadius, 1e-3);
     float altNorm = max(camDist - pc.surfaceRadius, 0.0) / thickness;
     float nightFactor = mix(0.05, 1.0, pc.sunVisibility);

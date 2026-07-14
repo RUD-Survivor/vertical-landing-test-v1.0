@@ -61,6 +61,8 @@ layout(push_constant) uniform PC {
     int   toPointDebugMode;
     float toPointDebugExposure;
     int   shellDiskMode;
+    float depthApBlendStartKm;
+    float depthApBlendEndKm;
 } pc;
 
 layout(location = 0) out vec3 vWorldPos;

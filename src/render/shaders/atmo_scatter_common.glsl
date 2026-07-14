@@ -84,6 +84,36 @@ bool intersectSphereAtCenter(vec3 ro, vec3 rd, vec3 center, float radius, out fl
     return true;
 }
 
+// Disk AP / Blend：tAnalytic 已含解析球截断；tScene 为沿射线场景深度。
+// shellDiskMode 0：全信深度；2：出大气后 wDepth 1→0 混到解析球。
+// 返回 false → 遮挡物在大气入口前，调用方 discard。
+bool atmoApplyDepthFarMix(
+    inout float tFar,
+    float tNear,
+    float tScene,
+    float camDist,
+    float outerRadius,
+    int   shellDiskMode,
+    float blendStartKm,
+    float blendEndKm)
+{
+    if (tScene < tNear)
+        return false;
+
+    float tAnalytic = tFar;
+    float tDepth    = min(tAnalytic, tScene);
+
+    float wDepth = 1.0;
+    if (shellDiskMode == 2) {
+        float r0 = outerRadius + max(blendStartKm, 0.0);
+        float r1 = outerRadius + max(blendEndKm, blendStartKm + 1.0);
+        wDepth = 1.0 - smoothstep(r0, r1, camDist);
+    }
+
+    tFar = mix(tAnalytic, tDepth, wDepth);
+    return true;
+}
+
 float rayleighPhaseAtmo(float cosTheta) {
     return 3.0 / (16.0 * 3.14159265359) * (1.0 + cosTheta * cosTheta);
 }

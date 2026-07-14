@@ -193,8 +193,11 @@ struct AtmoPushConstants {
     int   skyScatterMode;              // 4 — offset 180 (0=Sky-View LUT，1=Inscatter 天空)
     int   toPointDebugMode;            // 4 — offset 184 (0=关；见 AtmoTuneParams)
     float toPointDebugExposure;        // 4 — offset 188
-    int   shellDiskMode;               // 4 — offset 192 (0=盘面 AP 对齐壳内；1=旧 discard)
-};                         //            total: 196 bytes
+    int   shellDiskMode;               // 4 — offset 192 (0=Disk AP；1=legacy discard；2=出大气后 Depth↔解析球混合)
+    // mode=2：camDist 在 [outer+start, outer+end] 从信深度渐变到信解析球
+    float depthApBlendStartKm;         // 4 — offset 196 (相对 outerRadius 起点 km，默认 0)
+    float depthApBlendEndKm;           // 4 — offset 200 (相对 outerRadius 终点 km，默认 1000)
+};                         //            total: 204 bytes
 
 // Terrain patch 专属 UBO（binding 1 of Set 0）
 // nodePos/nodeSide/nodeUp 已移至 push constants（每 draw call 更新），此处只保留每帧常量

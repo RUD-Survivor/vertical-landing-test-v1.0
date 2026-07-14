@@ -65,7 +65,9 @@ layout(push_constant) uniform PC {
     int   skyScatterMode;         // 0=Sky-View LUT，1=Inscatter 天空
     int   toPointDebugMode;       // 0=关；1..8 见 atmo_scatter_common
     float toPointDebugExposure;
-    int   shellDiskMode;          // 壳外专用；布局对齐 AtmoPushConstants
+    int   shellDiskMode;          // 0=Disk；1=legacy；2=Blend（壳内近顶可用）
+    float depthApBlendStartKm;
+    float depthApBlendEndKm;
 } pc;
 
 #define PC_RAYLEIGH vec3(pc.rayleighCoeffX, pc.rayleighCoeffY, pc.rayleighCoeffZ)
@@ -117,8 +119,12 @@ void main() {
         vec4 viewP = inverse(frame.proj) * clip;
         viewP     /= viewP.w;
         vec4 worldP = inverse(frame.view) * viewP;
-        float tScene = length(worldP.xyz - camPos);
-        tFar = min(tFar, tScene);
+        float tScene = max(dot(worldP.xyz - camPos, rayDir), 0.0);
+        // mode2：出大气混合；其余算法位在壳内仍全信深度（diskMode=0）
+        int diskMode = (pc.shellDiskMode == 2) ? 2 : 0;
+        if (!atmoApplyDepthFarMix(tFar, tNear, tScene, camDist, pc.outerRadius,
+                diskMode, pc.depthApBlendStartKm, pc.depthApBlendEndKm))
+            discard;
     }
 
     if (tFar - tNear <= 0.0) discard;
