@@ -149,6 +149,7 @@ inline void AtmoTunerImGui(bool* p_open, AtmoTuneParams& p, VkAtmoLutCache& lutC
     ImGui::Text("spaceVisibility（旧壳内星空穿透；统一合成后影响较小）");
     ImGui::SliderFloat("VisStart (altNorm)", &p.spaceVisStart, 0.0f, 1.0f, "%.2f");
     ImGui::SliderFloat("VisEnd (altNorm)",   &p.spaceVisEnd,   0.0f, 1.5f, "%.2f");
+    ImGui::TextDisabled("程序化星场/银河细节：F5 星空调参面板。");
 
     ImGui::Separator();
     ImGui::Text("曝光基准（建议 InnerFar ≈ Outer，减少穿壳跳变）");

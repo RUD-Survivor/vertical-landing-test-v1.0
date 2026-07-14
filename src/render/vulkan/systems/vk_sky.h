@@ -1,8 +1,7 @@
 #pragma once
 // ==========================================================================
-// vk_sky.h — 天空盒渲染子系统
-// 全屏三角形（无顶点缓冲），在几何 pass 最后绘制，填充非几何像素。
-// 内部自行计算 inv(proj * view)，调用方只需传 view/proj 数组。
+// vk_sky.h — 天空盒渲染子系统 + 程序化星空调参
+// 全屏三角形（无顶点缓冲），几何 pass 早期绘制。
 // ==========================================================================
 
 #include "../vk_context.h"
@@ -12,9 +11,27 @@
 #include <cstring>
 #include <cmath>
 
+// 程序化星空 / 银河调参（imgui_sky_tuner.h，F5）
+struct SkyTuneParams {
+    float exposure          = 0.28f;
+    float starDensity       = 1.5f;
+    float starBrightness    = 0.18f;
+    float starSize          = 0.25f;
+    float glowStrength      = 0.45f;
+    float milkyWayIntensity = 1.4f;
+    float milkyWayWidth     = 0.5f;
+    float dustStrength      = 1.35f;
+    float galacticCoreBoost = 1.2f;
+    float colorVariety      = 1.0f;
+    float bgLevel           = 1.0f;
+    float galaxyYaw         = 0.55f;  // rad — 银道朝向
+    float galaxyPitch       = 1.05f;  // rad — ~60° 倾角观感
+};
+
 struct VkSkySystem {
     VkSkyboxPipeline     pipe;
     VkDescriptorManager* desc = nullptr;
+    SkyTuneParams        tune;
 
     // -----------------------------------------------------------------------
     bool init(VulkanContext& ctx, VkDescriptorManager& d,
@@ -32,9 +49,9 @@ struct VkSkySystem {
     void shutdown(VkDevice d) { pipe.shutdown(d); }
 
     // -----------------------------------------------------------------------
-    // 绘制天空盒（几何 pass 末尾调用）
+    // 绘制天空盒
     //   view/proj : 列主序 float[16]
-    //   vibrancy  : 星场饱和度（1.0 = 正常）
+    //   vibrancy  : 场景昼夜衰减（1.0 = 正常；白天由 flight_scene 压低）
     void draw(VkCommandBuffer cmd, int frameIdx,
               const float view[16], const float proj[16],
               float vibrancy = 1.0f) {
@@ -49,7 +66,20 @@ struct VkSkySystem {
 
         SkyboxPushConstants pc{};
         memcpy(pc.invViewProj, invVP, 64);
-        pc.skyVibrancy = vibrancy;
+        pc.skyVibrancy       = vibrancy;
+        pc.exposure          = tune.exposure;
+        pc.starDensity       = tune.starDensity;
+        pc.starBrightness    = tune.starBrightness;
+        pc.starSize          = tune.starSize;
+        pc.glowStrength      = tune.glowStrength;
+        pc.milkyWayIntensity = tune.milkyWayIntensity;
+        pc.milkyWayWidth     = tune.milkyWayWidth;
+        pc.dustStrength      = tune.dustStrength;
+        pc.galacticCoreBoost = tune.galacticCoreBoost;
+        pc.colorVariety      = tune.colorVariety;
+        pc.bgLevel           = tune.bgLevel;
+        pc.galaxyYaw         = tune.galaxyYaw;
+        pc.galaxyPitch       = tune.galaxyPitch;
         vkCmdPushConstants(cmd, pipe.layout,
             VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
             0, sizeof(SkyboxPushConstants), &pc);
@@ -57,7 +87,6 @@ struct VkSkySystem {
     }
 
 private:
-    // 列主序 4×4 矩阵乘法 C = A * B
     static void mul4x4(const float A[16], const float B[16], float C[16]) {
         for (int r = 0; r < 4; r++)
             for (int c = 0; c < 4; c++) {
@@ -67,7 +96,6 @@ private:
             }
     }
 
-    // 列主序 4×4 矩阵求逆（解析法，行列式近零时返回 false）
     static bool inv4x4(const float M[16], float inv[16]) {
         float s0=M[0]*M[5]-M[4]*M[1], s1=M[0]*M[9]-M[8]*M[1], s2=M[0]*M[13]-M[12]*M[1];
         float s3=M[4]*M[9]-M[8]*M[5], s4=M[4]*M[13]-M[12]*M[5], s5=M[8]*M[13]-M[12]*M[9];

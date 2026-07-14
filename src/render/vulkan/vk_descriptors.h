@@ -65,13 +65,28 @@ struct PlanetPushConstants {
 
 // -----------------------------------------------------------------------
 // SkyboxPushConstants — fullscreen triangle skybox (no vertex buffer)
-// 80 bytes: mat4 invViewProj(64) + float skyVibrancy(4) + pad(12)
+// 128 bytes: invViewProj(64) + vibrancy/tune floats (64). Matches SkyTuneParams.
 // -----------------------------------------------------------------------
 struct SkyboxPushConstants {
-    float invViewProj[16]; // 64 bytes — offset  0
-    float skyVibrancy;     //  4 bytes — offset 64
-    float _pad[3];         // 12 bytes — offset 68
-};                         //            total: 80 bytes
+    float invViewProj[16];     // 64 — offset  0
+    float skyVibrancy;         //  4 — offset 64 (场景昼夜衰减，与 tune 相乘)
+    float exposure;            //  4 — offset 68
+    float starDensity;         //  4 — offset 72
+    float starBrightness;      //  4 — offset 76
+    float starSize;            //  4 — offset 80
+    float glowStrength;        //  4 — offset 84
+    float milkyWayIntensity;   //  4 — offset 88
+    float milkyWayWidth;       //  4 — offset 92
+    float dustStrength;        //  4 — offset 96
+    float galacticCoreBoost;   //  4 — offset 100
+    float colorVariety;        //  4 — offset 104
+    float bgLevel;             //  4 — offset 108
+    float galaxyYaw;           //  4 — offset 112 (银道倾角/朝向，弧度)
+    float galaxyPitch;         //  4 — offset 116
+    float _pad[2];             //  8 — offset 120
+};                             //      total: 128 bytes
+
+static_assert(sizeof(SkyboxPushConstants) == 128, "SkyboxPushConstants must be 128 bytes");
 
 // -----------------------------------------------------------------------
 // ExhaustPushConstants — volumetric plume (additive blend)
