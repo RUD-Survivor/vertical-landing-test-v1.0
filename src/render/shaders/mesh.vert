@@ -11,14 +11,17 @@ layout(set = 0, binding = 0) uniform FrameUBO {
 } frame;
 
 // Push constants: per-object transform and material params
-// 注意：当与星球 frag shader 配对时，push constant 块必须包含 planetCenter
-// 以保持跨阶段一致性（Vulkan 规范要求 push constant 块布局相同）
+// 与 PlanetPushConstants / 行星 frag 布局一致（含 lightDir；vert 阶段不用）
 layout(push_constant) uniform PC {
     mat4  model;
     vec4  baseColor;
     vec4  planetCenter;  // 仅在星球管线中使用（offset 80）
     float ambientStr;    // offset 96
     int   hasTexture;    // offset 100
+    float lightDirX;     // offset 104 — 行星→太阳（勿用 vec3，std430 会错位）
+    float lightDirY;     // offset 108
+    float lightDirZ;     // offset 112
+    float _padLight;     // offset 116
 } pc;
 
 layout(location = 0) in vec3 aPos;

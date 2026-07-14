@@ -76,17 +76,20 @@ struct VkRenderer3D {
 
     // shaderKey: "earth"/"mars"/"venus"/"jupiter"/"gas_giant"/"barren"/"mercury"/"moon"/
     //            "saturn"/"uranus"/"neptune"，未知 key 降级为 drawMesh
+    // lightDir*: 归一化「行星→太阳」，经 push constant 传入（见 PlanetPushConstants）
     void drawPlanet(VkCommandBuffer cmd, const std::string& meshId, const float model[16],
                     float cx, float cy, float cz,
+                    float lx, float ly, float lz,
                     float r=1.f, float g=1.f, float b=1.f,
                     const std::string& shaderKey="earth") {
-        scene.drawPlanet(cmd, meshId, model, cx, cy, cz, r, g, b, shaderKey);
+        scene.drawPlanet(cmd, meshId, model, cx, cy, cz, lx, ly, lz, r, g, b, shaderKey);
     }
 
     // planetRadius: render units，传给 ring.frag 做归一化
     void drawRing(VkCommandBuffer cmd, const std::string& meshId, const float model[16],
-                  float cx, float cy, float cz, float planetRadius) {
-        scene.drawRing(cmd, meshId, model, cx, cy, cz, planetRadius);
+                  float cx, float cy, float cz, float planetRadius,
+                  float lx, float ly, float lz) {
+        scene.drawRing(cmd, meshId, model, cx, cy, cz, planetRadius, lx, ly, lz);
     }
 
     // SVO — 与普通 mesh 相同顶点格式，走 svo.frag（per-vertex 颜色 + 三平面噪声）
@@ -353,7 +356,8 @@ struct VkRenderer3D {
         }
 
         // ---- 2. 行星表面（不透明，共用 "earth" unit sphere mesh） ----
-        // 逐行星更新光照方向（匹配 OpenGL per-planet lightDir）
+        // 每颗行星的「→太阳」方向经 push constant 传入；勿改 FrameUBO（录制期改
+        // 写同一份 UBO，GPU 执行时只见最后一次写入，其它星向阳面会错）。
         for (const auto& cd : snap.celestials) {
             // 当地形四叉树补丁存在时，跳过地球程序噪声球体（terrain 已覆盖）
             if (cd.bodyIdx == 3 && !snap.terrainPatches.empty()) continue;
@@ -361,22 +365,22 @@ struct VkRenderer3D {
             float lx = snap.sunWorldPos[0] - cd.center[0];
             float ly = snap.sunWorldPos[1] - cd.center[1];
             float lz = snap.sunWorldPos[2] - cd.center[2];
-            scene.updateLightDir(snap.frameIndex % 2, lx, ly, lz);
+            float llen = sqrtf(lx*lx + ly*ly + lz*lz);
+            if (llen > 1e-6f) { lx /= llen; ly /= llen; lz /= llen; }
+            else { lx = snap.lightDir[0]; ly = snap.lightDir[1]; lz = snap.lightDir[2]; }
 
             drawPlanet(cmd, "earth", cd.model,
                        cd.center[0], cd.center[1], cd.center[2],
+                       lx, ly, lz,
                        cd.r, cd.g, cd.b, cd.shaderKey);
 
             // 土星环
             if (cd.hasRing && hasMesh("ring")) {
                 drawRing(cmd, "ring", cd.model,
                          cd.center[0], cd.center[1], cd.center[2],
-                         cd.radius);
+                         cd.radius, lx, ly, lz);
             }
         }
-        // 恢复全局光照方向（火箭/发射台等用）
-        scene.updateLightDir(snap.frameIndex % 2,
-            snap.lightDir[0], snap.lightDir[1], snap.lightDir[2]);
 
         // ---- 3. 地形（不透明，与行星表面同层，先于大气/轨道线） ----
         if (!snap.terrainPatches.empty()) {

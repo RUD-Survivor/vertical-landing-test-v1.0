@@ -15,6 +15,10 @@ layout(push_constant) uniform PC {
     vec4  planetCenter;
     float ambientStr;
     int   hasTexture;
+    float lightDirX;     // planet->sun (scalar; avoid vec3 std430 align)
+    float lightDirY;
+    float lightDirZ;
+    float _padLight;
 } pc;
 
 layout(location = 0) in vec3 vWorldPos;
@@ -36,7 +40,7 @@ float noise3d(vec3 p) {
 float fbm(vec3 p, int oct) { float v=0.0,a=0.5; for(int i=0;i<oct;i++){v+=noise3d(p)*a;p=p*2.07+vec3(0.131,-0.217,0.344);a*=0.48;} return v; }
 
 void main() {
-    vec3 N = normalize(vNormal); vec3 L = normalize(frame.lightDir);
+    vec3 N = normalize(vNormal); vec3 L = normalize(vec3(pc.lightDirX, pc.lightDirY, pc.lightDirZ));
     vec3 V = normalize(frame.viewPos - vWorldPos);
     vec3 sph = normalize(vWorldPos - pc.planetCenter.xyz);
     vec3 tc = sph * 5.0;

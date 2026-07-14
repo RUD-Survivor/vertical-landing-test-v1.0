@@ -37,21 +37,31 @@ struct MeshPushConstants {
 };                         //           total: 120 bytes
 
 // -----------------------------------------------------------------------
-// PlanetPushConstants — 行星着色器扩展（在 MeshPushConstants 基础上追加
-// planetCenter.xyz，供 earth.frag 重建 vLocalPos）
-// 104 bytes total (< 128 byte minimum guarantee)
+// PlanetPushConstants — 行星/土星环表面绘制
 // -----------------------------------------------------------------------
-// 字段顺序保证 GLSL std430 与 C++ sizeof 一致（均 104 字节，无隐式 padding）：
-//   mat4(64) + vec4 baseColor(16) + vec4 planetCenter(16) + float(4) + int(4)
+// 字段顺序保证 GLSL std430 与 C++ sizeof 一致（120 字节，无隐式 padding）：
+//   mat4(64) + vec4 baseColor(16) + vec4 planetCenter(16)
+//   + float ambientStr(4) + int hasTexture(4) + float lightDir[3](12) + pad(4)
 // 注意：vec4 planetCenter 必须在 float/int 标量之前，否则 GLSL std430 会在
-// offset 88 处插入 8 字节 padding 使块大小变为 112 字节（与 C++ 不一致）。
+// offset 88 处插入 8 字节 padding。
+//
+// lightDir 必须放 push constant，不能靠录制时改 FrameUBO：Vulkan 录制与执行
+// 分离，同一份 mapped UBO 在 submit 时只剩最后一次写入（通常是恢复后的
+// 「火箭→太阳」），会导致除近地地球外其它行星向阳面全错。大气已用 per-draw
+// sunDir PC；地表与之对齐。
+//
+// GLSL 侧禁止用 vec3 lightDir：std430 下 vec3 按 16 字节对齐，hasTexture 后
+// 会从 offset 112 起读，丢掉 C++ 写在 104/108 的 lx/ly，亮面会错（曾表现为
+// 竖直朝上）。与 AtmoPushConstants 一样，shader 用 lightDirX/Y/Z 三个 float。
 struct PlanetPushConstants {
     float model[16];       // 64 bytes — offset   0
     float baseColor[4];    // 16 bytes — offset  64
     float planetCenter[4]; // 16 bytes — offset  80 (.xyz = center world pos)
     float ambientStr;      //  4 bytes — offset  96
     int   hasTexture;      //  4 bytes — offset 100
-};                         //           total: 104 bytes
+    float lightDir[3];     // 12 bytes — offset 104 (归一化，行星→太阳；GLSL=X/Y/Z)
+    float _padLight;       //  4 bytes — offset 116
+};                         //           total: 120 bytes
 
 // -----------------------------------------------------------------------
 // SkyboxPushConstants — fullscreen triangle skybox (no vertex buffer)

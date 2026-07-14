@@ -346,8 +346,10 @@ struct VkSceneSystem {
     // -----------------------------------------------------------------------
     // shaderKey: "earth"/"mars"/"venus"/"jupiter"/"gas_giant"/"barren"/"mercury"/
     //            "moon"/"saturn"/"uranus"/"neptune"，默认 "earth"
+    // lightDir*: 已归一化「行星→太阳」；写入 push constant，勿依赖 FrameUBO 逐 draw 改写
     void drawPlanet(VkCommandBuffer cmd, const std::string& meshId, const float model[16],
                     float cx, float cy, float cz,
+                    float lx, float ly, float lz,
                     float r=1.f, float g=1.f, float b=1.f,
                     const std::string& shaderKey="earth") {
         auto pit = planetPipes.find(shaderKey);
@@ -362,6 +364,7 @@ struct VkSceneSystem {
         pc.baseColor[0]=r; pc.baseColor[1]=g; pc.baseColor[2]=b; pc.baseColor[3]=1.f;
         pc.planetCenter[0]=cx; pc.planetCenter[1]=cy; pc.planetCenter[2]=cz; pc.planetCenter[3]=0.f;
         pc.ambientStr = 0.008f; pc.hasTexture = 0;
+        pc.lightDir[0]=lx; pc.lightDir[1]=ly; pc.lightDir[2]=lz; pc._padLight = 0.f;
         vkCmdPushConstants(cmd, pit->second.layout,
             VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
             0, sizeof(PlanetPushConstants), &pc);
@@ -372,7 +375,8 @@ struct VkSceneSystem {
 
     // -----------------------------------------------------------------------
     void drawRing(VkCommandBuffer cmd, const std::string& meshId, const float model[16],
-                  float cx, float cy, float cz, float planetRadius) {
+                  float cx, float cy, float cz, float planetRadius,
+                  float lx, float ly, float lz) {
         if (ringPipe.pipeline == VK_NULL_HANDLE) return;
         auto it = meshCache.find(meshId);
         if (it == meshCache.end()) return;
@@ -384,6 +388,7 @@ struct VkSceneSystem {
         pc.planetCenter[0]=cx; pc.planetCenter[1]=cy; pc.planetCenter[2]=cz; pc.planetCenter[3]=0.f;
         pc.ambientStr = planetRadius;
         pc.hasTexture = 0;
+        pc.lightDir[0]=lx; pc.lightDir[1]=ly; pc.lightDir[2]=lz; pc._padLight = 0.f;
         vkCmdPushConstants(cmd, ringPipe.layout,
             VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
             0, sizeof(PlanetPushConstants), &pc);

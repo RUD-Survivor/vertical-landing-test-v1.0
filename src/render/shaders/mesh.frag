@@ -18,6 +18,10 @@ layout(push_constant) uniform PC {
     vec4  planetCenter;  // 与 mesh.vert 保持一致（mesh 管线中未使用）
     float ambientStr;
     int   hasTexture;
+    float lightDirX;     // 与 mesh.vert / PlanetPushConstants 一致（勿用 vec3）
+    float lightDirY;
+    float lightDirZ;
+    float _padLight;
 } pc;
 
 layout(location = 0) in vec3 vWorldPos;

@@ -146,13 +146,13 @@ struct VkMeshPipeline {
         dynState.pDynamicStates    = dynStates;
 
         // --- Pipeline layout: Set 0 + Set 1 + push constants ---
-        // 使用 PlanetPushConstants 的大小（104 bytes），使 mesh pipeline 与
+        // 使用 PlanetPushConstants 的大小（120 bytes），使 mesh pipeline 与
         // planet pipeline 的 layout 兼容（Vulkan 要求 pcRange 一致才能在同
         // 一 cmd buffer 内跨 pipeline 复用 descriptor set 绑定）。
         VkPushConstantRange pcRange{};
         pcRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
         pcRange.offset     = 0;
-        pcRange.size       = sizeof(PlanetPushConstants);  // 104 bytes
+        pcRange.size       = sizeof(PlanetPushConstants);  // 120 bytes
 
         VkDescriptorSetLayout setLayouts[] = { desc.set0Layout, desc.set1Layout };
         VkPipelineLayoutCreateInfo layoutCI{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
@@ -219,7 +219,7 @@ struct VkMeshPipeline {
 // VkPlanetPipeline — 行星表面管线（复用 mesh.vert，专用 frag 着色器）
 //
 // 与 VkMeshPipeline 共享相同的 descriptor set layout（Set 0 FrameUBO +
-// Set 1 sampler），push constant range 同为 104 bytes（PlanetPushConstants），
+// Set 1 sampler），push constant range 同为 120 bytes（PlanetPushConstants），
 // 因此两者 layout 完全兼容，descriptor set 绑定可跨 pipeline 复用。
 // -----------------------------------------------------------------------
 struct VkPlanetPipeline {
@@ -296,7 +296,7 @@ struct VkPlanetPipeline {
 
         VkPushConstantRange pcRange{};
         pcRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-        pcRange.size       = sizeof(PlanetPushConstants);  // 104 bytes
+        pcRange.size       = sizeof(PlanetPushConstants);  // 120 bytes
 
         VkDescriptorSetLayout setLayouts[] = { desc.set0Layout, desc.set1Layout };
         VkPipelineLayoutCreateInfo layoutCI{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
@@ -447,7 +447,7 @@ inline bool buildPipeline(VkDevice device,
 
 // -----------------------------------------------------------------------
 // VkRingPipeline — Saturn ring (alpha blend, depth test, no depth write)
-// Layout matches VkPlanetPipeline (PlanetPushConstants 104 bytes, Set 0+1).
+// Layout matches VkPlanetPipeline (PlanetPushConstants 120 bytes, Set 0+1).
 // pc.ambientStr = planet radius in render units.
 // -----------------------------------------------------------------------
 struct VkRingPipeline {

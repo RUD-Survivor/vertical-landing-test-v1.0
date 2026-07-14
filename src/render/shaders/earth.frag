@@ -10,7 +10,7 @@ layout(set = 0, binding = 0) uniform FrameUBO {
     float time;
 } frame;
 
-// Push constants (PlanetPushConstants — 104 bytes, std430 无 padding)
+// Push constants (PlanetPushConstants — 120 bytes, std430 无 padding)
 // 字段顺序与 C++ struct 对齐：vec4 planetCenter 必须在 float/int 之前
 layout(push_constant) uniform PC {
     mat4  model;
@@ -18,6 +18,10 @@ layout(push_constant) uniform PC {
     vec4  planetCenter;  // .xyz = world-space planet center (offset 80)
     float ambientStr;    // offset 96
     int   hasTexture;    // offset 100
+    float lightDirX;     // planet->sun (scalar; avoid vec3 std430 align)
+    float lightDirY;
+    float lightDirZ;
+    float _padLight;
 } pc;
 
 layout(location = 0) in vec3 vWorldPos;
@@ -79,7 +83,7 @@ float ridgeNoise(vec3 p, int octaves) {
 
 void main() {
     vec3 N = normalize(vNormal);
-    vec3 L = normalize(frame.lightDir);
+    vec3 L = normalize(vec3(pc.lightDirX, pc.lightDirY, pc.lightDirZ));
     vec3 V = normalize(frame.viewPos - vWorldPos);
     vec3 H = normalize(L + V);
 
