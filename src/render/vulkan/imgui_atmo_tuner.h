@@ -22,6 +22,7 @@ inline void AtmoTunerImGui(bool* p_open, AtmoTuneParams& p, VkAtmoLutCache& lutC
     // 置顶：算法开关（不滚动也能看见）。改完只需重编宿主，不必重烤 LUT。
     if (p.segmentScatterMode < 0 || p.segmentScatterMode > 1) p.segmentScatterMode = 0;
     if (p.skyScatterMode < 0 || p.skyScatterMode > 1) p.skyScatterMode = 0;
+    if (p.mieStorageMode < 0 || p.mieStorageMode > 1) p.mieStorageMode = 0;
     if (p.shellDiskMode < 0 || p.shellDiskMode > 2) p.shellDiskMode = 0;
 
     ImGui::TextColored(ImVec4(0.55f, 0.85f, 1.0f, 1.0f), "渲染算法");
@@ -38,6 +39,14 @@ inline void AtmoTunerImGui(bool* p_open, AtmoTuneParams& p, VkAtmoLutCache& lutC
     ImGui::SameLine();
     if (ImGui::RadioButton("Inscatter Sky##sky", p.skyScatterMode == 1))
         p.skyScatterMode = 1;
+
+    ImGui::Text("Inscatter Mie 存储");
+    if (ImGui::RadioButton("Combined extrapolated##mieStorage", p.mieStorageMode == 0))
+        p.mieStorageMode = 0;
+    ImGui::SameLine();
+    if (ImGui::RadioButton("Full RGB LUT##mieStorage", p.mieStorageMode == 1))
+        p.mieStorageMode = 1;
+    ImGui::TextDisabled("Combined=官方 A=Mie.r 外推；Full RGB=独立 256x128x32 表（无需重烤切换）。");
 
     ImGui::Text("壳外盘面");
     if (ImGui::RadioButton("Disk AP##disk", p.shellDiskMode == 0))
@@ -60,6 +69,7 @@ inline void AtmoTunerImGui(bool* p_open, AtmoTuneParams& p, VkAtmoLutCache& lutC
     if (ImGui::Button("Reset Algorithm -> ToPoint + Sky-View + Blend")) {
         p.segmentScatterMode = 0;
         p.skyScatterMode = 0;
+        p.mieStorageMode = 0;
         p.shellDiskMode = 2;
         p.depthApBlendStartKm = 0.0f;
         p.depthApBlendEndKm = 1000.0f;

@@ -21,18 +21,23 @@ layout(set = 1, binding = 1) uniform texture2D inTransmittanceLut;
 layout(set = 1, binding = 2) uniform texture2D inSkyViewLut; // 壳内天空像素采样；须与 skyview_lut 烘焙同基
 layout(set = 1, binding = 3) uniform sampler   samp;
 layout(set = 1, binding = 4) uniform texture2D inSceneColor; // 几何 pass HDR，与 atmo 同帧同图（GENERAL 布局读写）
-layout(set = 1, binding = 5) uniform texture3D inInscatterLut; // RGB=Rayleigh+Multi/phaseR，A=Mie luma
+layout(set = 1, binding = 5) uniform texture3D inInscatterLut; // RGB=Rayleigh+Multi/phaseR，A=Mie.r
+layout(set = 1, binding = 6) uniform texture3D inSingleMieLut; // 可选完整 RGB 单次 Mie
 
 // scattered：路径积分散射光 L_inscatter
 // viewT：视线 RGB 透射
 struct AtmoMarchResult { vec3 scattered; vec3 viewT; float opacity; };
 
-// Mie 亮度（A 通道）→ RGB；mieTint 与烘焙侧 mieScattering 同色标
-vec3 atmoMieFromLuminance(float luma, vec3 mieTint)
+// Bruneton COMBINED_SCATTERING_TEXTURES：由 combined RGB 与 A=Mie.r 外推完整 Mie。
+vec3 atmoExtrapolateSingleMie(vec3 scattering, float mieRed,
+                              vec3 rayleighScattering, vec3 mieScattering)
 {
-    vec3 t = max(mieTint, vec3(1e-6));
-    float tl = dot(t, vec3(0.299, 0.587, 0.114));
-    return vec3(luma) * t / tl;
+    if (scattering.r <= 0.0 || mieScattering.r <= 0.0)
+        return vec3(0.0);
+    vec3 safeRayleigh = max(rayleighScattering, vec3(1e-8));
+    return scattering * (mieRed / scattering.r)
+        * (rayleighScattering.r / mieScattering.r)
+        * (mieScattering / safeRayleigh);
 }
 
 // Transmittance LUT：沿 (r,μ) 射线到大气顶的透射率
@@ -242,10 +247,17 @@ void atmoInscatterParamsAtRelPos(vec3 posRel, vec3 viewDir, vec3 sunDir,
     nu = clamp(nu, -muBound, muBound);
 }
 
-// Bruneton GetCombinedScattering：无相位 reduced 查表
-void atmoGetCombinedReducedScattering(float r, float mu, float mu_s, float nu, bool hitGround,
-                                       float bottomRadius, float topRadius, vec3 mieTint,
-                                       out vec3 scattering, out vec3 singleMie)
+struct AtmoReducedScattering {
+    vec3 scattering;
+    vec3 singleMie;
+    float singleMieRed;
+};
+
+// mieStorageMode：0=Bruneton combined 外推；1=独立完整 RGB Mie LUT。
+AtmoReducedScattering atmoGetCombinedReducedScattering(
+    float r, float mu, float mu_s, float nu, bool hitGround,
+    float bottomRadius, float topRadius,
+    vec3 rayleighScattering, vec3 mieScattering, int mieStorageMode)
 {
     AtmosphereParameters atmo;
     atmo.bottomRadius = bottomRadius;
@@ -253,8 +265,14 @@ void atmoGetCombinedReducedScattering(float r, float mu, float mu_s, float nu, b
 
     BrunetonReducedScattering s = sampleBrunetonReducedInscatterLut(
         inInscatterLut, samp, atmo, r, mu, mu_s, nu, hitGround);
-    scattering = s.scattering;
-    singleMie  = atmoMieFromLuminance(s.mieLuminance, mieTint);
+    AtmoReducedScattering result;
+    result.scattering = s.scattering;
+    result.singleMieRed = s.mieRed;
+    result.singleMie = (mieStorageMode == 1)
+        ? sampleInscatterLut(inSingleMieLut, samp, atmo, r, mu, mu_s, nu, hitGround)
+        : atmoExtrapolateSingleMie(s.scattering, s.mieRed,
+                                  rayleighScattering, mieScattering);
+    return result;
 }
 
 vec3 atmoApplyBrunetonPhases(vec3 scattering, vec3 singleMie, float nu, float mu_s, float gMie)
@@ -266,7 +284,8 @@ vec3 atmoApplyBrunetonPhases(vec3 scattering, vec3 singleMie, float nu, float mu
 // 从 posRel 沿 viewDir 积到大气边界的预烘焙散射（单次查表 + 运行时相位）
 vec3 atmoInscatterToBoundary(vec3 posRel, vec3 viewDir, vec3 sunDir,
                               float bottomRadius, float topRadius,
-                              bool hitGround, vec3 mieTint, float gMie)
+                              bool hitGround, vec3 rayleighScattering,
+                              vec3 mieScattering, float gMie, int mieStorageMode)
 {
     float r = length(posRel);
     vec3 up = posRel / max(r, 1e-4);
@@ -276,16 +295,17 @@ vec3 atmoInscatterToBoundary(vec3 posRel, vec3 viewDir, vec3 sunDir,
     float muBound = mu * mu_s + sqrt(max(0.0, (1.0 - mu * mu) * (1.0 - mu_s * mu_s)));
     nu = clamp(nu, -muBound, muBound);
 
-    vec3 scattering, singleMie;
-    atmoGetCombinedReducedScattering(r, mu, mu_s, nu, hitGround,
-        bottomRadius, topRadius, mieTint, scattering, singleMie);
-    return atmoApplyBrunetonPhases(scattering, singleMie, nu, mu_s, gMie);
+    AtmoReducedScattering s = atmoGetCombinedReducedScattering(
+        r, mu, mu_s, nu, hitGround, bottomRadius, topRadius,
+        rayleighScattering, mieScattering, mieStorageMode);
+    return atmoApplyBrunetonPhases(s.scattering, s.singleMie, nu, mu_s, gMie);
 }
 
 // GetSkyRadiance：太空相机先投影到大气顶，再单次查表 + 相位
 vec3 atmoSampleInscatterSky(vec3 camRelPlanetKm, vec3 rayDir, vec3 sunDirToPlanet,
                              float bottomRadius, float topRadius,
-                             vec3 mieTint, float gMie)
+                             vec3 rayleighScattering, vec3 mieScattering,
+                             float gMie, int mieStorageMode)
 {
     vec3 observer = atmoObserverPosKm(camRelPlanetKm);
     if (length(observer) > topRadius) {
@@ -301,7 +321,8 @@ vec3 atmoSampleInscatterSky(vec3 camRelPlanetKm, vec3 rayDir, vec3 sunDirToPlane
     float mu = dot(rayDir, observer / max(r, 1e-4));
     bool hitGround = inscatterRayIntersectsGround(atmo, r, mu);
     return atmoInscatterToBoundary(observer, rayDir, sunDirToPlanet,
-        bottomRadius, topRadius, hitGround, mieTint, gMie);
+        bottomRadius, topRadius, hitGround, rayleighScattering,
+        mieScattering, gMie, mieStorageMode);
 }
 
 // ToPoint 中间量（F4 debug：区分 S0≈0 vs 相减归零）
@@ -322,7 +343,8 @@ struct AtmoToPointDebug {
 
 AtmoToPointDebug atmoEvalSkyRadianceToPointDebug(vec3 p0Rel, vec3 p1Rel, vec3 viewDir, vec3 sunDir,
                                                   float bottomRadius, float topRadius,
-                                                  vec3 mieTint, float gMie)
+                                                  vec3 rayleighScattering, vec3 mieScattering,
+                                                  float gMie, int mieStorageMode)
 {
     AtmoToPointDebug dbg;
     dbg.S0 = dbg.S1 = dbg.mie0 = dbg.mie1 = dbg.T = dbg.T_S1 =
@@ -356,17 +378,30 @@ AtmoToPointDebug atmoEvalSkyRadianceToPointDebug(vec3 p0Rel, vec3 p1Rel, vec3 vi
 
     dbg.T = atmoGetTransmittanceBruneton(r, mu, dbg.d, hitGround, bottomRadius, topRadius);
 
-    atmoGetCombinedReducedScattering(r, mu, mu_s, nu, hitGround,
-        bottomRadius, topRadius, mieTint, dbg.S0, dbg.mie0);
+    AtmoReducedScattering s0 = atmoGetCombinedReducedScattering(
+        r, mu, mu_s, nu, hitGround, bottomRadius, topRadius,
+        rayleighScattering, mieScattering, mieStorageMode);
+    dbg.S0 = s0.scattering;
+    dbg.mie0 = s0.singleMie;
 
     float r_p, mu_p, mu_s_p;
     inscatterParamsAfterDistance(atmo, r, mu, mu_s, nu, dbg.d, r_p, mu_p, mu_s_p);
-    atmoGetCombinedReducedScattering(r_p, mu_p, mu_s_p, nu, hitGround,
-        bottomRadius, topRadius, mieTint, dbg.S1, dbg.mie1);
+    AtmoReducedScattering s1 = atmoGetCombinedReducedScattering(
+        r_p, mu_p, mu_s_p, nu, hitGround, bottomRadius, topRadius,
+        rayleighScattering, mieScattering, mieStorageMode);
+    dbg.S1 = s1.scattering;
+    dbg.mie1 = s1.singleMie;
 
     dbg.T_S1  = dbg.T * dbg.S1;
     dbg.diffR = max(dbg.S0 - dbg.T_S1, vec3(0.0));
-    dbg.diffMie = max(dbg.mie0 - dbg.T * dbg.mie1, vec3(0.0));
+    if (mieStorageMode == 1) {
+        dbg.diffMie = max(dbg.mie0 - dbg.T * dbg.mie1, vec3(0.0));
+    } else {
+        // 官方 combined 路径：先对可靠的 Mie.r 做段差，再用段 scattering RGB 外推。
+        float diffMieRed = max(s0.singleMieRed - dbg.T.r * s1.singleMieRed, 0.0);
+        dbg.diffMie = atmoExtrapolateSingleMie(
+            dbg.diffR, diffMieRed, rayleighScattering, mieScattering);
+    }
     dbg.finalScattered = atmoApplyBrunetonPhases(dbg.diffR, dbg.diffMie, nu, mu_s, gMie);
     return dbg;
 }
@@ -395,10 +430,12 @@ vec3 atmoToPointDebugColor(int mode, AtmoToPointDebug dbg)
 // Bruneton GetSkyRadianceToPoint：hitGround 仅在 p0 算一次；p1 用 (r_p,μ_p,μ_s_p) 同 ν
 vec3 atmoGetSkyRadianceToPoint(vec3 p0Rel, vec3 p1Rel, vec3 viewDir, vec3 sunDir,
                                 float bottomRadius, float topRadius,
-                                vec3 mieTint, float gMie)
+                                vec3 rayleighScattering, vec3 mieScattering,
+                                float gMie, int mieStorageMode)
 {
     return atmoEvalSkyRadianceToPointDebug(p0Rel, p1Rel, viewDir, sunDir,
-        bottomRadius, topRadius, mieTint, gMie).finalScattered;
+        bottomRadius, topRadius, rayleighScattering, mieScattering,
+        gMie, mieStorageMode).finalScattered;
 }
 
 // [tNear,tFar] 段散射 + 段透射（Bruneton ToPoint）
@@ -406,8 +443,8 @@ vec3 atmoGetSkyRadianceToPoint(vec3 p0Rel, vec3 p1Rel, vec3 viewDir, vec3 sunDir
 AtmoMarchResult atmoSegmentInscatterMarch(vec3 camRelKm, vec3 rayDir,
                                          float tNear, float tFar, vec3 sunDir,
                                          float bottomRadius, float topRadius,
-                                         vec3 mieTint, float gMie,
-                                         int debugMode)
+                                         vec3 rayleighScattering, vec3 mieScattering,
+                                         float gMie, int mieStorageMode, int debugMode)
 {
     AtmoMarchResult result;
     result.scattered = vec3(0.0);
@@ -424,7 +461,8 @@ AtmoMarchResult atmoSegmentInscatterMarch(vec3 camRelKm, vec3 rayDir,
     }
 
     AtmoToPointDebug dbg = atmoEvalSkyRadianceToPointDebug(
-        p0, p1, rayDir, sunDir, bottomRadius, topRadius, mieTint, gMie);
+        p0, p1, rayDir, sunDir, bottomRadius, topRadius,
+        rayleighScattering, mieScattering, gMie, mieStorageMode);
 
     if (debugMode > 0)
         result.scattered = atmoToPointDebugColor(debugMode, dbg);

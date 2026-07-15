@@ -5,7 +5,8 @@
 // inscatter_lut.glsl — Bruneton reduced scattering 烘焙（单次 + 多重）。
 //
 // 每个 texel：RGB = Rayleigh_reduced + Multi / RayleighPhase(ν)
-//           A   = Mie 亮度（无相位）
+//           A   = 单次 Mie.r（无相位，供 Bruneton combined 外推）
+// 独立 SingleMie LUT 同时保存完整 RGB，供 tuner 精确模式选择。
 // 运行时 atmoApplyBrunetonPhases：RGB×phaseR + Mie×phaseM，与
 // Bruneton COMBINED_SCATTERING_TEXTURES 同构（多重已折进 RGB）。
 // UV 映射见 shared_atmosphere.glsl::inscatterTexelToParams。
@@ -60,6 +61,7 @@ void main()
     // Bruneton：多重进 RGB 时除以 Rayleigh 相位，运行时再乘回。
     float phaseR = max(rayleighPhase(nu), 1e-4);
     vec3 rayleigh = min(ss.rayleighLight + ss.multiLight / phaseR, vec3(kMaxHalfFloat));
-    float mieLuma = min(dot(ss.mieLight, vec3(0.299, 0.587, 0.114)), kMaxHalfFloat);
-    imageStore(imageInscatterLut, workPos, vec4(rayleigh, mieLuma));
+    vec3 singleMie = min(ss.mieLight, vec3(kMaxHalfFloat));
+    imageStore(imageInscatterLut, workPos, vec4(rayleigh, singleMie.r));
+    imageStore(imageSingleMieLut, workPos, vec4(singleMie, 1.0));
 }

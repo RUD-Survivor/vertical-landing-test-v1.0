@@ -2,11 +2,49 @@
 // ==========================================================================
 // imgui_cloud_tuner.h — Dear ImGui 体积云参数调试面板
 // 用法: CloudTunerImGui(&open, params);
+//       FlowerCloudTunerImGui(&open, params, &weatherPreview);
 // ==========================================================================
 #include "../cloud_system.h"  // CloudTuneParams
 #include "vk_cloud_system.h"  // FlowerCloudTuneParams
 #include "imgui.h"
+#include "backends/imgui_impl_vulkan.h"
 #include <cmath>
+#include <cstdint>
+
+// Weather map ImGui 预览（VkDescriptorSet == ImTextureID，经 ImGui_ImplVulkan_AddTexture 注册）
+struct WeatherMapImGuiPreview {
+    VkDescriptorSet sets[5] = {}; // 0=RGB 合成, 1=R coverage, 2=G type, 3=B humidity, 4=A land
+    bool ready = false;
+
+    bool registerTextures(VkImageView composite,
+                          VkImageView r, VkImageView g, VkImageView b, VkImageView a) {
+        unregister();
+        VkImageView views[5] = { composite, r, g, b, a };
+        for (int i = 0; i < 5; i++) {
+            if (views[i] == VK_NULL_HANDLE) { unregister(); return false; }
+            sets[i] = ImGui_ImplVulkan_AddTexture(views[i], VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+            if (sets[i] == VK_NULL_HANDLE) { unregister(); return false; }
+        }
+        ready = true;
+        return true;
+    }
+
+    void unregister() {
+        for (int i = 0; i < 5; i++) {
+            if (sets[i] != VK_NULL_HANDLE) {
+                ImGui_ImplVulkan_RemoveTexture(sets[i]);
+                sets[i] = VK_NULL_HANDLE;
+            }
+        }
+        ready = false;
+    }
+
+    ImTextureID texId(int channel) const {
+        if (!ready || channel < 0 || channel > 4 || sets[channel] == VK_NULL_HANDLE)
+            return ImTextureID_Invalid;
+        return (ImTextureID)(uintptr_t)sets[channel];
+    }
+};
 
 inline void CloudTunerImGui(bool* p_open, CloudTuneParams& p) {
     // F2 toggles the window
@@ -63,11 +101,12 @@ inline void CloudTunerImGui(bool* p_open, CloudTuneParams& p) {
 
 // ==========================================================================
 // Flower 云管线（cloud_common.glsl 系，VkCloudSystem）调参面板。
-// 用法: FlowerCloudTunerImGui(&open, cloudSystem.tuneParams);
+// 用法: FlowerCloudTunerImGui(&open, cloudSystem.tuneParams, &weatherPreview);
 // 和上面 CloudTunerImGui() 是两套独立参数——那个调的是 legacy cloud.frag，
 // 这个调的是新的 1/4 分辨率 compute 云管线（cloudSystem.enabled=true 时生效）。
 // ==========================================================================
-inline void FlowerCloudTunerImGui(bool* p_open, FlowerCloudTuneParams& p) {
+inline void FlowerCloudTunerImGui(bool* p_open, FlowerCloudTuneParams& p,
+                                  WeatherMapImGuiPreview* weatherPreview = nullptr) {
     if (ImGui::IsKeyPressed(ImGuiKey_F3, false)) *p_open = !*p_open;
     if (!*p_open) return;
 
@@ -144,6 +183,29 @@ inline void FlowerCloudTunerImGui(bool* p_open, FlowerCloudTuneParams& p) {
     ImGui::SliderFloat("WeatherUVScale", &p.weatherUVScale, 0.1f, 8.0f, "%.2f");
     ImGui::SliderFloat3("WindDir", &p.windDirX, -1.f, 1.f, "%.2f");
     ImGui::SliderFloat("Speed", &p.speed, 0.0f, 2.0f, "%.3f");
+
+    if (weatherPreview && weatherPreview->ready) {
+        static int weatherVisChannel = 0;
+        const char* channelItems[] = {
+            "RGB 合成 (R=cov G=type B=hum)",
+            "Coverage (R)",
+            "CloudType (G)",
+            "Humidity (B)",
+            "LandMask (A)",
+        };
+        ImGui::Combo("WeatherMap 通道", &weatherVisChannel, channelItems, IM_ARRAYSIZE(channelItems));
+        ImTextureID tid = weatherPreview->texId(weatherVisChannel);
+        if (tid != ImTextureID_Invalid) {
+            const float previewW = ImGui::GetContentRegionAvail().x;
+            const float previewH = previewW * 0.5f; // 2048×1024 equirectangular
+            ImGui::Image(ImTextureRef(tid), ImVec2(previewW, previewH));
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("经纬度 equirectangular · 左=-180° 右=+180° 下=南极 上=北极");
+        }
+        ImGui::TextDisabled("R=coverage  G=type  B=humidity  A=land（bake 自 vk_scene）");
+    } else {
+        ImGui::TextDisabled("WeatherMap 预览未注册");
+    }
 
     ImGui::Separator();
     ImGui::Text("多重散射");

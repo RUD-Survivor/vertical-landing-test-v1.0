@@ -135,7 +135,7 @@ struct LensFlarePushConstants {
 };                         //            total: 64 bytes
 
 // -----------------------------------------------------------------------
-// AtmoPushConstants — 大气散射球体（176 bytes，超过 128 字节保证下限——本工程
+// AtmoPushConstants — 大气散射球体（208 bytes，超过 128 字节保证下限——本工程
 // 目标硬件是桌面独显（实测 NVIDIA RTX 4060），desktop NVIDIA/AMD 早就普遍支持
 // 到 256 字节，这里就不再费事查询 VkPhysicalDeviceLimits::maxPushConstantsSize
 // 了，直接用）。
@@ -212,7 +212,8 @@ struct AtmoPushConstants {
     // mode=2：camDist 在 [outer+start, outer+end] 从信深度渐变到信解析球
     float depthApBlendStartKm;         // 4 — offset 196 (相对 outerRadius 起点 km，默认 0)
     float depthApBlendEndKm;           // 4 — offset 200 (相对 outerRadius 终点 km，默认 1000)
-};                         //            total: 204 bytes
+    int   mieStorageMode;               // 4 — offset 204 (0=combined 外推；1=完整 RGB Mie LUT)
+};                         //            total: 208 bytes
 
 // Terrain patch 专属 UBO（binding 1 of Set 0）
 // nodePos/nodeSide/nodeUp 已移至 push constants（每 draw call 更新），此处只保留每帧常量

@@ -71,6 +71,7 @@ layout(push_constant) uniform PC {
     int   shellDiskMode;          // 0=Disk AP；1=legacy discard；2=Depth↔解析球混合
     float depthApBlendStartKm;    // mode2：相对 outer 的混合起点 km
     float depthApBlendEndKm;      // mode2：相对 outer 的混合终点 km
+    int   mieStorageMode;         // 0=combined 外推；1=完整 RGB Mie LUT
 } pc;
 
 #define PC_RAYLEIGH vec3(pc.rayleighCoeffX, pc.rayleighCoeffY, pc.rayleighCoeffZ)
@@ -147,8 +148,8 @@ void main() {
     if (pc.toPointDebugMode > 0) {
         march = atmoSegmentInscatterMarch(
             camRel, rayDir, tNear, tFar, sunDir,
-            pc.surfaceRadius, pc.outerRadius, vec3(pc.mieCoeff), pc.gMie,
-            pc.toPointDebugMode);
+            pc.surfaceRadius, pc.outerRadius, PC_RAYLEIGH, vec3(pc.mieCoeff),
+            pc.gMie, pc.mieStorageMode, pc.toPointDebugMode);
         vec3 x = march.scattered;
         if (pc.toPointDebugMode != 3 && pc.toPointDebugMode != 7 && pc.toPointDebugMode != 8)
             x = max(x * pc.toPointDebugExposure, vec3(0.0));
@@ -171,7 +172,8 @@ void main() {
     } else {
         march = atmoSegmentInscatterMarch(
             camRel, rayDir, tNear, tFar, sunDir,
-            pc.surfaceRadius, pc.outerRadius, vec3(pc.mieCoeff), pc.gMie, 0);
+            pc.surfaceRadius, pc.outerRadius, PC_RAYLEIGH, vec3(pc.mieCoeff),
+            pc.gMie, pc.mieStorageMode, 0);
     }
 
     float thickness = max(pc.outerRadius - pc.surfaceRadius, 1e-3);

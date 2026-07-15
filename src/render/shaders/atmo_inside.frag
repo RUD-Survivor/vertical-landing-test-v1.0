@@ -68,6 +68,7 @@ layout(push_constant) uniform PC {
     int   shellDiskMode;          // 0=Disk；1=legacy；2=Blend（壳内近顶可用）
     float depthApBlendStartKm;
     float depthApBlendEndKm;
+    int   mieStorageMode;         // 0=combined 外推；1=完整 RGB Mie LUT
 } pc;
 
 #define PC_RAYLEIGH vec3(pc.rayleighCoeffX, pc.rayleighCoeffY, pc.rayleighCoeffZ)
@@ -136,8 +137,8 @@ void main() {
     // ToPoint debug：强制段路径并输出中间量（覆盖天空/Raymarch 分支）
     if (pc.toPointDebugMode > 0) {
         march = atmoSegmentInscatterMarch(camRel, rayDir, tNear, tFar, sunDir,
-            pc.surfaceRadius, pc.outerRadius, vec3(pc.mieCoeff), pc.gMie,
-            pc.toPointDebugMode);
+            pc.surfaceRadius, pc.outerRadius, PC_RAYLEIGH, vec3(pc.mieCoeff),
+            pc.gMie, pc.mieStorageMode, pc.toPointDebugMode);
         vec3 x = march.scattered;
         // T / d / hitGround 已是可视化编码，不再乘曝光；其余 ACES×exposure
         if (pc.toPointDebugMode != 3 && pc.toPointDebugMode != 7 && pc.toPointDebugMode != 8)
@@ -154,7 +155,8 @@ void main() {
     if (isSkyPixel) {
         if (pc.skyScatterMode == 1) {
             march.scattered = atmoSampleInscatterSky(camRel, rayDir, sunDir,
-                pc.surfaceRadius, pc.outerRadius, vec3(pc.mieCoeff), pc.gMie);
+                pc.surfaceRadius, pc.outerRadius, PC_RAYLEIGH, vec3(pc.mieCoeff),
+                pc.gMie, pc.mieStorageMode);
         } else {
             march.scattered = atmoSampleSkyViewLut(camRel, rayDir, sunDir,
                 pc.surfaceRadius, pc.outerRadius);
@@ -171,7 +173,8 @@ void main() {
             pc.surfaceRadius, pc.outerRadius, sunDir, cosTheta);
     } else {
         march = atmoSegmentInscatterMarch(camRel, rayDir, tNear, tFar, sunDir,
-            pc.surfaceRadius, pc.outerRadius, vec3(pc.mieCoeff), pc.gMie, 0);
+            pc.surfaceRadius, pc.outerRadius, PC_RAYLEIGH, vec3(pc.mieCoeff),
+            pc.gMie, pc.mieStorageMode, 0);
     }
 
     float thickness = max(pc.outerRadius - pc.surfaceRadius, 1e-3);
@@ -189,7 +192,8 @@ void main() {
     // Phase A debug：整屏显示 Inscatter 天空采样（验证烘焙/查表通路）
     if (pc.inscatterDebugExposure > 0.0) {
         vec3 Ldbg = atmoSampleInscatterSky(camRel, rayDir, sunDir,
-            pc.surfaceRadius, pc.outerRadius, vec3(pc.mieCoeff), pc.gMie);
+            pc.surfaceRadius, pc.outerRadius, PC_RAYLEIGH, vec3(pc.mieCoeff),
+            pc.gMie, pc.mieStorageMode);
         vec3 x = max(Ldbg * pc.inscatterDebugExposure, vec3(0.0));
         vec3 toned = (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);
         FragColor = vec4(toned, 1.0);

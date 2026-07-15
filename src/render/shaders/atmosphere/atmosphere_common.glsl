@@ -58,6 +58,9 @@ layout (set = 0, binding = 11, rgba16f) uniform image2D imageCloudAmbientMusLut;
 // Inscatter 4D→3D（inscatter_lut.glsl 写入；atmo_inside debug / 后续 ToPoint 采样）。
 layout (set = 0, binding = 12, rgba16f) uniform image3D imageInscatterLut;
 
+// 可选完整 RGB 单次 Mie；与 combined Inscatter 同一次 dispatch 烘焙。
+layout (set = 0, binding = 13, rgba16f) uniform image3D imageSingleMieLut;
+
 AtmosphereParameters getAtmosphereParameters()
 {
     return getAtmosphereParameters(frameData);

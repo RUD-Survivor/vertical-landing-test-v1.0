@@ -98,15 +98,15 @@ struct FlowerCloudTuneParams {
     // 沿太阳方向体积阴影步进（volumetricShadow）
     float lightStepMul = 1.5f;                // cloudLightStepMul
     float lightBasicStepKm = 0.033f;          // cloudLightBasicStep (km)
-    int   lightStepNum = 12;                   // cloudLightStepNum
+    int   lightStepNum = 6;                   // cloudLightStepNum
 
     // 天气 / 风
     float weatherUVScale = 1.f;               // cloudWeatherUVScale
     float windDirX = 1.f, windDirY = 0.f, windDirZ = 0.f; // cloudDirection
 
     // 地面光 / 环境
-    float fogFade = 1.f;                      // cloudFogFade
-    float groundNoiseScale = 1.f;             // cloudNoiseScale
+    float fogFade = 0.95f;                      // cloudFogFade
+    float groundNoiseScale = 0.5f;             // cloudNoiseScale
     bool  enableGroundContribution = true;    // cloudEnableGroundContribution
     float cloudAlbedo = 1.f;                  // cloudAlbedo.rgb
 

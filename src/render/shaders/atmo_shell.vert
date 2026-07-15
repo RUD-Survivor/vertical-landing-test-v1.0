@@ -63,6 +63,7 @@ layout(push_constant) uniform PC {
     int   shellDiskMode;
     float depthApBlendStartKm;
     float depthApBlendEndKm;
+    int   mieStorageMode;
 } pc;
 
 layout(location = 0) out vec3 vWorldPos;

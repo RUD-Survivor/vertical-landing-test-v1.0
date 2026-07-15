@@ -86,6 +86,11 @@ struct VkSceneSystem {
     // Phase 2: cloud_common.glsl::cloudMap() 的 localCoverage 局部碎片湍流细节纹理
     // （新 Flower 云管线 binding 9 专用，legacy cloud.frag 的 cloudTexSet 不用它）。
     VkTexture2D     cloudCurlTex;
+    // Weather map ImGui 预览：同 image 上的通道 swizzle view（R/G/B/A → 灰度 RGB）
+    VkImageView     weatherVisViewR = VK_NULL_HANDLE;
+    VkImageView     weatherVisViewG = VK_NULL_HANDLE;
+    VkImageView     weatherVisViewB = VK_NULL_HANDLE;
+    VkImageView     weatherVisViewA = VK_NULL_HANDLE;
     VkCloudBake     cloudBake;
     CloudTuneParams cloudTune;  // from cloud_system.h
 
@@ -276,6 +281,13 @@ struct VkSceneSystem {
 
         // Cloud textures
         cloudBake.shutdown(ctx.device);
+        auto destroyVis = [&](VkImageView& v) {
+            if (v != VK_NULL_HANDLE) { vkDestroyImageView(ctx.device, v, nullptr); v = VK_NULL_HANDLE; }
+        };
+        destroyVis(weatherVisViewR);
+        destroyVis(weatherVisViewG);
+        destroyVis(weatherVisViewB);
+        destroyVis(weatherVisViewA);
         cloudNoiseTex.destroy(ctx);
         cloudCoverTex.destroy(ctx);
         cloudDetailTex.destroy(ctx);
@@ -553,7 +565,7 @@ struct VkSceneSystem {
     // Bake + upload 4 cloud textures (noise 128³, cover 128³, detail 32³, weather 2048×1024)
     // Must be called once after VulkanContext is initialized.
     // Noise + detail: GPU compute (flower cloud_basicnoise / cloud_detailnoise).
-    // Cover + weather: CPU (cover 暂无 comp；weather 保留 RS3D 地理图).
+    // Cover + weather: CPU (cover 暂无 comp；weather = 气候带 × domain-warped 天气场).
     bool initCloudTextures(VulkanContext& ctx) {
         printf("[VkScene] Baking cloud textures...\n");
 
@@ -625,8 +637,12 @@ struct VkSceneSystem {
         }
 
         // ── 4) Weather 2048×1024 ─────────────────────────────────────────
+        // 气候带均值 × 球面 domain-warped 天气场 → 锋面/斑块/破碎 ITCZ，
+        // 而不是纯纬度平滑色带。RGBA: R=coverage G=cloudType B=humidity A=land。
         {
             const int W=2048,H=1024; std::vector<uint8_t> data(W*H*4);
+            constexpr float kDeg2Rad = kPI_f / 180.f;
+            auto sat01=[](float v){return v<0.f?0.f:(v>1.f?1.f:v);};
             auto ellipse=[&](float lon,float lat,float cLon,float cLat,float hW,float hH){
                 float dlon=lon-cLon;if(dlon>180)dlon-=360;if(dlon<-180)dlon+=360;
                 float dlat=lat-cLat;float r=sqrtf((dlon/hW)*(dlon/hW)+(dlat/hH)*(dlat/hH));
@@ -634,10 +650,11 @@ struct VkSceneSystem {
                 float tt=(r-0.7f)/0.6f;return 1-tt*tt*(3-2*tt);
             };
             auto gauss=[](float x,float c,float s){float d=(x-c)/s;return expf(-0.5f*d*d);};
+            printf("[VkScene] Baking weather map (climate × domain-warp)...\n");
             for(int y=0;y<H;y++){
-                float lat=((float)y/H-0.5f)*180;
+                float lat=((float)y/H-0.5f)*180.f;
                 for(int x=0;x<W;x++){
-                    float lon=((float)x/W-0.5f)*360;
+                    float lon=((float)x/W-0.5f)*360.f;
                     float land=0;
                     land=fmaxf(land,ellipse(lon,lat,-98,52,42,30));
                     land=fmaxf(land,ellipse(lon,lat,-90,18,13,12));
@@ -653,12 +670,12 @@ struct VkSceneSystem {
                     land=fmaxf(land,ellipse(lon,lat,118,-3,20,7));
                     land=fmaxf(land,ellipse(lon,lat,134,-26,22,16));
                     land=fmaxf(land,ellipse(lon,lat,-42,72,22,12));
-                    {float tt=fminf(1,fmaxf(0,(-lat-70)/14));land=fmaxf(land,tt*tt*(3-2*tt));}
-                    land=fminf(land,1);
+                    {float tt=fminf(1.f,fmaxf(0.f,(-lat-70.f)/14.f));land=fmaxf(land,tt*tt*(3.f-2.f*tt));}
+                    land=fminf(land,1.f);
 
                     float absLat=fabsf(lat);
-                    float wITCZ=gauss(absLat,2,6),wSubDry=gauss(absLat,27,10);
-                    float wTemperate=gauss(absLat,52,13),wPolar=gauss(absLat,75,9);
+                    float wITCZ=gauss(absLat,2.f,6.f),wSubDry=gauss(absLat,27.f,10.f);
+                    float wTemperate=gauss(absLat,52.f,13.f),wPolar=gauss(absLat,75.f,9.f);
                     float wSum=wITCZ+wSubDry+wTemperate+wPolar+1e-6f;
                     wITCZ/=wSum;wSubDry/=wSum;wTemperate/=wSum;wPolar/=wSum;
 
@@ -668,18 +685,84 @@ struct VkSceneSystem {
                     float cov_la=wITCZ*0.55f+wSubDry*0.28f+wTemperate*0.48f+wPolar*0.38f;
                     float type_la=wITCZ*0.65f+wSubDry*0.30f+wTemperate*0.38f+wPolar*0.08f;
                     float hum_la=wITCZ*0.62f+wSubDry*0.28f+wTemperate*0.52f+wPolar*0.42f;
-                    float coverage=cov_oc+(cov_la-cov_oc)*land;
-                    float cloudTypeV=type_oc+(type_la-type_oc)*land;
-                    float humidity=hum_oc+(hum_la-hum_oc)*land;
+                    float climateCov=cov_oc+(cov_la-cov_oc)*land;
+                    float climateType=type_oc+(type_la-type_oc)*land;
+                    float climateHum=hum_oc+(hum_la-hum_oc)*land;
+
+                    // 球面坐标（无缝），再做两级 domain warp 打破纬线圈
+                    float lonR=lon*kDeg2Rad, latR=lat*kDeg2Rad;
+                    float cl=cosf(latR);
+                    float sx=cl*cosf(lonR), sy=cl*sinf(lonR), sz=sinf(latR);
+
+                    float wx=cpuFbm(sx*2.1f+17.1f,sy*2.1f-3.4f,sz*2.1f+9.2f,3);
+                    float wy=cpuFbm(sx*2.1f-8.7f,sy*2.1f+22.3f,sz*2.1f-4.1f,3);
+                    float wz=cpuFbm(sx*2.1f+5.5f,sy*2.1f+11.0f,sz*2.1f+30.6f,3);
+                    const float warp1=0.55f;
+                    float qx=sx+(wx*2.f-1.f)*warp1;
+                    float qy=sy+(wy*2.f-1.f)*warp1;
+                    float qz=sz+(wz*2.f-1.f)*warp1;
+
+                    float w2x=cpuFbm(qx*3.3f+41.f,qy*3.3f,qz*3.3f-19.f,2);
+                    float w2y=cpuFbm(qx*3.3f-27.f,qy*3.3f+8.f,qz*3.3f,2);
+                    float w2z=cpuFbm(qx*3.3f,qy*3.3f+13.f,qz*3.3f+7.f,2);
+                    const float warp2=0.35f;
+                    float rx=qx+(w2x*2.f-1.f)*warp2;
+                    float ry=qy+(w2y*2.f-1.f)*warp2;
+                    float rz=qz+(w2z*2.f-1.f)*warp2;
+
+                    // 天气尺度场 + 温带 storm-track（略沿经向拉长）
+                    float synoptic=cpuFbm(rx*4.5f,ry*4.5f,rz*4.5f,4);
+                    float midLat=gauss(absLat,48.f,14.f);
+                    float track=cpuFbm(sx*1.2f+sy*3.8f,sz*2.0f,sx*0.5f-sy*0.3f+40.f,3);
+                    float band=sat01(synoptic*0.72f+track*0.48f*midLat);
+
+                    // 破碎 ITCZ（不是一整圈均匀云带）
+                    float itczBreak=cpuFbm(sx*6.f+3.f,sy*6.f,sz*1.5f+50.f,3);
+                    float itczMask=gauss(absLat,2.f,7.f)*sat01(itczBreak*1.65f-0.22f);
+
+                    float weatherField=sat01(band*0.85f+itczMask*0.55f);
+                    weatherField=sat01((weatherField-0.28f)/0.42f); // 高对比：大片晴空 vs 浓云
+                    weatherField=weatherField*weatherField*(3.f-2.f*weatherField);
+                    weatherField=powf(weatherField,1.12f);
+
+                    float coverage=sat01(climateCov*(0.20f+0.98f*weatherField));
+                    float coast=land*(1.f-land)*4.f; // 海岸抬升一点点
+                    coverage=sat01(coverage+coast*0.08f*weatherField);
+
+                    float cloudTypeV=sat01(climateType*(0.35f+0.75f*weatherField)+(1.f-land)*0.04f);
+                    float humidity=sat01(climateHum*(0.30f+0.80f*(0.45f*weatherField+0.55f*synoptic)));
 
                     int idx=(y*W+x)*4;
-                    data[idx]=(uint8_t)fminf(255,(int)(coverage*255+0.5f));
-                    data[idx+1]=(uint8_t)fminf(255,(int)(cloudTypeV*255+0.5f));
-                    data[idx+2]=(uint8_t)fminf(255,(int)(humidity*255+0.5f));
-                    data[idx+3]=(uint8_t)fminf(255,(int)(land*255+0.5f));
+                    data[idx]  =clampU8(coverage);
+                    data[idx+1]=clampU8(cloudTypeV);
+                    data[idx+2]=clampU8(humidity);
+                    data[idx+3]=clampU8(land);
                 }
             }
             if(!cloudWeatherTex.upload(ctx,data.data(),W,H)){fprintf(stderr,"[VkScene] Cloud weather upload failed\n");return false;}
+
+            // ImGui 预览用通道 swizzle view（不复制像素）
+            auto makeSwizzleView=[&](VkComponentSwizzle c)->VkImageView{
+                VkImageViewCreateInfo vci{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+                vci.image=cloudWeatherTex.image;
+                vci.viewType=VK_IMAGE_VIEW_TYPE_2D;
+                vci.format=VK_FORMAT_R8G8B8A8_UNORM;
+                vci.components={c,c,c,VK_COMPONENT_SWIZZLE_ONE};
+                vci.subresourceRange.aspectMask=VK_IMAGE_ASPECT_COLOR_BIT;
+                vci.subresourceRange.levelCount=1;
+                vci.subresourceRange.layerCount=1;
+                VkImageView v=VK_NULL_HANDLE;
+                if(vkCreateImageView(ctx.device,&vci,nullptr,&v)!=VK_SUCCESS){
+                    fprintf(stderr,"[VkScene] Weather vis view create failed\n");
+                    return VK_NULL_HANDLE;
+                }
+                return v;
+            };
+            weatherVisViewR=makeSwizzleView(VK_COMPONENT_SWIZZLE_R);
+            weatherVisViewG=makeSwizzleView(VK_COMPONENT_SWIZZLE_G);
+            weatherVisViewB=makeSwizzleView(VK_COMPONENT_SWIZZLE_B);
+            weatherVisViewA=makeSwizzleView(VK_COMPONENT_SWIZZLE_A);
+            if(!weatherVisViewR||!weatherVisViewG||!weatherVisViewB||!weatherVisViewA)return false;
         }
 
         // ── Create cloud texture descriptor set ──────────────────────────

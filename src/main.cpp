@@ -87,6 +87,7 @@ static bool                g_vkCloudTunerOpen = false;  // F2 toggles
 static bool                g_flowerCloudTunerOpen = false;  // F3 toggles
 static bool                g_atmoTunerOpen = false;  // F4 toggles
 static bool                g_skyTunerOpen = false;   // F5 toggles
+static WeatherMapImGuiPreview g_weatherMapPreview;
 static VkHUDSystem         g_vkHUD;
 static VkImGuiSystem       g_vkImGui;
 static VkGameUI            g_gameUI;
@@ -335,7 +336,7 @@ static void renderVulkanFrame(GLFWwindow* window) {
         PerfOverlayImGui(&g_perfOverlayOpen, ww, wh, presentName);
     }
     CloudTunerImGui(&g_vkCloudTunerOpen, g_vkR3D.scene.cloudTune);
-    FlowerCloudTunerImGui(&g_flowerCloudTunerOpen, g_vkR3D.cloudSystem.tuneParams);
+    FlowerCloudTunerImGui(&g_flowerCloudTunerOpen, g_vkR3D.cloudSystem.tuneParams, &g_weatherMapPreview);
     AtmoTunerImGui(&g_atmoTunerOpen, g_vkR3D.atmoTune, g_vkR3D.scene.atmoLutCache);
     SkyTunerImGui(&g_skyTunerOpen, g_vkR3D.sky.tune);
     ImGui::Render();
@@ -473,6 +474,14 @@ int main() {
     glfwTerminate();
     return -1;
   }
+  if (!g_weatherMapPreview.registerTextures(
+          g_vkR3D.scene.cloudWeatherTex.view,
+          g_vkR3D.scene.weatherVisViewR,
+          g_vkR3D.scene.weatherVisViewG,
+          g_vkR3D.scene.weatherVisViewB,
+          g_vkR3D.scene.weatherVisViewA)) {
+      fprintf(stderr, "[Vulkan] Warning: weather map ImGui preview registration failed\n");
+  }
   // 从主菜单启动
   g_gameUI.state = VkGameState::MENU;
 
@@ -551,6 +560,7 @@ int main() {
   vkDeviceWaitIdle(g_vkCtx.device);
   delete g_flightScene; g_flightScene = nullptr;
   delete g_vkTerrain;   g_vkTerrain   = nullptr;
+  g_weatherMapPreview.unregister();
   g_vkImGui.shutdown(g_vkCtx.device);
   g_vkR3D.shutdown(g_vkCtx);
   g_vkTAA.shutdown(g_vkCtx);

@@ -23,14 +23,16 @@ struct VkImGuiSystem {
 
     // ----------------------------------------------------------------
     bool init(VulkanContext& ctx, GLFWwindow* window, VkFormat swapFmt) {
-        // 为 ImGui 创建专用 descriptor pool
+        // 为 ImGui 创建专用 descriptor pool（1.92+/2026-04：SAMPLED_IMAGE + SAMPLER，
+        // 字库 atlas + ImGui_ImplVulkan_AddTexture 自定义纹理，如 weather map 预览）
         VkDescriptorPoolSize poolSizes[] = {
-            { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 16 }
+            { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 64 },
+            { VK_DESCRIPTOR_TYPE_SAMPLER,        4 },
         };
         VkDescriptorPoolCreateInfo pi{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
         pi.flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-        pi.maxSets       = 16;
-        pi.poolSizeCount = 1;
+        pi.maxSets       = 68;
+        pi.poolSizeCount = 2;
         pi.pPoolSizes    = poolSizes;
         if (vkCreateDescriptorPool(ctx.device, &pi, nullptr, &descPool) != VK_SUCCESS) {
             fprintf(stderr, "[ImGui] Failed to create descriptor pool\n");
