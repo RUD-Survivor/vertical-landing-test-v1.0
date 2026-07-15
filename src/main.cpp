@@ -482,6 +482,9 @@ int main() {
           g_vkR3D.scene.weatherVisViewA)) {
       fprintf(stderr, "[Vulkan] Warning: weather map ImGui preview registration failed\n");
   }
+  if (!g_weatherMapPreview.registerCurl(g_vkR3D.scene.cloudCurlTex.view)) {
+      fprintf(stderr, "[Vulkan] Warning: curl noise ImGui preview registration failed\n");
+  }
   // 从主菜单启动
   g_gameUI.state = VkGameState::MENU;
 

@@ -130,20 +130,26 @@ float cloudMap(vec3 posMeter,float normalizedHeight)//单位是米，根据位�
 
     vec4 weatherValue=texture(sampler2D(inWeatherTexture,linearRepeatSampler),sampleUv);//查2D天气图，.x区域coverage bias .g/.b/.a云类型、湿度等
 
-    // curl 噪声同理换成局部东/北向 km 距离（对应 cloud_rs3d_common.glsl::worldNoiseKm 的思路），
-    // 而不是绝对世界 xz（那样相机一动整张 curl 图案就跟着搬，行星尺度下明显不对）。
+    // Curl（假资产：bake 的 Worley/Perlin 2D）→ localCoverage。
+    // UV 用局部东/北向 km（不随浮点原点漂移）；频率/强度/对比均由 Cloud Tuner 控制。
     float cosLat=max(cos(latRad),0.01);
     float eastKm=lonRad*(frameData.sky.atmosphereConfig.bottomRadius)*cosLat;
     float northKm=latRad*frameData.sky.atmosphereConfig.bottomRadius;
-    float localCoverage =texture(sampler2D(inCloudCurlNoise,linearRepeatSampler),
-    (frameData.appTime.x*cloudSpeed*50+vec2(eastKm,northKm)*1000.0)*0.000001+0.5
-    ).x;
-    //linearRepeatSampler在shared_sampler.glsl，在 Descriptor Set 1 上声明
-    //linear线性滤波:UV 落在两个纹素之间时，做插值（2D 是双线性），而不是只取最近一格
-    //Repeat重复寻址：UV 超出 [0, 1] 时 平铺重复，而不是 clamp 到边缘或变透明，UV = 1.3  →  等价于 0.3（循环）UV = -0.2 →  等价于 0.8
-
-    localCoverage=saturate(localCoverage*3.0-0.75)*0.2;//* 3.0 - 0.75再saturate：提高对比度，大部分区域被压到0附近，把噪声拉成稀疏的局部云团,* 0.2：幅度缩小，避免盖掉全局 weather
-    //大尺度云量靠天气图，curl 只负责 碎块、不均匀
+    float curlUVScale=frameData.sky.atmosphereConfig.cloudCurlUVScale;
+    float curlStrength=frameData.sky.atmosphereConfig.cloudCurlStrength;
+    float curlContrast=frameData.sky.atmosphereConfig.cloudCurlContrast;
+    // 旧硬编码等价：uvScale=0.001 → (time*speed*50 + km*1000)*1e-6 + 0.5
+    vec2 curlUv=vec2(eastKm,northKm)*curlUVScale
+        +vec2(frameData.appTime.x*cloudSpeed*(50.0*curlUVScale),0.0)
+        +vec2(0.5);
+    float localCoverage=0.0;
+    if(curlStrength>1e-5)
+    {
+        localCoverage=texture(sampler2D(inCloudCurlNoise,linearRepeatSampler),curlUv).x;
+        // saturate(x*c - c*0.25)*strength；c=3 → 旧式 *3-0.75
+        localCoverage=saturate(localCoverage*curlContrast-curlContrast*0.25)*curlStrength;
+    }
+    //大尺度云量靠天气图，curl 只负责中小尺度碎块
 
     float coverage=saturate(Coverage*(localCoverage+weatherValue.x));
     //合成这一位置的最终覆盖率，Coverage全局云量参数，weatherValue.x天气图大尺度bias，三者相加再 × 全局coverage，最后saturate到[0,1]

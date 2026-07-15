@@ -104,6 +104,11 @@ struct FlowerCloudTuneParams {
     float weatherUVScale = 1.f;               // cloudWeatherUVScale
     float windDirX = 1.f, windDirY = 0.f, windDirZ = 0.f; // cloudDirection
 
+    // Curl 纹理 → localCoverage（cloud_common.glsl；假 curl = Worley/Perlin 2D）
+    float curlUVScale = 0.001f;               // cloudCurlUVScale；轨道可试 0.0002
+    float curlStrength = 0.2f;                // cloudCurlStrength；0=关闭碎点
+    float curlContrast = 3.0f;                // cloudCurlContrast
+
     // 地面光 / 环境
     float fogFade = 0.95f;                      // cloudFogFade
     float groundNoiseScale = 0.5f;             // cloudNoiseScale
@@ -482,6 +487,9 @@ private:
         ac.cloudLightBasicStep = tuneParams.lightBasicStepKm;
         ac.cloudLightStepNum = tuneParams.lightStepNum;
         ac.cloudWeatherUVScale[0] = ac.cloudWeatherUVScale[1] = tuneParams.weatherUVScale;
+        ac.cloudCurlUVScale = tuneParams.curlUVScale;
+        ac.cloudCurlStrength = tuneParams.curlStrength;
+        ac.cloudCurlContrast = tuneParams.curlContrast;
         ac.cloudDirection[0] = tuneParams.windDirX;
         ac.cloudDirection[1] = tuneParams.windDirY;
         ac.cloudDirection[2] = tuneParams.windDirZ;

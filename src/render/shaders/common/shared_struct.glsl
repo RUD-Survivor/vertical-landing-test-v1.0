@@ -137,9 +137,10 @@ struct AtmosphereConfig
     float cloudAmbientExposure;       // 环境光总曝光（对齐 atmo）
     float cloudAmbientAnalyticBlend;  // 与 analyticSkyAmbient 混合 [0,1]
     int   cloudIrradianceBakeAtShell; // 保留布局；SkyView 烘焙高度（atmo 路径）
-    float padAmbient0;                // 原 AmbientMode/night 已删除，保 std140 尺寸
-    float padAmbient1;
-    float padAmbient2;
+    // Curl 假资产 localCoverage（云管线；复用原 padAmbient 槽位，保 632B）
+    float cloudCurlUVScale;           // UV = km * scale（旧硬编码 0.001）
+    float cloudCurlStrength;          // 叠到 weather.x；0=关
+    float cloudCurlContrast;          // saturate(x*c - c*0.25)*strength
 };
 
 struct SkyInfo

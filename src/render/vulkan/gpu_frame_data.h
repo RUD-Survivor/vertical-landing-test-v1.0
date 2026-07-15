@@ -122,9 +122,10 @@ struct GpuAtmosphereConfig {
     float cloudAmbientExposure = 5.f;
     float cloudAmbientAnalyticBlend = 0.f;
     int32_t cloudIrradianceBakeAtShell = 1;
-    float padAmbient0 = 0.f;
-    float padAmbient1 = 0.f; // 原 nightStart / mode 槽位
-    float padAmbient2 = 0.f; // 原 nightEnd 槽位
+    // Curl / localCoverage（原 padAmbient* 槽位；见 cloud_common.glsl::cloudMap）
+    float cloudCurlUVScale = 0.001f;  // UV = km * scale；旧硬编码 0.001
+    float cloudCurlStrength = 0.2f;   // 叠到 weather.x 的幅度；0=关闭
+    float cloudCurlContrast = 3.0f;   // saturate(x*c - c*0.25)*strength；旧值 3 → bias -0.75
 };
 static_assert(sizeof(GpuAtmosphereConfig) == 632, "GpuAtmosphereConfig must match std140 AtmosphereConfig");
 

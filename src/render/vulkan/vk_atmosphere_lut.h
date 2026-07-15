@@ -299,6 +299,9 @@ inline void fillPlanetAtmosphereProfile(GpuAtmosphereConfig& cfg, int32_t atmoId
     cfg.cloudSunLitMapOctave = 1;
     cfg.cloudNoiseScale = 1.0f;
     cfg.cloudGodRay = 0; // Phase 2 待接入（依赖 SDSM 级联阴影）
+    cfg.cloudCurlUVScale = 0.001f;
+    cfg.cloudCurlStrength = 0.2f;
+    cfg.cloudCurlContrast = 3.0f;
     (void)cloudExtinction; // gCloudExtinction 由 cloud_common.glsl 侧的 CloudTuneParams 提供，这里不重复
 }
 

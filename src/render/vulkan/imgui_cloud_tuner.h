@@ -11,25 +11,35 @@
 #include <cmath>
 #include <cstdint>
 
-// Weather map ImGui 预览（VkDescriptorSet == ImTextureID，经 ImGui_ImplVulkan_AddTexture 注册）
+// Weather / Curl ImGui 预览（VkDescriptorSet == ImTextureID，经 ImGui_ImplVulkan_AddTexture 注册）
 struct WeatherMapImGuiPreview {
     VkDescriptorSet sets[5] = {}; // 0=RGB 合成, 1=R coverage, 2=G type, 3=B humidity, 4=A land
+    VkDescriptorSet curlSet = VK_NULL_HANDLE;
     bool ready = false;
+    bool curlReady = false;
 
     bool registerTextures(VkImageView composite,
                           VkImageView r, VkImageView g, VkImageView b, VkImageView a) {
-        unregister();
+        unregisterWeather();
         VkImageView views[5] = { composite, r, g, b, a };
         for (int i = 0; i < 5; i++) {
-            if (views[i] == VK_NULL_HANDLE) { unregister(); return false; }
+            if (views[i] == VK_NULL_HANDLE) { unregisterWeather(); return false; }
             sets[i] = ImGui_ImplVulkan_AddTexture(views[i], VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-            if (sets[i] == VK_NULL_HANDLE) { unregister(); return false; }
+            if (sets[i] == VK_NULL_HANDLE) { unregisterWeather(); return false; }
         }
         ready = true;
         return true;
     }
 
-    void unregister() {
+    bool registerCurl(VkImageView curl) {
+        unregisterCurl();
+        if (curl == VK_NULL_HANDLE) return false;
+        curlSet = ImGui_ImplVulkan_AddTexture(curl, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        curlReady = (curlSet != VK_NULL_HANDLE);
+        return curlReady;
+    }
+
+    void unregisterWeather() {
         for (int i = 0; i < 5; i++) {
             if (sets[i] != VK_NULL_HANDLE) {
                 ImGui_ImplVulkan_RemoveTexture(sets[i]);
@@ -39,10 +49,28 @@ struct WeatherMapImGuiPreview {
         ready = false;
     }
 
+    void unregisterCurl() {
+        if (curlSet != VK_NULL_HANDLE) {
+            ImGui_ImplVulkan_RemoveTexture(curlSet);
+            curlSet = VK_NULL_HANDLE;
+        }
+        curlReady = false;
+    }
+
+    void unregister() {
+        unregisterWeather();
+        unregisterCurl();
+    }
+
     ImTextureID texId(int channel) const {
         if (!ready || channel < 0 || channel > 4 || sets[channel] == VK_NULL_HANDLE)
             return ImTextureID_Invalid;
         return (ImTextureID)(uintptr_t)sets[channel];
+    }
+
+    ImTextureID curlTexId() const {
+        if (!curlReady || curlSet == VK_NULL_HANDLE) return ImTextureID_Invalid;
+        return (ImTextureID)(uintptr_t)curlSet;
     }
 };
 
@@ -205,6 +233,23 @@ inline void FlowerCloudTunerImGui(bool* p_open, FlowerCloudTuneParams& p,
         ImGui::TextDisabled("R=coverage  G=type  B=humidity  A=land（bake 自 vk_scene）");
     } else {
         ImGui::TextDisabled("WeatherMap 预览未注册");
+    }
+
+    ImGui::Separator();
+    ImGui::Text("Curl / localCoverage（假 curl 纹理）");
+    ImGui::SliderFloat("CurlUVScale", &p.curlUVScale, 0.00001f, 0.01f, "%.5f", ImGuiSliderFlags_Logarithmic);
+    ImGui::SliderFloat("CurlStrength", &p.curlStrength, 0.0f, 1.0f, "%.3f");
+    ImGui::SliderFloat("CurlContrast", &p.curlContrast, 0.5f, 8.0f, "%.2f");
+    ImGui::TextDisabled("Strength=0 关闭碎点；轨道可试 UV≈0.0002 Strength≈0.1");
+    ImGui::TextDisabled("旧硬编码: UV=0.001 Strength=0.2 Contrast=3");
+    if (weatherPreview && weatherPreview->curlReady) {
+        ImTextureID curlTid = weatherPreview->curlTexId();
+        if (curlTid != ImTextureID_Invalid) {
+            const float previewW = ImGui::GetContentRegionAvail().x;
+            ImGui::Image(ImTextureRef(curlTid), ImVec2(previewW, previewW)); // 256² tile
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("bake 的 256² R8（Worley+Perlin），非真 curl 矢量场");
+        }
     }
 
     ImGui::Separator();
