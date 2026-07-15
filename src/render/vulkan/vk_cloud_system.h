@@ -57,9 +57,9 @@ struct FlowerCloudTuneParams {
     float detailNoiseScale = 0.02f;
     float multiScatterExtinction = 0.5f;
     float multiScatterScatter    = 0.5f;
-    float phaseForward  = 0.8f;
-    float phaseBackward = -0.2f;
-    float phaseMixFactor = 0.5f;
+    float phaseForward  = 0.27f;
+    float phaseBackward = -0.27f;
+    float phaseMixFactor = 0.7f;
     float powderScale = 1.0f;
     float powderPow   = 1.0f;
     float sunLightScale = 1.0f;
@@ -77,7 +77,7 @@ struct FlowerCloudTuneParams {
     // ── 管线 / cloud_common.glsl frameData.sky.atmosphereConfig ─────────────
     // useQuarterRes → updateFaceIndex（1=Bayer 1/4 + reconstruct，0=全分辨率 raymarch）
     bool useQuarterRes = true;
-    int  marchingStepNum = 64;              // cloudMarchingStepNum（baseline）
+    int  marchingStepNum = 128;              // cloudMarchingStepNum（baseline）
     float maxTracingDistanceKm = 350.f;       // cloudMaxTraceingDistance
     float tracingStartMaxDistanceKm = 1e8f;   // cloudTracingStartMaxDistance
     float stepTMinKm = 0.05f;               // cloudMarchStepMinKm
@@ -98,7 +98,7 @@ struct FlowerCloudTuneParams {
     // 沿太阳方向体积阴影步进（volumetricShadow）
     float lightStepMul = 1.5f;                // cloudLightStepMul
     float lightBasicStepKm = 0.033f;          // cloudLightBasicStep (km)
-    int   lightStepNum = 6;                   // cloudLightStepNum
+    int   lightStepNum = 12;                   // cloudLightStepNum
 
     // 天气 / 风
     float weatherUVScale = 1.f;               // cloudWeatherUVScale
@@ -116,7 +116,7 @@ struct FlowerCloudTuneParams {
     float airPerspectiveScale = 0.01f;        // 采样混合权重倍率（α'=α×此值；默认 0.01）
 
     // 环境天光：相机无关 μs→zenith LUT（可选混入 analytic）
-    float ambientExposure = 5.f;
+    float ambientExposure = 0.32f;
     float ambientAnalyticBlend = 0.f;
 };
 

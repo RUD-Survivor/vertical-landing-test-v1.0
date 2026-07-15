@@ -10,3 +10,8 @@ extern const uint32_t kScramblingTile[128 * 128 * 8];
 extern const uint32_t kRankingTile[128 * 128 * 8];
 
 }  // namespace rs3d::blue_noise
+//采样坐标为(x,y),那么就采x+128*y的值作为蓝噪声值(要对x,y取模128，即x&127,y&127)
+//先从kRankingTile中找sampleDimension + (pixel_i + pixel_j * 128u) * 8u索引的值作为rank值，该值与sampleIndex取异或，得到一个rankedindex
+//再从kSobol256spp256d中找rankedindex*256+sampleDimension索引的值作为蓝噪声值
+//最后从ScramblingTile中找sampleDimension%8 + (pixel_i + pixel_j * 128u) * 8u索引的值作为scrambling值,并与蓝噪声值进行异或，得到最终的蓝噪声值
+//蓝噪声值+0.5除以256，得到一个0-1之间的值，作为最终的蓝噪声值

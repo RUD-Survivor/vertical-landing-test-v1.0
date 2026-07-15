@@ -497,7 +497,7 @@ struct VkAtmosphereLut {
     // 补细节），深度方向 32 片，配合 shared_atmosphere.glsl::kAirPerspectiveKmPerSlice=4
     // 正好是 32×4=128km 的最大空气透视距离，和 cloud_common.glsl 采样时的假设一致。
     static constexpr uint32_t kFroxelW = 160, kFroxelH = 90, kFroxelD = 32;
-    // 云环境天光：μs∈[-1,1] → 云壳高度天顶散射色（与相机无关）
+    // 云环境天光：μs∈[-1,1] → 云壳高度天空半球余弦加权辐照度/π（与相机无关）
     static constexpr uint32_t kAmbientMusW = 128, kAmbientMusH = 1;
     // Inscatter 4D→3D：MuS*Nu × Mu × R = 256×128×32
     static constexpr uint32_t kInscatterW = 32u * 8u;  // RES_MU_S * RES_NU

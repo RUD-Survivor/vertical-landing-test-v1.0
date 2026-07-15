@@ -182,7 +182,7 @@ inline void FlowerCloudTunerImGui(bool* p_open, FlowerCloudTuneParams& p) {
     ImGui::Text("环境天光 (μs LUT，与相机无关)");
     ImGui::SliderFloat("AmbientExposure", &p.ambientExposure, 0.1f, 50.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
     ImGui::SliderFloat("AmbientAnalyticBlend", &p.ambientAnalyticBlend, 0.0f, 1.0f, "%.2f");
-    ImGui::TextDisabled("μs=dot(云点天顶,太阳) 查 128×1 天顶散射 LUT；夜半球由 μs 自然变暗");
+    ImGui::TextDisabled("μs=dot(云点天顶,太阳) 查 128×1 半球辐照度 LUT；夜半球由 μs 自然变暗");
     ImGui::TextDisabled("AnalyticBlend 混入 analyticSkyAmbient；Exposure≈atmo InnerFar");
 
     ImGui::Separator();

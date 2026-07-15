@@ -50,7 +50,7 @@ layout (set = 0, binding = 24, rgba16f) uniform image2D imageCloudFogReconstruct
 layout (set = 0, binding = 25) uniform texture2D inCloudFogReconstructionTexture; // 全分辨率云雾（只读）；与云/场景合成
 layout (set = 0, binding = 26) uniform texture2D inCloudFogReconstructionTextureHistory; // 上一帧全分辨率云雾；雾效时域滤波
 
-layout (set = 0, binding = 27) uniform texture2D inCloudAmbientMusLut; // 云环境天光 μs→zenith 1D LUT（与相机无关）
+layout (set = 0, binding = 27) uniform texture2D inCloudAmbientMusLut; // 云环境天光 μs→半球辐照度/π 1D LUT（与相机无关）
 
 layout (set = 0, binding = 28) uniform texture2D inSDSMShadowDepth; // SDSM 级联阴影深度；云受太阳阴影影响
 layout (set = 0, binding = 29) buffer SSBOCascadeInfoBuffer{ CascadeInfo cascadeInfos[]; }; // 阴影级联 SSBO；各 cascade 视锥与矩阵
@@ -264,7 +264,8 @@ vec3 lookupSkylight(vec3 worldDir,vec3 worldPos,float viewHeight,vec3 upVector,i
     return luminance;
 }
 
-// 云点环境天光：查相机无关的 μs→天顶散射 LUT（cloud_ambient_mus_lut 在云壳高度烘焙）。
+// 云点环境天光：查相机无关的 μs→天空半球余弦加权辐照度/π LUT
+//（cloud_ambient_mus_lut 在云壳高度烘焙）。
 // μs=dot(localUp,sun)；可选混入 analyticSkyAmbient。
 vec3 sampleCloudAmbient(const in AtmosphereParameters atmosphere, vec3 posKm, vec3 sunDirection)
 {
@@ -520,7 +521,7 @@ float fogNoise)
     vec3 scatteredLight=vec3(0.0);//沿视线累积的云散射光
     //将在march循环中不断更新
 
-    // 环境天光：按云壳入口位置的当地 μs 查 Sky-View 天顶 + 昼夜衰减（见 sampleCloudAmbient）。
+    // 环境天光：按云壳入口位置的当地 μs 查天空半球辐照度/π（见 sampleCloudAmbient）。
     vec3 cloudEntryPos=tMin*worldDir+worldPos;
     vec3 cloudEntryUp=normalize(cloudEntryPos);
     vec3 groundToCloudTransfertIsoScatter=sampleCloudAmbient(atmosphere,cloudEntryPos,sunDirection);
@@ -606,7 +607,7 @@ float fogNoise)
 
         // groundToCloudTransfertIsoScatter = skyBackgroundColor;// mix(groundToCloudTransfertIsoScatter, skyBackgroundColor, sunDirection.y);
         const vec3 upScaleColor=sampleCloudAmbient(atmosphere,cloudEntryPos,sunDirection);
-        // upScaleColor：云入口点当地环境天光（SkyView 天顶色 × μs 昼夜）。
+        // upScaleColor：云入口点当地环境天光（天空半球辐照度/π，昼夜由 μs 编码）。
 
         // marchStepT：第三层可变步长（km），每步末尾按 edgeSharpness 更新；第一层 stepT 为基准。
         float marchStepT = stepT;
