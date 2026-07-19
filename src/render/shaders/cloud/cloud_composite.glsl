@@ -101,10 +101,10 @@ void main()
         //远距离丁达尔效应不明显，若想要 km 级丁达尔（云缝阳光、远景光轴），需要例如：
         //加长 God Ray march（成本高）；
         //或在云 raymarch 内加强向太阳方向的散射（你们已有 powder/自阴影，更接近真实丁达尔）
-    // Phase 2 待接入：这段 400m 近距 God Ray 原本无条件每像素执行 64 步 march，且内部
-    // P0 的行星坐标换算仍是 flower 近地 Y-up 假设（只在贴近地表时成立，尚未做行星尺度改造）。
-    // 用 cloudGodRay 开关关闭（本次 fillPlanetAtmosphereProfile 里恒为 0），等 SDSM 级联阴影
-    // 与该坐标换算一起接入时再打开。
+    // 400m 近距 God Ray march。P0 的行星坐标换算已从 flower 近地 Y-up 假设（+vec3(0,bottomRadius,0)）
+    // 改成球面径向：rayPosWP/frameData.camWorldPos 都是"相对当前行星中心"的米制坐标（见
+    // cloud_common.glsl::cloudMap() 顶部注释），*0.001 转公里后本身就已经是从行星中心出发的
+    // 径向向量，不需要再加任何固定轴偏移——加了反而是错的（假设行星中心固定在 Y=-bottomRadius）。
     if (frameData.sky.atmosphereConfig.cloudGodRay != 0)
     {
         const uint  kGodRaySteps = 64;//定步数
@@ -152,7 +152,7 @@ void main()
         float rayleighPhaseValue = rayleighPhase(VoL);//Rayleigh相位
         vec3 sunColor = frameData.sky.color * frameData.sky.intensity;//太阳HDR色*强度
         vec3 groundToCloudTransfertIsoScatter = sampleCloudAmbient(atmosphere,
-            rayPosWP * 0.001 + vec3(0.0, atmosphere.bottomRadius, 0.0), sunDirection);// μs LUT 环境底光
+            rayPosWP * 0.001, sunDirection);// μs LUT 环境底光
         //接下来循环每步合成sunSkyLuminance = groundToCloudTransfertIsoScatter
         //        + visibilityTerm * sunColor * phase * atmosphereTransmittance;
 
@@ -160,10 +160,11 @@ void main()
         {//————————————————————先算太阳光是否被其他物体遮挡住，即从太阳看过去，是不是已经有别的东西——————
             float visibilityTerm = 1.0;//默认全亮，无阴影
             {
-                // Phase 2 待接入：真正的 SDSM 级联阴影渲染 pass 还没做，C++ 侧把
-                // sky.cacsadeConfig.cascadeCount 绑定为占位值 0，下面这个循环因此 0 次迭代、
-                // activeCascadeId 停在 0，紧接着 `activeCascadeId < cascadeCount`（0<0）为假，
-                // 直接跳过阴影采样、保留 visibilityTerm=1.0——不需要额外分支就能安全降级。
+                // 级联阴影已接入（vk_shadow_cascade.h::VkCascadeShadowSystem 每帧渲染地形深度图集）。
+                // 阴影系统关闭（tuner 未开）/本帧无地形面片可画时，C++ 侧把 cascadeCount 落回 0，
+                // 下面这个循环因此 0 次迭代、activeCascadeId 停在 0，紧接着 `activeCascadeId <
+                // cascadeCount`（0<0）为假，直接跳过阴影采样、保留 visibilityTerm=1.0——
+                // 不需要额外分支就能安全降级。
                 //SDSM Sample-Distribution Shadow Maps，Shadow Map是从太阳方向渲染一次深度图，每个像素存从太阳看该像素处的表面深度，每个雾点是否被遮挡只要和贴图中的深度比较
                 // First find active cascade.//cascade是把世界按距离切成多段，每段单独一张「从太阳看的深度图」，近处用高分辨率 cascade，远处用低分辨率 cascade
                 uint activeCascadeId = 0;//当前雾点rayPosWP应该查那一段cascade
@@ -198,12 +199,12 @@ void main()
                     }
                 }//若全部超出 → activeCascadeId == cascadeCount → 不采样，保持 visibilityTerm = 1
 
-            }//需要 C++ 绑定 inSDSMShadowDepth、cascadeInfos SSBO，且每帧更新
+            }//inSDSMShadowDepth/cascadeInfos 已由 vk_cloud_system.h::updateCloudDescriptorSet 每帧绑定为真实资源
 
             // Second evaluate transmittance due to participating media
             vec3 atmosphereTransmittance;
             {
-                vec3 P0 = rayPosWP * 0.001 + vec3(0.0, atmosphere.bottomRadius, 0.0); // meter -> kilometers.
+                vec3 P0 = rayPosWP * 0.001; // meter -> kilometers，行星中心相对坐标，直接是径向向量
                 float viewHeight = length(P0);//离地心高度
                 const vec3 upVector = P0 / viewHeight;
 

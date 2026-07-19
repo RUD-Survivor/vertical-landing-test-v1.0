@@ -29,6 +29,7 @@
 #include "vk_taa.h"
 #include "vk_atmosphere_lut.h"
 #include "vk_blue_noise.h"
+#include "vk_shadow_cascade.h"
 #include "gpu_frame_data.h"
 #include "../scene_snapshot.h"
 #include "../../math/math3d.h"
@@ -123,6 +124,13 @@ struct FlowerCloudTuneParams {
     // 环境天光：相机无关 μs→zenith LUT（可选混入 analytic）
     float ambientExposure = 0.32f;
     float ambientAnalyticBlend = 0.f;
+
+    // God Ray（400m 近距体积雾光柱 march，cloud_composite.glsl:108 起）。默认关闭——
+    // 需要先在 VkCascadeShadowSystem（vk_shadow_cascade.h）里也打开 enabled，两者
+    // 缺一都看不到效果：阴影关着 God Ray 全程 visibilityTerm=1（无遮挡但仍然有光轴）；
+    // God Ray 关着阴影渲染是纯浪费（没人读图集）。
+    bool  godRayEnabled = false;
+    float godRayScale = 1.0f; // cloudGodRayScale：光轴强度倍率
 };
 
 struct VkCloudSystem {
@@ -254,8 +262,14 @@ struct VkCloudSystem {
 
     // Called after TAA endGeometryPass — HDR + depth are SHADER_READ_ONLY.
     // 在 snap.celestials 里自己找地球类(atmoIdx==3)行星，抽取中心/半径；不需要调用方额外传参。
+    //
+    // shadowAtlasView/cascadeInfoBuf/cascadeCfg：来自 vk_renderer3d.h 持有的 VkCascadeShadowSystem，
+    // 在本函数调用前已经渲染好本帧的级联阴影贴图（见 vk_shadow_cascade.h::render()）。三者
+    // 全部为空（默认值）时退化成 Phase2 之前的占位行为（cascadeCount=0，God Ray 级联查找自动跳过）。
     void renderPhase0(VulkanContext& ctx, VkCommandBuffer cmd, VkTAA& taa,
-                      const SceneSnapshot& snap, int frameSlot, bool drawClouds) {
+                      const SceneSnapshot& snap, int frameSlot, bool drawClouds,
+                      VkImageView shadowAtlasView = VK_NULL_HANDLE, VkBuffer cascadeInfoBuf = VK_NULL_HANDLE,
+                      const GpuCascadeShadowConfig* cascadeCfg = nullptr) {
         if (!enabled) return;
         if (!tuneParams.flowerCloudEnabled) return;
         if (!drawClouds) {
@@ -283,7 +297,7 @@ struct VkCloudSystem {
         int slot = frameSlot % FRAMES_IN_FLIGHT;
         int histSlot = 1 - slot;
 
-        GpuPerFrameData fd = fillCloudFrameData(snap, *earth);
+        GpuPerFrameData fd = fillCloudFrameData(snap, *earth, cascadeCfg);
         // 已放弃 LUT 方案（Transmittance/MultiScatter/SkyView/SkyIrradiance 全部改成
         // cloud_common.glsl 里实时算，见 shared_atmosphere.glsl::realTimeTransmittance /
         // analyticSkyAmbient），不再需要每帧烘这四个 pass，省一次 GPU 开销。
@@ -316,7 +330,7 @@ struct VkCloudSystem {
         atmosphereLut.bakeFroxel(ctx, cmd, frameSlot, cloudLutPipelines);
         atmosphereLut.uploadFrameData(ctx, cmd, frameSlot, fd);
 
-        updateCloudDescriptorSet(ctx, taa, slot, histSlot, fd);
+        updateCloudDescriptorSet(ctx, taa, slot, histSlot, fd, shadowAtlasView, cascadeInfoBuf);
 
         VkDescriptorSet sets[3] = { cloudSet[slot], samplerSet, blueNoise.set };
 
@@ -372,7 +386,7 @@ private:
 
     // 填充 cloud_common.glsl binding 21 用的每帧数据：相机矩阵（含逆矩阵）+ sky/atmosphere 配置。
     // 与 vk_atmosphere_lut.h 的 LUT bake 共用同一份数据（同一个 UBO 内容）。
-    GpuPerFrameData fillCloudFrameData(const SceneSnapshot& snap, const CelestialDraw& earth) {
+    GpuPerFrameData fillCloudFrameData(const SceneSnapshot& snap, const CelestialDraw& earth, const GpuCascadeShadowConfig* cascadeCfg) {
         GpuPerFrameData fd{};
 
         fd.appTime[0] = snap.time; fd.appTime[1] = sinf(snap.time); fd.appTime[2] = cosf(snap.time);
@@ -440,9 +454,10 @@ private:
         fd.sky.color[0]=fd.sky.color[1]=fd.sky.color[2]=1.0f;
         fd.sky.intensity = snap.sunIntensity * tuneParams.sunIntensityMul;
 
-        // Phase 2 占位：SDSM 级联数量置 0，getShadow()/God Ray 级联查找自动跳过（见
-        // cloud_composite.glsl 里的说明），不需要真的渲染级联阴影贴图。
-        fd.sky.cacsadeConfig.cascadeCount = 0;
+        // cascadeCfg 来自 VkCascadeShadowSystem::render() 本帧渲染结果；为空（阴影关闭/无地形
+        // 面片可画）时退化成 cascadeCount=0，cloud_composite.glsl 的级联查找/God Ray 自动跳过。
+        if (cascadeCfg) fd.sky.cacsadeConfig = *cascadeCfg;
+        else fd.sky.cacsadeConfig.cascadeCount = 0;
 
         const float kAtmosphereThicknessKm = 160.0f; // 与 vk_renderer3d.h 里 apc.outerRadius = radius+160 保持一致
         fillPlanetAtmosphereProfile(fd.sky.atmosphereConfig, earth.atmoIdx, earth.radius, kAtmosphereThicknessKm,
@@ -502,6 +517,9 @@ private:
         ac.cloudAmbientExposure = tuneParams.ambientExposure;
         ac.cloudAmbientAnalyticBlend = tuneParams.ambientAnalyticBlend;
         ac.cloudIrradianceBakeAtShell = 1;
+
+        ac.cloudGodRay = tuneParams.godRayEnabled ? 1 : 0;
+        ac.cloudGodRayScale = tuneParams.godRayScale;
 
         return fd;
     }
@@ -685,7 +703,8 @@ private:
 
     // 每帧重写 Set 0 的全部 31 个 binding（含没变化的静态资源）：简单、不容易漏绑，
     // 代价是每帧多几十次 vkUpdateDescriptorSets，对云这种低频 compute pass 可以接受。
-    void updateCloudDescriptorSet(VulkanContext& ctx, VkTAA& taa, int slot, int histSlot, const GpuPerFrameData&) {
+    void updateCloudDescriptorSet(VulkanContext& ctx, VkTAA& taa, int slot, int histSlot, const GpuPerFrameData&,
+                                   VkImageView shadowAtlasView, VkBuffer cascadeInfoBuf) {
         VkDescriptorSet set = cloudSet[slot];
 
         VkDescriptorImageInfo hdr{ VK_NULL_HANDLE, taa.colorViews[taa.currentIdx], VK_IMAGE_LAYOUT_GENERAL };
@@ -719,10 +738,16 @@ private:
         VkDescriptorImageInfo fFogRO{ VK_NULL_HANDLE, fullFogView[slot], VK_IMAGE_LAYOUT_GENERAL };
         VkDescriptorImageInfo fFogHist{ VK_NULL_HANDLE, fullFogView[histSlot], VK_IMAGE_LAYOUT_GENERAL };
         VkDescriptorImageInfo skyIrr{ VK_NULL_HANDLE, atmosphereLut.cloudAmbientMusLutView(), VK_IMAGE_LAYOUT_GENERAL };
-        VkDescriptorImageInfo sdsm{ VK_NULL_HANDLE, dummy2DView, VK_IMAGE_LAYOUT_GENERAL };
+        // shadowAtlasView 是深度图（SHADER_READ_ONLY_OPTIMAL），采样时走 point-clamp 采样器
+        // （cloud_composite.glsl 里 pointClampEdgeSampler），跟其它 SAMPLED_IMAGE 一致不需要
+        // combined-image-sampler。为空（阴影系统未初始化/本帧被跳过）时退回旧的中性占位纹理。
+        VkDescriptorImageInfo sdsm{ VK_NULL_HANDLE, shadowAtlasView ? shadowAtlasView : dummy2DView,
+                                     shadowAtlasView ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL : VK_IMAGE_LAYOUT_GENERAL };
         VkDescriptorImageInfo hiz{ VK_NULL_HANDLE, dummy2DView, VK_IMAGE_LAYOUT_GENERAL };
         VkDescriptorBufferInfo ubo{ atmosphereLut.frameUBO(slot), 0, sizeof(GpuPerFrameData) };
-        VkDescriptorBufferInfo cascadeSsbo{ dummyCascadeBuf, 0, sizeof(GpuCascadeInfo) };
+        VkDescriptorBufferInfo cascadeSsbo{ cascadeInfoBuf ? cascadeInfoBuf : dummyCascadeBuf, 0,
+                                             cascadeInfoBuf ? sizeof(GpuCascadeInfo) * (size_t)VkCascadeShadowSystem::kMaxCascades
+                                                             : sizeof(GpuCascadeInfo) };
 
         VkWriteDescriptorSet w[31]{};
         auto imgW = [&](int i, uint32_t binding, VkDescriptorType t, VkDescriptorImageInfo* info) {

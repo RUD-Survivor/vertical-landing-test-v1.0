@@ -6,6 +6,7 @@
 // ==========================================================================
 #include "../cloud_system.h"  // CloudTuneParams
 #include "vk_cloud_system.h"  // FlowerCloudTuneParams
+#include "vk_shadow_cascade.h" // VkCascadeShadowSystem
 #include "imgui.h"
 #include "backends/imgui_impl_vulkan.h"
 #include <cmath>
@@ -134,7 +135,8 @@ inline void CloudTunerImGui(bool* p_open, CloudTuneParams& p) {
 // 这个调的是新的 1/4 分辨率 compute 云管线（cloudSystem.enabled=true 时生效）。
 // ==========================================================================
 inline void FlowerCloudTunerImGui(bool* p_open, FlowerCloudTuneParams& p,
-                                  WeatherMapImGuiPreview* weatherPreview = nullptr) {
+                                  WeatherMapImGuiPreview* weatherPreview = nullptr,
+                                  VkCascadeShadowSystem* shadow = nullptr) {
     if (ImGui::IsKeyPressed(ImGuiKey_F3, false)) *p_open = !*p_open;
     if (!*p_open) return;
 
@@ -291,6 +293,31 @@ inline void FlowerCloudTunerImGui(bool* p_open, FlowerCloudTuneParams& p,
     ImGui::SliderFloat("AmbientAnalyticBlend", &p.ambientAnalyticBlend, 0.0f, 1.0f, "%.2f");
     ImGui::TextDisabled("μs=dot(云点天顶,太阳) 查 128×1 半球辐照度 LUT；夜半球由 μs 自然变暗");
     ImGui::TextDisabled("AnalyticBlend 混入 analyticSkyAmbient；Exposure≈atmo InnerFar");
+
+    ImGui::Separator();
+    ImGui::Text("God Ray（近距 400m 体积光柱）");
+    ImGui::Checkbox("God Ray 启用", &p.godRayEnabled);
+    ImGui::SliderFloat("God Ray 强度", &p.godRayScale, 0.0f, 8.0f, "%.2f");
+    ImGui::TextDisabled("需要下面的级联阴影也开启，否则光柱不受地形遮挡");
+
+    if (shadow) {
+        ImGui::Separator();
+        ImGui::Text("SDSM 级联阴影（地形，供 God Ray 用）");
+        ImGui::Checkbox("级联阴影启用", &shadow->enabled);
+        ImGui::Text("级联数 %d × %dpx（初始化时固定，改需重启）", shadow->cascadeCount, shadow->percascadeDimXY);
+        ImGui::SliderFloat("SplitLambda", &shadow->cascadeSplitLambda, 0.0f, 1.0f, "%.2f");
+        ImGui::TextDisabled("0=纯均匀拆分 1=纯对数拆分（近处更细）");
+        ImGui::SliderFloat("近裁截 (km)", &shadow->nearDistanceKm, 0.001f, 1.0f, "%.3f", ImGuiSliderFlags_Logarithmic);
+        ImGui::SliderFloat("远裁截 (km)", &shadow->maxDrawDepthDistanceKm, 0.5f, 50.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
+        ImGui::SliderFloat("深度余量 (km)", &shadow->depthMarginKm, 1.0f, 200.0f, "%.1f", ImGuiSliderFlags_Logarithmic);
+        ImGui::TextDisabled("光源沿太阳方向后退的额外距离，兜住相机附近地形起伏");
+        ImGui::SliderFloat("BiasConst", &shadow->shadowBiasConst, 0.0f, 0.02f, "%.4f");
+        ImGui::SliderFloat("BiasSlope", &shadow->shadowBiasSlope, 0.0f, 0.02f, "%.4f");
+        ImGui::SliderFloat("BorderAdopt", &shadow->cascadeBorderAdopt, 0.0f, 0.2f, "%.3f");
+        ImGui::SliderFloat("EdgeLerpThreshold", &shadow->cascadeEdgeLerpThreshold, 0.5f, 1.0f, "%.3f");
+    } else {
+        ImGui::TextDisabled("级联阴影系统未接入（shadow==nullptr）");
+    }
 
     ImGui::Separator();
     ImGui::Text("调试可视化（排查黑云用）");

@@ -24,6 +24,7 @@ struct VkRenderer3D {
     VkSkySystem     sky;
     VkEffectsSystem effects;
     VkCloudSystem   cloudSystem;
+    VkCascadeShadowSystem shadowSystem; // SDSM 级联阴影（Phase2 收尾，只投射地形，见 vk_shadow_cascade.h）
     AtmoTuneParams  atmoTune; // 大气重构调参（imgui_atmo_tuner.h），见 renderAtmoAfterGeometry
 
     // -----------------------------------------------------------------------
@@ -34,11 +35,15 @@ struct VkRenderer3D {
         if (!sky.init(ctx, desc, colorFmt, depthFmt))     return false;
         if (!effects.init(ctx, desc, colorFmt, depthFmt)) return false;
         effects.initRibbonRing(ctx, 524288);  // 环形 VBO (512K verts) 用于丝带渲染，需足够大以容纳高级轨道预测+机动虚线
+        // 复用地形管线的纹理 set1Layout（scene.terrainPipe 在 scene.init() 里已经建好），
+        // 阴影深度管线只需要那 4 张地形纹理，不需要自己另开一套 texture descriptor set。
+        if (!shadowSystem.init(ctx, scene.terrainPipe.set1Layout)) return false;
         printf("[VkRenderer3D] All systems initialized\n");
         return true;
     }
 
     void shutdown(VulkanContext& ctx) {
+        shadowSystem.shutdown(ctx);
         cloudSystem.shutdown(ctx);
         effects.shutdownRibbonRing();
         effects.shutdown(ctx.device);
@@ -251,10 +256,31 @@ struct VkRenderer3D {
     void renderFlowerCloudAfterGeometry(VulkanContext& ctx, VkCommandBuffer cmd, VkTAA& taa,
                                         const SceneSnapshot& snap, int frameSlot) {
         bool showClouds = false;
+        const CelestialDraw* earthForShadow = nullptr;
         for (const auto& cd : snap.celestials) {
-            if (cd.atmoIdx == 3 && cd.showClouds) { showClouds = true; break; }
+            if (cd.atmoIdx == 3 && cd.showClouds) { showClouds = true; earthForShadow = &cd; break; }
         }
-        cloudSystem.renderPhase0(ctx, cmd, taa, snap, frameSlot, showClouds);
+
+        // 级联阴影贴图必须在云 compute dispatch 之前渲染好（云的 God Ray 要采样它）。
+        // 只有云打算画的时候才需要——目前唯一的消费者就是 cloud_composite.glsl 的 God Ray。
+        GpuCascadeShadowConfig cascadeCfg{};
+        if (showClouds && earthForShadow) {
+            float sunDirToPlanetKm[3] = {
+                snap.sunWorldPos[0] - earthForShadow->center[0],
+                snap.sunWorldPos[1] - earthForShadow->center[1],
+                snap.sunWorldPos[2] - earthForShadow->center[2],
+            };
+            float len = sqrtf(sunDirToPlanetKm[0]*sunDirToPlanetKm[0] + sunDirToPlanetKm[1]*sunDirToPlanetKm[1] + sunDirToPlanetKm[2]*sunDirToPlanetKm[2]);
+            if (len > 1e-4f) { sunDirToPlanetKm[0]/=len; sunDirToPlanetKm[1]/=len; sunDirToPlanetKm[2]/=len; }
+
+            shadowSystem.render(ctx, cmd, frameSlot, snap,
+                scene.terrainPatchVbo, scene.terrainPatchIbo, scene.terrainPatchIcount,
+                scene.terrainGlobalTexSet, sunDirToPlanetKm, snap.camPos, cascadeCfg);
+        }
+
+        cloudSystem.renderPhase0(ctx, cmd, taa, snap, frameSlot, showClouds,
+            shadowSystem.shadowAtlasView(), shadowSystem.cascadeInfoBuffer(frameSlot),
+            cascadeCfg.cascadeCount > 0 ? &cascadeCfg : nullptr);
     }
 
     static bool isGasGiant(int atmoIdx) {
