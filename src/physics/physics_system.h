@@ -128,7 +128,9 @@ namespace PhysicsSystem {
     void Update(entt::registry& registry, entt::entity entity, double dt);
 
     /**
-     * @brief 精简版的快速引力更新，常用于预测未来的轨迹（轨迹预测线）。
+     * @brief 滑行（coast）引力积分：跳过气动/姿态/推力。
+     * 步长按轨道尺度选择，并用每帧 max_steps 预算限制 CPU。
+     * 供时间加速与快速传播使用。
      */
     void FastGravityUpdate(entt::registry& registry, entt::entity entity, double dt_total);
     

@@ -626,12 +626,13 @@ struct VkRenderer3D {
             }
         }
 
-        // ---- 9. 轨道丝带 (Block A) ----
-        effects.beginRibbonFrame();
-        for (const auto& rib : snap.ribbons) {
+        // ---- 9. 轨道丝带 (Block A) —— rib.width 为屏上像素宽，挤出时按距离换算 ----
+        effects.beginRibbonFrame();//把 ribbon 环形 VBO 的写入游标 ringOffset 置 0，每帧从缓冲开头重新写
+        for (const auto& rib : snap.ribbons) {//遍历快照的所有轨道线
             effects.drawRibbonData(cmd, snap.frameIndex % 2,
                 rib.points, rib.colors, rib.width,
-                Vec3(snap.camPos[0], snap.camPos[1], snap.camPos[2]));
+                Vec3(snap.camPos[0], snap.camPos[1], snap.camPos[2]),
+                (float)_extent.height, 0.8f);
         }
 
         // ---- 10. 变轨节点广告牌 (Block A) ----

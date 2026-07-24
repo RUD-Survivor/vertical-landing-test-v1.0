@@ -736,11 +736,11 @@ else {
             if (cam.mode == 2 && i < 10) {
                 double a = b.sma_base, e = b.ecc_base, inc = b.inc_base;
                 double lan = b.lan_base, argP = b.arg_peri_base;
-                int segs = 90;
+                int segs = 1200;//天体轨道线分段数
                 double cO = cos(lan), sO = sin(lan);
                 double cw = cos(argP), sw = sin(argP);
                 double ci = cos(inc), si = sin(inc);
-                std::vector<Vec3> opts; std::vector<Vec4> ocols;
+                std::vector<Vec3> opts; std::vector<Vec4> ocols;//opts:轨道线顶点，ocolors:轨道线颜色
                 for (int k = 0; k < segs; k++) {
                     double Ek = (double)k / (segs-1) * 2.0 * kPI;
                     double nuk = 2.0 * atan2(sqrt(1.0+e)*sin(Ek/2.0), sqrt(1.0-e)*cos(Ek/2.0));
@@ -753,8 +753,8 @@ else {
                     opts.push_back(Vec3((float)(wx*ws_d-ro_x),(float)(wy*ws_d-ro_y),(float)(wz*ws_d-ro_z)));
                     ocols.push_back(Vec4(b.r*0.6f+0.3f, b.g*0.6f+0.3f, b.b*0.6f+0.3f, 0.7f));
                 }
-                float orbW = fmaxf(ctx.earth_r*0.008f, fmaxf((ctx.camEye_rel-Vec3(px,py,pz)).length(), ctx.camEye_rel.length())*0.0035f);
-                if (i==4) orbW*=0.5f;
+                // 屏上像素宽（drawRibbonData 按距离换算）
+                float orbW = 1.5f;
                 snap.ribbons.push_back({opts, ocols, orbW});
             }
         }

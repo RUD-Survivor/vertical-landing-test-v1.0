@@ -1225,22 +1225,16 @@ void Update(entt::registry& registry, entt::entity entity, double dt) {
 }
 
 // 高倍速率引力更新 (FastGravityUpdate)
-// 当用户开启 100x, 1000x 甚至更高倍的时间加速时，
-// 我们不再计算空气阻力、姿态控制或推力，只计算纯粹的引力。
-// 这样可以极大地提高计算效率，防止 CPU 过载导致游戏卡死。
+// 滑行（coast）路径：不计算空气阻力、姿态控制或推力，只积分引力。
+// 步长按轨道尺度选择（约 1° 平近点角 / 位置容差），并用 max_steps 限制每帧预算。
 void FastGravityUpdate(entt::registry& registry, entt::entity entity, double dt_total) {
 
     auto& trans = registry.get<TransformComponent>(entity);
     auto& vel = registry.get<VelocityComponent>(entity);
-    auto& att = registry.get<AttitudeComponent>(entity);
     auto& prop = registry.get<PropulsionComponent>(entity);
     auto& tele = registry.get<TelemetryComponent>(entity);
     auto& guid = registry.get<GuidanceComponent>(entity);
-    auto& orb = registry.get<OrbitComponent>(entity);
-    auto& mnv = registry.get<ManeuverComponent>(entity);
-    auto& vfx = registry.get<VFXComponent>(entity);
     const auto& config = registry.get<RocketConfig>(entity);
-    const auto& input = registry.get<ControlInput>(entity);
 
     // 1. 处理高倍率下的地面锁定
     // 如果飞船在地面上，直接根据星球自转同步位置。
@@ -1258,17 +1252,40 @@ void FastGravityUpdate(entt::registry& registry, entt::entity entity, double dt_
         return;
     }
 
-    // 2. 动态步长调整
-    // 防止在高倍加速（如 10000x）下每帧计算太多步。
-    double dt_step = std::max(5.0, dt_total / 200.0); 
+    if (dt_total <= 0.0) return;
+
+    // 2. 轨道尺度步长 + 每帧步数预算（Principia 风格：容差/周期分数，而非机身尺度）
+    constexpr int kMaxCoastStepsPerFrame = 256;
+    constexpr double kLengthToleranceM = 100.0;       // 目标位置尺度 ~100 m
+    constexpr double kMaxTrueAnomalyRad = 1.0 * PI / 180.0; // 单步最多 ~1° 平运动
+
+    CelestialBody& body0 = UniverseModel::getInstance().solar_system[UniverseModel::getInstance().current_soi_index];
+    double r0 = std::sqrt(trans.px * trans.px + trans.py * trans.py + trans.pz * trans.pz);
+    double speed0 = std::sqrt(vel.vx * vel.vx + vel.vy * vel.vy + vel.vz * vel.vz);
+    if (!std::isfinite(r0) || r0 < 1.0) r0 = std::max(1.0, body0.radius);
+    if (!std::isfinite(speed0)) speed0 = 0.0;
+
+    double GM0 = G_const * body0.mass;
+    double mean_motion = (r0 > 1.0 && GM0 > 0.0) ? std::sqrt(GM0 / (r0 * r0 * r0)) : 1e-3;
+    double dt_orbital = kMaxTrueAnomalyRad / std::max(mean_motion, 1e-12);
+    double max_travel = std::max(kLengthToleranceM, r0 * 0.001); // ≥100 m 或 0.1% 半径
+    double dt_travel = max_travel / std::max(speed0, 1.0);
+    double dt_step = std::min(dt_orbital, dt_travel);
+    // 保证本帧能在预算内走完（略降精度换帧时间）
+    dt_step = std::max(dt_step, dt_total / (double)kMaxCoastStepsPerFrame);
+    dt_step = std::min(dt_step, dt_total);
+
     double t_remaining = dt_total;
+    int steps_done = 0;
     
     double total_mass = config.dry_mass + prop.fuel + config.upper_stages_mass;
+    if (!(total_mass > 1e-6)) total_mass = 1.0;
 
-    // 循环迭代：将大步长拆解为物理上可接受的小步长
-    while (t_remaining > 0) {
+    // 循环迭代：将大步长拆解为轨道尺度小步长
+    while (t_remaining > 1e-12 && steps_done < kMaxCoastStepsPerFrame) {
         double dt = std::min(t_remaining, dt_step);
         t_remaining -= dt;
+        steps_done++;
         tele.sim_time += dt;
         if (guid.status != PRE_LAUNCH) {
             guid.mission_timer += dt;

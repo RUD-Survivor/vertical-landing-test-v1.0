@@ -47,7 +47,7 @@ struct ExhaustDraw {
 struct RibbonSegment {
     std::vector<Vec3> points;   // 世界空间点
     std::vector<Vec4> colors;   // per-vertex 颜色
-    float width;                // 丝带宽度（渲染单位）
+    float width;                // 目标屏幕像素宽度（drawRibbonData 按相机距离换算世界半宽）
 };
 
 // ============================================================================

@@ -116,9 +116,13 @@ void lutTransmittanceParamsToUv(
 
 	uv.y = rho / H;
 
-	// Distance to atmosphere boundary
-	float discriminant = viewHeight * viewHeight * (viewZenithCosAngle * viewZenithCosAngle - 1.0) + atmosphere.topRadius * atmosphere.topRadius;
-	float d = max(0.0, (-viewHeight * viewZenithCosAngle + sqrt(discriminant))); 
+	// Distance to atmosphere boundary。discriminant 在 viewHeight > topRadius 且视线/日照方向
+	// 擦过星球边缘、根本不会再穿回大气层顶时会变负（sqrt(负数) = NaN，且会顺着
+	// atmosphereTransmittance→scatteredLight2→result.rgb 传染到整帧）。God Ray march 的取样点
+	// 在轨道/深空场景下 viewHeight 经常 > topRadius，之前没人从这种角度调用过这个函数，
+	// 所以这个漏加的 max(0.0,...) 一直没暴露出来——照抄上面 H/rho 已有的同款保护补上。
+	float discriminant = max(0.0, viewHeight * viewHeight * (viewZenithCosAngle * viewZenithCosAngle - 1.0) + atmosphere.topRadius * atmosphere.topRadius);
+	float d = max(0.0, (-viewHeight * viewZenithCosAngle + sqrt(discriminant)));
 
 	float dMin = atmosphere.topRadius - viewHeight;
 	float dMax = rho + H;

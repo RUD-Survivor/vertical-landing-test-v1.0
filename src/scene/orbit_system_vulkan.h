@@ -284,24 +284,27 @@ inline void computeOrbitDataVK(OrbitSystem& osys,
 // ---- 将 Keplerian 缓存追加到 ribbon 输出 ----
 inline void extractKepRibbons(const KepOrbitCache& kep, float earth_r, float cam_dist,
                                std::vector<RibbonSegment>& out) {
-    float rw = fminf(fmaxf(earth_r * 0.006f, cam_dist * 0.001f), cam_dist * 0.5f);
-    if (kep.bodyPts.size() >= 2) out.push_back({kep.bodyPts, kep.bodyCols, rw});
-    if (kep.sunPts.size() >= 2)  out.push_back({kep.sunPts,  kep.sunCols,  rw});
+    (void)earth_r; (void)cam_dist;
+    constexpr float kOrbitPx = 2.5f; // 屏上像素宽
+    if (kep.bodyPts.size() >= 2) out.push_back({kep.bodyPts, kep.bodyCols, kOrbitPx});
+    if (kep.sunPts.size() >= 2)  out.push_back({kep.sunPts,  kep.sunCols,  kOrbitPx});
 }
 
 // ---- 将高级轨道缓存追加到 ribbon 输出 ----
 inline void extractAdvRibbons(const AdvOrbitCache& adv, float earth_r, float cam_dist,
                                std::vector<RibbonSegment>& out) {
-    float rw = fminf(fmaxf(earth_r * 0.006f, cam_dist * 0.001f), cam_dist * 0.5f);
-    if (adv.worldPts.size() >= 2) out.push_back({adv.worldPts, adv.cols, rw});
+    (void)earth_r; (void)cam_dist;
+    constexpr float kOrbitPx = 2.5f;//轨道线在屏幕上的像素宽度
+    constexpr float kMnvDashPx = 2.5f;//变轨虚线在屏幕上的像素宽度
+    if (adv.worldPts.size() >= 2) out.push_back({adv.worldPts, adv.cols, kOrbitPx});
     // 变轨虚线：每 12 点一个 dash
     for (size_t s = 0; s < adv.mnvDash.size(); s += 20) {
-        std::vector<Vec3> dashPts; std::vector<Vec4> dashCols;
+        std::vector<Vec3> dashPts; std::vector<Vec4> dashCols;//dashPts:虚线顶点，dashCols:虚线颜色
         for (size_t j = 0; j < 12 && (s+j) < adv.mnvDash.size(); j++) {
             dashPts.push_back(adv.mnvDash[s+j]);
             dashCols.push_back(adv.mnvCols[s+j]);
         }
-        if (dashPts.size() >= 2) out.push_back({dashPts, dashCols, rw});
+        if (dashPts.size() >= 2) out.push_back({dashPts, dashCols, kMnvDashPx});
     }
 }
 

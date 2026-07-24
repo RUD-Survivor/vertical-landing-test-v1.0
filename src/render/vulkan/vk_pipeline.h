@@ -530,7 +530,7 @@ struct VkExhaustPipeline {
 // -----------------------------------------------------------------------
 // VkRibbonPipeline — Alpha-blended ribbon trail
 // Vertex: vec3 pos(0) + vec4 color(1) + float qSide(2), stride=32.
-// Set 0 only. Push: RibbonPushConstants (64 bytes).
+// Set 0 only. Push: RibbonPushConstants (80 bytes).
 // -----------------------------------------------------------------------
 struct VkRibbonPipeline {
     VkPipelineLayout layout=VK_NULL_HANDLE; VkPipeline pipeline=VK_NULL_HANDLE;

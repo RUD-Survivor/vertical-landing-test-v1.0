@@ -15,6 +15,7 @@
 #include "../vk_descriptors.h"
 #include "../vk_pipeline.h"
 #include "../../math/math3d.h"  // Vec3, Vec4
+#include <cmath>
 #include <cstring>
 #include <cstdio>
 
@@ -95,15 +96,18 @@ struct VkEffectsSystem {
 
     // -----------------------------------------------------------------------
     // 尾迹带。vbo 顶点格式: vec3 pos + vec4 color + float qSide（stride=32）。
+    // coreEdge: 视觉核心在 |qSide| 中的外缘（几何含 AA 余量时 < 1）。
     void drawRibbon(VkCommandBuffer cmd, int frameIdx,
                     VkBuffer vbo, uint32_t vertCount,
-                    const float model[16], VkDeviceSize vboOffset = 0) {
+                    const float model[16], VkDeviceSize vboOffset = 0,
+                    float coreEdge = 1.0f) {
         if (ribbonPipe.pipeline == VK_NULL_HANDLE) return;
         ribbonPipe.bind(cmd);
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
             ribbonPipe.layout, 0, 1, &desc->set0[frameIdx], 0, nullptr);
         RibbonPushConstants pc{};
         memcpy(pc.model, model, 64);
+        pc.coreEdge = coreEdge;
         vkCmdPushConstants(cmd, ribbonPipe.layout,
             VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
             0, sizeof(RibbonPushConstants), &pc);
@@ -127,35 +131,58 @@ struct VkEffectsSystem {
         return true;
     }
 
-    void drawRibbonData(VkCommandBuffer cmd, int frameIdx,
-                        const std::vector<Vec3>& pts, const std::vector<Vec4>& cols,
-                        float width, const Vec3& camPos) {
-        if (pts.size()<2 || ribbonRingVbo==VK_NULL_HANDLE) return;
-        struct RibV { float px,py,pz, cr,cg,cb,ca, side; };
+    // widthPixels: 目标屏幕像素宽度。几何额外加宽 aaPad 供外侧羽化（细线 AA 必需）。
+    // 逐点按相机距离换算世界半宽，使轨道线屏上近似定宽。
+    void drawRibbonData(VkCommandBuffer cmd, int frameIdx,//cmd:命令缓存，frameIdx:帧索引
+                        const std::vector<Vec3>& pts, const std::vector<Vec4>& cols,//pts:轨道线中心点，cols:逐点颜色
+                        float widthPixels, const Vec3& camPos,//widthPixels:ribbon 在屏幕上的目标宽度，camPos:相机位置
+                        float viewportHeight, float fovY = 0.8f)//viewportHeight:视口高度，fovY:竖直视场角
+    {
+        if (pts.size()<2 || ribbonRingVbo==VK_NULL_HANDLE) return;//至少两点才能成带；环形 VBO 未初始化则跳过
+        if (viewportHeight < 1.f) viewportHeight = 1.f;//防止除零
+        if (widthPixels < 0.5f) widthPixels = 0.5f;//过细没有覆盖率，钳到半像素
+        struct RibV { float px,py,pz, cr,cg,cb,ca, side; };//pos + color + qSide，与 stride=32 对齐
         size_t n = pts.size();
-        size_t total = n*2;
+        size_t total = n*2;//每个中心点挤出左右两个顶点
         if (ringOffset + total > ribbonRingMax) return; // 超出环形缓冲
 
-        void* data;
-        vmaMapMemory(ribbonAllocator, ribbonRingAlloc, &data);
-        auto* v = (RibV*)data + ringOffset;
-        for (size_t i=0; i<n; i++) {
-            Vec4 col = (i<cols.size())?cols[i]:Vec4(1,1,1,1);
-            Vec3 fwd;
-            if (i<n-1) fwd=(pts[i+1]-pts[i]).normalized();
-            else fwd=(pts[i]-pts[i-1]).normalized();
-            Vec3 toCam = camPos - pts[i];
-            Vec3 right = fwd.cross(toCam).normalized();
-            if (right.length()<0.001f) right=Vec3(1,0,0);
-            float hw=width*0.5f;
-            v[i*2]  ={(float)(pts[i].x+right.x*hw),(float)(pts[i].y+right.y*hw),(float)(pts[i].z+right.z*hw), (float)col.x,(float)col.y,(float)col.z,(float)col.w, 1.f};
-            v[i*2+1]={(float)(pts[i].x-right.x*hw),(float)(pts[i].y-right.y*hw),(float)(pts[i].z-right.z*hw), (float)col.x,(float)col.y,(float)col.z,(float)col.w,-1.f};
-        }
-        vmaUnmapMemory(ribbonAllocator, ribbonRingAlloc);
+        // 两侧合计约 2px 的 AA 余量；视觉宽度仍为 widthPixels
+        constexpr float kAaPadPx = 2.0f;//几何比视觉多出的屏上像素宽（外侧羽化带）
+        const float geomPixels = widthPixels + kAaPadPx;//实际挤出用的几何宽度
+        const float coreEdge = widthPixels / geomPixels;//|qSide|<coreEdge 为不透明核心，之外为 AA 区
 
-        float idMat[16]={1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
-        VkDeviceSize voff = ringOffset * 32; // 当前段在 VBO 中的字节偏移
-        drawRibbon(cmd, frameIdx, ribbonRingVbo, (uint32_t)total, idMat, voff);
+        const float tanHalf = tanf(fovY * 0.5f);//半角 tan，用于透视下“单位距离竖直可见高度”
+        // (geomPixels/viewportHeight)：几何宽占屏高比例；×2*tanHalf：单位距离上的世界宽度系数
+        const float pxScale = (geomPixels / viewportHeight) * 2.f * tanHalf;
+
+        void* data;
+        vmaMapMemory(ribbonAllocator, ribbonRingAlloc, &data);//映射环形 VBO，CPU 可写
+        auto* v = (RibV*)data + ringOffset;//当前帧写入游标
+        for (size_t i=0; i<n; i++) {
+            Vec4 col = (i<cols.size())?cols[i]:Vec4(1,1,1,1);//缺色时用白
+            Vec3 fwd;//轨道局部切线
+            if (i<n-1) fwd=(pts[i+1]-pts[i]).normalized();//前向差分
+            else fwd=(pts[i]-pts[i-1]).normalized();//末点用后向差分
+            Vec3 toCam = camPos - pts[i];//点指向相机
+            float dist = toCam.length();//到相机距离，决定该点世界线宽
+            if (dist < 1e-6f) dist = 1e-6f;
+            Vec3 right = fwd.cross(toCam).normalized();//带宽方向：垂直于切线且朝向相机侧
+            if (right.length()<0.001f) right=Vec3(1,0,0);//切线几乎朝向相机时叉积退化，兜底
+            // 屏上定宽：worldW ∝ dist；相对 dist 的比例 clamp 防贴相机炸开 / 远距过粗
+            float worldW = pxScale * dist;//该点处几何丝带的世界全宽
+            float minW = dist * 1e-5f;//最小宽度
+            float maxW = dist * 0.05f;//最大宽度
+            if (worldW < minW) worldW = minW;
+            if (worldW > maxW) worldW = maxW;
+            float hw = worldW * 0.5f;//半宽，左右各挤 hw
+            v[i*2]  ={(float)(pts[i].x+right.x*hw),(float)(pts[i].y+right.y*hw),(float)(pts[i].z+right.z*hw), (float)col.x,(float)col.y,(float)col.z,(float)col.w, 1.f};//左侧，qSide=+1
+            v[i*2+1]={(float)(pts[i].x-right.x*hw),(float)(pts[i].y-right.y*hw),(float)(pts[i].z-right.z*hw), (float)col.x,(float)col.y,(float)col.z,(float)col.w,-1.f};//右侧，qSide=-1
+        }
+        vmaUnmapMemory(ribbonAllocator, ribbonRingAlloc);//写完解映射，交 GPU 读
+
+        float idMat[16]={1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};//单位矩阵：顶点已是世界坐标
+        VkDeviceSize voff = ringOffset * 32; // 当前段在 VBO 中的字节偏移，每顶点 32 字节
+        drawRibbon(cmd, frameIdx, ribbonRingVbo, (uint32_t)total, idMat, voff, coreEdge);//提交绘制，传入核心边缘
         ringOffset += total; // 推进偏移，下一条 ribbon 写到后面
     }
 
@@ -246,3 +273,4 @@ struct VkEffectsSystem {
         vkCmdDraw(cmd, 4, 1, 0, 0);
     }
 };
+//ribbon,billboard,lens_flare,exhaust全部挤在一起

@@ -12,7 +12,11 @@ layout(set = 0, binding = 0) uniform FrameUBO {
 } frame;
 
 layout(push_constant) uniform PC {
-    mat4 model; // 64 bytes
+    mat4  model;    // 64
+    float coreEdge; // 视觉核心外缘（frag 使用）
+    float _pad0;
+    float _pad1;
+    float _pad2;
 } pc;
 
 layout(location = 0) in vec3 aPos;

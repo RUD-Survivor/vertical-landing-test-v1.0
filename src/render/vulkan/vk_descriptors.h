@@ -102,11 +102,13 @@ struct ExhaustPushConstants {
 
 // -----------------------------------------------------------------------
 // RibbonPushConstants — alpha-blended trail ribbon
-// 64 bytes: mat4 model only
+// 80 bytes: mat4 model + coreEdge（视觉半宽在 qSide∈[0,1] 中的位置）+ pad
 // -----------------------------------------------------------------------
 struct RibbonPushConstants {
-    float model[16]; // 64 bytes
-};
+    float model[16]; // 64 bytes — offset 0
+    float coreEdge;  //  4 bytes — offset 64；几何加宽后，不透明核心外缘的 |qSide|
+    float _pad[3];   // 12 bytes — offset 68
+};                   //            total: 80 bytes
 
 // -----------------------------------------------------------------------
 // BillboardPushConstants — screen-aligned sprite (alpha blend)
