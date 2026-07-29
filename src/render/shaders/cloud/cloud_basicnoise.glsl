@@ -75,7 +75,7 @@ void main()
     const vec3 uvw=(vec3(workPos)+vec3(0.5))/vec3(texSize);
     //把整数格点移到体素中心，再归一化到[0, 1]³,vec3(workPos)+vec3(0.5)才是体素中心，一个体素边长为1
 
-    float pfbm =mix(1.0,perlinFbm(uvw,kBasicFrequency,8),kBasicNoiseMixFactor);//7层较丰富，kBasicFrequency是平铺周期，mix(x,y,0.5)=(x+y)/2,避免噪声对比过强。
+    float pfbm =mix(1.0,perlinFbm(uvw,kBasicFrequency,7),kBasicNoiseMixFactor);//7层较丰富，kBasicFrequency是平铺周期，mix(x,y,0.5)=(x+y)/2,避免噪声对比过强。
     pfbm=abs(pfbm*2.0-1.0);// billowy perlin noise，让云更加蓬松
     
     vec4 col=vec4(0.0);

@@ -29,6 +29,7 @@
 #include "vk_utils.h"
 #include "vk_frame.h"
 #include "gpu_frame_data.h"
+#include "cloud_noise_ladder.h"
 
 #include <cstdio>
 #include <cstring>
@@ -276,15 +277,14 @@ inline void fillPlanetAtmosphereProfile(GpuAtmosphereConfig& cfg, int32_t atmoId
     cfg.cloudSpeed = 0.15f;
     cfg.cloudMultiScatterExtinction = 0.5f;
     cfg.cloudMultiScatterScatter = 0.5f;
-    // 行星尺度关键：cloudMap() 里这个 scale 直接乘在"公里"量级的 posKm 上
+    // 行星尺度关键：cloudMap() 里这些 scale 直接乘在"公里"量级的 posKm 上
     // （posKm 现在是相对行星中心的真实公里坐标，不再是近地小范围坐标）。
     // flower 原版 0.4/1.2 是给"几公里量级"的近地场景调的，直接套用在几千公里量级的
     // 星球上会让 128³/32³ 噪声纹理在屏幕空间里重复几千次——compute shader 里 texture()
     // 没有隐式 mip LOD（噪声纹理本身也只建了 1 级 mip），会退化成极端欠采样，
-    // 看起来就是满屏白色雪花噪点而不是云。这里把频率降到"一个纹理周期对应几百公里"，
-    // 对应真实天气系统的尺度。
-    cfg.cloudBasicNoiseScale = 0.4f;
-    cfg.cloudDetailNoiseScale = 1.2f;
+    // 看起来就是满屏白色雪花噪点而不是云。首档降到"一个纹理周期对应几百公里"
+    // 对应真实天气系统尺度，其余档由 Nyquist 跨度推出（见 cloud_noise_ladder.h）。
+    CloudNoiseLadder::apply(cfg, CloudNoiseLadder::kDefaultBasicScale);
     cfg.cloudAlbedo[0]=cfg.cloudAlbedo[1]=cfg.cloudAlbedo[2]=1.0f;
     cfg.cloudPhaseForward = 0.8f;
     cfg.cloudPhaseBackward = -0.2f;
@@ -300,7 +300,7 @@ inline void fillPlanetAtmosphereProfile(GpuAtmosphereConfig& cfg, int32_t atmoId
     cfg.cloudNoiseScale = 1.0f;
     cfg.cloudGodRay = 0; // Phase 2 待接入（依赖 SDSM 级联阴影）
     cfg.cloudCurlUVScale = 0.001f;
-    cfg.cloudCurlStrength = 0.2f;
+    cfg.cloudCurlStrength = 0.0f;
     cfg.cloudCurlContrast = 3.0f;
     (void)cloudExtinction; // 云消光由 FlowerCloudTuneParams / cloudMap Density 侧提供，这里不重复
 }

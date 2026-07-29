@@ -28,6 +28,7 @@
 #include "vk_utils.h"
 #include "vk_taa.h"
 #include "vk_atmosphere_lut.h"
+#include "cloud_noise_ladder.h"
 #include "vk_blue_noise.h"
 #include "vk_shadow_cascade.h"
 #include "gpu_frame_data.h"
@@ -54,8 +55,16 @@ struct FlowerCloudTuneParams {
     bool flowerCloudEnabled = true;
     float coverage = 0.45f;
     float density   = 1.00f;
-    float basicNoiseScale  = 0.003f;
-    float detailNoiseScale = 0.02f;
+    // 噪声频带阶梯（换算与规则见 cloud_noise_ladder.h）。形状链 Basic/Meso/Fine
+    // 共用同一张 128³ 噪声，只换世界频率；侵蚀链是 32³ Worley，接在形状链末档之后。
+    // 幅度以 Basic=1 为基准；把某档幅度调 0 就等于把该档摘掉（shader 侧连采样一起跳过）。
+    float basicNoiseScale  = CloudNoiseLadder::kDefaultBasicScale;
+    float mesoNoiseScale   = CloudNoiseLadder::kDefaultMesoScale;
+    float fineNoiseScale   = CloudNoiseLadder::kDefaultFineScale;
+    float detailNoiseScale = CloudNoiseLadder::kDefaultDetailScale;
+    float mesoAmplitude    = CloudNoiseLadder::kDefaultMesoAmp;
+    float fineAmplitude    = CloudNoiseLadder::kDefaultFineAmp;
+    float detailAmplitude  = CloudNoiseLadder::kDefaultDetailAmp;
     float multiScatterExtinction = 0.5f;
     float multiScatterScatter    = 0.5f;
     float phaseForward  = 0.27f;
@@ -107,7 +116,7 @@ struct FlowerCloudTuneParams {
 
     // Curl 纹理 → localCoverage（cloud_common.glsl；假 curl = Worley/Perlin 2D）
     float curlUVScale = 0.001f;               // cloudCurlUVScale；轨道可试 0.0002
-    float curlStrength = 0.2f;                // cloudCurlStrength；0=关闭碎点
+    float curlStrength = 0.0f;                // cloudCurlStrength；0=关闭碎点
     float curlContrast = 3.0f;                // cloudCurlContrast
 
     // 地面光 / 环境
@@ -132,6 +141,19 @@ struct FlowerCloudTuneParams {
     bool  godRayEnabled = false;
     float godRayScale = 1.0f; // cloudGodRayScale：光轴强度倍率
 };
+
+// 以 basicNoiseScale 为锚点重算整条频带阶梯（Cloud Tuner 的"重建阶梯"按钮）。
+// 手调各档后想回到"频率无空洞、幅度逐档递减"的基线时用这个，避免手算 ×16。
+inline void rebuildCloudNoiseLadder(FlowerCloudTuneParams& p) {
+    using namespace CloudNoiseLadder;
+    if (!(p.basicNoiseScale > 0.f)) p.basicNoiseScale = kDefaultBasicScale;
+    p.mesoNoiseScale   = nextScale(p.basicNoiseScale, kBasicBandSpan);
+    p.fineNoiseScale   = nextScale(p.mesoNoiseScale,  kBasicBandSpan);
+    p.detailNoiseScale = nextScale(p.fineNoiseScale,  kBasicBandSpan);
+    p.mesoAmplitude   = kShapeAmpFalloff;
+    p.fineAmplitude   = p.mesoAmplitude * kShapeAmpFalloff;
+    p.detailAmplitude = p.fineAmplitude * kErosionAmpFalloff;
+}
 
 struct VkCloudSystem {
     static constexpr VkFormat kColorFmt = VK_FORMAT_R16G16B16A16_SFLOAT;
@@ -481,7 +503,12 @@ private:
         ac.cloudCoverage = tuneParams.coverage;
         ac.cloudDensity = tuneParams.density;
         ac.cloudBasicNoiseScale = tuneParams.basicNoiseScale;
+        ac.cloudMesoNoiseScale = tuneParams.mesoNoiseScale;
+        ac.cloudFineNoiseScale = tuneParams.fineNoiseScale;
         ac.cloudDetailNoiseScale = tuneParams.detailNoiseScale;
+        ac.cloudMesoAmplitude = tuneParams.mesoAmplitude;
+        ac.cloudFineAmplitude = tuneParams.fineAmplitude;
+        ac.cloudDetailAmplitude = tuneParams.detailAmplitude;
         ac.cloudMultiScatterExtinction = tuneParams.multiScatterExtinction;
         ac.cloudMultiScatterScatter = tuneParams.multiScatterScatter;
         ac.cloudPhaseForward = tuneParams.phaseForward;

@@ -104,6 +104,43 @@ float remap(float value,float originMin,float originMax,float newMin,float newMa
 //采样规则：采样规则（怎么插值、怎么重复）
 //uv:读哪一点，通常[0,1]可以超出
 
+// 幅度低于此值就整档跳过采样：既省一次 texture()，也是频带 LOD 的关闭档
+// （把某档幅度调 0 等价于把该档从频带阶梯里摘掉，画面退化成上一档的结果）。
+#define kCloudBandAmpEpsilon 1e-4
+
+// 三档形状噪声共用同一张 inBasicNoise，只换世界频率（scale 单位 1/km）。同一张纹理
+// 在不同尺度上会把噪声特征点排在同一批世界坐标上，产生网格状对齐痕迹，所以每档加一个
+// 固定世界偏移（km）打散相位；偏移取无理数量级的杂值，避免和纹理平铺周期成整数比。
+const vec3 kCloudMesoOffsetKm = vec3(37.19, 11.73, 61.31);
+const vec3 kCloudFineOffsetKm = vec3(-83.47, 53.09, -29.83);
+
+// 返回值与"只采一档 Basic"同量纲（[0,1]）：幅度和被归一化，因此 meso/fine 幅度为 0 时
+// 结果与单档采样逐位一致，方便按频带做 LOD 或回退。
+float sampleCloudShapeNoise(vec3 posKm,vec3 windOffset)
+{
+    const float mesoAmp=max(frameData.sky.atmosphereConfig.cloudMesoAmplitude,0.0);
+    const float fineAmp=max(frameData.sky.atmosphereConfig.cloudFineAmplitude,0.0);
+
+    float noise=texture(sampler3D(inBasicNoise,linearRepeatSampler),
+        (posKm+windOffset)*frameData.sky.atmosphereConfig.cloudBasicNoiseScale).r;
+    float ampSum=1.0;
+
+    if(mesoAmp>kCloudBandAmpEpsilon)
+    {
+        noise+=mesoAmp*texture(sampler3D(inBasicNoise,linearRepeatSampler),
+            (posKm+windOffset+kCloudMesoOffsetKm)*frameData.sky.atmosphereConfig.cloudMesoNoiseScale).r;
+        ampSum+=mesoAmp;
+    }
+    if(fineAmp>kCloudBandAmpEpsilon)
+    {
+        noise+=fineAmp*texture(sampler3D(inBasicNoise,linearRepeatSampler),
+            (posKm+windOffset+kCloudFineOffsetKm)*frameData.sky.atmosphereConfig.cloudFineNoiseScale).r;
+        ampSum+=fineAmp;
+    }
+
+    return noise/ampSum;
+}
+
 float cloudMap(vec3 posMeter,float normalizedHeight)//单位是米，根据位置和归一化高度计算云密度
 {
     const float Coverage=frameData.sky.atmosphereConfig.cloudCoverage;
@@ -158,10 +195,10 @@ float cloudMap(vec3 posMeter,float normalizedHeight)//单位是米，根据位�
     //云量在垂直方向上的分布（云底 / 云腰 / 云顶），两个remap相乘,高度 0.00~0.10：从 0.1 升到 1.0  → 云底逐渐变厚;高度 0.10~0.80：从 1.0 降到 0.2  → 中层最厚，往上变薄
     //中间鼓、底薄、顶薄 的积云垂直profile
 
-    float basicNoise=texture(sampler3D(inBasicNoise,linearRepeatSampler),(posKm+windOffset)*vec3(frameData.sky.atmosphereConfig.cloudBasicNoiseScale)).r;
-    //从烘焙好的3D基础噪声（Perlin-Worley，cloud_basicnoise.glsl 烘出来的）采样
-    //(posKm + windOffset) * cloudBasicNoiseScale，posKm+windOffset位置+风动画，cloudBasicNoiseScale噪声频率/平铺周期
-    //.r只读R通道
+    float basicNoise=sampleCloudShapeNoise(posKm,windOffset);
+    //形状链：Basic/Meso/Fine 三档共用 inBasicNoise（Perlin-Worley，cloud_basicnoise.glsl 烘出来的），
+    //只换世界频率 scale（1/km）；windOffset 让三档按同一个世界风速平移（物理上同一团云在动）。
+    //一张 128³ 纹理有效频带 f=4…64（Nyquist），单档只能盖 ×16 的世界尺度，所以要多档接力。
 
     float basicCloudNoise=basicNoise*gradientShape;
     //3D 噪声 × 垂直高度包络 = 带正确层高分布的云块形状
@@ -169,15 +206,21 @@ float cloudMap(vec3 posMeter,float normalizedHeight)//单位是米，根据位�
     float basicCloudNoiseWithCoverage=coverage*remap(basicCloudNoise,1.0-coverage,1.0,0,1);
     //把 coverage 叠到大形状噪声上,coverage越小云生成阈值越大云越少越碎，越高则反
 
-    vec3 sampleDetailNoise=posKm-windOffset*0.15;
-    //与基础噪声略反风偏移，避免完全对齐
+    //侵蚀链：接在形状链最细一档之后，只负责 Worley 碎边，幅度必须低于形状链末档，
+    //否则细碎噪声会把大形状打散成雪花。幅度 0 时整档跳过采样。
+    float detailAmp=max(frameData.sky.atmosphereConfig.cloudDetailAmplitude,0.0);
+    float detailNoiseMixByHeight=0.0;
+    if(detailAmp>kCloudBandAmpEpsilon)
+    {
+        vec3 sampleDetailNoise=posKm-windOffset*0.15;
+        //与基础噪声略反风偏移，避免完全对齐
 
-    float detailNoiseComposite=texture(sampler3D(inDetailNoise,linearRepeatSampler),sampleDetailNoise*frameData.sky.atmosphereConfig.cloudDetailNoiseScale).r;
-    //3DWorley细节噪声采样，从烘焙好的细节3D纹理（cloud_detailnoise.glsl）采样
+        float detailNoiseComposite=texture(sampler3D(inDetailNoise,linearRepeatSampler),sampleDetailNoise*frameData.sky.atmosphereConfig.cloudDetailNoiseScale).r;
+        //3DWorley细节噪声采样，从烘焙好的细节3D纹理（cloud_detailnoise.glsl）采样
 
-    float detailNoiseMixByHeight=0.2*mix(detailNoiseComposite,1-detailNoiseComposite,saturate(normalizedHeight*10.0));
-    //0.2是侵蚀强度上限，后续可参数化
-    //前10%高度云底用一种侵蚀，高层云顶用反相侵蚀，x*detail+(1-x)(1-detail)=1-x+(2x-1)*detail
+        detailNoiseMixByHeight=detailAmp*mix(detailNoiseComposite,1-detailNoiseComposite,saturate(normalizedHeight*10.0));
+        //前10%高度云底用一种侵蚀，高层云顶用反相侵蚀，x*detail+(1-x)(1-detail)=1-x+(2x-1)*detail
+    }
 
 
     float densityShape=saturate(0.01+normalizedHeight*1.15)*Density*

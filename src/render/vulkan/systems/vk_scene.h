@@ -649,6 +649,15 @@ struct VkSceneSystem {
                     weatherField=weatherField*weatherField*(3.f-2.f*weatherField);
                     weatherField=powf(weatherField,1.12f);
 
+                    // 试验：把 Weather FBM 内容贴满 2048 纹理带宽（赤道 ≈19.5 km/px）。
+                    // 球频 f≈R/λ（R≈6370）：原 synoptic 最细约 150km；下列三层补 250→~19.5km。
+                    // 分档加权（而非单条长 FBM），避免细层被 amp*=0.48 埋掉，方便目视满带宽效果。
+                    float meso=cpuFbm(rx*25.f+11.f,ry*25.f-4.f,rz*25.f+19.f,3);   // ~255→~60 km
+                    float fine=cpuFbm(rx*100.f+55.f,ry*100.f-12.f,rz*100.f+3.f,3); // ~64→~15 km
+                    float micro=cpuFbm(rx*327.f+7.f,ry*327.f+21.f,rz*327.f-9.f,2); // ~19.5→~9 km
+                    float detailFill=sat01(meso*0.40f+fine*0.35f+micro*0.30f);
+                    weatherField=sat01(weatherField*(0.45f+0.55f*detailFill)+detailFill*0.22f);
+
                     float coverage=sat01(climateCov*(0.20f+0.98f*weatherField));
                     float coast=land*(1.f-land)*4.f; // 海岸抬升一点点
                     coverage=sat01(coverage+coast*0.08f*weatherField);

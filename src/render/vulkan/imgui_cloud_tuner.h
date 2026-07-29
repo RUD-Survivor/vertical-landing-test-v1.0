@@ -9,6 +9,7 @@
 #include "backends/imgui_impl_vulkan.h"
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 
 // Weather / Curl ImGui 预览（VkDescriptorSet == ImTextureID，经 ImGui_ImplVulkan_AddTexture 注册）
 struct WeatherMapImGuiPreview {
@@ -138,11 +139,66 @@ inline void FlowerCloudTunerImGui(bool* p_open, FlowerCloudTuneParams& p,
     ImGui::SliderFloat("Density",    &p.density,  0.0f, 4.0f, "%.2f");
 
     ImGui::Separator();
-    ImGui::Text("噪声频率（周期 ≈ 公里数倒数；越大纹理越密）");
-    ImGui::SliderFloat("BasicNoiseScale",  &p.basicNoiseScale,  0.0001f, 4.0f, "%.4f", ImGuiSliderFlags_Logarithmic);
-    ImGui::SliderFloat("DetailNoiseScale", &p.detailNoiseScale, 0.0001f,  8.0f, "%.3f", ImGuiSliderFlags_Logarithmic);
-    ImGui::TextDisabled("近地 flower 参考: Basic≈0.4  Detail≈1.2");
-    ImGui::TextDisabled("行星轨道参考: Basic≈0.003  Detail≈0.02");
+    ImGui::Text("噪声频带阶梯（scale 单位 1/km；周期 = 1/scale ÷ 纹理频率）");
+    ImGui::TextDisabled("形状 Basic/Meso/Fine 共用 128³ 噪声，只换 scale；侵蚀用 32³ Worley");
+    if (ImGui::Button("按 Nyquist 重建阶梯")) rebuildCloudNoiseLadder(p);
+    ImGui::SameLine();
+    ImGui::TextDisabled("锚 Basic：scale ×%.0f/档，幅度 ×%.2f（侵蚀 ×%.2f）",
+        CloudNoiseLadder::kBasicBandSpan, CloudNoiseLadder::kShapeAmpFalloff,
+        CloudNoiseLadder::kErosionAmpFalloff);
+
+    ImGui::SliderFloat("BasicNoiseScale",  &p.basicNoiseScale,  0.0001f,   4.0f, "%.4f", ImGuiSliderFlags_Logarithmic);
+    ImGui::SliderFloat("MesoNoiseScale",   &p.mesoNoiseScale,   0.0001f,  16.0f, "%.4f", ImGuiSliderFlags_Logarithmic);
+    ImGui::SliderFloat("MesoAmp",          &p.mesoAmplitude,    0.0f, 1.0f, "%.3f");
+    ImGui::SliderFloat("FineNoiseScale",   &p.fineNoiseScale,   0.0001f,  64.0f, "%.4f", ImGuiSliderFlags_Logarithmic);
+    ImGui::SliderFloat("FineAmp",          &p.fineAmplitude,    0.0f, 1.0f, "%.3f");
+    ImGui::SliderFloat("DetailNoiseScale", &p.detailNoiseScale, 0.0001f, 256.0f, "%.3f", ImGuiSliderFlags_Logarithmic);
+    ImGui::SliderFloat("DetailAmp",        &p.detailAmplitude,  0.0f, 1.0f, "%.3f");
+    ImGui::TextDisabled("幅度=0 的档在 shader 里连采样一起跳过（频带 LOD 的关闭档）");
+
+    // 频带读数：scale 换算成"这一档实际覆盖的世界周期区间"，并检查三个边界——
+    // 与上一档的接缝是否连续、是否细过 march 步长（采样不到，只会闪）、是否细过
+    // float 在行星尺度上的精度台阶。
+    {
+        const float stepBase = p.maxTracingDistanceKm / (float)(p.marchingStepNum > 0 ? p.marchingStepNum : 1);
+        const float marchStepKm = fminf(fmaxf(stepBase, p.stepTMinKm), p.stepTMaxKm);
+        const float precisionKm = CloudNoiseLadder::samplePrecisionKm();
+        const ImVec4 warnCol(0.95f, 0.75f, 0.2f, 1.0f);
+
+        auto fmtKm = [](char* buf, size_t n, float km) {
+            if (km <= 0.f)            snprintf(buf, n, "n/a");
+            else if (km < 1.0f)       snprintf(buf, n, "%.1f m", km * 1000.f);
+            else                      snprintf(buf, n, "%.2f km", km);
+        };
+
+        float prevFinestKm = 0.f;
+        auto bandRow = [&](const char* name, float scale, float amp, int texDim) {
+            const float coarseKm = CloudNoiseLadder::coarsestPeriodKm(scale);
+            const float finestKm = CloudNoiseLadder::finestPeriodKm(scale, texDim);
+            char c[32], f[32];
+            fmtKm(c, sizeof(c), coarseKm);
+            fmtKm(f, sizeof(f), finestKm);
+            ImGui::TextDisabled("%-6s %s → %s  (amp %.3f, %d³)", name, c, f, amp, texDim);
+
+            if (amp <= 0.f || finestKm <= 0.f) { prevFinestKm = finestKm; return; }
+            if (prevFinestKm > 0.f) {
+                // 接缝：本档最粗特征应等于上一档最细特征，比值偏离即空洞（>1）或重复（<1）
+                const float seam = coarseKm > 0.f ? prevFinestKm / coarseKm : 0.f;
+                if (seam > 1.2f)       ImGui::TextColored(warnCol, "  ↑ 频带空洞 ×%.1f", seam);
+                else if (seam < 0.83f) ImGui::TextColored(warnCol, "  ↑ 频带重复 ×%.1f", 1.f / seam);
+            }
+            if (finestKm < marchStepKm * 2.f)
+                ImGui::TextColored(warnCol, "  ↑ 细过 march 步长×2 (%.0f m)：会闪不会更细", marchStepKm * 2000.f);
+            if (finestKm < precisionKm * 4.f)
+                ImGui::TextColored(warnCol, "  ↑ 接近 float 精度台阶 (%.1f m)", precisionKm * 1000.f);
+            prevFinestKm = finestKm;
+        };
+
+        bandRow("Basic",  p.basicNoiseScale,  1.0f,               CloudNoiseLadder::kBasicTexDim);
+        bandRow("Meso",   p.mesoNoiseScale,   p.mesoAmplitude,    CloudNoiseLadder::kBasicTexDim);
+        bandRow("Fine",   p.fineNoiseScale,   p.fineAmplitude,    CloudNoiseLadder::kBasicTexDim);
+        bandRow("Detail", p.detailNoiseScale, p.detailAmplitude,  CloudNoiseLadder::kDetailTexDim);
+    }
 
     ImGui::Separator();
     ImGui::Text("体积阴影步进 (volumetricShadow)");

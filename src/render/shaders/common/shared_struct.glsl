@@ -141,6 +141,20 @@ struct AtmosphereConfig
     float cloudCurlUVScale;           // UV = km * scale（旧硬编码 0.001）
     float cloudCurlStrength;          // 叠到 weather.x；0=关
     float cloudCurlContrast;          // saturate(x*c - c*0.25)*strength
+
+    // 噪声频带阶梯（cloud_common.glsl::cloudMap）。形状链 Basic/Meso/Fine 共用同一张
+    // 128³ inBasicNoise，只换世界频率（单位 1/km，纹理平铺周期 = 1/scale km）；
+    // 侵蚀链用 32³ inDetailNoise。Basic 幅度恒为 1，其余是相对它的权重。
+    // 幅度全为 0 时退化成"单档 Basic + 无侵蚀"，可当作频带 LOD 的关闭档。
+    float cloudMesoNoiseScale;
+    float cloudMesoAmplitude;
+    float cloudFineNoiseScale;
+    float cloudFineAmplitude;
+
+    float cloudDetailAmplitude;       // 侵蚀幅度：remap 的下限阈值上界
+    float padNoiseLadder0;            // 预留 Micro scale/amp（见频带表后两档）
+    float padNoiseLadder1;
+    float padNoiseLadder2;
 };
 
 struct SkyInfo

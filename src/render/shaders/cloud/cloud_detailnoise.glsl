@@ -4,7 +4,10 @@
 #include "cloud_common_noise.glsl"
 
 
-#define kDetailFrequency 8.0//经验值，后期可调参
+// 32³ 纹理的 Nyquist 频率 ≈ N/2 = 16。worleyFbm 内部固定叠 3 层（f、2f、4f），所以
+// 基频只能取 4：4/8/16 三层都在 Nyquist 内（最细一层刚好 2 体素一个 cell）。
+// 基频再往上或在外面再叠 ×2/×4 档，都会把 f>16 的内容写进纹理，只剩混叠。
+#define kDetailFrequency 4.0
 //============================
 //体积云Worley细节噪声烘培
 //============================
@@ -49,10 +52,10 @@ void main()
     //除以texSize：归一化到 [0, 1]³
     //后面 worleyFbm(uvw, ...) 在这个连续坐标上采样。
 
-    float detailNoise=worleyFbm(uvw,kDetailFrequency*1.0)*0.625+
-    worleyFbm(uvw,kDetailFrequency*2.0)*0.25+
-    worleyFbm(uvw,kDetailFrequency*4.0)*0.125;
-    //三档Worley Fbm噪声加权混合，每一档 worleyFbm 内部已经叠了 3 层 Worley（0.625/0.25/0.125），这里再按 5:2:1 做 第二次 跨尺度混合
+    float detailNoise=worleyFbm(uvw,kDetailFrequency);
+    //worleyFbm 内部已按 0.625/0.25/0.125 叠了 f/2f/4f 三层；32³ 只够放到 4/8/16，
+    //所以这里不再做第二次跨尺度混合。世界尺度上的接力交给 cloudDetailNoiseScale
+    //（见 cloud_common.glsl 的频带阶梯：本纹理只覆盖 ×4 的世界尺度跨度）。
     //视觉效果：云边缘的 碎屑、镂空、毛边
 
     imageStore(imageWorleyNoise,workPos,vec4(detailNoise));//imageStore写入3D纹理

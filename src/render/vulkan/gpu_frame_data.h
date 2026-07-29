@@ -37,7 +37,7 @@ struct GpuCascadeShadowConfig {
 static_assert(sizeof(GpuCascadeShadowConfig) == 48, "GpuCascadeShadowConfig must match std140 CascadeShadowConfig");
 
 // -----------------------------------------------------------------------
-// AtmosphereConfig — 632 bytes. Bruneton2017/UE SkyAtmosphere 参数化。
+// AtmosphereConfig — 664 bytes. Bruneton2017/UE SkyAtmosphere 参数化。
 // 所有距离单位 km（与 shared_struct.glsl 注释一致）。
 // -----------------------------------------------------------------------
 struct GpuAtmosphereConfig {
@@ -124,13 +124,25 @@ struct GpuAtmosphereConfig {
     int32_t cloudIrradianceBakeAtShell = 1;
     // Curl / localCoverage（原 padAmbient* 槽位；见 cloud_common.glsl::cloudMap）
     float cloudCurlUVScale = 0.001f;  // UV = km * scale；旧硬编码 0.001
-    float cloudCurlStrength = 0.2f;   // 叠到 weather.x 的幅度；0=关闭
+    float cloudCurlStrength = 0.0f;   // 叠到 weather.x 的幅度；0=关闭
     float cloudCurlContrast = 3.0f;   // saturate(x*c - c*0.25)*strength；旧值 3 → bias -0.75
+
+    // 噪声频带阶梯（见 shared_struct.glsl 同名字段与 cloud_common.glsl::sampleCloudShapeNoise）。
+    // scale 单位 1/km；幅度以 Basic=1 为基准。全 0 = 单档 Basic + 无侵蚀。
+    float cloudMesoNoiseScale = 0.f;
+    float cloudMesoAmplitude = 0.f;
+    float cloudFineNoiseScale = 0.f;
+    float cloudFineAmplitude = 0.f;
+
+    float cloudDetailAmplitude = 0.f;
+    float padNoiseLadder0 = 0.f;      // 预留 Micro scale/amp
+    float padNoiseLadder1 = 0.f;
+    float padNoiseLadder2 = 0.f;
 };
-static_assert(sizeof(GpuAtmosphereConfig) == 632, "GpuAtmosphereConfig must match std140 AtmosphereConfig");
+static_assert(sizeof(GpuAtmosphereConfig) == 664, "GpuAtmosphereConfig must match std140 AtmosphereConfig");
 
 // -----------------------------------------------------------------------
-// SkyInfo — 728 bytes (16+16+16+48+632)
+// SkyInfo — 760 bytes (16+16+16+48+664)
 // -----------------------------------------------------------------------
 struct GpuSkyInfo {
     float color[3] = {1,1,1}; float intensity = 1.f;
@@ -142,10 +154,10 @@ struct GpuSkyInfo {
     GpuCascadeShadowConfig cacsadeConfig;
     GpuAtmosphereConfig atmosphereConfig;
 };
-static_assert(sizeof(GpuSkyInfo) == 728, "GpuSkyInfo must match std140 SkyInfo");
+static_assert(sizeof(GpuSkyInfo) == 760, "GpuSkyInfo must match std140 SkyInfo");
 
 // -----------------------------------------------------------------------
-// PerFrameData — 1752 bytes. binding 21 (cloud_common.glsl) / binding 8 (atmosphere_common.glsl).
+// PerFrameData — 1784 bytes. binding 21 (cloud_common.glsl) / binding 8 (atmosphere_common.glsl).
 // -----------------------------------------------------------------------
 struct GpuPerFrameData {
     float appTime[4] = {};       // .x runtime .y sin .z cos .w pad
@@ -192,7 +204,7 @@ struct GpuPerFrameData {
 
     GpuSkyInfo sky;
 };
-static_assert(sizeof(GpuPerFrameData) == 1752, "GpuPerFrameData must match std140 PerFrameData");
+static_assert(sizeof(GpuPerFrameData) == 1784, "GpuPerFrameData must match std140 PerFrameData");
 
 // -----------------------------------------------------------------------
 // CascadeInfo — 176 bytes. SDSM cascade SSBO 元素（binding 29）。
