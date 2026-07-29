@@ -28,7 +28,6 @@
     <ClCompile Include="..\src\simulation\center_visualizer.cpp" />
     <ClCompile Include="..\src\simulation\predictor.cpp" />
     <ClCompile Include="..\src\render\stb_impl.cpp" />
-    <ClCompile Include="..\src\render\cloud_system.cpp" />
     <ClCompile Include="..\src\render\vulkan\vk_allocator.cpp" />
     <ClCompile Include="..\vendor\imgui\imgui.cpp" />
     <ClCompile Include="..\vendor\imgui\imgui_draw.cpp" />

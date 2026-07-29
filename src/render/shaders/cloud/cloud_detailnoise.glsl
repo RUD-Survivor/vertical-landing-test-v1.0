@@ -63,6 +63,6 @@ void main()
 //现状：
 //算法完整，可编译为 compute shader
 //未加入 compile_shaders.bat，C++ 未绑 compute + STORAGE_IMAGE
-//输出 r8 单通道；运行时 cloud.frag 读 uDetailTex3D.a，对接前需统一通道/格式
+//输出 r8 单通道；Flower cloudMap 读 inDetailNoise.r
 //与 vk_scene.h CPU Detail 烘焙算法、频率、通道布局不一致
 //将替换CPU烘培

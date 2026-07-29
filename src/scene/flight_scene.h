@@ -42,7 +42,6 @@ extern float g_scroll_y;
 #include "spaceport_manager.h"
 #include "celestial_renderer.h"
 #include "rocket_visuals.h"
-#include "render/cloud_tuner.h"
 #include "environment_system.h"
 #include "hud_manager.h"
 #include "render_context.h"
@@ -257,7 +256,6 @@ public:
     int last_soi = -1;
     bool show_clouds = true;
     int last_save_frame = -1000;  // 自动存档闪烁指示器
-    CloudTuner cloudTuner;
     // Vulkan 轨道缓存（update 中计算，extractRenderSnapshot 中消费）
     KepOrbitCache     vkKepCache;
     AdvOrbitCache     vkAdvCache;
@@ -444,7 +442,7 @@ else {
     StructuralState::initialize(world, rocket_entity);
     
     // ======== INPUT ROUTER INITIALIZATION ========
-    inputSystem.setup(input, rocket_config, control_input, hudManager.hud, cam, show_clouds, world, rocket_entity, cloudTuner);
+    inputSystem.setup(input, rocket_config, control_input, hudManager.hud, cam, show_clouds, world, rocket_entity);
     // Keep a reference to the assembly for rendering
     const RocketAssembly& assembly = builder_state_assembly;
      // 飞行模式相机控制器
@@ -1076,17 +1074,7 @@ else {
             extractOrbitMarkers(vkKepCache, vkRktCache, snap.billboards);
         }
 
-        // ---- 14. 云调试面板 (Block F) ----
-        snap.cloudTuner.visible = cloudTuner.visible;
-        if (cloudTuner.visible && GameContext::getInstance().renderer3d) {
-            auto& p = GameContext::getInstance().renderer3d->cloudSystem.tuneParams;
-            snap.cloudTuner.covLo=p.covLo; snap.cloudTuner.covHi=p.covHi;
-            snap.cloudTuner.threshLo=p.threshLo; snap.cloudTuner.threshHi=p.threshHi;
-            snap.cloudTuner.erosion=p.erosion; snap.cloudTuner.density=p.density;
-            snap.cloudTuner.extinction=p.extinction;
-            snap.cloudTuner.minAlt=p.minAlt; snap.cloudTuner.maxAlt=p.maxAlt;
-            snap.cloudTuner.debugMode=p.debugMode;
-        }
+        // ---- 14. (removed legacy cloud tuner Block F) ----
 
         // ---- 15. SVO + Terrain + Vegetation (Block D) ----
         {

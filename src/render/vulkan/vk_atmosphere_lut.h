@@ -302,7 +302,7 @@ inline void fillPlanetAtmosphereProfile(GpuAtmosphereConfig& cfg, int32_t atmoId
     cfg.cloudCurlUVScale = 0.001f;
     cfg.cloudCurlStrength = 0.2f;
     cfg.cloudCurlContrast = 3.0f;
-    (void)cloudExtinction; // gCloudExtinction 由 cloud_common.glsl 侧的 CloudTuneParams 提供，这里不重复
+    (void)cloudExtinction; // 云消光由 FlowerCloudTuneParams / cloudMap Density 侧提供，这里不重复
 }
 
 // 填充"某星球的大气 LUT 烘焙"专用的 GpuPerFrameData。这个 UBO 结构体本来是给
@@ -398,9 +398,10 @@ private:
         return vkCreateSampler(ctx.device, &sci, nullptr, &linearClampSampler) == VK_SUCCESS;
     }
 
-    // 14-binding 布局（末尾 12=combined Inscatter，13=完整 RGB Single Mie）
+    // 16-binding 布局（12=combined Inscatter，13=完整 RGB Single Mie，
+    // 14/15=同两张图的采样端，供 cloud_ambient_mus_lut 过滤查表）
     bool createSetLayout(VulkanContext& ctx) {
-        VkDescriptorSetLayoutBinding b[14]{};
+        VkDescriptorSetLayoutBinding b[16]{};
         b[0] = { 0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr };
         b[1] = { 1, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr };
         b[2] = { 2, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr };
@@ -415,8 +416,10 @@ private:
         b[11] = { 11, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr }; // Ambient μs LUT
         b[12] = { 12, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr }; // Inscatter 3D
         b[13] = { 13, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr }; // Full RGB Mie 3D
+        b[14] = { 14, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr }; // Inscatter 3D（采样端）
+        b[15] = { 15, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr }; // Full RGB Mie 3D（采样端）
         VkDescriptorSetLayoutCreateInfo lci{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-        lci.bindingCount = 14; lci.pBindings = b;
+        lci.bindingCount = 16; lci.pBindings = b;
         if (vkCreateDescriptorSetLayout(ctx.device, &lci, nullptr, &setLayout) != VK_SUCCESS) return false;
 
         VkPipelineLayoutCreateInfo plci{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
@@ -691,7 +694,8 @@ struct VkAtmosphereLut {
     }
 
     // 烘焙云环境天光 μs LUT（128×1）。与相机无关，只依赖大气 profile + sky.intensity。
-    // 依赖 Transmittance/MultiScatter；调用方应在 bakeFull 之后、云 raymarch 之前调用。
+    // 依赖 Inscatter/SingleMie（半球每个方向查表补相位，不再逐方向 raymarch），
+    // 所以必须排在 bakeFull 的 inscatter dispatch 之后、云 raymarch 之前调用。
     // 不重复 upload UBO（与 bakeFroxel 相同约定）。
     void bakeAmbientMusLut(VulkanContext& ctx, VkCommandBuffer cmd, int frameSlot,
                             const VkAtmoLutPipelines& pipes) {
@@ -837,7 +841,7 @@ private:
     bool createDescriptors(VulkanContext& ctx, const VkAtmoLutPipelines& pipes) {
         VkDescriptorPoolSize sizes[] = {
             { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 8 * FRAMES_IN_FLIGHT }, // +inscatter + full Mie
-            { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 4 * FRAMES_IN_FLIGHT },
+            { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 6 * FRAMES_IN_FLIGHT }, // +inscatter/fullMie 采样端
             { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 * FRAMES_IN_FLIGHT },
             { VK_DESCRIPTOR_TYPE_SAMPLER, 1 * FRAMES_IN_FLIGHT },
         };
@@ -861,7 +865,7 @@ private:
             VkDescriptorImageInfo iSingleMie{ VK_NULL_HANDLE, singleMieView, VK_IMAGE_LAYOUT_GENERAL };
             VkDescriptorBufferInfo iUbo{ uboBuf[i], 0, sizeof(GpuPerFrameData) };
 
-            VkWriteDescriptorSet w[14]{};
+            VkWriteDescriptorSet w[16]{};
             auto imgWrite = [&](int idx, uint32_t binding, VkDescriptorType type, VkDescriptorImageInfo* info) {
                 w[idx].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; w[idx].dstSet = descSet[i];
                 w[idx].dstBinding = binding; w[idx].descriptorType = type; w[idx].descriptorCount = 1; w[idx].pImageInfo = info;
@@ -881,7 +885,9 @@ private:
             imgWrite(11, 11, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, &iAmbient);
             imgWrite(12, 12, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, &iInscatter);
             imgWrite(13, 13, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, &iSingleMie);
-            vkUpdateDescriptorSets(ctx.device, 14, w, 0, nullptr);
+            imgWrite(14, 14, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, &iInscatter);
+            imgWrite(15, 15, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, &iSingleMie);
+            vkUpdateDescriptorSets(ctx.device, 16, w, 0, nullptr);
         }
         return true;
     }

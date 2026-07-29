@@ -336,7 +336,7 @@ MediumSampleRGB sampleMediumRGB(in vec3 worldPos, in const AtmosphereParameters 
 // 用于云管线放弃 Transmittance LUT 之后的替代方案：从 posKm（行星中心为原点，km）
 // 沿 dir 方向短程数值积分到大气顶，累积 Rayleigh+Mie+臭氧消光，返回 exp(-光学深度)。
 // 直接复用 sampleMediumRGB 的指数密度模型——和 fillPlanetAtmosphereProfile() 喂给
-// AtmosphereConfig 的是同一套系数，天然和 cloud_rs3d_common.glsl 的实时大气一致，
+// AtmosphereConfig 的是同一套系数，天然和实时大气路径一致，
 // 不需要另外维护一张预烘焙表，也没有"该用相机高度还是采样点高度"的参数化问题
 // （因为直接从 posKm 本身出发积分，没有 LUT 那种和位置脱钩的查表环节）。
 vec3 realTimeTransmittance(vec3 posKm, vec3 dir, in const AtmosphereParameters atmosphere, int steps)
@@ -362,8 +362,7 @@ vec3 realTimeTransmittance(vec3 posKm, vec3 dir, in const AtmosphereParameters a
 
 // ── 实时天空环境色近似 ─────────────────────────────────────────────────────────
 // 不做完整大气积分（那样等于把 Transmittance/MultiScatter/SkyView LUT 的活又干一遍，
-// 只是换成每像素实时算，没有省掉复杂度），改用和 cloud_rs3d_lighting.glsl 里
-// cloud.frag 同一套手调的日/昏/夜三色混合——艺术近似，但和现有 rs3d 云在视觉上一致，
+// 只是换成每像素实时算，没有省掉复杂度），改用日/昏/夜三色混合——艺术近似，与体积云光照观感对齐，
 // 参数只需要"当地太阳高度角"一个输入。
 vec3 analyticSkyAmbient(float sunElevation) // sunElevation = dot(localUp, sunDir)
 {

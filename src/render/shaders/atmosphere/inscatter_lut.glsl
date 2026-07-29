@@ -12,6 +12,7 @@
 // UV 映射见 shared_atmosphere.glsl::inscatterTexelToParams。
 //
 // 生成顺序：transmittance → multiScatter → **inscatter** → skyView → ...
+// 下游除了 atmo_inside/atmo_shell，还有 cloud_ambient_mus_lut（查这两张表算云环境天光）。
 // ==========================================================================
 
 #include "atmosphere_common.glsl"

@@ -76,16 +76,6 @@ struct SunBodyDraw {
 };
 
 // ============================================================================
-// 云调试面板状态
-// ============================================================================
-struct CloudTunerState {
-    bool visible;
-    float covLo, covHi, threshLo, threshHi;
-    float erosion, density, extinction, minAlt, maxAlt;
-    int   debugMode;
-};
-
-// ============================================================================
 // 体素破坏调试状态
 // ============================================================================
 struct VoxelDebugState {
@@ -196,9 +186,6 @@ struct SceneSnapshot {
     SunBodyDraw sunBody;
     bool drawSunBody = false;
 
-    // ---- 云调试面板 (Block F) ----
-    CloudTunerState cloudTuner;
-
     // ---- 体素破坏调试 ----
     VoxelDebugState voxelDebug;
     std::vector<VoxelDebugMarker> voxelDebugMarkers;
@@ -232,7 +219,6 @@ struct SceneSnapshot {
         memset(sunBody.model, 0, sizeof(sunBody.model));
         launchPad.model[0]=launchPad.model[5]=launchPad.model[10]=launchPad.model[15]=1.f;
         sunBody.model[0]=sunBody.model[5]=sunBody.model[10]=sunBody.model[15]=1.f;
-        cloudTuner.visible = false;
         voxelDebug = VoxelDebugState{};
     }
 };

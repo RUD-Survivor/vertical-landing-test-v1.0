@@ -108,11 +108,6 @@ struct VkRenderer3D {
         scene.drawAtmosphere(cmd, pc);
     }
 
-    // Cloud — legacy fullscreen frag path (disabled when cloudSystem.enabled)
-    void drawCloud(VkCommandBuffer cmd, const AtmoPushConstants& pc, double simTime, float camAlt) {
-        scene.drawCloud(cmd, pc, simTime, camAlt);
-    }
-
     // 大气重构·壳内/壳外调度 — 必须在 TAA endGeometryPass() 之后、
     // renderFlowerCloudAfterGeometry() 之前调用（顺序见 main.cpp）。
     //
@@ -486,19 +481,7 @@ struct VkRenderer3D {
             // 测试，而深度只有在几何 pass 结束、TAA 转成只读纹理之后才能被采样——两者
             // 没法在同一个 render pass 里共存。改到 renderAtmoAfterGeometry()（本文件下方），
             // 由 main.cpp 在 endGeometryPass() 之后、renderFlowerCloudAfterGeometry() 之前调用。
-
-            // 云：仅地球；flower Phase0 在 geometry pass 后 compute 合成
-            if (cd.atmoIdx == 3 && cd.showClouds && !cloudSystem.enabled) {
-                apc.tuneMinAlt     = 2.0f;
-                apc.tuneMaxAlt     = 14.0f;
-                apc.tuneExtinction = 1.2f;
-                apc.showClouds     = 1.f;
-                float dx = snap.camPos[0] - apc.planetCenter[0];
-                float dy = snap.camPos[1] - apc.planetCenter[1];
-                float dz = snap.camPos[2] - apc.planetCenter[2];
-                float camAltKm = sqrtf(dx*dx+dy*dy+dz*dz) - apc.surfaceRadius;
-                drawCloud(cmd, apc, (double)snap.time, camAltKm);
-            }
+            // 体积云由 Flower compute（renderFlowerCloudAfterGeometry）在几何 pass 后合成。
         }
         // 恢复全局光照方向
         scene.updateLightDir(snap.frameIndex % 2,

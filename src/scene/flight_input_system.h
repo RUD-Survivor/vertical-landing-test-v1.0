@@ -6,7 +6,6 @@
 #include "simulation/stage_manager.h"
 #include "camera/camera_director.h"
 #include "render/HUD_system.h"
-#include "render/cloud_tuner.h"
 
 struct FlightInputSystem {
     // --- SVO State ---
@@ -16,7 +15,7 @@ struct FlightInputSystem {
 
     void setup(InputRouter& router, RocketConfig& rocket_config,
                ControlInput& control_input, FlightHUD& hud, CameraDirector& cam, bool& show_clouds,
-               entt::registry& world, entt::entity rocket_entity, CloudTuner& cloudTuner) {
+               entt::registry& world, entt::entity rocket_entity) {
         
         router.on_ignition = [&world, rocket_entity]() {
             auto& guid = world.get<GuidanceComponent>(rocket_entity);
@@ -89,25 +88,6 @@ struct FlightInputSystem {
         router.registerShiftKey(GLFW_KEY_P, [&show_clouds]() {
             show_clouds = !show_clouds;
             std::cout << "[CLOUDS] " << (show_clouds ? "ON" : "OFF") << std::endl;
-        });
-
-        // F2: toggle cloud tuner panel
-        router.registerKey(GLFW_KEY_F2, [&cloudTuner]() {
-            cloudTuner.toggle();
-            std::cout << "[CloudTuner] " << (cloudTuner.visible ? "OPEN (sliders active)" : "CLOSED") << std::endl;
-        });
-
-        // F3: cycle cloud debug views
-        router.registerKey(GLFW_KEY_F3, []() {
-            Renderer3D* r3d = GameContext::getInstance().renderer3d;
-            if (r3d) {
-                r3d->cloudSystem.tuneParams.debugMode = (r3d->cloudSystem.tuneParams.debugMode + 1) % 7;
-                const char* names[] = {
-                    "OFF", "FORCE_DENSITY", "DENSITY", "COVERAGE_PROFILE_SHAPE",
-                    "ALPHA_TRANS_DEPTH", "SUN_SKY_GROUND", "STEP_OPTICAL_DEPTH"
-                };
-                std::cout << "[DBG] Cloud debug: " << names[r3d->cloudSystem.tuneParams.debugMode] << std::endl;
-            }
         });
 
         router.registerShiftKey(GLFW_KEY_V, [this, &world, rocket_entity]() {

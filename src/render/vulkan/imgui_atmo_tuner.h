@@ -2,7 +2,7 @@
 // ==========================================================================
 // imgui_atmo_tuner.h — 大气渲染重构（壳内/壳外 LUT 路径）调参面板
 // 用法: AtmoTunerImGui(&open, g_vkR3D.atmoTune, g_vkR3D.scene.atmoLutCache);
-// F4 开关，跟随 imgui_cloud_tuner.h（F2/F3）的排版风格。
+// F4 开关，跟随 imgui_cloud_tuner.h（F3 Flower 云）的排版风格。
 // ==========================================================================
 #include "vk_atmosphere_lut.h" // AtmoTuneParams / VkAtmoLutCache
 #include "imgui.h"

@@ -12,7 +12,6 @@
 #include "vegetation_system.h"
 #include "svo_system.h"
 #include "svo_meshing.h"
-#include "cloud_system.h"
 
 // ==========================================================
 // 3D 顶点格式 (Vertex3D)
@@ -60,8 +59,6 @@ namespace MeshGen { Mesh patch(int units); }
 
 class Renderer3D {
 public:
-  CloudSystem cloudSystem;
-
   Mat4 view, proj;
   Vec3 camPos;
   Vec3 lightDir;
@@ -81,11 +78,6 @@ public:
   Renderer3D() {
     sharedPatchMesh = MeshGen::patch(32);
     terrain = new Terrain::QuadtreeTerrain(EARTH_RADIUS);
-    if (terrain->sim && !terrain->sim->gridHeight.empty()) {
-        cloudSystem.rebakeWeather(terrain->sim->gridHeight,
-            terrain->sim->width, terrain->sim->height,
-            Tectonic::TectonicSimulator::CONT_THRESHOLD);
-    }
     vegSystem = new Vegetation::VegetationSystem();
     svoManager = new SVO::SVOManager();
   }

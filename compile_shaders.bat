@@ -126,11 +126,7 @@ if %ERRORLEVEL% neq 0 goto :fail
 if %ERRORLEVEL% neq 0 goto :fail
 %GLSLC% %SHADER_DIR%\atmo_shell.frag -o %OUT_DIR%\atmo_shell.frag.spv
 if %ERRORLEVEL% neq 0 goto :fail
-echo [Cloud] cloud.vert + cloud.frag + cloud bake compute
-%GLSLC% %SHADER_DIR%\cloud.vert -o %OUT_DIR%\cloud.vert.spv
-if %ERRORLEVEL% neq 0 goto :fail
-%GLSLC% %SHADER_DIR%\cloud.frag -o %OUT_DIR%\cloud.frag.spv
-if %ERRORLEVEL% neq 0 goto :fail
+echo [Cloud] bake compute (basic/detail/curl noise)
 %GLSLC% -fshader-stage=compute %SHADER_DIR%\cloud\cloud_basicnoise.glsl -o %OUT_DIR%\cloud_basicnoise.comp.spv
 if %ERRORLEVEL% neq 0 goto :fail
 %GLSLC% -fshader-stage=compute %SHADER_DIR%\cloud\cloud_detailnoise.glsl -o %OUT_DIR%\cloud_detailnoise.comp.spv

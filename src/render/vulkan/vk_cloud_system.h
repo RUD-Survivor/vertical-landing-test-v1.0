@@ -137,7 +137,7 @@ struct VkCloudSystem {
     static constexpr VkFormat kColorFmt = VK_FORMAT_R16G16B16A16_SFLOAT;
     static constexpr VkFormat kDepthFmt  = VK_FORMAT_R32_SFLOAT;
 
-    bool enabled = true;  // true = 新管线；false = legacy cloud.frag（vk_renderer3d.h 里判断）
+    bool enabled = true;  // Flower 体积云总开关（main.cpp 判断）
     bool debugLogOnce = true;
     // dispatch 成功和"跳过"两条路径分开各自的一次性日志开关（之前共用一个 debugLogOnce，
     // 一旦被"成功 dispatch"用掉，后面哪怕真的开始被跳过也不会再有任何提示，排查起来
@@ -162,6 +162,11 @@ struct VkCloudSystem {
     // AirPerspectiveSunScale 变化时需重烤 MultiScatter（LUT 内含太阳强度）。
     bool atmosphereLutBaked = false;
     float lastAirPerspectiveSunScale = -1.f;
+    // 云环境 μs LUT 现在每帧查 Inscatter（见 cloud_ambient_mus_lut.glsl），而
+    // Inscatter 烘焙时已经把 sky.color×sky.intensity 乘进了 texel。所以太阳亮度一变，
+    // 不重烤 Inscatter 的话环境天光会一直停在旧亮度上——这里记住上次烘焙时的亮度，
+    // 变了就连同 Inscatter 一起重烤。
+    float lastBakedSunLuminance = -1.f;
 
     // ── 1/4 分辨率 RT：颜色(L,T) / 深度 / 雾 ─────────────────────────────────
     VkImage quarterColorImg=VK_NULL_HANDLE, quarterDepthImg=VK_NULL_HANDLE, quarterFogImg=VK_NULL_HANDLE;
@@ -298,17 +303,15 @@ struct VkCloudSystem {
         int histSlot = 1 - slot;
 
         GpuPerFrameData fd = fillCloudFrameData(snap, *earth, cascadeCfg);
-        // 已放弃 LUT 方案（Transmittance/MultiScatter/SkyView/SkyIrradiance 全部改成
-        // cloud_common.glsl 里实时算，见 shared_atmosphere.glsl::realTimeTransmittance /
-        // analyticSkyAmbient），不再需要每帧烘这四个 pass，省一次 GPU 开销。
-        // atmosphereLut 相关的描述符绑定（binding 10/20/27）现在是死绑定，指向的内容
-        // 不会再被 cloud_common.glsl 采样；atmosphereLut 整个类先留着不删，
-        // 后续如果不再需要可以连同 vk_atmosphere_lut.h 一起清掉。
+        // 云自己的太阳/天空透射率是实时算的（见 shared_atmosphere.glsl::
+        // realTimeTransmittance），所以 Transmittance/SkyView/SkyIrradiance 不必每帧重烤。
+        // 但 binding 10/27 是活绑定：10=Froxel 空气透视，27=云环境 μs LUT（后者现在
+        // 由 cloud_ambient_mus_lut.glsl 查 Inscatter 烘出来，见下面 bakeAmbientMusLut）。
         //
-        // 但 atmosphereLut 的 UBO 仍然是 cloud_common.glsl binding 21 的数据来源（相机矩阵、
+        // atmosphereLut 的 UBO 同时还是 cloud_common.glsl binding 21 的数据来源（相机矩阵、
         // 太阳方向、DebugMode 开关都在里面），必须每帧上传，不能跟着 bake() 一起跳过——
         // 之前这里整行注释掉 bake() 时漏了这个，导致 frameData 一直是旧值，DebugMode 都
-        // 传不进 shader。改成只调用不 dispatch LUT 的轻量上传。
+        // 传不进 shader。所以不重烤的那条分支也要走一次只上传不 dispatch 的轻量路径。
         //
         // Froxel 空气透视：烘焙用独立的太阳倍率（airPerspectiveSunScale，默认 1=Bruneton
         // 量级），与云光照的 SunIntensityMul 解耦，避免雾色被 ×30 过曝。bake 完再把
@@ -316,16 +319,23 @@ struct VkCloudSystem {
         GpuPerFrameData fdFroxel = fd;
         fdFroxel.sky.intensity = snap.sunIntensity * tuneParams.airPerspectiveSunScale;
 
+        // sky.color 恒为 (1,1,1)（见 fillCloudFrameData），亮度全在 intensity 上。
+        // 这里取 fd 而不是 fdFroxel：三次 uploadFrameData 写的是同一个 slot 的同一个
+        // 映射 UBO，memcpy 在录制期就完成，而 dispatch 要到提交后才执行——本帧所有
+        // bake 实际读到的都是最后一次上传的内容，也就是 fd。
+        const float sunLuminance = fd.sky.intensity;
         const bool needLutRebake = !atmosphereLutBaked
-            || (lastAirPerspectiveSunScale != tuneParams.airPerspectiveSunScale);
+            || (lastAirPerspectiveSunScale != tuneParams.airPerspectiveSunScale)
+            || (fabsf(lastBakedSunLuminance - sunLuminance) > 1e-4f);
         if (needLutRebake) {
             atmosphereLut.bakeFull(ctx, cmd, frameSlot, cloudLutPipelines, fdFroxel);
             atmosphereLutBaked = true;
             lastAirPerspectiveSunScale = tuneParams.airPerspectiveSunScale;
+            lastBakedSunLuminance = sunLuminance;
         } else {
             atmosphereLut.uploadFrameData(ctx, cmd, frameSlot, fdFroxel);
         }
-        // 每帧刷新云环境 μs LUT（与相机无关，128×1，极便宜）+ Froxel
+        // 每帧刷新云环境 μs LUT（128×1，与相机无关，纯查 Inscatter）+ Froxel
         atmosphereLut.bakeAmbientMusLut(ctx, cmd, frameSlot, cloudLutPipelines);
         atmosphereLut.bakeFroxel(ctx, cmd, frameSlot, cloudLutPipelines);
         atmosphereLut.uploadFrameData(ctx, cmd, frameSlot, fd);

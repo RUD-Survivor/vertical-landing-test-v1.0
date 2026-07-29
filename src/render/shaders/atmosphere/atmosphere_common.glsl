@@ -61,6 +61,13 @@ layout (set = 0, binding = 12, rgba16f) uniform image3D imageInscatterLut;
 // 可选完整 RGB 单次 Mie；与 combined Inscatter 同一次 dispatch 烘焙。
 layout (set = 0, binding = 13, rgba16f) uniform image3D imageSingleMieLut;
 
+// 上面两张 Inscatter 图像的采样端（同一批图像，storage/sampled 双绑定，和
+// Transmittance/SkyView/MultiScatter 的 0/1、2/3、4/5 配对同一套路）。
+// storage image 只能点读，而 cloud_ambient_mus_lut.glsl 的半球积分要在
+// (r,μ,μs,ν) 四维上做三线性 + ν 手工插值，必须走 sampler。
+layout (set = 0, binding = 14) uniform texture3D inInscatterLut;
+layout (set = 0, binding = 15) uniform texture3D inSingleMieLut;
+
 AtmosphereParameters getAtmosphereParameters()
 {
     return getAtmosphereParameters(frameData);

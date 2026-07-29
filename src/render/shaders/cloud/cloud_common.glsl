@@ -762,9 +762,11 @@ float fogNoise)
                 // mix(skyBackground, groundIrradiance, …)：低处偏地面辐照，高处偏天空背景色。
                 // GroundOcc(0.5)：云底遮挡一半地面光；normalizedHeight 越高 ground 项越强。
 
-                vec3 ambientLit=upScaleColor*powderEffect*(1.0-dot(sunDirection,normalize(samplePos)))
-                *atmosphereTransmittance;
+                vec3 ambientLit=upScaleColor*powderEffect*(1.0-dot(sunDirection,normalize(samplePos)));
                 // ambientLit：云内环境光（天光经云自阴影后的散射照明）。
+                // 不乘 atmosphereTransmittance：那是「太阳方向」的路径衰减，而环境光走的是
+                // 整个天空半球；upScaleColor 本身就是大气积分的结果，已含各方向衰减，
+                // 再乘一遍等于重复衰减，低太阳角时会把环境光额外压暗并染上太阳路径的红。
                 // (1-dot(sunDirection,localUp))：太阳越贴近地平线（局部天顶角越大），环境天光占比越大；
                 // 正午直射主导时减弱。原版用 sunDirection.y 假设 Y 恒为当地天顶，行星尺度下
                 // 改成 dot(sunDirection, normalize(samplePos))（samplePos 已是行星中心为原点）。
@@ -1307,7 +1309,7 @@ float fogNoise)
   rayHitPos ← 0;  rayHitPosWeight ← 0
   atmosphereTransmittance0 ← LUT@sampleT入口
   atmosphereTransmittance1 ← LUT@tMax出口
-  upScaleColor ← inSkyIrradiance(0,1,0)
+  upScaleColor ← sampleCloudAmbient(cloudEntryPos)   // μs → 半球辐照度/π LUT
 
 --------------------------------------------------------------------------------
 【cloudColorCompute 阶段 2 — 主 march 循环  L527-787】
@@ -1333,7 +1335,7 @@ float fogNoise)
 
       sunlightTerm ← atmosphereTransmittance × sunColor × scale
       groundLit    ← mix(skyBG, groundIrradiance, …)
-      ambientLit   ← upScaleColor × powder × (1-sunDir.y) × atmosphereTrans
+      ambientLit   ← upScaleColor × powder × (1-sunDir·up)
 
       σ_t ← density;  σ_s ← density × albedo
       scatteringCoefficients[ms], extinctionCoefficients[ms]  // MsCount=2

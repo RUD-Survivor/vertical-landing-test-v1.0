@@ -12,7 +12,6 @@
 #include "../vk_texture.h"
 #include "../vk_cloud_bake.h"
 #include "../vk_atmosphere_lut.h" // 大气重构：VkAtmoLutCache + fillAtmoLutFrameData
-#include "../../cloud_system.h"  // CloudTuneParams
 #include "../../math/math3d.h"   // Vec3, Mat4
 
 #include <unordered_map>
@@ -31,7 +30,6 @@ struct VkSceneSystem {
     VkAtmoInsidePipeline atmoInsidePipe; // 大气重构·壳内路径（atmo_inside.frag）
     VkAtmoShellPipeline  atmoShellPipe;  // 大气重构·壳外路径（atmo_shell.vert/frag，画 atmoSphereVbo）
     VkAtmoLutCache        atmoLutCache;  // 按 bodyIdx 缓存每颗星球的 Transmittance/SkyView LUT
-    VkCloudPipeline      cloudPipe;
     VkVegetationPipeline vegPipe;
     VkTerrainPipeline    terrainPipe;
 
@@ -78,13 +76,11 @@ struct VkSceneSystem {
     VkTexture2D     terrainNullTex2;
     VkDescriptorSet terrainGlobalTexSet = VK_NULL_HANDLE;
 
-    // Cloud textures (4: noise 128³, cover 128³, detail 32³, weather 2048×1024)
+    // Cloud textures for Flower compute path (basic/detail/weather/curl)
     VkTexture3D     cloudNoiseTex;
-    VkTexture3D     cloudCoverTex;
     VkTexture3D     cloudDetailTex;
     VkTexture2D     cloudWeatherTex;
-    // Phase 2: cloud_common.glsl::cloudMap() 的 localCoverage 局部碎片湍流细节纹理
-    // （新 Flower 云管线 binding 9 专用，legacy cloud.frag 的 cloudTexSet 不用它）。
+    // cloud_common.glsl::cloudMap() localCoverage（binding 9）
     VkTexture2D     cloudCurlTex;
     // Weather map ImGui 预览：同 image 上的通道 swizzle view（R/G/B/A → 灰度 RGB）
     VkImageView     weatherVisViewR = VK_NULL_HANDLE;
@@ -92,7 +88,6 @@ struct VkSceneSystem {
     VkImageView     weatherVisViewB = VK_NULL_HANDLE;
     VkImageView     weatherVisViewA = VK_NULL_HANDLE;
     VkCloudBake     cloudBake;
-    CloudTuneParams cloudTune;  // from cloud_system.h
 
     // Vegetation 实例 VBO + 环形缓冲
     VkBuffer      vegInstanceVbo      = VK_NULL_HANDLE;
@@ -146,12 +141,6 @@ struct VkSceneSystem {
                 "src/render/shaders/spirv/atmo_shell.vert.spv",
                 "src/render/shaders/spirv/atmo_shell.frag.spv")) {
             fprintf(stderr, "[VkScene] Failed: atmo shell pipeline\n"); return false;
-        }
-        if (!cloudPipe.init(ctx, d, colorFmt, depthFmt,
-                "src/render/shaders/spirv/cloud.vert.spv",
-                "src/render/shaders/spirv/cloud.frag.spv",
-                d.cloudSet0Layout, d.cloudTexLayout)) {
-            fprintf(stderr, "[VkScene] Failed: cloud pipeline\n"); return false;
         }
         if (!vegPipe.init(ctx, d, colorFmt, depthFmt,
                 "src/render/shaders/spirv/vegetation.vert.spv",
@@ -270,7 +259,6 @@ struct VkSceneSystem {
         planetPipes.clear();
         vegPipe.shutdown(ctx.device);
         terrainPipe.shutdown(ctx.device);
-        cloudPipe.shutdown(ctx.device);
         atmoPipe.shutdown(ctx.device);
         atmoInsidePipe.shutdown(ctx.device);
         atmoShellPipe.shutdown(ctx.device);
@@ -289,7 +277,6 @@ struct VkSceneSystem {
         destroyVis(weatherVisViewB);
         destroyVis(weatherVisViewA);
         cloudNoiseTex.destroy(ctx);
-        cloudCoverTex.destroy(ctx);
         cloudDetailTex.destroy(ctx);
         cloudWeatherTex.destroy(ctx);
         cloudCurlTex.destroy(ctx);
@@ -518,54 +505,8 @@ struct VkSceneSystem {
     }
 
     // -----------------------------------------------------------------------
-    // Cloud — fullscreen triangle, pre-multiplied alpha blend.
-    void drawCloud(VkCommandBuffer cmd, const AtmoPushConstants& pc,
-                   double simTime, float camAltKm) {
-        if (cloudPipe.pipeline == VK_NULL_HANDLE) return;
-        if (desc->cloudTexSet == VK_NULL_HANDLE) return;
-
-        // Update CloudParamsUBO
-        CloudParamsUBO cpubo{};
-        float wrappedTime = (float)std::fmod(simTime, 10000.0);
-        cpubo.uTime = wrappedTime;
-        double phase = simTime * 0.004 * -0.2;
-        cpubo.uPhaseSin = (float)std::sin(phase);
-        cpubo.uPhaseCos = (float)std::cos(phase);
-        cpubo.uCovLo    = cloudTune.covLo;
-        cpubo.uCovHi    = cloudTune.covHi;
-        cpubo.uThreshLo = cloudTune.threshLo;
-        cpubo.uThreshHi = cloudTune.threshHi;
-        cpubo.uErosion  = cloudTune.erosion;
-        cpubo.uDensity  = cloudTune.density;
-        cpubo.uExtinction = cloudTune.extinction;
-        cpubo.uMinAlt   = cloudTune.minAlt;
-        cpubo.uMaxAlt   = cloudTune.maxAlt;
-        cpubo.uDebug    = cloudTune.debugMode;
-        cpubo.uLocalRadius = cloudTune.localRadiusKm;
-
-        if (camAltKm < 20.f)      { cpubo.uCloudSteps = 128; cpubo.uLightSteps = 16; }
-        else if (camAltKm < 500.f) { cpubo.uCloudSteps = 48;  cpubo.uLightSteps = 12; }
-        else if (camAltKm < 5000.f){ cpubo.uCloudSteps = 32;  cpubo.uLightSteps = 8; }
-        else                       { cpubo.uCloudSteps = 16;  cpubo.uLightSteps = 4; }
-
-        desc->updateCloudUBO(_frameIdx, cpubo);
-
-        cloudPipe.bind(cmd);
-        VkDescriptorSet sets[2] = { desc->cloudSet0[_frameIdx], desc->cloudTexSet };
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-            cloudPipe.layout, 0, 2, sets, 0, nullptr);
-        vkCmdPushConstants(cmd, cloudPipe.layout,
-            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-            0, sizeof(AtmoPushConstants), &pc);
-        vkCmdDraw(cmd, 3, 1, 0, 0);
-        _bindMeshPipe(cmd);
-    }
-
-    // -----------------------------------------------------------------------
-    // Bake + upload 4 cloud textures (noise 128³, cover 128³, detail 32³, weather 2048×1024)
+    // Bake + upload Flower cloud textures (basic/detail/curl/weather).
     // Must be called once after VulkanContext is initialized.
-    // Noise + detail: GPU compute (flower cloud_basicnoise / cloud_detailnoise).
-    // Cover + weather: CPU (cover 暂无 comp；weather = 气候带 × domain-warped 天气场).
     bool initCloudTextures(VulkanContext& ctx) {
         printf("[VkScene] Baking cloud textures...\n");
 
@@ -581,7 +522,7 @@ struct VkSceneSystem {
             return false;
         }
 
-        // ── CPU FBM helpers (cover only) ─────────────────────────────────
+        // ── CPU FBM helpers (weather map) ────────────────────────────────
         auto cpuFract = [](float x) { return x - floorf(x); };
         auto cpuHash = [&](float px, float py, float pz) {
             px=cpuFract(px*443.897f); py=cpuFract(py*441.423f); pz=cpuFract(pz*437.195f);
@@ -605,31 +546,14 @@ struct VkSceneSystem {
         };
         auto clampU8 = [](float v) { int i=(int)(v*255+0.5f); return (uint8_t)(i<0?0:i>255?255:i); };
 
-        // ── 2) Cover 128³ ────────────────────────────────────────────────
-        {
-            const int N=128; std::vector<uint8_t> data(N*N*N*4);
-            for(int z=0;z<N;z++)for(int y=0;y<N;y++)for(int x=0;x<N;x++){
-                float px=(float)x/N,py=(float)y/N,pz=(float)z/N;
-                float r=cpuFbm(px*8,py*8,pz*8,2);
-                float g=cpuFbm(px*8,py*8,pz*8,1);
-                float b=cpuFbm(px*8+12.3f,py*8,pz*8,3);
-                float a=cpuFbm(px*8+47.1f,py*8,pz*8,3);
-                int idx=(z*N*N+y*N+x)*4;
-                data[idx]=clampU8(r);data[idx+1]=clampU8(g);data[idx+2]=clampU8(b);data[idx+3]=clampU8(a);
-            }
-            if(!cloudCoverTex.upload(ctx,data.data(),N,N,N)){fprintf(stderr,"[VkScene] Cloud cover upload failed\n");return false;}
-        }
-
-        // ── 3) Detail noise 32³ R8 (GPU) ─────────────────────────────────
+        // ── 2) Detail noise 32³ R8 (GPU) ─────────────────────────────────
         if (!cloudDetailTex.createStorage3D(ctx, 32, 32, 32, VK_FORMAT_R8_UNORM) ||
             !cloudBake.bakeDetailNoise(ctx, cloudDetailTex)) {
             fprintf(stderr, "[VkScene] GPU detail noise bake failed\n");
             return false;
         }
 
-        // ── 3.5) Curl noise 256² R8 (GPU, Phase 2) ───────────────────────
-        // 新 Flower 云管线 cloud_common.glsl::cloudMap() 的 localCoverage 局部碎片项用，
-        // 见 vk_cloud_bake.h::bakeCurlNoise。legacy cloud.frag 不用这张纹理。
+        // ── 3) Curl noise 256² R8 (GPU) ──────────────────────────────────
         if (!cloudCurlTex.createStorage2D(ctx, 256, 256, VK_FORMAT_R8_UNORM) ||
             !cloudBake.bakeCurlNoise(ctx, cloudCurlTex)) {
             fprintf(stderr, "[VkScene] GPU curl noise bake failed\n");
@@ -764,23 +688,6 @@ struct VkSceneSystem {
             weatherVisViewA=makeSwizzleView(VK_COMPONENT_SWIZZLE_A);
             if(!weatherVisViewR||!weatherVisViewG||!weatherVisViewB||!weatherVisViewA)return false;
         }
-
-        // ── Create cloud texture descriptor set ──────────────────────────
-        desc->cloudTexSet = desc->allocateCloudTexSet(ctx.device);
-        if (desc->cloudTexSet == VK_NULL_HANDLE) return false;
-        VkDescriptorImageInfo img[4]{};
-        img[0]={cloudNoiseTex.sampler, cloudNoiseTex.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-        img[1]={cloudCoverTex.sampler, cloudCoverTex.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-        img[2]={cloudDetailTex.sampler, cloudDetailTex.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-        img[3]={cloudWeatherTex.sampler, cloudWeatherTex.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-        VkWriteDescriptorSet w[4]{};
-        for (int i=0;i<4;i++) {
-            w[i].sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            w[i].dstSet=desc->cloudTexSet; w[i].dstBinding=(uint32_t)i;
-            w[i].descriptorType=VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            w[i].descriptorCount=1; w[i].pImageInfo=&img[i];
-        }
-        vkUpdateDescriptorSets(ctx.device,4,w,0,nullptr);
 
         printf("[VkScene] Cloud textures baked and uploaded.\n");
         return true;

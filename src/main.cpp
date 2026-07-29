@@ -83,7 +83,6 @@ static VkDescriptorManager g_vkDesc;
 static VkTAA               g_vkTAA;
 static VkRenderer3D        g_vkR3D;
 static bool                g_perfOverlayOpen = false;  // F1 toggles
-static bool                g_vkCloudTunerOpen = false;  // F2 toggles
 static bool                g_flowerCloudTunerOpen = false;  // F3 toggles
 static bool                g_atmoTunerOpen = false;  // F4 toggles
 static bool                g_skyTunerOpen = false;   // F5 toggles
@@ -335,7 +334,6 @@ static void renderVulkanFrame(GLFWwindow* window) {
         }
         PerfOverlayImGui(&g_perfOverlayOpen, ww, wh, presentName);
     }
-    CloudTunerImGui(&g_vkCloudTunerOpen, g_vkR3D.scene.cloudTune);
     FlowerCloudTunerImGui(&g_flowerCloudTunerOpen, g_vkR3D.cloudSystem.tuneParams, &g_weatherMapPreview, &g_vkR3D.shadowSystem);
     AtmoTunerImGui(&g_atmoTunerOpen, g_vkR3D.atmoTune, g_vkR3D.scene.atmoLutCache);
     SkyTunerImGui(&g_skyTunerOpen, g_vkR3D.sky.tune);
