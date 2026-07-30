@@ -6,6 +6,7 @@
 //   cloud_basicnoise.comp  → 128³ R8  (Perlin-Worley composite)
 //   cloud_detailnoise.comp → 32³  R8  (Worley detail FBM)
 //   cloud_curlnoise.comp   → 256² R8  (Phase 2: 局部碎片湍流细节，2D)
+// Weather map（CPU RGBA）见 weather_map_bake.h，不在本模块。
 // ==========================================================================
 
 #include "vk_context.h"
