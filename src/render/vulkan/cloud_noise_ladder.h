@@ -35,22 +35,23 @@ constexpr int kDetailTexDim = 32;
 constexpr float kBasicBandSpan  = (kBasicTexDim  * 0.5f) / kBandBaseFreq; // 16
 constexpr float kDetailBandSpan = (kDetailTexDim * 0.5f) / kBandBaseFreq; // 4
 
-// 幅度规则：形状链逐档减半；侵蚀链要明显低于形状链末档，否则细碎 Worley 会把
-// 大形状打成雪花噪点（cloudMap 里侵蚀是 remap 的下限阈值，不是加性细节）。
-constexpr float kShapeAmpFalloff   = 0.5f;
+// 幅度规则：形状链逐档 ×0.2（档跨 ×16≈4 个倍频，接近 G^4 量级，避免 ×0.5 把中高频抬太高）；
+// 侵蚀链再 ×0.2，明显低于形状链末档，否则细碎 Worley 会把大形状打成雪花
+// （cloudMap 里侵蚀是 remap 的下限阈值，不是加性细节）。
+constexpr float kShapeAmpFalloff   = 0.2f;
 constexpr float kErosionAmpFalloff = 0.2f;
 
-// 形状链首档的世界频率：一个纹理周期 ≈ 666 km，对应真实天气系统尺度。
-constexpr float kDefaultBasicScale = 0.0015f;
+// 形状链首档的世界频率：一个纹理周期 ≈ 333 km，对应真实天气系统尺度。
+constexpr float kDefaultBasicScale = 0.003f;
 
 // 由首档推出的其余档位（各差一个 bandSpan，接缝处周期相等）
 constexpr float kDefaultMesoScale   = kDefaultBasicScale * kBasicBandSpan;  // 0.048
 constexpr float kDefaultFineScale   = kDefaultMesoScale  * kBasicBandSpan;  // 0.768
 constexpr float kDefaultDetailScale = kDefaultFineScale  * kBasicBandSpan;  // 12.288
 
-constexpr float kDefaultMesoAmp   = kShapeAmpFalloff;                      // 0.5
-constexpr float kDefaultFineAmp   = kDefaultMesoAmp * kShapeAmpFalloff;    // 0.25
-constexpr float kDefaultDetailAmp = kDefaultFineAmp * kErosionAmpFalloff;  // 0.05
+constexpr float kDefaultMesoAmp   = kShapeAmpFalloff;                      // 0.2
+constexpr float kDefaultFineAmp   = kDefaultMesoAmp * kShapeAmpFalloff;    // 0.04
+constexpr float kDefaultDetailAmp = kDefaultFineAmp * kErosionAmpFalloff;  // 0.008
 
 // ── 频带 LOD（屏幕足迹）─────────────────────────────────────────────────────
 // 一档噪声在屏幕上占不到一两个像素时就不再是"细节"，只是每帧乱跳的噪点，可以整档关掉。
@@ -64,9 +65,9 @@ constexpr float kDefaultDetailAmp = kDefaultFineAmp * kErosionAmpFalloff;  // 0.
 //
 // 判据只依赖距离/视场/分辨率，和 raymarch 的自适应步长解耦：步长由 empty skip 与
 // edge refine 负责，两者若互相挂钩会形成"缩步→开细档→更碎→更缩步"的反馈。
-constexpr float kDefaultLodNMin = 1.1f;            // 低于 1.1px 的档开始淡出
-constexpr float kDefaultLodShadowDistScale = 1.0f; // 阴影侧按 1.0 倍距离算，比主视线更早关
-constexpr float kLodFadeSpan = 0.25f;             // 完全关闭点 = nMin × 此值（smoothstep 下界）
+constexpr float kDefaultLodNMin = 1.f;            // 低于 1px 的档开始淡出
+constexpr float kDefaultLodShadowDistScale = 1.f; // 阴影侧按 1 倍距离算，比主视线更早关
+constexpr float kLodFadeSpan = 0.25f;            // 完全关闭点 = nMin × 此值（smoothstep 下界）
 
 // UI 读数用的参考视口：面板不持有真实相机参数，用常见 1080p/60° 给一个量级参考。
 constexpr float kLodPreviewRenderHeight = 1080.f;
