@@ -40,8 +40,8 @@ constexpr float kDetailBandSpan = (kDetailTexDim * 0.5f) / kBandBaseFreq; // 4
 constexpr float kShapeAmpFalloff   = 0.5f;
 constexpr float kErosionAmpFalloff = 0.2f;
 
-// 形状链首档的世界频率：一个纹理周期 ≈ 333 km，对应真实天气系统尺度。
-constexpr float kDefaultBasicScale = 0.003f;
+// 形状链首档的世界频率：一个纹理周期 ≈ 666 km，对应真实天气系统尺度。
+constexpr float kDefaultBasicScale = 0.0015f;
 
 // 由首档推出的其余档位（各差一个 bandSpan，接缝处周期相等）
 constexpr float kDefaultMesoScale   = kDefaultBasicScale * kBasicBandSpan;  // 0.048

@@ -53,7 +53,7 @@ inline void invertMat4(const float in[16], float out[16]) {
 // FlowerCloudTunerImGui() 实时调节。默认值对应 fillCloudFrameData() 里原先写死的常量。
 struct FlowerCloudTuneParams {
     bool flowerCloudEnabled = true;
-    float coverage = 0.45f;
+    float coverage = 1.0f;
     float density   = 1.00f;
     // 噪声频带阶梯（换算与规则见 cloud_noise_ladder.h）。形状链 Basic/Meso/Fine
     // 共用同一张 128³ 噪声，只换世界频率；侵蚀链是 32³ Worley，接在形状链末档之后。
@@ -73,19 +73,19 @@ struct FlowerCloudTuneParams {
     float noiseLodShadowDistScale = CloudNoiseLadder::kDefaultLodShadowDistScale;
     float multiScatterExtinction = 0.5f;
     float multiScatterScatter    = 0.5f;
-    float phaseForward  = 0.27f;
+    float phaseForward  = 0.37f;
     float phaseBackward = -0.27f;
     float phaseMixFactor = 0.7f;
     float powderScale = 1.0f;
     float powderPow   = 1.0f;
-    float sunLightScale = 1.0f;
+    float sunLightScale = 2.0f;
     float minAltKm = 1.0f;
-    float maxAltKm = 30.0f;
+    float maxAltKm = 20.0f;
     float speed = 0.15f;
     // Bruneton/Hillaire 大气积分对"太阳辐照度"的物理量级要求，和引擎其余部分（atmo.frag 等）
     // 手调出来的 sunIntensity(~1.0) 未必是同一套标定；这里单独给一个宽范围倍率，
     // 用来在不改引擎全局曝光的前提下，把云的整体亮度调到合理范围（黑云多半是这里太低）。
-    float sunIntensityMul = 30.0f;
+    float sunIntensityMul = 20.0f;
     // 0=正常渲染；1/2/3/4=调试可视化（借用 cloudSunLitMapOctave 字段传给 shader，
     // 见 cloud_common.glsl::cloudColorCompute 开头的 dbgMode 分支），排查"黑云"用。
     int debugMode = 0;
@@ -127,7 +127,7 @@ struct FlowerCloudTuneParams {
 
     // 地面光 / 环境
     float fogFade = 0.95f;                      // cloudFogFade
-    float groundNoiseScale = 0.5f;             // cloudNoiseScale
+    float groundNoiseScale = 0.25f;             // cloudNoiseScale
     bool  enableGroundContribution = true;    // cloudEnableGroundContribution
     float cloudAlbedo = 1.f;                  // cloudAlbedo.rgb
 
@@ -137,7 +137,7 @@ struct FlowerCloudTuneParams {
     float airPerspectiveScale = 0.01f;        // 采样混合权重倍率（α'=α×此值；默认 0.01）
 
     // 环境天光：相机无关 μs→zenith LUT（可选混入 analytic）
-    float ambientExposure = 0.32f;
+    float ambientExposure = 1.0f;
     float ambientAnalyticBlend = 0.f;
 
     // God Ray（400m 近距体积雾光柱 march，cloud_composite.glsl:108 起）。默认关闭——
