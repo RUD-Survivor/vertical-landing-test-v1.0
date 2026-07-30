@@ -201,6 +201,34 @@ inline void FlowerCloudTunerImGui(bool* p_open, FlowerCloudTuneParams& p,
     }
 
     ImGui::Separator();
+    ImGui::Text("噪声 LOD（屏幕足迹）");
+    ImGui::TextDisabled("一档特征不足 nMin 像素就淡出；Basic 恒开，只影响 Meso/Fine/Detail");
+    ImGui::Checkbox("NoiseLodEnabled", &p.noiseLodEnabled);
+    ImGui::BeginDisabled(!p.noiseLodEnabled);
+    ImGui::SliderFloat("NoiseLodNMin", &p.noiseLodNMin, 0.5f, 8.0f, "%.2f px");
+    ImGui::SliderFloat("NoiseLodShadowDistScale", &p.noiseLodShadowDistScale, 1.0f, 8.0f, "%.2f×");
+    ImGui::TextDisabled("阴影 march 按 %.1f× 距离判定，比主视线更早丢细档", p.noiseLodShadowDistScale);
+    {
+        // 各档大致从多远开始淡出。面板拿不到当帧相机参数，用固定参考视口给量级
+        // （真实 fovy/分辨率不同只是整体等比缩放这些距离）。
+        auto fadeRow = [&](const char* name, float scale, float amp, int texDim) {
+            if (amp <= 0.f) return;
+            const float finestKm = CloudNoiseLadder::finestPeriodKm(scale, texDim);
+            const float dOff = CloudNoiseLadder::lodFadeStartKm(finestKm, p.noiseLodNMin);
+            if (dOff <= 0.f) return;
+            ImGui::TextDisabled("%-6s 约 %.1f km 起淡出，%.1f km 全关",
+                name, dOff, dOff / CloudNoiseLadder::kLodFadeSpan);
+        };
+        fadeRow("Meso",   p.mesoNoiseScale,   p.mesoAmplitude,   CloudNoiseLadder::kBasicTexDim);
+        fadeRow("Fine",   p.fineNoiseScale,   p.fineAmplitude,   CloudNoiseLadder::kBasicTexDim);
+        fadeRow("Detail", p.detailNoiseScale, p.detailAmplitude, CloudNoiseLadder::kDetailTexDim);
+        ImGui::TextDisabled("参考视口 %.0fp / %.0f°；实际按当帧 fovy 与渲染高度等比缩放",
+            CloudNoiseLadder::kLodPreviewRenderHeight,
+            CloudNoiseLadder::kLodPreviewFovYRad * 57.2957795f);
+    }
+    ImGui::EndDisabled();
+
+    ImGui::Separator();
     ImGui::Text("体积阴影步进 (volumetricShadow)");
     ImGui::SliderInt("LightStepNum", &p.lightStepNum, 1, 16);
     ImGui::SliderFloat("LightBasicStep (km)", &p.lightBasicStepKm, 0.001f, 0.5f, "%.4f", ImGuiSliderFlags_Logarithmic);

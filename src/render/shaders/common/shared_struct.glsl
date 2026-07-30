@@ -152,9 +152,11 @@ struct AtmosphereConfig
     float cloudFineAmplitude;
 
     float cloudDetailAmplitude;       // 侵蚀幅度：remap 的下限阈值上界
-    float padNoiseLadder0;            // 预留 Micro scale/amp（见频带表后两档）
-    float padNoiseLadder1;
-    float padNoiseLadder2;
+    // 频带 LOD（cloud_noise_lod.glsl）：按采样点到相机距离的屏幕足迹淡出高频档。
+    // 与自适应步长无关——步长由 empty skip / edge refine 单独管，两套不互相挂钩。
+    float cloudNoiseLodNMin;             // 一个特征周期至少要占几个像素才保留该档
+    float cloudNoiseLodShadowDistScale;  // 阴影侧的有效距离倍率（>1 = 阴影更早关细档）
+    int   cloudNoiseLodEnabled;          // 0=权重恒 1，退化成"全档常开"（回归开关）
 };
 
 struct SkyInfo

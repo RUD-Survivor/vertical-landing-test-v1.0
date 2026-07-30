@@ -65,6 +65,12 @@ struct FlowerCloudTuneParams {
     float mesoAmplitude    = CloudNoiseLadder::kDefaultMesoAmp;
     float fineAmplitude    = CloudNoiseLadder::kDefaultFineAmp;
     float detailAmplitude  = CloudNoiseLadder::kDefaultDetailAmp;
+
+    // 频带 LOD：上面的幅度是"艺术上限"，这里按采样点屏幕足迹把高频档淡出。
+    // 关掉即退回全档常开，可用来对照 LOD 是否吃掉了本该看见的细节。
+    bool  noiseLodEnabled = true;
+    float noiseLodNMin = CloudNoiseLadder::kDefaultLodNMin;
+    float noiseLodShadowDistScale = CloudNoiseLadder::kDefaultLodShadowDistScale;
     float multiScatterExtinction = 0.5f;
     float multiScatterScatter    = 0.5f;
     float phaseForward  = 0.27f;
@@ -433,6 +439,13 @@ private:
         float camRelPlanetKm[3] = { snap.camPos[0]-earth.center[0], snap.camPos[1]-earth.center[1], snap.camPos[2]-earth.center[2] };
         fd.camWorldPos[0]=camRelPlanetKm[0]*1000.0f; fd.camWorldPos[1]=camRelPlanetKm[1]*1000.0f; fd.camWorldPos[2]=camRelPlanetKm[2]*1000.0f;
 
+        // fovy/aspect：噪声屏幕足迹 LOD（cloud_noise_lod.glsl）要用竖直视场把世界周期换算成
+        // 像素数。snap.proj 由 math3d.h::Mat4::perspective 生成，m[5] = 1/tan(fovy/2)，从矩阵
+        // 反解比再传一份 fov 字段少一处会失同步的状态。
+        const float projYY = snap.proj[5], projXX = snap.proj[0];
+        fd.camInfo[0] = (projYY > 1e-6f) ? 2.0f * atanf(1.0f / projYY) : 0.8f;
+        fd.camInfo[1] = (projYY > 1e-6f && fabsf(projXX) > 1e-6f) ? projYY / projXX : 1.0f;
+        fd.camInfoPrev[0] = fd.camInfo[0]; fd.camInfoPrev[1] = fd.camInfo[1];
         fd.camInfo[2] = 0.1f; fd.camInfo[3] = 1e7f; // near/far，粗略值：目前 shader 未依赖精确值
         fd.camInfoPrev[2] = fd.camInfo[2]; fd.camInfoPrev[3] = fd.camInfo[3];
 
@@ -509,6 +522,9 @@ private:
         ac.cloudMesoAmplitude = tuneParams.mesoAmplitude;
         ac.cloudFineAmplitude = tuneParams.fineAmplitude;
         ac.cloudDetailAmplitude = tuneParams.detailAmplitude;
+        ac.cloudNoiseLodNMin = tuneParams.noiseLodNMin;
+        ac.cloudNoiseLodShadowDistScale = tuneParams.noiseLodShadowDistScale;
+        ac.cloudNoiseLodEnabled = tuneParams.noiseLodEnabled ? 1 : 0;
         ac.cloudMultiScatterExtinction = tuneParams.multiScatterExtinction;
         ac.cloudMultiScatterScatter = tuneParams.multiScatterScatter;
         ac.cloudPhaseForward = tuneParams.phaseForward;

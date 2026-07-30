@@ -8,6 +8,7 @@
 
 #include "../common/shared_functions.glsl"
 #include "../common/shared_atmosphere.glsl"
+#include "cloud_noise_lod.glsl"
 
 //// #define SkyMsExtintion 0.5
 #define SkyMsExtinction 0.5//天空方向多次散射的消光衰减系数,后续可以修改硬编码参数
@@ -114,12 +115,47 @@ float remap(float value,float originMin,float originMax,float newMin,float newMa
 const vec3 kCloudMesoOffsetKm = vec3(37.19, 11.73, 61.31);
 const vec3 kCloudFineOffsetKm = vec3(-83.47, 53.09, -29.83);
 
+// 各噪声纹理能分辨的最高频（一个平铺周期内的特征数）= N/2。与 cloud_noise_ladder.h
+// 的 kBasicTexDim / kDetailTexDim 同源，换烘焙分辨率时两边一起改。
+#define kCloudBasicNyquistFreq 64.0  // 128³ inBasicNoise
+#define kCloudDetailNyquistFreq 16.0 // 32³  inDetailNoise
+
+// 该档最细特征的世界周期（km）：scale 单位 1/km，平铺周期 = 1/scale。
+float cloudBandFinestPeriodKm(float scale,float nyquistFreq)
+{
+    return scale>0.0?1.0/(scale*nyquistFreq):0.0;
+}
+
+// LOD 关闭时返回 0：cloudBandScreenWeight 对 theta<=0 恒返回 1，等价于全档常开（回归开关）。
+float cloudLodPixelThetaFromFrame()
+{
+    if(frameData.sky.atmosphereConfig.cloudNoiseLodEnabled==0) return 0.0;
+    return cloudLodPixelTheta(frameData.camInfo.x,frameData.renderHeight);
+}
+
+// 阴影 march 的细节最终只汇成一个标量透射率，比主视线更早丢高频档看不出差别，
+// 却能省下成倍的 texture()。倍率下限 1，避免误配成"阴影比主视线还细"。
+float cloudLodShadowDistScale()
+{
+    return max(frameData.sky.atmosphereConfig.cloudNoiseLodShadowDistScale,1.0);
+}
+#define kCloudLodDistScaleView 1.0
+
 // 返回值与"只采一档 Basic"同量纲（[0,1]）：幅度和被归一化，因此 meso/fine 幅度为 0 时
 // 结果与单档采样逐位一致，方便按频带做 LOD 或回退。
-float sampleCloudShapeNoise(vec3 posKm,vec3 windOffset)
+// dKm/pixelTheta/lodDistScale 用于屏幕足迹 LOD：小到看不见的档幅度收 0，走 amp>ε 整档跳过。
+float sampleCloudShapeNoise(vec3 posKm,vec3 windOffset,float dKm,float pixelTheta,float lodDistScale)
 {
-    const float mesoAmp=max(frameData.sky.atmosphereConfig.cloudMesoAmplitude,0.0);
-    const float fineAmp=max(frameData.sky.atmosphereConfig.cloudFineAmplitude,0.0);
+    const float lodNMin=frameData.sky.atmosphereConfig.cloudNoiseLodNMin;
+    // Basic 不参与淡出：它是云的形状锚点，淡掉不是"变粗"而是整团消失。
+    float mesoAmp=max(frameData.sky.atmosphereConfig.cloudMesoAmplitude,0.0)
+        *cloudBandScreenWeight(dKm,
+            cloudBandFinestPeriodKm(frameData.sky.atmosphereConfig.cloudMesoNoiseScale,kCloudBasicNyquistFreq),
+            pixelTheta,lodNMin,lodDistScale);
+    float fineAmp=max(frameData.sky.atmosphereConfig.cloudFineAmplitude,0.0)
+        *cloudBandScreenWeight(dKm,
+            cloudBandFinestPeriodKm(frameData.sky.atmosphereConfig.cloudFineNoiseScale,kCloudBasicNyquistFreq),
+            pixelTheta,lodNMin,lodDistScale);
 
     float noise=texture(sampler3D(inBasicNoise,linearRepeatSampler),
         (posKm+windOffset)*frameData.sky.atmosphereConfig.cloudBasicNoiseScale).r;
@@ -141,7 +177,10 @@ float sampleCloudShapeNoise(vec3 posKm,vec3 windOffset)
     return noise/ampSum;
 }
 
-float cloudMap(vec3 posMeter,float normalizedHeight)//单位是米，根据位置和归一化高度计算云密度
+// lodDistScale：屏幕足迹 LOD 的有效距离倍率。主视线/空跳探测/debug 传 kCloudLodDistScaleView，
+// 各条 shadow march 传 cloudLodShadowDistScale()——不给默认值是刻意的，新增调用点必须
+// 显式表态走哪条策略，避免阴影和主视线悄悄用上两套不同的细节。
+float cloudMap(vec3 posMeter,float normalizedHeight,float lodDistScale)//单位是米，根据位置和归一化高度计算云密度
 {
     const float Coverage=frameData.sky.atmosphereConfig.cloudCoverage;
     const float Density=frameData.sky.atmosphereConfig.cloudDensity;
@@ -195,7 +234,12 @@ float cloudMap(vec3 posMeter,float normalizedHeight)//单位是米，根据位�
     //云量在垂直方向上的分布（云底 / 云腰 / 云顶），两个remap相乘,高度 0.00~0.10：从 0.1 升到 1.0  → 云底逐渐变厚;高度 0.10~0.80：从 1.0 降到 0.2  → 中层最厚，往上变薄
     //中间鼓、底薄、顶薄 的积云垂直profile
 
-    float basicNoise=sampleCloudShapeNoise(posKm,windOffset);
+    // 屏幕足迹 LOD 的采样点距离。相机位置走 convertToAtmosphereUnit（米→km 并加上
+    // kAtmoCameraOffsetKm 径向偏移），和 march 起点用的是同一个 worldPos，不另算一套。
+    float lodDistKm=length(posKm-convertToAtmosphereUnit(frameData.camWorldPos.xyz,frameData));
+    float lodPixelTheta=cloudLodPixelThetaFromFrame();
+
+    float basicNoise=sampleCloudShapeNoise(posKm,windOffset,lodDistKm,lodPixelTheta,lodDistScale);
     //形状链：Basic/Meso/Fine 三档共用 inBasicNoise（Perlin-Worley，cloud_basicnoise.glsl 烘出来的），
     //只换世界频率 scale（1/km）；windOffset 让三档按同一个世界风速平移（物理上同一团云在动）。
     //一张 128³ 纹理有效频带 f=4…64（Nyquist），单档只能盖 ×16 的世界尺度，所以要多档接力。
@@ -208,7 +252,10 @@ float cloudMap(vec3 posMeter,float normalizedHeight)//单位是米，根据位�
 
     //侵蚀链：接在形状链最细一档之后，只负责 Worley 碎边，幅度必须低于形状链末档，
     //否则细碎噪声会把大形状打散成雪花。幅度 0 时整档跳过采样。
-    float detailAmp=max(frameData.sky.atmosphereConfig.cloudDetailAmplitude,0.0);
+    float detailAmp=max(frameData.sky.atmosphereConfig.cloudDetailAmplitude,0.0)
+        *cloudBandScreenWeight(lodDistKm,
+            cloudBandFinestPeriodKm(frameData.sky.atmosphereConfig.cloudDetailNoiseScale,kCloudDetailNyquistFreq),
+            lodPixelTheta,frameData.sky.atmosphereConfig.cloudNoiseLodNMin,lodDistScale);
     float detailNoiseMixByHeight=0.0;
     if(detailAmp>kCloudBandAmpEpsilon)
     {
@@ -360,7 +407,7 @@ ParticipatingMedia volumetricShadow(vec3 posKm,vec3 sunDirection,const in Atmosp
         float normalizedHeight=sampleDt/atmosphere.cloudAreaThickness;//云内归一化高度
         vec3 samplePosMeter=samplePosKm*1000.0f;
 
-        extinctionCoefficients[0]=cloudMap(samplePosMeter,normalizedHeight);//由cloudMap()得到云密度
+        extinctionCoefficients[0]=cloudMap(samplePosMeter,normalizedHeight,cloudLodShadowDistScale());//由cloudMap()得到云密度
         extinctionAccumulation[0]+=extinctionCoefficients[0]*stepL;//第0阶消光累积，云密度*步长
 
         float MsExtinctionFactor=msExtinctionFactor;
@@ -393,7 +440,7 @@ float cloudDensityAtRayT(float rayTKm, vec3 worldPos, vec3 worldDir, const in At
     vec3 samplePos = rayTKm * worldDir + worldPos;
     float sampleHeight = length(samplePos);
     float normalizedHeight = (sampleHeight - atmosphere.cloudAreaStartHeight) / atmosphere.cloudAreaThickness;
-    return cloudMap(samplePos * 1000.0, normalizedHeight);
+    return cloudMap(samplePos * 1000.0, normalizedHeight, kCloudLodDistScaleView);
 }
 
 //主函数：对一条射线算整朵云，返回RGB散射和A透射
@@ -598,7 +645,7 @@ float fogNoise)
         vec3 dbgSamplePos=dbgT*worldDir+worldPos;
         float dbgHeight=length(dbgSamplePos);
         float dbgNormHeight=(dbgHeight-atmosphere.cloudAreaStartHeight)/atmosphere.cloudAreaThickness;
-        float dbgDensity=cloudMap(dbgSamplePos*1000.0f,dbgNormHeight);
+        float dbgDensity=cloudMap(dbgSamplePos*1000.0f,dbgNormHeight,kCloudLodDistScaleView);
         if(isnan(dbgDensity)||isinf(dbgDensity)){ return vec4(1.0,0.0,0.0,0.0); }
         return vec4(0.0,saturate(dbgDensity*5.0),0.0,0.0);
     }
@@ -695,7 +742,7 @@ float fogNoise)
             vec3 samplePosMeter=samplePos*1000.0f;
             // samplePosMeter：cloudMap 输入为米；flower 噪声/weather 部分按 km 尺度，接口约定不一。
 
-            float stepCloudDensity=cloudMap(samplePosMeter,normalizedHeight);
+            float stepCloudDensity=cloudMap(samplePosMeter,normalizedHeight,kCloudLodDistScaleView);
             // stepCloudDensity：该点体积云密度 σ（无量纲标量，近似 σ_t 的密度因子）。
             // >0 才进入光照计算；薄云也完整算光，不跳过 shadow march。
 
@@ -1139,7 +1186,7 @@ float fogNoise)
                     float normalizedHeight=sampleDt/atmosphere.cloudAreaThickness;
                     vec3 samplePosMeter=samplePosKm*1000.0f;
 
-                    transmittanceShadow+=cloudMap(samplePosMeter,normalizedHeight);
+                    transmittanceShadow+=cloudMap(samplePosMeter,normalizedHeight,cloudLodShadowDistScale());
                     // 累加云密度：太阳到 P0 之间有多少云挡光（简化 shadow，非 volumetricShadow 多阶）。
 
                     d+=stepL;

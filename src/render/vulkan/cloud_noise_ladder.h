@@ -52,6 +52,34 @@ constexpr float kDefaultMesoAmp   = kShapeAmpFalloff;                      // 0.
 constexpr float kDefaultFineAmp   = kDefaultMesoAmp * kShapeAmpFalloff;    // 0.25
 constexpr float kDefaultDetailAmp = kDefaultFineAmp * kErosionAmpFalloff;  // 0.05
 
+// ── 频带 LOD（屏幕足迹）─────────────────────────────────────────────────────
+// 一档噪声在屏幕上占不到一两个像素时就不再是"细节"，只是每帧乱跳的噪点，可以整档关掉。
+// 特征周期 P(km) 在距离 d(km) 处横跨的像素数：
+//
+//   nPx ≈ P·H / (d · fovy)          H=渲染高度(px)，fovy=竖直视场(rad)
+//
+// 于是"开始淡出"的距离可以直接解出来（UI 用它显示各档大致作用范围）：
+//
+//   dOff ≈ P·H / (nMin · fovy)
+//
+// 判据只依赖距离/视场/分辨率，和 raymarch 的自适应步长解耦：步长由 empty skip 与
+// edge refine 负责，两者若互相挂钩会形成"缩步→开细档→更碎→更缩步"的反馈。
+constexpr float kDefaultLodNMin = 1.1f;            // 低于 1.1px 的档开始淡出
+constexpr float kDefaultLodShadowDistScale = 1.0f; // 阴影侧按 1.0 倍距离算，比主视线更早关
+constexpr float kLodFadeSpan = 0.25f;             // 完全关闭点 = nMin × 此值（smoothstep 下界）
+
+// UI 读数用的参考视口：面板不持有真实相机参数，用常见 1080p/60° 给一个量级参考。
+constexpr float kLodPreviewRenderHeight = 1080.f;
+constexpr float kLodPreviewFovYRad = 1.0472f; // 60°
+
+// 该档从多远开始淡出（km）。P 为该档最细特征周期，见 finestPeriodKm()。
+inline float lodFadeStartKm(float finestKm, float nMin,
+                            float renderHeight = kLodPreviewRenderHeight,
+                            float fovYRad = kLodPreviewFovYRad) {
+    if (!(finestKm > 0.f) || !(nMin > 0.f) || !(fovYRad > 0.f)) return 0.f;
+    return finestKm * renderHeight / (nMin * fovYRad);
+}
+
 // cloudMap 的 posKm 是"相对行星中心"的坐标，量级 ≈ 行星半径。float32 在这个量级上的
 // 相邻可表示值间隔就是世界空间采样网格的硬下限（地球量级 ≈ 0.8 m）：频带细端接近它时
 // 噪声不会更细，只会被量化成台阶，必须先把 march 改成相机相对坐标才能继续往下做。
@@ -80,6 +108,9 @@ inline void apply(GpuAtmosphereConfig& cfg, float basicScale) {
     cfg.cloudMesoAmplitude   = kDefaultMesoAmp;
     cfg.cloudFineAmplitude   = kDefaultFineAmp;
     cfg.cloudDetailAmplitude = kDefaultDetailAmp;
+    cfg.cloudNoiseLodNMin = kDefaultLodNMin;
+    cfg.cloudNoiseLodShadowDistScale = kDefaultLodShadowDistScale;
+    cfg.cloudNoiseLodEnabled = 1;
 }
 
 } // namespace CloudNoiseLadder

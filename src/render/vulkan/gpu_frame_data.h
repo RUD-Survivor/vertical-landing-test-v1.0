@@ -135,9 +135,10 @@ struct GpuAtmosphereConfig {
     float cloudFineAmplitude = 0.f;
 
     float cloudDetailAmplitude = 0.f;
-    float padNoiseLadder0 = 0.f;      // 预留 Micro scale/amp
-    float padNoiseLadder1 = 0.f;
-    float padNoiseLadder2 = 0.f;
+    // 频带 LOD（见 shared_struct.glsl 同名字段与 cloud_noise_lod.glsl）。
+    float cloudNoiseLodNMin = 0.f;
+    float cloudNoiseLodShadowDistScale = 1.f;
+    int32_t cloudNoiseLodEnabled = 0; // 默认关：未显式配置的路径保持全档常开
 };
 static_assert(sizeof(GpuAtmosphereConfig) == 664, "GpuAtmosphereConfig must match std140 AtmosphereConfig");
 
