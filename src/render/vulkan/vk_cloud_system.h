@@ -78,14 +78,14 @@ struct FlowerCloudTuneParams {
     float phaseMixFactor = 0.5f;
     float powderScale = 1.0f;
     float powderPow   = 0.1f;
-    float sunLightScale = 4.0f;
+    float sunLightScale = 1.0f;
     float minAltKm = 1.0f;
     float maxAltKm = 20.0f;
     float speed = 0.15f;
     // Bruneton/Hillaire 大气积分对"太阳辐照度"的物理量级要求，和引擎其余部分（atmo.frag 等）
-    // 手调出来的 sunIntensity(~1.0) 未必是同一套标定；这里单独给一个宽范围倍率，
-    // 用来在不改引擎全局曝光的前提下，把云的整体亮度调到合理范围（黑云多半是这里太低）。
-    float sunIntensityMul = 24.0f;
+    // 手调出来的 sunIntensity(~1.0) 未必是同一套标定。Inscatter/Ambient/Froxel 按单位太阳烘焙；
+    // 本值是运行时全局曝光：L_sun = color × snap.sunIntensity × sunIntensityMul。
+    float sunIntensityMul = 100.0f;
     // 0=正常渲染；1/2/3/4=调试可视化（借用 cloudSunLitMapOctave 字段传给 shader，
     // 见 cloud_common.glsl::cloudColorCompute 开头的 dbgMode 分支），排查"黑云"用。
     int debugMode = 0;
@@ -113,7 +113,7 @@ struct FlowerCloudTuneParams {
 
     // 沿太阳方向体积阴影步进（volumetricShadow）
     float lightStepMul = 1.5f;                // cloudLightStepMul
-    float lightBasicStepKm = 0.5f;          // cloudLightBasicStep (km)
+    float lightBasicStepKm = 0.03f;          // cloudLightBasicStep (km)
     int   lightStepNum = 6;                   // cloudLightStepNum
 
     // 天气 / 风
@@ -126,18 +126,18 @@ struct FlowerCloudTuneParams {
     float curlContrast = 3.0f;                // cloudCurlContrast
 
     // 地面光 / 环境
-    float fogFade = 0.75f;                      // cloudFogFade
+    float fogFade = 0.25f;                      // cloudFogFade
     float groundNoiseScale = 1.0f;             // cloudNoiseScale
     bool  enableGroundContribution = true;    // cloudEnableGroundContribution
     float cloudAlbedo = 1.f;                  // cloudAlbedo.rgb
 
-    // Froxel 空气透视：与 SunIntensityMul 解耦（后者只影响云光照）
+    // Froxel 空气透视：LUT 单位太阳；运行时 × L_sun × airPerspectiveSunScale
     bool  airPerspectiveEnabled = true;       // cloudAirPerspectiveEnabled
-    float airPerspectiveSunScale = 1.0f;      // 烘焙 Froxel 时的 sky.intensity 倍率（Bruneton 量级，默认 1）
+    float airPerspectiveSunScale = 1.0f;      // 相对 L_sun 的雾色倍率（默认 1=与云直射同源）
     float airPerspectiveScale = 0.01f;        // 采样混合权重倍率（α'=α×此值；默认 0.01）
 
-    // 环境天光：相机无关 μs→zenith LUT（可选混入 analytic）
-    float ambientExposure = 0.3f;
+    // 环境天光：单位太阳 μs LUT × L_sun × ambientExposure
+    float ambientExposure = 1.0f;
     float ambientAnalyticBlend = 0.f;
 
     // God Ray（400m 近距体积雾光柱 march，cloud_composite.glsl:108 起）。默认关闭——
@@ -187,14 +187,9 @@ struct VkCloudSystem {
     // 但云本身的大气采样早就改成实时算了（realTimeTransmittance），不需要 Sky-View/
     // Sky-Irradiance——所以这里只在第一次调用时 bakeFull() 一次（地球大气 profile
     // 基本不变，不用每帧重烤那两张贵的），之后只每帧刷 Froxel。
-    // AirPerspectiveSunScale 变化时需重烤 MultiScatter（LUT 内含太阳强度）。
+    // Inscatter/MultiScatter/Froxel 均为单位太阳（shader 内不乘 intensity），太阳亮度
+    // 变化不再触发 bakeFull。
     bool atmosphereLutBaked = false;
-    float lastAirPerspectiveSunScale = -1.f;
-    // 云环境 μs LUT 现在每帧查 Inscatter（见 cloud_ambient_mus_lut.glsl），而
-    // Inscatter 烘焙时已经把 sky.color×sky.intensity 乘进了 texel。所以太阳亮度一变，
-    // 不重烤 Inscatter 的话环境天光会一直停在旧亮度上——这里记住上次烘焙时的亮度，
-    // 变了就连同 Inscatter 一起重烤。
-    float lastBakedSunLuminance = -1.f;
 
     // ── 1/4 分辨率 RT：颜色(L,T) / 深度 / 雾 ─────────────────────────────────
     VkImage quarterColorImg=VK_NULL_HANDLE, quarterDepthImg=VK_NULL_HANDLE, quarterFogImg=VK_NULL_HANDLE;
@@ -341,32 +336,18 @@ struct VkCloudSystem {
         // 之前这里整行注释掉 bake() 时漏了这个，导致 frameData 一直是旧值，DebugMode 都
         // 传不进 shader。所以不重烤的那条分支也要走一次只上传不 dispatch 的轻量路径。
         //
-        // Froxel 空气透视：烘焙用独立的太阳倍率（airPerspectiveSunScale，默认 1=Bruneton
-        // 量级），与云光照的 SunIntensityMul 解耦，避免雾色被 ×30 过曝。bake 完再把
-        // 云用的 fd（含 SunIntensityMul）写回 UBO，供 raymarch 读。
-        GpuPerFrameData fdFroxel = fd;
-        fdFroxel.sky.intensity = snap.sunIntensity * tuneParams.airPerspectiveSunScale;
-
-        // sky.color 恒为 (1,1,1)（见 fillCloudFrameData），亮度全在 intensity 上。
-        // 这里取 fd 而不是 fdFroxel：三次 uploadFrameData 写的是同一个 slot 的同一个
-        // 映射 UBO，memcpy 在录制期就完成，而 dispatch 要到提交后才执行——本帧所有
-        // bake 实际读到的都是最后一次上传的内容，也就是 fd。
-        const float sunLuminance = fd.sky.intensity;
-        const bool needLutRebake = !atmosphereLutBaked
-            || (lastAirPerspectiveSunScale != tuneParams.airPerspectiveSunScale)
-            || (fabsf(lastBakedSunLuminance - sunLuminance) > 1e-4f);
-        if (needLutRebake) {
-            atmosphereLut.bakeFull(ctx, cmd, frameSlot, cloudLutPipelines, fdFroxel);
+        // 单位太阳烘焙：integrateScatteredLuminance 只读 sky.color，不读 intensity。
+        // 因此 bakeFull / Froxel / Ambient 与 raymarch 可共用最后一次 upload 的 fd
+        // （含 L_sun=color×intensity）；亮度旋钮只影响运行时采样，不再触发重烤。
+        if (!atmosphereLutBaked) {
+            atmosphereLut.bakeFull(ctx, cmd, frameSlot, cloudLutPipelines, fd);
             atmosphereLutBaked = true;
-            lastAirPerspectiveSunScale = tuneParams.airPerspectiveSunScale;
-            lastBakedSunLuminance = sunLuminance;
         } else {
-            atmosphereLut.uploadFrameData(ctx, cmd, frameSlot, fdFroxel);
+            atmosphereLut.uploadFrameData(ctx, cmd, frameSlot, fd);
         }
-        // 每帧刷新云环境 μs LUT（128×1，与相机无关，纯查 Inscatter）+ Froxel
+        // 每帧刷新云环境 μs LUT（128×1，与相机无关，纯查单位太阳 Inscatter）+ Froxel
         atmosphereLut.bakeAmbientMusLut(ctx, cmd, frameSlot, cloudLutPipelines);
         atmosphereLut.bakeFroxel(ctx, cmd, frameSlot, cloudLutPipelines);
-        atmosphereLut.uploadFrameData(ctx, cmd, frameSlot, fd);
 
         updateCloudDescriptorSet(ctx, taa, slot, histSlot, fd, shadowAtlasView, cascadeInfoBuf);
 
@@ -497,6 +478,7 @@ private:
         // frameData.sky.direction 约定是"光线传播方向"（从太阳照向场景），互为相反数。
         fd.sky.direction[0] = -snap.lightDir[0]; fd.sky.direction[1] = -snap.lightDir[1]; fd.sky.direction[2] = -snap.lightDir[2];
         fd.sky.color[0]=fd.sky.color[1]=fd.sky.color[2]=1.0f;
+        // 运行时 L_sun = color × intensity；LUT 烘焙端不乘 intensity（单位太阳）。
         fd.sky.intensity = snap.sunIntensity * tuneParams.sunIntensityMul;
 
         // cascadeCfg 来自 VkCascadeShadowSystem::render() 本帧渲染结果；为空（阴影关闭/无地形
@@ -567,6 +549,7 @@ private:
         ac.cloudAlbedo[0] = ac.cloudAlbedo[1] = ac.cloudAlbedo[2] = tuneParams.cloudAlbedo;
         ac.cloudAirPerspectiveEnabled = tuneParams.airPerspectiveEnabled ? 1 : 0;
         ac.cloudAirPerspectiveScale = tuneParams.airPerspectiveScale;
+        ac.cloudAirPerspectiveSunScale = tuneParams.airPerspectiveSunScale;
         ac.cloudAmbientExposure = tuneParams.ambientExposure;
         ac.cloudAmbientAnalyticBlend = tuneParams.ambientAnalyticBlend;
         ac.cloudIrradianceBakeAtShell = 1;

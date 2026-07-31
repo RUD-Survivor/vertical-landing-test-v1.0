@@ -8,6 +8,7 @@
 // 天空辐亮度不再逐方向重新 raymarch，而是查 Inscatter/SingleMie（Bruneton reduced
 // scattering）再补相位——一次 LUT 采样代替一整条大气积分，把这张表的成本从
 // 128×16 条积分降到纯查表，方向数因此可以给到 8×8。
+// Inscatter 为单位太阳；本表亦为单位太阳，运行时 sampleCloudAmbient 乘 L_sun。
 // 生成顺序必须排在 inscatter_lut 之后（见 bakeFull / bakeAmbientMusLut）。
 #include "atmosphere_common.glsl"
 

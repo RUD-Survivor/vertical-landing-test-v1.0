@@ -361,19 +361,21 @@ vec3 lookupSkylight(vec3 worldDir,vec3 worldPos,float viewHeight,vec3 upVector,i
 }
 
 // 云点环境天光：查相机无关的 μs→天空半球余弦加权辐照度/π LUT
-//（cloud_ambient_mus_lut 在云壳高度烘焙）。
+//（cloud_ambient_mus_lut 在云壳高度、单位太阳下烘焙）。
 // μs=dot(localUp,sun)；可选混入 analyticSkyAmbient。
+// 运行时乘 L_sun = color×intensity，与直射/AP 同源。
 vec3 sampleCloudAmbient(const in AtmosphereParameters atmosphere, vec3 posKm, vec3 sunDirection)
 {
     const vec3 localUp = normalize(posKm);
     const float muS = dot(localUp, sunDirection);
     const float expos = frameData.sky.atmosphereConfig.cloudAmbientExposure;
     const float analBlend = saturate(frameData.sky.atmosphereConfig.cloudAmbientAnalyticBlend);
+    const vec3 Lsun = frameData.sky.color * frameData.sky.intensity;
 
     const float u = clamp(muS * 0.5 + 0.5, 0.0, 1.0);
     vec3 lutColor = texture(sampler2D(inCloudAmbientMusLut, linearClampEdgeSampler), vec2(u, 0.5)).rgb;
     vec3 analytic = analyticSkyAmbient(muS);
-    return mix(lutColor, analytic, analBlend) * expos;
+    return mix(lutColor, analytic, analBlend) * expos * Lsun;
 }
 
 ParticipatingMedia volumetricShadow(vec3 posKm,vec3 sunDirection,const in AtmosphereParameters atmosphere,int fixNum,float msExtinctionFactor)
@@ -1070,9 +1072,8 @@ float fogNoise)
 
             //apply air perspective
             // 空气透视：相机与云之间的大气散射，使远处云发雾、发蓝、对比度降（观察路径上的雾，非太阳光路径）。
-            // 已接入：inFroxelScatter 现在是真烤出来的 Froxel 3D 体积散射（vk_atmosphere_lut.h::
-            // VkAtmosphereLut::bakeFroxel()，shader 见 atmosphere/aerial_perspective_lut.glsl，
-            // 对齐 flower air_perspective.glsl；烘焙太阳倍率与云 SunIntensityMul 解耦）。
+            // Froxel 按单位太阳烘焙（integrateScatteredLuminance 不乘 intensity）；这里乘 L_sun
+            // 与云直射/环境同源。AirPerspectiveSunScale 是相对 L_sun 的艺术微调。
             if(frameData.sky.atmosphereConfig.cloudAirPerspectiveEnabled != 0)
             {
                 float slice =aerialPerspectiveDepthToSlice(rayHitHeight);//aerialPerspectiveDepthToSlice：shared_atmosphere.glsl
@@ -1098,6 +1099,9 @@ float fogNoise)
                 vec4 airPerspective=weight*texture(sampler3D(inFroxelScatter,linearClampEdgeSampler),vec3(uv,w));
                 // airPerspective：本像素、该云距离下的空气雾色(RGB)与洗淡量(A)，× weight 处理近距 fade。
                 // uv=屏幕位置；w=深度层。
+                // 单位太阳 LUT → 运行时乘 L_sun；α 仍只受艺术 Scale（不随太阳亮度变）。
+                vec3 Lsun=frameData.sky.color*frameData.sky.intensity;
+                airPerspective.rgb*=Lsun*frameData.sky.atmosphereConfig.cloudAirPerspectiveSunScale;
                 // 艺术 Scale 只缩放混合权重 α（默认 0.01）：L' = L×(1-α')+fog×α'
                 // 避免旧式 fog×(1-T) 在厚云上整份叠加 HDR 雾，以及高 Scale 时 α 灭云却 RGB≈0 涂黑。
                 float apScale=frameData.sky.atmosphereConfig.cloudAirPerspectiveScale;
@@ -1392,7 +1396,7 @@ float fogNoise)
   rayHitPos ← 0;  rayHitPosWeight ← 0
   atmosphereTransmittance0 ← LUT@sampleT入口
   atmosphereTransmittance1 ← LUT@tMax出口
-  upScaleColor ← sampleCloudAmbient(cloudEntryPos)   // μs → 半球辐照度/π LUT
+  upScaleColor ← sampleCloudAmbient(cloudEntryPos)   // 单位太阳 LUT × L_sun × Exposure
 
 --------------------------------------------------------------------------------
 【cloudColorCompute 阶段 2 — 主 march 循环  L527-787】

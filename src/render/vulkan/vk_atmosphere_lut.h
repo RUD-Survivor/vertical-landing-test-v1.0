@@ -128,7 +128,7 @@ struct AtmoLutProfileKey {
     float multipleScatteringFactor = 1.f;
     float mieAbsFraction = 0.1f;
     // 烘焙语义修订号：改 Inscatter 烘焙公式时 bump，强制全量 bakeFull。
-    float inscatterBakeRev = 3.f; // 3 = A 改存 Mie.r，并同步烘焙完整 RGB Mie
+    float inscatterBakeRev = 4.f; // 4 = 单位太阳烘焙（globalL=sky.color，运行时乘 intensity）
 
     static AtmoLutProfileKey fromTune(int32_t atmoIdx, float radiusKm, float thicknessKm,
                                       const AtmoTuneParams& t) {
@@ -145,7 +145,7 @@ struct AtmoLutProfileKey {
         k.groundAlbedo = t.groundAlbedo;
         k.multipleScatteringFactor = t.multipleScatteringFactor;
         k.mieAbsFraction = t.mieAbsFraction;
-        k.inscatterBakeRev = 3.f;
+        k.inscatterBakeRev = 4.f;
         return k;
     }
 
@@ -693,10 +693,11 @@ struct VkAtmosphereLut {
         _atmoLutComputeBarrier(cmd);
     }
 
-    // 烘焙云环境天光 μs LUT（128×1）。与相机无关，只依赖大气 profile + sky.intensity。
+    // 烘焙云环境天光 μs LUT（128×1）。与相机无关，只依赖大气 profile（单位太阳 Inscatter）。
     // 依赖 Inscatter/SingleMie（半球每个方向查表补相位，不再逐方向 raymarch），
     // 所以必须排在 bakeFull 的 inscatter dispatch 之后、云 raymarch 之前调用。
     // 不重复 upload UBO（与 bakeFroxel 相同约定）。
+    // 运行时 sampleCloudAmbient 再乘 L_sun = color×intensity。
     void bakeAmbientMusLut(VulkanContext& ctx, VkCommandBuffer cmd, int frameSlot,
                             const VkAtmoLutPipelines& pipes) {
         int slot = frameSlot % FRAMES_IN_FLIGHT;

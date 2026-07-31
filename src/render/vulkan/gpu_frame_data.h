@@ -37,7 +37,7 @@ struct GpuCascadeShadowConfig {
 static_assert(sizeof(GpuCascadeShadowConfig) == 48, "GpuCascadeShadowConfig must match std140 CascadeShadowConfig");
 
 // -----------------------------------------------------------------------
-// AtmosphereConfig — 664 bytes. Bruneton2017/UE SkyAtmosphere 参数化。
+// AtmosphereConfig — 668 bytes. Bruneton2017/UE SkyAtmosphere 参数化。
 // 所有距离单位 km（与 shared_struct.glsl 注释一致）。
 // -----------------------------------------------------------------------
 struct GpuAtmosphereConfig {
@@ -119,6 +119,7 @@ struct GpuAtmosphereConfig {
 
     int32_t cloudAirPerspectiveEnabled = 1;
     float cloudAirPerspectiveScale = 0.01f;
+    float cloudAirPerspectiveSunScale = 1.f; // 相对 L_sun；默认 1=与云直射同源
     float cloudAmbientExposure = 5.f;
     float cloudAmbientAnalyticBlend = 0.f;
     int32_t cloudIrradianceBakeAtShell = 1;
@@ -140,10 +141,10 @@ struct GpuAtmosphereConfig {
     float cloudNoiseLodShadowDistScale = 1.f;
     int32_t cloudNoiseLodEnabled = 0; // 默认关：未显式配置的路径保持全档常开
 };
-static_assert(sizeof(GpuAtmosphereConfig) == 664, "GpuAtmosphereConfig must match std140 AtmosphereConfig");
+static_assert(sizeof(GpuAtmosphereConfig) == 668, "GpuAtmosphereConfig must match std140 AtmosphereConfig");
 
 // -----------------------------------------------------------------------
-// SkyInfo — 760 bytes (16+16+16+48+664)
+// SkyInfo — 764 bytes (16+16+16+48+668)
 // -----------------------------------------------------------------------
 struct GpuSkyInfo {
     float color[3] = {1,1,1}; float intensity = 1.f;
@@ -155,7 +156,7 @@ struct GpuSkyInfo {
     GpuCascadeShadowConfig cacsadeConfig;
     GpuAtmosphereConfig atmosphereConfig;
 };
-static_assert(sizeof(GpuSkyInfo) == 760, "GpuSkyInfo must match std140 SkyInfo");
+static_assert(sizeof(GpuSkyInfo) == 764, "GpuSkyInfo must match std140 SkyInfo");
 
 // -----------------------------------------------------------------------
 // PerFrameData — 1784 bytes. binding 21 (cloud_common.glsl) / binding 8 (atmosphere_common.glsl).
@@ -205,7 +206,7 @@ struct GpuPerFrameData {
 
     GpuSkyInfo sky;
 };
-static_assert(sizeof(GpuPerFrameData) == 1784, "GpuPerFrameData must match std140 PerFrameData");
+static_assert(sizeof(GpuPerFrameData) == 1788, "GpuPerFrameData must match std140 PerFrameData");
 
 // -----------------------------------------------------------------------
 // CascadeInfo — 176 bytes. SDSM cascade SSBO 元素（binding 29）。

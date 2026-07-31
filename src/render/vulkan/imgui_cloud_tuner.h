@@ -297,7 +297,7 @@ inline void FlowerCloudTunerImGui(bool* p_open, FlowerCloudTuneParams& p,
     ImGui::Separator();
     ImGui::Text("光照与高度");
     ImGui::SliderFloat("SunIntensityMul", &p.sunIntensityMul, 0.1f, 200000.0f, "%.1f", ImGuiSliderFlags_Logarithmic);
-    ImGui::TextDisabled("只影响云光照；空气透视用下面的 AirPerspectiveSunScale");
+    ImGui::TextDisabled("全局曝光 L_sun=color×sunIntensity×本值；直射/环境/AP 同源");
     ImGui::SliderFloat("SunLightScale", &p.sunLightScale, 0.0f, 4.0f, "%.2f");
     ImGui::SliderFloat("MinAlt (km)",   &p.minAltKm, 0.5f, 8.0f, "%.2f");
     ImGui::SliderFloat("MaxAlt (km)",   &p.maxAltKm, 8.0f, 30.0f, "%.2f");
@@ -310,7 +310,7 @@ inline void FlowerCloudTunerImGui(bool* p_open, FlowerCloudTuneParams& p,
     ImGui::Text("空气透视 (Froxel)");
     ImGui::Checkbox("AirPerspective Enabled", &p.airPerspectiveEnabled);
     ImGui::SliderFloat("AirPerspectiveSunScale", &p.airPerspectiveSunScale, 0.001f, 30.0f, "%.3f", ImGuiSliderFlags_Logarithmic);
-    ImGui::TextDisabled("烘焙 Froxel 的太阳倍率（Bruneton 量级，默认 1；勿与 SunIntensityMul 混用）");
+    ImGui::TextDisabled("相对 L_sun 的雾色倍率（默认 1；LUT 为单位太阳）");
     ImGui::SliderFloat("AirPerspectiveScale", &p.airPerspectiveScale, 0.0f, 1.0f, "%.3f", ImGuiSliderFlags_Logarithmic);
     ImGui::TextDisabled("混合权重 α'=α×Scale；L'=L×(1-α')+fog×α'（默认 0.01）");
 
@@ -318,8 +318,8 @@ inline void FlowerCloudTunerImGui(bool* p_open, FlowerCloudTuneParams& p,
     ImGui::Text("环境天光 (μs LUT，与相机无关)");
     ImGui::SliderFloat("AmbientExposure", &p.ambientExposure, 0.1f, 50.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
     ImGui::SliderFloat("AmbientAnalyticBlend", &p.ambientAnalyticBlend, 0.0f, 1.0f, "%.2f");
-    ImGui::TextDisabled("μs=dot(云点天顶,太阳) 查 128×1 半球辐照度 LUT；夜半球由 μs 自然变暗");
-    ImGui::TextDisabled("AnalyticBlend 混入 analyticSkyAmbient；Exposure≈atmo InnerFar");
+    ImGui::TextDisabled("单位太阳半球 LUT × L_sun × Exposure；夜半球由 μs 变暗");
+    ImGui::TextDisabled("AnalyticBlend 混入 analyticSkyAmbient（同样乘 L_sun）");
 
     ImGui::Separator();
     ImGui::Text("God Ray（近距 400m 体积光柱）");

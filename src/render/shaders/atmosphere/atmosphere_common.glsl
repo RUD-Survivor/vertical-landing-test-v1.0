@@ -289,7 +289,11 @@ SingleScatteringResult integrateScatteredLuminance(
     float miePhaseValue = hgPhase(atmosphere.miePhaseG, -cosTheta);
     float rayleighPhaseValue = rayleighPhase(cosTheta);
 
-    vec3 globalL = frameData.sky.color * frameData.sky.intensity;
+    // 单位太阳烘焙：只写入光谱形状 sky.color，不乘 intensity。
+    // Inscatter / MultiScatter / Froxel / SkyView 都走这条积分；运行时强度由
+    // 采样端统一乘 L_sun = color×intensity（云直射/环境/AP）或片元 exposure（行星大气）。
+    // 这样云管线与 LUT 可共用同一份 UBO：最后一次 upload 的 intensity 不会污染烘焙结果。
+    vec3 globalL = frameData.sky.color;
 
     vec3 L = vec3(0.0);
     vec3 L_ray = vec3(0.0);

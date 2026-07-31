@@ -109,6 +109,7 @@ void main()
 
     ss.scatteredLight = min(ss.scatteredLight, vec3(kMaxHalfFloat));
 
+    // 单位太阳：scatteredLight 不含 sky.intensity；云采样端再乘 L_sun。
     // flower：α = 1 - mean(transmittance)
     imageStore(imageFroxelScatter, workPos, vec4(ss.scatteredLight, 1.0 - mean(ss.transmittance)));
 }

@@ -131,10 +131,11 @@ struct AtmosphereConfig
     float cloudMarchEdgeGradLow;    // τ 跳变 smoothstep 下界（density×km 量纲，归一化 per km），小于它认为不是云的边缘
     float cloudMarchEdgeGradHigh;   // τ 跳变 smoothstep 上界，大于它认为是边缘，中间平滑取值
 
-    // Froxel 空气透视（采样侧；烘焙太阳倍率见 CPU airPerspectiveSunScale，不进 UBO）
+    // Froxel 空气透视（LUT 为单位太阳；运行时 × L_sun × SunScale）
     int   cloudAirPerspectiveEnabled; // 0=跳过空气透视混合
     float cloudAirPerspectiveScale;   // 采样时 α'=α×此值（艺术向；默认 0.01）
-    float cloudAmbientExposure;       // 环境光总曝光（对齐 atmo）
+    float cloudAirPerspectiveSunScale;// 相对 L_sun 的雾色倍率（默认 1=与云直射同源）
+    float cloudAmbientExposure;       // 环境光相对倍率（LUT×L_sun 之后再乘）
     float cloudAmbientAnalyticBlend;  // 与 analyticSkyAmbient 混合 [0,1]
     int   cloudIrradianceBakeAtShell; // 保留布局；SkyView 烘焙高度（atmo 路径）
     // Curl 假资产 localCoverage（云管线；复用原 padAmbient 槽位，保 632B）
