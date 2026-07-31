@@ -277,6 +277,14 @@ inline void fillPlanetAtmosphereProfile(GpuAtmosphereConfig& cfg, int32_t atmoId
     cfg.cloudSpeed = 0.15f;
     cfg.cloudMultiScatterExtinction = 0.5f;
     cfg.cloudMultiScatterScatter = 0.5f;
+    // phi_fwd 漫射场：这里给的是"未经 Cloud Tuner 覆盖"时的基线，Intensity=0 表示关闭，
+    // 保证 LUT 烘焙路径与任何未显式开启的调用点都退化成接入前的行为。
+    cfg.cloudPhiFwdIntensity = 0.0f;
+    cfg.cloudPhiFwdMsBuildScale = 1.0f;
+    cfg.cloudPhiFwdCompress = 0.0f;
+    cfg.cloudPhiFwdDepthPow = 1.0f;
+    cfg.cloudPhiFwdDepthBias = 0.0f;
+    cfg.cloudPhiFwdBoundaryConfidence = 1.0f;
     // 行星尺度关键：cloudMap() 里这些 scale 直接乘在"公里"量级的 posKm 上
     // （posKm 现在是相对行星中心的真实公里坐标，不再是近地小范围坐标）。
     // flower 原版 0.4/1.2 是给"几公里量级"的近地场景调的，直接套用在几千公里量级的

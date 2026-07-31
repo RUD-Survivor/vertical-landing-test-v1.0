@@ -158,6 +158,20 @@ struct AtmosphereConfig
     float cloudNoiseLodNMin;             // 一个特征周期至少要占几个像素才保留该档
     float cloudNoiseLodShadowDistScale;  // 阴影侧的有效距离倍率（>1 = 阴影更早关细档）
     int   cloudNoiseLodEnabled;          // 0=权重恒 1，退化成"全档常开"（回归开关）
+
+    // ── phi_fwd 物理漫射场（cloud_common.glsl::volumetricShadow / cloudColorCompute）──
+    // 扩散近似（τ≫1、g_eff→0）下的各向同性多重散射，沿太阳光步用 1D 格林函数累加，
+    // 作为与 Frostbite MsCount 假 MS 正交的「加性」散射项。Intensity=0 时整条路径跳过。
+    float cloudPhiFwdIntensity;          // 总强度；0=关闭（画面与未接入前一致）
+    float cloudPhiFwdMsBuildScale;       // C_iso：各向同性 MS 建立速度（越大越早转漫射）
+    float cloudPhiFwdCompress;           // 软饱和压缩；0=线性不压缩
+    float cloudPhiFwdDepthPow;           // C_bottom：底部置信度恢复速度；0=禁用底部软化
+    float cloudPhiFwdDepthBias;          // C_bottom：底部锚点偏移（>0 云底保留更多漫射）
+    float cloudPhiFwdBoundaryConfidence; // C_top：云顶受光置信度强度（0=禁用，1=全量）
+    // 补到 16 字节整数倍，让 gpu_frame_data.h 的 C++ 镜像尺寸与 std140 严格相等。
+    float phiFwdPad0;
+    float phiFwdPad1;
+    float phiFwdPad2;
 };
 
 struct SkyInfo

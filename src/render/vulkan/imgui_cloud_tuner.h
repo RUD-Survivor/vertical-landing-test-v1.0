@@ -287,6 +287,21 @@ inline void FlowerCloudTunerImGui(bool* p_open, FlowerCloudTuneParams& p,
     ImGui::SliderFloat("MsScatter",    &p.multiScatterScatter,    0.0f, 1.0f, "%.3f");
 
     ImGui::Separator();
+    ImGui::Text("PhiFwd 漫射场（各向同性 MS，加性）");
+    ImGui::TextDisabled("与上面 MsExtinction/MsScatter 正交：先固定假 MS，再调本组");
+    ImGui::SliderFloat("PhiFwdIntensity", &p.phiFwdIntensity, 0.0f, 4.0f, "%.3f");
+    ImGui::TextDisabled("0=关闭（画面回到接入前）；建议 0→0.2→1 逐步加");
+    ImGui::SliderFloat("PhiFwdMsBuild", &p.phiFwdMsBuildScale, 0.0f, 8.0f, "%.2f");
+    ImGui::TextDisabled("各向同性建立速度：越大越早从方向性散射转成漫射源");
+    ImGui::SliderFloat("PhiFwdCompress", &p.phiFwdCompress, 0.0f, 4.0f, "%.2f");
+    ImGui::TextDisabled("软饱和：0=线性；越大越早饱和，防厚云芯爆亮");
+    ImGui::SliderFloat("PhiFwdDepthPow", &p.phiFwdDepthPow, 0.0f, 4.0f, "%.2f");
+    ImGui::SliderFloat("PhiFwdDepthBias", &p.phiFwdDepthBias, -0.3f, 0.5f, "%.3f");
+    ImGui::TextDisabled("底部置信度：Pow=0 禁用；Bias>0 让云底保留更多漫射光");
+    ImGui::SliderFloat("PhiFwdBoundary", &p.phiFwdBoundaryConfidence, 0.0f, 1.0f, "%.2f");
+    ImGui::TextDisabled("云顶受光置信度：0=不判边界；1=全量抑制背光侧假亮");
+
+    ImGui::Separator();
     ImGui::Text("相位 / 银边");
     ImGui::SliderFloat("PhaseForward",  &p.phaseForward,   0.0f, 0.99f, "%.3f");
     ImGui::SliderFloat("PhaseBackward", &p.phaseBackward, -0.99f, 0.0f, "%.3f");
@@ -368,6 +383,7 @@ inline void FlowerCloudTunerImGui(bool* p_open, FlowerCloudTuneParams& p,
         "13: 平均 powderEffect 灰阶（云顶若<<1=粉末压暗）",
         "14: 平均云内高度（红=顶 绿=底）",
         "15: 物理 Beer（关 soft-T）+ raw L",
+        "16: 仅 phi_fwd 漫射场贡献（Intensity=0 时全黑）",
     };
     ImGui::Combo("DebugMode", &p.debugMode, dbgItems, IM_ARRAYSIZE(dbgItems));
     ImGui::TextDisabled("8/9仍暗→看11是否本就亮，再比6/12/13；非0时a=0替换背景");

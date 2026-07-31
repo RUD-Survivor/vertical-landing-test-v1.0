@@ -92,6 +92,9 @@ struct ParticipatingMedia//参与介质（Participating Media）的多次散射�
     float extinctionCoefficients[MsCount];//各阶消光系数 σ_t（单位长度上的衰减强度）第 0 阶：来自 cloudMap() 的真实云密度第 1 阶：× cloudMultiScatterExtinction（逐阶衰减）
     float transmittanceToLight[MsCount];//从采样点沿光方向到光源的透射率 T（0~1）T=e−∫σt​ds 第0阶：直射光还能剩多少（云影深浅） 第1阶：高阶路径的“可见度”，通常更亮、更 diffuse
     float extinctionAcc[MsCount];//沿光路径累积的消光（光学深度 τ 的积分），再换算成透射率
+    float phiFwd;//phi_fwd 各向同性漫射场：沿同一条光路累积的标量辐照度（无量纲，已含 Intensity）。
+    //与上面三项正交——那三项是「还剩多少直射光」，这项是「多次散射后填进来多少漫射光」。
+    //只有太阳方向的 shadow march 会填它；天空方向恒为 0。
 
 };//第 1 阶让云 背光面/云体内 不会死黑，更接近真实多次散射，代价只是多算一条 shadow march 和一个散射阶循环
 
@@ -378,7 +381,85 @@ vec3 sampleCloudAmbient(const in AtmosphereParameters atmosphere, vec3 posKm, ve
     return mix(lutColor, analytic, analBlend) * expos * Lsun;
 }
 
-ParticipatingMedia volumetricShadow(vec3 posKm,vec3 sunDirection,const in AtmosphereParameters atmosphere,int fixNum,float msExtinctionFactor)
+////////////////////////////////////////////////////////////////////////////////////////
+// phi_fwd 物理漫射场（各向同性多重散射）
+//
+// 物理链路：RTE → 扩散近似（τ≫1，g_eff→0）→ Helmholtz + 格林函数 G=exp(-κr)/(4πr)
+//          → 有效源 Q_eff（慢衰减 + 局部散射沉积 + 边界置信度）→ 沿太阳方向 1D 离散。
+//
+// 与 MsCount 的 Frostbite 假 MS 是两回事：那边是「逐阶衰减的乘性方向性散射」，
+// 这里是「独立的加性各向同性漫射场」，负责厚云内部/云底不指数变黑。两者叠加。
+//
+// 单位约定：cloudMap 返回的 density 直接就是 σ_t（m⁻¹）——volumetricShadow 的
+// exp(-accum*1000) 说明 accum 是 density×km，即 OD = density × 米。所以本节所有
+// OD / κ / 1/r 一律走「米」，光步的 km 步长必须先 ×1000。
+
+// 单散射反照率：水云 0.999~0.9999，写死不进 UBO（美术无需调，改它等于换介质）。
+#define kPhiFwdOmega0 0.999
+// g_eff=0 时 σ_tr=σ_t，κ = σ_t·sqrt(3(1-ω₀))；sqrt 提出来当常数，逐步只需乘本步 OD。
+#define kPhiFwdKappaODScale 0.05477225575  // sqrt(3*(1-0.999))
+// 底部软化的归一化高度基准尺度（云壳归一化高度单位）；再按云柱厚度代理放大。
+#define kPhiFwdBottomSoftBase 0.1
+
+// 云顶高度代理：只取天气图 coverage 的大尺度趋势，用来判断「最近相关边界是否朝向太阳」。
+// 刻意不含 curl / 风向高度错位 / 3D 噪声——这里不评估密度本身，只要一个平滑的高度场，
+// 否则差分出来的法线会被高频噪声打成雪花。UV 与 cloudMap 同一套球面经纬度。
+float phiFwdTopHeightProxy(vec3 posKm)
+{
+    vec3 sphDir=normalize(posKm);
+    float lonRad=atan(sphDir.y,sphDir.x);
+    float latRad=asin(clamp(sphDir.z,-1.0,1.0));
+    vec2 sampleUv=vec2(lonRad*(1.0/(2.0*kPI))+0.5, latRad*(1.0/kPI)+0.5);
+    sampleUv*=frameData.sky.atmosphereConfig.cloudWeatherUVScale;
+
+    float weatherX=texture(sampler2D(inWeatherTexture,linearRepeatSampler),sampleUv).x;
+    return saturate(frameData.sky.atmosphereConfig.cloudCoverage*weatherX);
+}
+
+// 边界项 B_eff 的两个输入，一次算完（共用同一批 4 次天气图采样）：
+//   .x = C_top    云顶/侧向受光置信度 = wrap(N_boundary · L)
+//   .y = 云柱厚度代理（0~1），供 C_bottom 的软化尺度用（厚云底部恢复更慢）
+//
+// 为什么需要 C_top：高反照率云里吸收极弱，光靠 T_abs 的距离衰减不足以让背光侧变暗。
+// 真正决定的是边界条件——受光边界能往云里注入太阳能量，背光/逃逸边界不能。
+vec2 phiFwdBoundaryTerms(vec3 posKm,vec3 sunDirection,const in AtmosphereParameters atmosphere)
+{
+    // 局部切平面基：径向 up + 两个正交切向。用球面基而不是世界 XZ——行星尺度下
+    // 相机可以绕到任意纬度，世界 XZ 差分在两极会退化。
+    vec3 up=normalize(posKm);
+    vec3 refAxis=(abs(up.z)<0.99)?vec3(0.0,0.0,1.0):vec3(1.0,0.0,0.0);
+    vec3 tangentA=normalize(cross(refAxis,up));
+    vec3 tangentB=cross(up,tangentA);
+
+    // 差分步长取云壳厚度量级：太小会放大天气图双线性插值的台阶，逐帧闪烁。
+    float epsKm=max(atmosphere.cloudAreaThickness,0.1);
+
+    float hL=phiFwdTopHeightProxy(posKm-tangentA*epsKm);
+    float hR=phiFwdTopHeightProxy(posKm+tangentA*epsKm);
+    float hD=phiFwdTopHeightProxy(posKm-tangentB*epsKm);
+    float hU=phiFwdTopHeightProxy(posKm+tangentB*epsKm);
+
+    // coverage 代理 → 云顶海拔（km）：coverage 越高云顶越高，跨度取整个云壳厚度。
+    float slabKm=max(atmosphere.cloudAreaThickness,1e-3);
+    float dHdA=(hR-hL)*slabKm/(2.0*epsKm);
+    float dHdB=(hU-hD)*slabKm/(2.0*epsKm);
+
+    // 切平面内的高度梯度 → 云顶法线（局部坐标下 up 相当于 +Y）。
+    vec3 topNormal=normalize(up-tangentA*dHdA-tangentB*dHdB);
+
+    // SSS 风格 wrap：背光侧不是硬切到 0，保留一点漫射（真实云边界并非全黑）。
+    const float kWrap=0.5;
+    float lit=saturate((dot(topNormal,sunDirection)+kWrap)/(1.0+kWrap));
+
+    float conf=saturate(frameData.sky.atmosphereConfig.cloudPhiFwdBoundaryConfidence);
+    float columnProxy=saturate((hL+hR+hD+hU)*0.25);
+
+    return vec2(mix(1.0,lit,conf),columnProxy);
+}
+
+// bPhiFwd：只有太阳方向那条 shadow march 才累加漫射场。天空/环境那条必须传 false，
+// 否则同一份能量会在 ambientLit 和 phi_fwd 两条路上各注入一次（双计发白）。
+ParticipatingMedia volumetricShadow(vec3 posKm,vec3 sunDirection,const in AtmosphereParameters atmosphere,int fixNum,float msExtinctionFactor,bool bPhiFwd)
 {
     ParticipatingMedia participatingMedia;
 
@@ -398,6 +479,38 @@ ParticipatingMedia volumetricShadow(vec3 posKm,vec3 sunDirection,const in Atmosp
     float stepL=frameData.sky.atmosphereConfig.cloudLightBasicStep;//单位为km,初始步长
 
     float d=stepL*0.5;//从半步开始
+
+    // ── phi_fwd 逐步状态（Intensity=0 时全程不参与运算，行为回到接入前）──────────
+    const float phiIntensity=frameData.sky.atmosphereConfig.cloudPhiFwdIntensity;
+    const bool bPhiFwdOn=bPhiFwd&&(phiIntensity>0.0);
+
+    float phiFwd=0.0;      // φ：累积的漫射辐照度
+    float phiTAbs=1.0;     // T_abs：无逃逸漫射源的吸收存活率（按 σ_a=(1-ω₀)σ_t 极慢衰减）
+    float phiKappaSum=0.0; // ∫κ ds：观测点→当前步入口，用于 G 的体积衰减 exp(-∫κ ds)
+    float phiODSum=0.0;    // ∫σ_t ds：各向同性建立权重 C_iso 用
+    float phiSrcConfidence=1.0; // B_eff = C_top × C_bottom，整条光路共用（只取决于观测点）
+
+    if(bPhiFwdOn)
+    {
+        // 边界项：观测点算一次即可——它回答的是「这一柱云的相关边界朝不朝太阳」，
+        // 是观测点的属性，不随光步位置变化（逐步重算只是浪费 4×N 次天气图采样）。
+        vec2 boundary=phiFwdBoundaryTerms(posKm,sunDirection,atmosphere);
+        float cTop=boundary.x;
+
+        // C_bottom：云底不该和云顶/侧向受光边界同等可信——太阳基本不从云体下方注入。
+        // 只在底部附近做软化，不是整根高度衰减。厚云柱恢复更慢（H_soft 随厚度放大）。
+        float cBottom=1.0;
+        float depthPow=frameData.sky.atmosphereConfig.cloudPhiFwdDepthPow;
+        if(depthPow>0.0)
+        {
+            float localHeight=(length(posKm)-atmosphere.cloudAreaStartHeight)/atmosphere.cloudAreaThickness;
+            float hAnchored=max(localHeight+frameData.sky.atmosphereConfig.cloudPhiFwdDepthBias,0.0);
+            float hSoft=max(kPhiFwdBottomSoftBase*mix(1.0,4.0,boundary.y),1e-3);
+            cBottom=1.0-exp(-hAnchored/hSoft*depthPow);
+        }
+
+        phiSrcConfidence=cTop*cBottom;
+    }
 
     for(uint j=0;j<StepLightNum;j++)
     {
@@ -422,6 +535,36 @@ ParticipatingMedia volumetricShadow(vec3 posKm,vec3 sunDirection,const in Atmosp
 
         }//多阶散射消光
 
+        // ── phi_fwd：1D 格林函数离散 φ += T_abs·(Q/D)·C_iso·B_eff·exp(-∫κ ds)·(1/r) ──
+        if(bPhiFwdOn)
+        {
+            // 全部换成米：σ_t 就是 cloudMap 的 density（m⁻¹），步长 km→m。
+            float stepM=stepL*1000.0;
+            float sigmaT=extinctionCoefficients[0];
+            float localOD=sigmaT*stepM;                 // 本步光学厚度 ∫σ_t ds
+            float qSrc=sigmaT*kPhiFwdOmega0*stepM;      // Q：局部散射沉积 σ_s·Δs
+            float invD=sigmaT;                          // 1/D ∝ 3σ_tr；常数 3 吸收进 Intensity
+
+            // κ 积到步中心（与 samplePosKm/d 一致的中点法则），而不是步末端。
+            float kappaStep=localOD*kPhiFwdKappaODScale;
+            float volAtten=exp(-(phiKappaSum+kappaStep*0.5));
+
+            // C_iso：扩散近似只在方向记忆被打散后成立；边界第一步仍归方向性散射管。
+            float msBuild=1.0-exp(-(phiODSum+localOD*0.5)
+                *max(frameData.sky.atmosphereConfig.cloudPhiFwdMsBuildScale,0.0));
+
+            // 1/r 几何扩展：r 用「观测点到本步采样点」的真实距离（米）。
+            float invR=1.0/max(d*1000.0,stepM*0.5);
+
+            phiFwd+=phiTAbs*qSrc*invD*msBuild*phiSrcConfidence*volAtten*invR*phiIntensity;
+
+            phiODSum+=localOD;
+            phiKappaSum+=kappaStep;
+            // T_abs 只按吸收衰减（ω₀=0.999 → 每单位 OD 只掉 0.1%），
+            // 这正是「厚云内部不指数变黑」的来源：不能用 exp(-OD) 那条单散射透射率。
+            phiTAbs*=exp(-localOD*(1.0-kPhiFwdOmega0));
+        }
+
         d+=stepL;//采样坐标继续前进
         stepL*=StepLMul;//步长变大
     }
@@ -432,7 +575,8 @@ ParticipatingMedia volumetricShadow(vec3 posKm,vec3 sunDirection,const in Atmosp
         //转换成透射率，Beer定律 e^(-τ)
         participatingMedia.extinctionAcc[ms]=extinctionAccumulation[ms]*1000.0;
     }
-    
+    participatingMedia.phiFwd=phiFwd;
+
     return participatingMedia;//返回参与介质结构体
 }//各散射阶的 transmittanceToLight，决定该点是亮（顺光薄云）还是暗（厚云阴影里），是体积云自阴影的核心
 
@@ -622,6 +766,9 @@ float fogNoise)
     float dbgPowderAcc=0.0;
     float dbgHeightAcc=0.0;
     float dbgSampleWeight=0.0;
+    // dbgMode 16：单独累加 phi_fwd 的散射贡献（不与其它光照混在一起），
+    // 用来确认漫射场本身是不是 0 / 有没有反过来主导画面。
+    vec3 dbgPhiFwdAcc=vec3(0.0);
 
     // 环境天光：按云壳入口位置的当地 μs 查天空半球辐照度/π（见 sampleCloudAmbient）。
     // Flower 的 skyBackgroundColor 来自 Sky-View（视线天空色）；云管线 Sky-View 只 bakeFull
@@ -643,6 +790,7 @@ float fogNoise)
     // 8/9 仍暗时：可见云顶往往本就 sunVis≈1，继续查 L_in 乘子与积分——
     // 12=强制 powder=1、phase=1、sunVis=1、T_atm=1，L_in=sunColor（测积分/Beer）；
     // 13=视线加权平均 powderEffect；14=加权平均 normalizedHeight；15=物理 Beer（禁用 Frostbite soft T）。
+    // 16=只输出 phi_fwd 漫射场贡献（其余光照全部不累加）；PhiFwdIntensity=0 时应当全黑。
     // 注意：alpha 统一给 0.0，不是 1.0——合成公式是 result=背景×cloudColor.a+cloudColor.rgb，
     // alpha=1 会让 debug 数值叠加在满强度背景之上，数值一旦是 0 就会跟"完全没开调试"长得
     //一模一样，看不出到底是没生效还是真的算出 0。alpha=0 让 debug 数值完全替换背景，
@@ -793,7 +941,7 @@ float fogNoise)
                     stepTransmittance=exp(-opticalDepth);
                 }
 
-                ParticipatingMedia participatingMedia=volumetricShadow(samplePos,sunDirection,atmosphere,-1,frameData.sky.atmosphereConfig.cloudMultiScatterExtinction);
+                ParticipatingMedia participatingMedia=volumetricShadow(samplePos,sunDirection,atmosphere,-1,frameData.sky.atmosphereConfig.cloudMultiScatterExtinction,true);
                 // participatingMedia：沿太阳方向短 march 得到的云自阴影 + 多散射阶透射率。
                 // transmittanceToLight[0] 直射影深浅；[1] 高阶路径更 diffuse，背光不死黑。
                 // fixNum=-1 表示用 cloudLightStepNum 默认步数。
@@ -822,7 +970,9 @@ float fogNoise)
 
                 if(frameData.sky.atmosphereConfig.cloudEnableGroundContribution!=0)
                 {
-                    participatingMediaAmbient=volumetricShadow(samplePos,normalize(samplePos),atmosphere,-1,SkyMsExtinction);
+                    participatingMediaAmbient=volumetricShadow(samplePos,normalize(samplePos),atmosphere,-1,SkyMsExtinction,false);
+                    // 末位 false：天空路不累加 phi_fwd——漫射场的源已经由太阳路那条算过了，
+                    // 这里再算一遍等于把同一份能量注入两次（ambientLit 和 phi_fwd 双计发白）。
                     // 天空方向用 SkyMsExtinction(0.5)系数衰减高阶，比太阳路径更「糊」。
                     // 若不做 ground contribution，可关此开关，省一半 light march。
 
@@ -944,6 +1094,39 @@ float fogNoise)
                     MsScatterFactor    *= MsScatterFactor;
                 }
                 // 生成 1 阶系数：更弱、更 diffuse 的「虚拟」介质层，模拟多次散射亮部。
+
+                // ── phi_fwd 各向同性漫射场注入（加性，与下面的 ms 循环正交）──────────
+                // 放在 ms 循环之外、之前，理由有二：
+                //   1) 只加一次。φ 已经是「多次散射后的各向同性辐照度」，本身不分阶；
+                //      塞进 ms 循环会按阶数重复计入，等于凭空放大 MsCount 倍。
+                //   2) 此刻 transmittance 还是本步入口的 T_view（ms==0 分支才会乘 stepTransmittance），
+                //      与 Flower 体积积分式对 T_view 的取值约定一致。
+                // 不乘 phase / powder：φ 是各向同性的，方向性瓣和粉末银边是方向性散射那条路的事。
+                if(participatingMedia.phiFwd>0.0)
+                {
+                    // 软饱和：扩散场在厚云芯会持续累积，线性注入容易过曝。
+                    // (1-exp(-x·c))/c 在 c→0 时退化为 x，所以 Compress=0 就是「不压缩」。
+                    float phiCompress=frameData.sky.atmosphereConfig.cloudPhiFwdCompress;
+                    float phiMapped=(phiCompress>0.0)
+                        ?(1.0-exp(-participatingMedia.phiFwd*phiCompress))/phiCompress
+                        :participatingMedia.phiFwd;
+
+                    vec3 phiLit=sunlightTerm*phiMapped;
+                    vec3 phiScatter=transmittance
+                        *(phiLit-phiLit*stepTransmittance)
+                        /max(1e-4f,extinctionCoefficients[0])
+                        *scatteringCoefficients[0];
+                    // 与 stepScatter 同一条体积积分式（ΔL = T_view × J × (1-T_step) / σ_t），
+                    // 只是 L_in 换成漫射场；σ_t/σ_s 都取 0 阶（真实云那一层）。
+
+                    scatteredLight+=phiScatter;
+
+                    // dbg 16 单独留一份，用来把漫射场从其它光照里摘出来看（dbgMode 是 uniform，不产生分支发散）。
+                    if(dbgMode==16)
+                    {
+                        dbgPhiFwdAcc+=phiScatter;
+                    }
+                }
 
                 for(ms=MsCount-1;ms>=0;ms--)// Should terminate at 0
                 // 从高阶向 0 阶积分：先算模糊的高阶光，再叠 0 阶直射+地面。
@@ -1175,144 +1358,125 @@ float fogNoise)
     if(bFog)//体积雾/God Ray
     // bFog=true 时走独立 pass：低层指数雾 + 云影遮挡 + 太阳 God Ray，与主云体 march 并行/可选。
     // 输出 lightingFog：.xyz 雾散射 RGB，.w 雾透射率；写入 binding 22 等云雾 RT。
-    // RocketSim3D：无单独 God Ray pass；低空雾/atmo 已在 atmo.frag，通常整段不移植。
+    // 重要：worldPos 是行星中心相对坐标（km），绝不能再用 flower 的 worldPos.y / sunDirection.y
+    // 平面假设——那会把「到云底」算成数千公里，σ·Δs 爆掉、T→0，composite 里 result*=fog.a 整天空涂黑。
     {
         const uint GodRaySteps=36;
-        // God RaySteps：沿视线从相机向云底方向固定 36 步 march。
+        // 与 composite 近距 God Ray（400m）对齐的短雾兜底；仰视云底时用球壳求交距离。
+        const float kFogNearFallbackKm=0.4;
+        // 地平线掠射到云底可达数百 km；不封顶则近处密度×巨步长仍会把 T 打穿。
+        const float kFogMarchMaxKm=20.0;
 
-        //单位为米
-        float stepLength=1000.0f*(atmosphere.cloudAreaStartHeight-worldPos.y)/clamp(worldDir.y,0.1,1.0)/float(GodRaySteps);
-        // stepLength：每步步长 (米)。
-        // cloudAreaStartHeight-worldPos.y ≈ 相机到云底壳的垂直高差 (km)；×1000→米；
-        // /worldDir.y：视线越平，沿射线到云底路径越长，步长加大；clamp(y,0.1,1) 防除零、限制极端掠射。
-        // RocketSim3D：worldPos.y / Y-up 假设，应改为 camAlt 或射线-云底球壳求交距离。
+        vec3 camLocalUp=normalize(worldPos);
+        float fogMarchKm=kFogNearFallbackKm;
+        if(viewHeight<radiusCloudStart && dot(worldDir,camLocalUp)>0.0)
+        {
+            // 相机在云底球壳内且视线朝外：沿视线到云底壳的斜距（km），等价 flower 的
+            // (cloudBase-y)/dir.y，但用球壳而非水平面。
+            float tToCloudBase=raySphereIntersectInside(worldPos,worldDir,vec3(0.0),radiusCloudStart);
+            if(tToCloudBase>0.0)
+            {
+                fogMarchKm=tToCloudBase;
+            }
+        }
+        fogMarchKm=clamp(fogMarchKm,kFogNearFallbackKm,kFogMarchMaxKm);
+
+        // 单位为米
+        float stepLength=fogMarchKm*1000.0f/float(GodRaySteps);
 
         vec3 stepRay=worldDir*stepLength;
         // stepRay：每步位移向量 (米，因 stepLength 为米)。
 
-        vec3 rayPosWP=frameData.camWorldPos.xyz+stepRay*(fogNoise+0.5);//fogNoise从哪来？
-        // rayPosWP：当前雾采样点世界坐标 (米，引擎空间)。
-        // 起点相机 + 半步 jitter：fogNoise∈[0,1] 来自调用方（308 行 fogNoise，同 blueNoise 类抖动），减轻带状分层。
+        vec3 rayPosWP=frameData.camWorldPos.xyz+stepRay*(fogNoise+0.5);
+        // rayPosWP：当前雾采样点世界坐标 (米，行星中心相对)。
+        // 起点相机 + 半步 jitter：fogNoise∈[0,1] 来自调用方蓝噪声，减轻带状分层。
 
         vec3 transmittanceTotal=vec3(1.0);
-        // transmittanceTotal：雾 pass 累积视线透射 T (RGB 分通道，此处各通道相同源)。
-
         vec3 scatteredLightTotal=vec3(0.0,0.0,0.0);
-        // scatteredLightTotal：雾 pass 累积散射光 RGB。
 
         float miePhaseValue=hgPhase(atmosphere.miePhaseG,-VoL);
-        // miePhaseValue：Mie 相位 HG(g,-VoL)；VoL=视线·光向，负号因 sunDirection 与 light 约定。
-        // 强前向散射 → 太阳方向看雾更亮（God Ray 光柱感）。
-
         float rayleighPhaseValue=rayleighPhase(VoL);
-        // rayleighPhaseValue：Rayleigh 相位；各向同性一些，给雾一点天空蓝散射。
-        // 两者在循环外算一次：本 pass 假设相位沿整条射线不变（近似）。
 
         for(uint i=0;i<GodRaySteps;i++)
         {
             vec3 P0=convertToAtmosphereUnit(rayPosWP,frameData);
-            // P0：当前雾采样点转到大气空间 (km，行星中心为原点)，与主云 march 的 worldPos/samplePos 同一套坐标。
-            // 本次 Phase 1 里 cloudGodRay 恒为 0（bFog 分支不会真正执行，见 cloud_raymarching.glsl），
-            // God Ray 依赖的 SDSM 级联阴影也还是 Phase 2 占位，这段留着只为保证编译通过。
+            // P0：雾采样点大气空间 (km，行星中心原点)，与主云 march 同源。
+
+            float p0Height=length(P0);
+            vec3 p0Up=(p0Height>1e-4)?(P0/p0Height):camLocalUp;
+            float sunElev=dot(sunDirection,p0Up);// 当地太阳高度 cos，替代 sunDirection.y
 
             float visibilityTerm=1.0;
-            // visibilityTerm：太阳光到 P0 的路径上，云+雾遮挡后还剩多少（0~1）；下面 shadow 块更新。
             {
                 const uint StepLight=8;
                 float stepL=atmosphere.cloudAreaThickness/float(StepLight);//km
-                // stepL：沿太阳方向的 light march 初始步长，约为云壳厚度均分 8 段。
-
-                stepL=stepL/abs(sunDirection.y);
-                // 太阳越贴近地平线，沿 sunDirection 穿过云壳的路径越长，步长放大。
+                // 太阳越低，穿过云壳路径越长；用当地径向 elev 替代 |sunDirection.y|。
+                stepL=stepL/max(abs(sunElev),0.1);
 
                 vec3 position=P0;
-                position+=P0.y<=atmosphere.cloudAreaStartHeight?
-                    sunDirection*(atmosphere.cloudAreaStartHeight-P0.y)/sunDirection.y:vec3(0.0);
-                // 若 P0 在云底以下，先把起点抬到云底壳再沿太阳 march（Y-up 求交）。
-                // RocketSim3D：改为球壳求交，不能用 P0.y。
-                
+                // 采样点在云底以下：沿太阳方向抬到云底球壳，再做云影 march。
+                if(p0Height<atmosphere.cloudAreaStartHeight && sunElev>0.0)
+                {
+                    float tLift=raySphereIntersectInside(P0,sunDirection,vec3(0.0),atmosphere.cloudAreaStartHeight);
+                    if(tLift>0.0)
+                    {
+                        position+=sunDirection*tLift;
+                    }
+                }
+
                 float d=stepL*0.01;
                 float transmittanceShadow=0.0;
-                // transmittanceShadow：沿太阳路累积 cloudMap 密度（非 exp，先积分再 exp）。
 
                 for(uint j=0;j<StepLight;j++)
                 {
                     vec3 samplePosKm=position+sunDirection*d;//单位为km
-                    float sampleHeightKm=samplePosKm.y;
+                    float sampleHeightKm=length(samplePosKm);// 径向高度，非 .y
                     float sampleDt=sampleHeightKm-atmosphere.cloudAreaStartHeight;
                     float normalizedHeight=sampleDt/atmosphere.cloudAreaThickness;
                     vec3 samplePosMeter=samplePosKm*1000.0f;
 
                     transmittanceShadow+=cloudMap(samplePosMeter,normalizedHeight,cloudLodShadowDistScale());
-                    // 累加云密度：太阳到 P0 之间有多少云挡光（简化 shadow，非 volumetricShadow 多阶）。
-
                     d+=stepL;
-
                 }
 
                 visibilityTerm=exp(-transmittanceShadow*stepL*1000.0);
-                // 密度积分 × 步长(米) → 光学深度 τ，T=exp(-τ)。
-                // 云越厚 visibilityTerm 越小，God Ray 被云影切掉。
             }
 
-            visibilityTerm=mix(visibilityTerm,1.0,saturate(1.0-sunDirection.y*5.0));
-            // 太阳越低 (sunDirection.y 小)，越向 1.0 mix → 低角度少砍 God Ray（日落光柱更长）。
-            // saturate(1-y*5)：y<0.2 时开始放松云影对 God Ray 的压制。
+            // 太阳越低越向 1.0 mix，放松云影对 God Ray 的压制（日落光柱更长）。
+            visibilityTerm=mix(visibilityTerm,1.0,saturate(1.0-sunElev*5.0));
 
             vec3 phaseTimesScattering=vec3(miePhaseValue+rayleighPhaseValue);
-            // 相位×散射强度标量（简化为 vec3 同值）；Mie+Rayleigh 合当作雾的散射权重。
 
-            //Second evaluate transmittance due to participating media
             vec3 atmosphereTransmittance;
             {
-                float viewHeight=length(P0);
-                const vec3 upVector=P0/viewHeight;
+                float sampleViewHeight=p0Height;
+                const vec3 upVector=p0Up;
                 float viewZenithCosAngle=dot(sunDirection,upVector);
                 vec2 sampleUv;
-                lutTransmittanceParamsToUv(atmosphere,viewHeight,viewZenithCosAngle,sampleUv);
+                lutTransmittanceParamsToUv(atmosphere,sampleViewHeight,viewZenithCosAngle,sampleUv);
                 atmosphereTransmittance=texture(sampler2D(inTransmittanceLut,linearClampEdgeSampler),sampleUv).rgb;
-                // 太阳光到 P0 的大气 RGB 透射（与主云 652 行 sunlightTerm 同源 LUT）。
-                // RocketSim3D：换 atmo 实时大气衰减，不移植 LUT。
-
             }
             float density=getDensity(distance(rayPosWP,frameData.camWorldPos.xyz));
-            // getDensity(74行)：exp(-d×0.001)×系数×cloudGodRayScale，指数衰减雾密度。
-            // 此处 d=采样点到相机距离(米)，非高度——近处雾浓、远处雾淡（参数名 heightMeter 在此用法下实为距离）。
-            // 与主云 cloudMap 无关，是低空/global 雾层。
+            // getDensity：exp(-d×0.001)×系数×cloudGodRayScale；此处 d=到相机距离(米)。
 
             vec3 sigmaS=vec3(density);
-            // σ_s：雾散射系数，RGB 同值。
-
             const float sigmaA=0.0;
             vec3 sigmaE=max(vec3(1e-6f),sigmaA+sigmaS);
-            // σ_t=σ_s（无吸收）；下限防除零。
 
             vec3 scatteredLitStep=(visibilityTerm*sunColor*phaseTimesScattering*atmosphereTransmittance+skyBackgroundColor)*sigmaS;
-            // 本步雾散射源 J = L_in × σ_s。L_in 两路：
-            //   直射：visibilityTerm × sunColor × 相位 × 大气透射（God Ray 主项）
-            //   + skyBackgroundColor：现为 Ambient（与云环境同源），不再用场景 HDR
 
             vec3 stepTransmittance=exp(-sigmaS*stepLength);
-            // 本步雾对视线透射 T_step = exp(-σ_s × Δs)。
 
             scatteredLightTotal+=transmittanceTotal*(scatteredLitStep-scatteredLitStep*stepTransmittance)/sigmaE;
-            // 与主云 731 行同式：ΔL = T_view × J × (1-T_step) / σ_t，前向积分雾散射。
-
             transmittanceTotal*=stepTransmittance;
-            // 更新雾 pass 视线透射。
 
-            //Step.
             rayPosWP+=stepRay;
-            // 沿视线前进到下一雾采样点。
-
         }
-        lightingFog.w=mean(transmittanceTotal);//mean()来源未知
-        // lightingFog.w：RGB 三通道透射率取平均 → 单标量 alpha，合成 pass 用。
-        // mean(vec3)：shared_functions.glsl 205-206 行，(R+G+B)/3。
+        lightingFog.w=mean(transmittanceTotal);
+        // lightingFog.w：RGB 透射率均值 → composite 用；须接近 1，否则天空被乘黑。
+        // mean(vec3)：shared_functions.glsl，(R+G+B)/3。
 
         lightingFog.xyz=scatteredLightTotal;
-        // lightingFog.xyz：本像素 God Ray / 体积雾散射 RGB，与主云 scatteredLight 分开输出。
-
     }
 
     //Dual mix transmittance
@@ -1351,6 +1515,11 @@ float fogNoise)
     {
         float v=(dbgSampleWeight>1e-6)?(dbgHeightAcc/dbgSampleWeight):0.0;
         return vec4(v,1.0-v,0.0,0.0); // 红=云顶 绿=云底
+    }
+    if(dbgMode==16)
+    {
+        // raw L：只含 phi_fwd 那一路的散射（16 号档在积分处已把它从 scatteredLight 里摘出来）。
+        return vec4(dbgPhiFwdAcc,0.0);
     }
     return result;
     // cloudColorCompute 主返回值；bFog 时 lightingFog 走 inout 另路输出，不在 result 里。
@@ -1409,7 +1578,8 @@ float fogNoise)
   B  74-92   getDensity, MsCount, ParticipatingMedia struct, remap
   C  99-168  cloudMap() → 云密度标量
   D  173-239  getParticipatingMediaPhase, powder, powderEffectNew, lookupSkylight
-  E  241-297 volumetricShadow() → transmittanceToLight[MsCount]
+  E  241-297 volumetricShadow() → transmittanceToLight[MsCount] + phiFwd（各向同性漫射场）
+       ← phiFwdTopHeightProxy / phiFwdBoundaryTerms（边界项 B_eff，天气图 coverage 差分）
   F  300-1014 cloudColorCompute() ★主入口
   G  1020+    移植笔记 + 本 ROADMAP
 
@@ -1493,8 +1663,8 @@ float fogNoise)
       opticalDepth ← density × stepT × 1000
       stepTransmittance ← max(exp(-τ), exp(-τ/4)×0.7)   // Frostbite 步透射
 
-      participatingMedia        ← volumetricShadow(samplePos, sunDirection)
-      participatingMediaAmbient ← volumetricShadow(samplePos, vec3(0,1,0))  // 可选
+      participatingMedia        ← volumetricShadow(samplePos, sunDirection, bPhiFwd=true)
+      participatingMediaAmbient ← volumetricShadow(samplePos, vec3(0,1,0), bPhiFwd=false)  // 可选
 
       powderEffect ← powderEffectNew(depthProbability, verticalProbability, VoL)
 
@@ -1504,6 +1674,13 @@ float fogNoise)
 
       σ_t ← density;  σ_s ← density × albedo
       scatteringCoefficients[ms], extinctionCoefficients[ms]  // MsCount=2
+
+      // phi_fwd 各向同性漫射场：加性、只加一次、不分 ms、不乘 phase/powder。
+      // φ 由太阳那条 light march 沿路累积（Q_eff × B_eff × exp(-∫κ) × 1/r）。
+      if φ > 0:                                              // PhiFwdIntensity=0 时恒为 0
+        φ_mapped ← Compress>0 ? (1-exp(-φ×C))/C : φ          // 软饱和
+        phiScatter ← transmittance × (sunlightTerm×φ_mapped)×(1-T_step) / σ_t[0] × σ_s[0]
+        scatteredLight += phiScatter
 
       for ms = 1 → 0:
         sunSkyLuminance ← sunVisibilityTerm × sunlightTerm × phase[ms] × powder
@@ -1537,16 +1714,17 @@ float fogNoise)
   scatteredLight ← L×(1-α) + fogRGB×(1-transmittance)
 
 --------------------------------------------------------------------------------
-【cloudColorCompute 阶段 4 — God Ray  L856-995】  (bFog)
+【cloudColorCompute 阶段 4 — God Ray / bFog】
 
-  36步: rayPosWP 沿 worldDir 从相机向云底
+  步长：球壳求交到云底（clamp 0.4~20 km），禁止 worldPos.y 平面假设
+  36步: rayPosWP 沿 worldDir 从相机前进
   每步:
-    visibilityTerm ← exp(-∫cloudMap) 沿太阳 8步 shadow
+    visibilityTerm ← exp(-∫cloudMap) 沿太阳 8步 shadow（径向高度 + 球壳抬升）
     density ← getDensity(到相机距离)   // 指数雾，非 cloudMap
     scatteredLitStep ← (visibility×sun×phase×atmTrans + skyBG) × σ_s
     scatteredLightTotal += 同主云积分式
   lightingFog.xyz ← scatteredLightTotal
-  lightingFog.w   ← mean(transmittanceTotal)
+  lightingFog.w   ← mean(transmittanceTotal)  // 须≈1，否则 composite 乘黑天空
 
 --------------------------------------------------------------------------------
 【cloudColorCompute 阶段 5 — 返回  L997-1014】

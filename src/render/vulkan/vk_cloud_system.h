@@ -73,6 +73,18 @@ struct FlowerCloudTuneParams {
     float noiseLodShadowDistScale = CloudNoiseLadder::kDefaultLodShadowDistScale;
     float multiScatterExtinction = 0.5f;
     float multiScatterScatter    = 0.5f;
+
+    // ── phi_fwd 物理漫射场（cloud_common.glsl::volumetricShadow / cloudColorCompute）──
+    // 扩散近似（τ≫1、g_eff→0）下的各向同性多重散射：沿太阳光步用 1D 格林函数累加，
+    // 视线侧作为「加性」项注入，与上面的 Frostbite 假 MS 正交——两套分开调，
+    // 先固定 multiScatter*，再开 phiFwd。Intensity=0 时 shader 整条路径跳过。
+    float phiFwdIntensity = 0.0f;           // 0=关闭（画面与接入前一致）
+    float phiFwdMsBuildScale = 1.0f;        // 各向同性建立速度；越大越早从方向性转漫射
+    float phiFwdCompress = 0.0f;            // 软饱和；0=线性不压缩
+    float phiFwdDepthPow = 1.0f;            // 底部置信度恢复速度；0=禁用底部软化
+    float phiFwdDepthBias = 0.0f;           // 底部锚点偏移；>0 云底保留更多漫射
+    float phiFwdBoundaryConfidence = 1.0f;  // 云顶受光置信度强度（0=禁用背光抑制）
+
     float phaseForward  = 0.6f;
     float phaseBackward = -0.2f;
     float phaseMixFactor = 0.5f;
@@ -509,6 +521,12 @@ private:
         ac.cloudNoiseLodEnabled = tuneParams.noiseLodEnabled ? 1 : 0;
         ac.cloudMultiScatterExtinction = tuneParams.multiScatterExtinction;
         ac.cloudMultiScatterScatter = tuneParams.multiScatterScatter;
+        ac.cloudPhiFwdIntensity = tuneParams.phiFwdIntensity;
+        ac.cloudPhiFwdMsBuildScale = tuneParams.phiFwdMsBuildScale;
+        ac.cloudPhiFwdCompress = tuneParams.phiFwdCompress;
+        ac.cloudPhiFwdDepthPow = tuneParams.phiFwdDepthPow;
+        ac.cloudPhiFwdDepthBias = tuneParams.phiFwdDepthBias;
+        ac.cloudPhiFwdBoundaryConfidence = tuneParams.phiFwdBoundaryConfidence;
         ac.cloudPhaseForward = tuneParams.phaseForward;
         ac.cloudPhaseBackward = tuneParams.phaseBackward;
         ac.cloudPhaseMixFactor = tuneParams.phaseMixFactor;
