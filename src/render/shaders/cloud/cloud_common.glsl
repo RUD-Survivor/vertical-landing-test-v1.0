@@ -924,28 +924,21 @@ float fogNoise)
                     //   sunlightTerm       — 太阳直射本身（652 行：大气透射×太阳色×艺术缩放；尚未含云影）
                     //   phase[ms]          — 散射方向性：朝太阳亮边(ms=0) / 更均匀(ms=1)
                     //   powderEffect       — 粉末/银边美术乘子（背光厚云更亮）
-                    // 此时 sunSkyLuminance 只含「太阳路」；环境天光、地面反射下面再加。
-
-                    if(frameData.sky.atmosphereConfig.cloudEnableGroundContribution!=0)
-                    {
-                        float skyVisibilityTerm=participatingMediaAmbient.transmittanceToLight[ms];
-                        // skyVisibilityTerm：天空路的云遮挡系数 T∈[0,1]（沿 vec3(0,1,0) 的 shadow march）。
-                        // 0=采样点头顶云很厚，天光几乎进不来；1=头顶较通透。
-                        // 与 sunVisibilityTerm 对称，但方向是「向上」环境光而非太阳。
-
-                        sunSkyLuminance+=skyVisibilityTerm*ambientLit;
-                        // 把环境光路叠进同一 L_in：
-                        //   ambientLit（663 行）= 无云时该点应有的天光强度（辐照度×粉末×大气×太阳高度因子）
-                        //   × skyVisibilityTerm = 经头顶云遮后的实际天光
-                        // 加法因为太阳路与环境路是两种独立光源，都照到同一点后再一起被 σ_s 散射。
-
-                    }
+                    // 此时 sunSkyLuminance 只含「太阳路」；环境天光、地面反射仅在 ms==0 再加。
+                    // 与 Frostbite / Flower 博文一致：环境光不进高阶 Ms，否则会抹平细节并（在
+                    // 蓝天半球环境源下）把暗部二次染蓝。
 
                     if(ms==0)
                     {
-                        sunSkyLuminance+=groundLit;
-                        // 仅 0 阶加地面反射；高阶不加，避免过亮。
+                        if(frameData.sky.atmosphereConfig.cloudEnableGroundContribution!=0)
+                        {
+                            float skyVisibilityTerm=participatingMediaAmbient.transmittanceToLight[0];
+                            // skyVisibilityTerm：天空路的云遮挡系数 T∈[0,1]（沿当地天顶 shadow march）。
+                            sunSkyLuminance+=skyVisibilityTerm*ambientLit;
+                        }
 
+                        sunSkyLuminance+=groundLit;
+                        // 仅 0 阶加环境天光 + 地面反射；高阶不加。
                     }
 
                     vec3 scatteredLitStep=sunSkyLuminance*scatteringCoefficients[ms];
@@ -1432,8 +1425,9 @@ float fogNoise)
 
       for ms = 1 → 0:
         sunSkyLuminance ← sunVisibilityTerm × sunlightTerm × phase[ms] × powder
-                       + skyVisibilityTerm × ambientLit          // 可选
-                       + groundLit                               // ms==0 only
+        if ms==0:
+                       + skyVisibilityTerm × ambientLit          // 可选；仅 0 阶
+                       + groundLit                               // 仅 0 阶
         scatteredLitStep ← sunSkyLuminance × σ_s[ms]
         stepScatter ← transmittance × (J×(1-T_step)) / σ_t[ms]
         scatteredLight += stepScatter
