@@ -86,8 +86,8 @@ struct FlowerCloudTuneParams {
     // 手调出来的 sunIntensity(~1.0) 未必是同一套标定。Inscatter/Ambient/Froxel 按单位太阳烘焙；
     // 本值是运行时全局曝光：L_sun = color × snap.sunIntensity × sunIntensityMul。
     float sunIntensityMul = 100.0f;
-    // 0=正常渲染；1/2/3/4=调试可视化（借用 cloudSunLitMapOctave 字段传给 shader，
-    // 见 cloud_common.glsl::cloudColorCompute 开头的 dbgMode 分支），排查"黑云"用。
+    // 0=正常；1–7 中间量；8–15 厚云发暗诊断（见 cloud_common.glsl dbgMode）。
+    // 借用 cloudSunLitMapOctave 传给 shader。
     int debugMode = 0;
 
     // ── 管线 / cloud_common.glsl frameData.sky.atmosphereConfig ─────────────
@@ -126,7 +126,7 @@ struct FlowerCloudTuneParams {
     float curlContrast = 3.0f;                // cloudCurlContrast
 
     // 地面光 / 环境
-    float fogFade = 0.25f;                      // cloudFogFade
+    float fogFade = 1.0f;                       // cloudFogFade：云底 groundLit 倍率（云顶已归零）
     float groundNoiseScale = 1.0f;             // cloudNoiseScale
     bool  enableGroundContribution = true;    // cloudEnableGroundContribution
     float cloudAlbedo = 1.f;                  // cloudAlbedo.rgb

@@ -303,8 +303,11 @@ inline void FlowerCloudTunerImGui(bool* p_open, FlowerCloudTuneParams& p,
     ImGui::SliderFloat("MaxAlt (km)",   &p.maxAltKm, 8.0f, 30.0f, "%.2f");
     ImGui::SliderFloat("CloudAlbedo",   &p.cloudAlbedo, 0.0f, 4.0f, "%.2f");
     ImGui::SliderFloat("FogFade",       &p.fogFade, 0.0f, 2.0f, "%.2f");
+    ImGui::TextDisabled("云底地面反弹倍率（albedo×Ambient）；云顶 nearGround→0，不再灌 HDR");
     ImGui::SliderFloat("GroundNoiseScale", &p.groundNoiseScale, 0.0f, 4.0f, "%.2f");
+    ImGui::TextDisabled("越大 → 地面反弹影响的高度带越厚（saturate(Scale−h)）");
     ImGui::Checkbox("GroundContribution", &p.enableGroundContribution);
+    ImGui::TextDisabled("开=环境天光 Ambient + 云底 groundLit；关=只剩太阳直射");
 
     ImGui::Separator();
     ImGui::Text("空气透视 (Froxel)");
@@ -357,9 +360,17 @@ inline void FlowerCloudTunerImGui(bool* p_open, FlowerCloudTuneParams& p,
         "5: 不透明度 1-T（全黑=没找到云密度）",
         "6: 散射光原始值（未做后处理）",
         "7: tMin/tMax 中点原始密度（绿=正常 红=NaN 黑=求交区间无效）",
+        "8: 强制无云影 + raw L（对比6：厚区变亮=自阴影）",
+        "9: 强制大气透射=1 + raw L（对比6：暖/暗来自T_atm）",
+        "10: 8+9 同时 + raw L",
+        "11: 平均 sunVis 灰阶（厚暗区近黑=直射被云影杀死）",
+        "12: L_in=sunColor, powder/phase=1 + raw L（仍暗=Beer/积分）",
+        "13: 平均 powderEffect 灰阶（云顶若<<1=粉末压暗）",
+        "14: 平均云内高度（红=顶 绿=底）",
+        "15: 物理 Beer（关 soft-T）+ raw L",
     };
     ImGui::Combo("DebugMode", &p.debugMode, dbgItems, IM_ARRAYSIZE(dbgItems));
-    ImGui::TextDisabled("非 0 时直接输出对应中间量，全黑=那一级 LUT/参数有问题");
+    ImGui::TextDisabled("8/9仍暗→看11是否本就亮，再比6/12/13；非0时a=0替换背景");
 
     ImGui::Separator();
     ImGui::TextDisabled("F3: 开关面板");
