@@ -78,7 +78,7 @@ struct FlowerCloudTuneParams {
     // 扩散近似（τ≫1、g_eff→0）下的各向同性多重散射：沿太阳光步用 1D 格林函数累加，
     // 视线侧作为「加性」项注入，与上面的 Frostbite 假 MS 正交——两套分开调，
     // 先固定 multiScatter*，再开 phiFwd。Intensity=0 时 shader 整条路径跳过。
-    float phiFwdIntensity = 0.0f;           // 0=关闭（画面与接入前一致）
+    float phiFwdIntensity = 4.0f;           // 0=关闭（画面与接入前一致）
     float phiFwdMsBuildScale = 1.0f;        // 各向同性建立速度；越大越早从方向性转漫射
     float phiFwdCompress = 0.0f;            // 软饱和；0=线性不压缩
     float phiFwdDepthPow = 1.0f;            // 底部置信度恢复速度；0=禁用底部软化
@@ -105,7 +105,7 @@ struct FlowerCloudTuneParams {
     // ── 管线 / cloud_common.glsl frameData.sky.atmosphereConfig ─────────────
     // useQuarterRes → updateFaceIndex（1=Bayer 1/4 + reconstruct，0=全分辨率 raymarch）
     bool useQuarterRes = true;
-    int  marchingStepNum = 128;              // cloudMarchingStepNum（baseline）
+    int  marchingStepNum = 256;              // cloudMarchingStepNum（baseline）
     float maxTracingDistanceKm = 350.f;       // cloudMaxTraceingDistance
     float tracingStartMaxDistanceKm = 1e8f;   // cloudTracingStartMaxDistance
     float stepTMinKm = 0.05f;               // cloudMarchStepMinKm
@@ -126,7 +126,7 @@ struct FlowerCloudTuneParams {
     // 沿太阳方向体积阴影步进（volumetricShadow）
     float lightStepMul = 1.5f;                // cloudLightStepMul
     float lightBasicStepKm = 0.03f;          // cloudLightBasicStep (km)
-    int   lightStepNum = 6;                   // cloudLightStepNum
+    int   lightStepNum = 8;                   // cloudLightStepNum
 
     // 天气 / 风
     float weatherUVScale = 1.f;               // cloudWeatherUVScale
@@ -139,9 +139,26 @@ struct FlowerCloudTuneParams {
 
     // 地面光 / 环境
     float fogFade = 1.0f;                       // cloudFogFade：云底 groundLit 倍率（云顶已归零）
-    float groundNoiseScale = 1.0f;             // cloudNoiseScale
+    float groundNoiseScale = 4.0f;             // cloudNoiseScale
     bool  enableGroundContribution = true;    // cloudEnableGroundContribution
     float cloudAlbedo = 1.f;                  // cloudAlbedo.rgb
+
+    // ── 双层云：Profile LUT 类型轴 ─────────────────────────────────────────
+    // 云类型廓形 LUT（inCloudProfileLut）：U=归一化高度 V=径向 RGB=Cu/Tcu/Cb。
+    // weather.g 提供类型，本组负责把 weather.g 映射到 LUT 类型轴（0=Cu,0.5=Tcu,1=Cb）。
+    // 廓形即 LUT 曲线本身，无运行时倍率（云量调 Coverage、浓淡调 Density）。
+    float profileTypeBias = 0.0f;             // 类型偏移
+    float profileTypeContrast = 1.0f;         // 类型对比度（>1 拉开类型差异）
+
+    // ── 双层云：高空云（第二层，inCloudHiWeather，纯 2D）──────────────────
+    bool  hiCloudEnabled = true;
+    float hiCloudCoverage = 0.4f;             // 高空云全局覆盖倍率（0=关闭第二层）
+    float hiCloudBottom = 0.90f;              // 高空云带底（slab 归一化高度）
+    float hiCloudTop = 0.95f;                 // 高空云带顶
+    float hiCloudDensity = 1.0f;              // 高空云密度（与低云 cloudMap 同单位，主 march ×1000）
+    float hiCloudThreshold = 0.05f;           // hi 覆盖阈值
+    float hiCloudSoftness = 0.2f;             // 阈值过渡宽度
+    float hiCloudType = 1.0f;                 // 高空云类型偏好（0=As 1=Ac）
 
     // Froxel 空气透视：LUT 单位太阳；运行时 × L_sun × airPerspectiveSunScale
     bool  airPerspectiveEnabled = true;       // cloudAirPerspectiveEnabled
@@ -221,6 +238,9 @@ struct VkCloudSystem {
     // ── 噪声/天气纹理（复用 vk_scene.h 已烘焙好的资源，不重复创建）─────────────
     VkImageView basicNoiseView=VK_NULL_HANDLE, detailNoiseView=VK_NULL_HANDLE, weatherView=VK_NULL_HANDLE;
     VkImageView curlNoiseView=VK_NULL_HANDLE; // Phase 2：真实 curl 湍流细节纹理（vk_scene.h::cloudCurlTex）
+    // ── 双层云：Profile LUT + 高空云 Hi weather map（vk_scene.h 烘焙）─────
+    VkImageView profileLutView=VK_NULL_HANDLE;
+    VkImageView hiWeatherView=VK_NULL_HANDLE;
 
     VkSampler linearRepeatSampler=VK_NULL_HANDLE, linearClampSampler=VK_NULL_HANDLE, pointClampSampler=VK_NULL_HANDLE;
 
@@ -257,10 +277,12 @@ struct VkCloudSystem {
 
     // -----------------------------------------------------------------------
     bool init(VulkanContext& ctx, VkExtent2D ext,
-              VkImageView basicNoise, VkImageView detailNoise, VkImageView weather, VkImageView curlNoise) {
+              VkImageView basicNoise, VkImageView detailNoise, VkImageView weather, VkImageView curlNoise,
+              VkImageView profileLut, VkImageView hiWeather) {
         extent = ext;
         quarterExt = { std::max(1u, (ext.width + 3) / 4), std::max(1u, (ext.height + 3) / 4) };
         basicNoiseView = basicNoise; detailNoiseView = detailNoise; weatherView = weather; curlNoiseView = curlNoise;
+        profileLutView = profileLut; hiWeatherView = hiWeather;
 
         if (!cloudLutPipelines.init(ctx))       return false;
         if (!atmosphereLut.init(ctx, cloudLutPipelines)) return false;
@@ -575,6 +597,17 @@ private:
         ac.cloudGodRay = tuneParams.godRayEnabled ? 1 : 0;
         ac.cloudGodRayScale = tuneParams.godRayScale;
 
+        // ── 双层云：Profile LUT 类型轴 + 高空云 ──
+        ac.cloudProfileTypeBias = tuneParams.profileTypeBias;
+        ac.cloudProfileTypeContrast = tuneParams.profileTypeContrast;
+        ac.hiCloudCoverage = tuneParams.hiCloudEnabled ? tuneParams.hiCloudCoverage : 0.0f;
+        ac.hiCloudBottom = tuneParams.hiCloudBottom;
+        ac.hiCloudTop = tuneParams.hiCloudTop;
+        ac.hiCloudDensity = tuneParams.hiCloudDensity;
+        ac.hiCloudThreshold = tuneParams.hiCloudThreshold;
+        ac.hiCloudSoftness = tuneParams.hiCloudSoftness;
+        ac.hiCloudType = tuneParams.hiCloudType;
+
         return fd;
     }
 
@@ -684,9 +717,9 @@ private:
             if (vkCreateDescriptorSetLayout(ctx.device, &ci, nullptr, &samplerSetLayout) != VK_SUCCESS) return false;
         }
 
-        // ── Set 0：cloud_common.glsl binding 0-30 ──
+        // ── Set 0：cloud_common.glsl binding 0-32 ──
         {
-            VkDescriptorSetLayoutBinding b[31]{};
+            VkDescriptorSetLayoutBinding b[33]{};
             auto img  = [&](int i, VkDescriptorType t){ b[i] = { (uint32_t)i, t, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr }; };
             img(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE); img(1, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
             img(2, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE); img(3, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
@@ -707,9 +740,11 @@ private:
             img(28, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
             b[29] = { 29, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr };
             img(30, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
+            img(31, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE); // inCloudProfileLut 2D（双层云廓形）
+            img(32, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE); // inCloudHiWeather 2D（高空云天气图）
 
             VkDescriptorSetLayoutCreateInfo ci{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-            ci.bindingCount = 31; ci.pBindings = b;
+            ci.bindingCount = 33; ci.pBindings = b;
             if (vkCreateDescriptorSetLayout(ctx.device, &ci, nullptr, &cloudSetLayout) != VK_SUCCESS) return false;
         }
 
@@ -720,7 +755,7 @@ private:
 
         VkDescriptorPoolSize sizes[] = {
             { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 8 * FRAMES_IN_FLIGHT },
-            { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 23 * FRAMES_IN_FLIGHT },
+            { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 25 * FRAMES_IN_FLIGHT },
             { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 * FRAMES_IN_FLIGHT },
             { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1 * FRAMES_IN_FLIGHT },
             { VK_DESCRIPTOR_TYPE_SAMPLER, 10 },
@@ -798,12 +833,15 @@ private:
         VkDescriptorImageInfo sdsm{ VK_NULL_HANDLE, shadowAtlasView ? shadowAtlasView : dummy2DView,
                                      shadowAtlasView ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL : VK_IMAGE_LAYOUT_GENERAL };
         VkDescriptorImageInfo hiz{ VK_NULL_HANDLE, dummy2DView, VK_IMAGE_LAYOUT_GENERAL };
+        // ── 双层云：Profile LUT + 高空云 Hi weather map（vk_scene.h 烘焙，SHADER_READ_ONLY）──
+        VkDescriptorImageInfo profileLut{ VK_NULL_HANDLE, profileLutView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+        VkDescriptorImageInfo hiWeather{ VK_NULL_HANDLE, hiWeatherView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
         VkDescriptorBufferInfo ubo{ atmosphereLut.frameUBO(slot), 0, sizeof(GpuPerFrameData) };
         VkDescriptorBufferInfo cascadeSsbo{ cascadeInfoBuf ? cascadeInfoBuf : dummyCascadeBuf, 0,
                                              cascadeInfoBuf ? sizeof(GpuCascadeInfo) * (size_t)VkCascadeShadowSystem::kMaxCascades
-                                                             : sizeof(GpuCascadeInfo) };
+                                                            : sizeof(GpuCascadeInfo) };
 
-        VkWriteDescriptorSet w[31]{};
+        VkWriteDescriptorSet w[33]{};
         auto imgW = [&](int i, uint32_t binding, VkDescriptorType t, VkDescriptorImageInfo* info) {
             w[i].sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; w[i].dstSet=set; w[i].dstBinding=binding;
             w[i].descriptorType=t; w[i].descriptorCount=1; w[i].pImageInfo=info;
@@ -829,8 +867,10 @@ private:
         w[29].sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; w[29].dstSet=set; w[29].dstBinding=29;
         w[29].descriptorType=VK_DESCRIPTOR_TYPE_STORAGE_BUFFER; w[29].descriptorCount=1; w[29].pBufferInfo=&cascadeSsbo;
         imgW(30,30,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,&hiz);
+        imgW(31,31,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,&profileLut);
+        imgW(32,32,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,&hiWeather);
 
-        vkUpdateDescriptorSets(ctx.device, 31, w, 0, nullptr);
+        vkUpdateDescriptorSets(ctx.device, 33, w, 0, nullptr);
     }
 
     bool createPipelines(VulkanContext& ctx) {

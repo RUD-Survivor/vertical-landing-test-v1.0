@@ -100,9 +100,16 @@ echo.
 echo [3/3] Compiling C++ source...
 
 :: --- Config: release (this script) | debug via build_debug.cmd ---
+:: Args: [debug|release] [force]
+::   force = rebuild all .cpp (ignore timestamps / headers)
 set "CFG=release"
+set "FORCE_REBUILD=0"
 if /I "%~1"=="release" set "CFG=release"
 if /I "%~1"=="debug" set "CFG=debug"
+if /I "%~1"=="force" set "FORCE_REBUILD=1"
+if /I "%~2"=="force" set "FORCE_REBUILD=1"
+if /I "%~2"=="release" set "CFG=release"
+if /I "%~2"=="debug" set "CFG=debug"
 
 if /I "%CFG%"=="release" (
     set "CFLAGS=/nologo /utf-8 /std:c++17 /EHsc /MD /O2 /W3 /DNDEBUG"
@@ -153,6 +160,7 @@ set "INCLUDES=/I dependencires\include /I vendor /I vendor\imgui /I vendor\imgui
 set "LIBS=dependencires\lib\glfw3.lib opengl32.lib user32.lib gdi32.lib shell32.lib"
 
 echo   Config:   %CFG%
+if "!FORCE_REBUILD!"=="1" (echo   Force:    ON ^(rebuild all .cpp^)) else (echo   Force:    off)
 echo   Compiler:  cl
 echo   Flags:     %CFLAGS% %VK_FLAG%
 echo   .exe:      %OUTPUT_EXE%
@@ -161,24 +169,30 @@ echo   Log:       %BUILD_LOG%
 echo.
 
 
+:: Stale units = missing .obj, OR .cpp newer, OR included headers newer.
+:: Logic lives in build_find_stale.ps1 (main.cpp also watches src\ + vendor\imgui\ headers).
+:: Use: build_release.cmd force   to rebuild every .cpp.
 set "STALE="
-for %%F in (%SRC%) do (
-    set "OBJ_PATH=%OBJ_DIR%\%%~nF.obj"
-    if not exist "!OBJ_PATH!" (
-        set "STALE=!STALE! %%F"
-    ) else (
-        powershell -NoProfile -Command "if ((Get-Item -LiteralPath '%%F').LastWriteTime -gt (Get-Item -LiteralPath '!OBJ_PATH!').LastWriteTime) { exit 0 } else { exit 1 }" >nul 2>&1
-        if !ERRORLEVEL! equ 0 set "STALE=!STALE! %%F"
-    )
+set "SOURCES_LST=%OBJ_DIR%\sources.lst"
+> "%SOURCES_LST%" (
+    for %%F in (%SRC%) do echo %%F
 )
+set "FORCE_PS="
+if "!FORCE_REBUILD!"=="1" set "FORCE_PS=-Force"
+for /f "usebackq delims=" %%S in (`powershell -NoProfile -ExecutionPolicy Bypass -File "build_find_stale.ps1" -ObjDir "%OBJ_DIR%" -SourcesFile "%SOURCES_LST%" !FORCE_PS!`) do set "STALE=%%S"
+
 echo. > "%BUILD_LOG%"
 set "BUILD_RESULT=0"
 if not "!STALE!"=="" (
-    echo   Compiling stale units:!STALE!
+    if "!FORCE_REBUILD!"=="1" (
+        echo   Force rebuild all units:!STALE!
+    ) else (
+        echo   Compiling stale units:!STALE!
+    )
     cl %CFLAGS% /c /MP %VK_FLAG% %INCLUDES% %VK_INC% /Fo"%OBJ_DIR%\\" /Fd"%OBJ_DIR%\vc.pdb" !STALE! >> "%BUILD_LOG%" 2>&1
     set BUILD_RESULT=!ERRORLEVEL!
 ) else (
-    echo   All .obj up to date, skip compile.
+    echo   All .obj up to date ^(cpp + headers^), skip compile.
 )
 
 

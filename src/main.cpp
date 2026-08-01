@@ -463,9 +463,10 @@ int main() {
    || !g_vkTAA.init(g_vkCtx, g_vkCtx.swapExtent, g_vkCtx.swapFormat,
                     "src/render/shaders/spirv/taa.vert.spv",
                     "src/render/shaders/spirv/taa.frag.spv")
-   || !g_vkR3D.cloudSystem.init(g_vkCtx, g_vkCtx.swapExtent,
-        g_vkR3D.scene.cloudNoiseTex.view, g_vkR3D.scene.cloudDetailTex.view, g_vkR3D.scene.cloudWeatherTex.view,
-        g_vkR3D.scene.cloudCurlTex.view)
+  || !g_vkR3D.cloudSystem.init(g_vkCtx, g_vkCtx.swapExtent,
+       g_vkR3D.scene.cloudNoiseTex.view, g_vkR3D.scene.cloudDetailTex.view, g_vkR3D.scene.cloudWeatherTex.view,
+       g_vkR3D.scene.cloudCurlTex.view,
+       g_vkR3D.scene.cloudProfileLutTex.view, g_vkR3D.scene.cloudHiWeatherTex.view)
    || !g_vkHUD.init(g_vkCtx, g_vkCtx.swapFormat)
    || !g_vkImGui.init(g_vkCtx, window, g_vkCtx.swapFormat)) {
     fprintf(stderr, "[Vulkan] Fatal: initialization failed\n");
@@ -483,6 +484,8 @@ int main() {
   if (!g_weatherMapPreview.registerCurl(g_vkR3D.scene.cloudCurlTex.view)) {
       fprintf(stderr, "[Vulkan] Warning: curl noise ImGui preview registration failed\n");
   }
+  g_weatherMapPreview.registerProfileLut(g_vkR3D.scene.cloudProfileLutTex.view);
+  g_weatherMapPreview.registerHiWeather(g_vkR3D.scene.cloudHiWeatherTex.view);
   // 从主菜单启动
   g_gameUI.state = VkGameState::MENU;
 

@@ -149,15 +149,32 @@ struct GpuAtmosphereConfig {
     float cloudPhiFwdDepthPow = 1.f;
     float cloudPhiFwdDepthBias = 0.f;
     float cloudPhiFwdBoundaryConfidence = 1.f;
-    // 补到 16 字节整数倍。std140 会把嵌套 struct 的大小向上取整到 16，之前的 668
-    // 让 C++ 侧比 shader 侧少 4 字节尾巴（sky 是最后一个成员，一直没出事）；
-    // 加了 phi_fwd 六项后缺口会变成 12 字节，索性显式补齐，让两侧尺寸严格相等。
-    float phiFwdPad0 = 0.f, phiFwdPad1 = 0.f, phiFwdPad2 = 0.f;
+
+    // ── 双层云：Profile LUT 类型轴 + 高空云（见 shared_struct.glsl 同名字段）──
+    // Profile LUT：U=归一化高度 V=径向 RGB=Cu/Tcu/Cb；廓形即 LUT 曲线本身。
+    float cloudProfileTypeBias = 0.f;
+    float cloudProfileTypeContrast = 1.f;
+    float cloudProfilePad0 = 0.f;   // 原 cloudProfileScale（已移除语义，仅保 std140 布局）
+    float cloudProfilePad1 = 0.f;
+    // 高空云：R=HiMask G=HiType(As/Ac)，纯 2D 密度，带 [hiCloudBottom, hiCloudTop]。
+    float hiCloudCoverage = 1.f;
+    float hiCloudBottom = 0.55f;
+    float hiCloudTop = 0.95f;
+    float hiCloudDensity = 1.f;
+    float hiCloudThreshold = 0.05f;
+    float hiCloudSoftness = 0.2f;
+    float hiCloudType = 1.f;
+    float hiCloudPad0 = 0.f;
+    // 补到 16 字节整数倍（std140 嵌套 struct 向上取整到 16；与 shared_struct.glsl 同名 pad）。
+    // 块内总计 15 个 float（60B），配合前段 692B → 整 struct 752B（=47×16，对齐成立）。
+    float cloudProfilePad2 = 0.f;
+    float cloudProfilePad3 = 0.f;
+    float cloudProfilePad4 = 0.f;
 };
-static_assert(sizeof(GpuAtmosphereConfig) == 704, "GpuAtmosphereConfig must match std140 AtmosphereConfig");
+static_assert(sizeof(GpuAtmosphereConfig) == 752, "GpuAtmosphereConfig must match std140 AtmosphereConfig");
 
 // -----------------------------------------------------------------------
-// SkyInfo — 800 bytes (16+16+16+48+704)
+// SkyInfo — 848 bytes (16+16+16+48+752)
 // -----------------------------------------------------------------------
 struct GpuSkyInfo {
     float color[3] = {1,1,1}; float intensity = 1.f;
@@ -169,10 +186,10 @@ struct GpuSkyInfo {
     GpuCascadeShadowConfig cacsadeConfig;
     GpuAtmosphereConfig atmosphereConfig;
 };
-static_assert(sizeof(GpuSkyInfo) == 800, "GpuSkyInfo must match std140 SkyInfo");
+static_assert(sizeof(GpuSkyInfo) == 848, "GpuSkyInfo must match std140 SkyInfo");
 
 // -----------------------------------------------------------------------
-// PerFrameData — 1824 bytes. binding 21 (cloud_common.glsl) / binding 8 (atmosphere_common.glsl).
+// PerFrameData — 1872 bytes. binding 21 (cloud_common.glsl) / binding 8 (atmosphere_common.glsl).
 // -----------------------------------------------------------------------
 struct GpuPerFrameData {
     float appTime[4] = {};       // .x runtime .y sin .z cos .w pad
@@ -219,7 +236,7 @@ struct GpuPerFrameData {
 
     GpuSkyInfo sky;
 };
-static_assert(sizeof(GpuPerFrameData) == 1824, "GpuPerFrameData must match std140 PerFrameData");
+static_assert(sizeof(GpuPerFrameData) == 1872, "GpuPerFrameData must match std140 PerFrameData");
 
 // -----------------------------------------------------------------------
 // CascadeInfo — 176 bytes. SDSM cascade SSBO 元素（binding 29）。

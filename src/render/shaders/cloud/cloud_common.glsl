@@ -62,11 +62,19 @@ layout (set = 0, binding = 30) uniform texture2D inHiz; // 层次化 Z（Hi-Z）
 //image2D和texture2D成对出现，image2D 用于 compute 的 imageStore 写入，texture2D 用于后续 pass 的 texture() 采样
 //大括号{}定义interface block接口块的成员，大括号列出这块GPU缓存里有哪些成员
 
+layout (set = 0, binding = 31) uniform texture2D inCloudProfileLut; // 双层云：云类型垂直廓形 LUT（U=类型轴 0=Cu/0.5=Tcu/1=Cb，V=归一化高度，R=廓形）
+layout (set = 0, binding = 32) uniform texture2D inCloudHiWeather;  // 双层云：高空云第二套天气图（R=HiMask G=HiType As/Ac）
+
 
 
 //用宏指定 Descriptor Set 编号，再引入公共采样器定义
 #define SHARED_SAMPLER_SET 1
 #include "../common/shared_sampler.glsl"
+
+// 双层云模块：Profile LUT + 高空云密度（并进 cloudMap 共用主 march）+ 公共光照。
+#include "cloud_profile.glsl"
+#include "cloud_high_layer.glsl" // highCloudDensity：与低云同 σ 单位，max() 进 cloudMap
+#include "cloud_lighting.glsl"   // 公共光照组装（sampleCloudAmbient/powder/散射公式）
 //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 //note:现在是Set1 的 sampler3D uNoiseTex3D 等，layout 完全不同。替换时要 重排 descriptor，或改 cloud_common.glsl 的 binding 对齐现有 vk_descriptors.h
 
@@ -233,9 +241,10 @@ float cloudMap(vec3 posMeter,float normalizedHeight,float lodDistScale)//单位�
     float coverage=saturate(Coverage*(localCoverage+weatherValue.x));
     //合成这一位置的最终覆盖率，Coverage全局云量参数，weatherValue.x天气图大尺度bias，三者相加再 × 全局coverage，最后saturate到[0,1]
 
-    float gradientShape =remap(normalizedHeight,0.0,0.1,0.1,1.0)*remap(normalizedHeight,0.1,0.8,1.0,0.2);
-    //云量在垂直方向上的分布（云底 / 云腰 / 云顶），两个remap相乘,高度 0.00~0.10：从 0.1 升到 1.0  → 云底逐渐变厚;高度 0.10~0.80：从 1.0 降到 0.2  → 中层最厚，往上变薄
-    //中间鼓、底薄、顶薄 的积云垂直profile
+    // 垂直廓形走 Profile LUT（cloud_profile.glsl）：weather.g 提供云类型，类型 0（Cu）处
+    // bake 了本条原 gradientShape 曲线，所以 cloudType=0 时与旧行为一致。
+    // 类型轴映射（对比度/偏移）+ 三段插值（Cu/Tcu/Cb）+ 径向维度都在模块内完成。
+    float gradientShape=cloudProfileHeightGradient(cloudProfileTypeAxis(weatherValue.g),normalizedHeight,sampleUv);
 
     // 屏幕足迹 LOD 的采样点距离。相机位置走 convertToAtmosphereUnit（米→km 并加上
     // kAtmoCameraOffsetKm 径向偏移），和 march 起点用的是同一个 worldPos，不另算一套。
@@ -283,8 +292,11 @@ float cloudMap(vec3 posMeter,float normalizedHeight,float lodDistScale)//单位�
     float cloudDensity=remap(basicCloudNoiseWithCoverage,detailNoiseMixByHeight,1.0,0.0,1.0);
     //remap(..., detailMix, 1, 0, 1)，从 detailMix 到 1 映射成 [0,1]：细节区相当于「挖掉」一部分形状 → 边缘侵蚀、镂空
 
-    return cloudDensity*densityShape;//再乘垂直包络和 Density 全局缩放
-    //返回值：该世界空间采样点的云密度标量（0 ≈ 无云，越大越厚）
+    // 低云（3D+LUT）与高空云（2D）并进同一密度场，主 march / 自阴影共用 ×1000 光学深度。
+    // max 避免重叠带双计 OD；高云有自己的高度带，不乘低云 densityShape。
+    const float loDensity=cloudDensity*densityShape;
+    const float hiDensity=highCloudDensity(posKm,normalizedHeight);
+    return max(loDensity,hiDensity);
 }
 
 // Cloud shape end.
@@ -316,15 +328,6 @@ ParticipatingMediaPhase getParticipatingMediaPhase(float basePhase,float basePha
 float powder(float opticalDepth)//简化版Power Effect粉末效应/银边效应；参数opticalDepth光学深度，沿光路径的累积消光，无量纲或密度×距离）
 {
     return pow(opticalDepth*20.0,0.5)*frameData.sky.atmosphereConfig.cloudPowderScale;//*20再取1/2次方，光学深度越深，背光提亮越多
-}
-
-float powderEffectNew(float depth,float height,float VoL)//是 Powder Effect（粉末/背光提亮）的完整版实用公式：让云在背光、厚、云底时不要太黑，并随朝向太阳变化
-{
-    //depth厚度;height垂直位置概率，云底、薄边更明显;VoL View和Light夹角的cos值
-    float r = VoL * 0.5 + 0.5;//先把VoL映射到[0,1]
-    r=r*r;
-    height=height*(1.0-r)+r;//背光最强；顺光时减弱height约束，避免正面过曝
-    return depth*height;
 }
 
 // 已弃用：cloudColorCompute 不再调用这个函数——放弃了 Sky-View LUT 方案，天空背景色
@@ -363,23 +366,8 @@ vec3 lookupSkylight(vec3 worldDir,vec3 worldPos,float viewHeight,vec3 upVector,i
     return luminance;
 }
 
-// 云点环境天光：查相机无关的 μs→天空半球余弦加权辐照度/π LUT
-//（cloud_ambient_mus_lut 在云壳高度、单位太阳下烘焙）。
-// μs=dot(localUp,sun)；可选混入 analyticSkyAmbient。
-// 运行时乘 L_sun = color×intensity，与直射/AP 同源。
-vec3 sampleCloudAmbient(const in AtmosphereParameters atmosphere, vec3 posKm, vec3 sunDirection)
-{
-    const vec3 localUp = normalize(posKm);
-    const float muS = dot(localUp, sunDirection);
-    const float expos = frameData.sky.atmosphereConfig.cloudAmbientExposure;
-    const float analBlend = saturate(frameData.sky.atmosphereConfig.cloudAmbientAnalyticBlend);
-    const vec3 Lsun = frameData.sky.color * frameData.sky.intensity;
-
-    const float u = clamp(muS * 0.5 + 0.5, 0.0, 1.0);
-    vec3 lutColor = texture(sampler2D(inCloudAmbientMusLut, linearClampEdgeSampler), vec2(u, 0.5)).rgb;
-    vec3 analytic = analyticSkyAmbient(muS);
-    return mix(lutColor, analytic, analBlend) * expos * Lsun;
-}
+// 云点环境天光已抽到 cloud_lighting.glsl（sampleCloudAmbient，与高空云共用，
+// 保证两层环境光同源：同一 μs LUT、同一 L_sun 标定、同一 analytic 混合）。
 
 ////////////////////////////////////////////////////////////////////////////////////////
 // phi_fwd 物理漫射场（各向同性多重散射）
@@ -1135,6 +1123,19 @@ float fogNoise)
                     }
                 }
 
+                // 天空路云遮挡（仅 0 阶环境光用，与 groundLit 同属地面/环境一组）：
+                // 沿当地天顶 shadow march 得 T∈[0,1]，云越厚头顶越暗。
+                float skyVisibilityTerm=1.0;
+                if(frameData.sky.atmosphereConfig.cloudEnableGroundContribution!=0)
+                {
+                    skyVisibilityTerm=participatingMediaAmbient.transmittanceToLight[0];
+                    // dbg 8/10/12：环境/地面关掉，避免把「直射积分」测脏。
+                    if(dbgMode==8||dbgMode==10||dbgMode==12)
+                    {
+                        skyVisibilityTerm=1.0;
+                    }
+                }
+
                 for(ms=MsCount-1;ms>=0;ms--)// Should terminate at 0
                 // 从高阶向 0 阶积分：先算模糊的高阶光，再叠 0 阶直射+地面。
                 {
@@ -1156,52 +1157,26 @@ float fogNoise)
                         sunVisibilityTerm=1.0;
                     }
 
-                    vec3 sunSkyLuminance=sunVisibilityTerm * sunlightTerm * participatingMediaPhase.phase[ms] * powderEffect;
-                    // sunSkyLuminance：本 ms 阶「太阳+天空直射路」的入射辐射度 RGB（单位：亮度，还不是最终像素色）。
-                    // 四项相乘，各自含义：
-                    //   sunVisibilityTerm  — 云自阴影（太阳方向 shadow march）
-                    //   sunlightTerm       — 太阳直射本身（652 行：大气透射×太阳色×艺术缩放；尚未含云影）
-                    //   phase[ms]          — 散射方向性：朝太阳亮边(ms=0) / 更均匀(ms=1)
-                    //   powderEffect       — 粉末/银边美术乘子（背光厚云更亮）
-                    // 此时 sunSkyLuminance 只含「太阳路」；环境天光、地面反射仅在 ms==0 再加。
+                    // 组装本 ms 阶入射光 L_in（公式与高空云同源，见 cloud_lighting.glsl）：
+                    //   太阳路 = 云影 × 直射 sunlightTerm × 相位 × 粉末
+                    //   环境路（仅 ms==0 且开 GroundContribution）= 天空遮挡 × 环境天光 + 云底地面反弹
                     // 与 Frostbite / Flower 博文一致：环境光不进高阶 Ms，否则会抹平细节并（在
                     // 蓝天半球环境源下）把暗部二次染蓝。
+                    vec3 sunSkyLuminance=cloudInScatterLuminance(
+                        sunlightTerm, sunVisibilityTerm, participatingMediaPhase.phase[ms], powderEffect,
+                        ambientLit, skyVisibilityTerm, groundLit,
+                        (ms==0)&&(frameData.sky.atmosphereConfig.cloudEnableGroundContribution!=0)&&(dbgMode!=12));
                     // dbg 12：L_in 固定为太阳色（无 phase/powder），只测「不透明积分是否能到 ~L_sun」。
                     if(dbgMode==12)
                     {
                         sunSkyLuminance=sunVisibilityTerm*sunColor;
                     }
 
-                    if(ms==0)
-                    {
-                        // GroundContribution：非直射填光（环境天光 + 云底地面反弹）总开关。
-                        if(frameData.sky.atmosphereConfig.cloudEnableGroundContribution!=0)
-                        {
-                            float skyVisibilityTerm=participatingMediaAmbient.transmittanceToLight[0];
-                            // skyVisibilityTerm：天空路的云遮挡系数 T∈[0,1]（沿当地天顶 shadow march）。
-                            if(dbgMode==8||dbgMode==10||dbgMode==12)
-                            {
-                                skyVisibilityTerm=1.0;
-                            }
-                            // dbg 12：环境/地面关掉，避免把「直射积分」测脏。
-                            if(dbgMode!=12)
-                            {
-                                sunSkyLuminance+=skyVisibilityTerm*ambientLit;
-                                sunSkyLuminance+=groundLit;
-                            }
-                        }
-                        // 仅 0 阶加；高阶不加，避免暗部二次染蓝/抹平细节。
-                    }
-
-                    vec3 scatteredLitStep=sunSkyLuminance*scatteringCoefficients[ms];
-                    // scatteredLitStep：本阶介质在局部收到的「照明 × σ_s」= 散射源强度。
-
-                    vec3 stepScatter=transmittance*(scatteredLitStep-scatteredLitStep*stepTransmittance)/max(1e-4f,extinctionCoefficients[ms]);
-                    // stepScatter：经典体积积分离散式 —— ΔL = T_view × (J × (1 - T_step)) / σ_t。
-                    // J = L_in × σ_s；T_view 是相机到当前点的透射，T_step 是本步消光。
-                    // 物理：前向积分 in-scattering；分母 σ_t 来自 RTE 通量形式。
-                    // RocketSim3D：cloud.frag 730-731 行同一公式，分 0/1 两阶手动写开。
-
+                    vec3 stepScatter=cloudScatterStep(
+                        sunSkyLuminance, transmittance,
+                        scatteringCoefficients[ms], extinctionCoefficients[ms], stepTransmittance);
+                    // stepScatter：经典体积积分离散式 —— ΔL = T_view × (L_in × σ_s × (1 - T_step)) / σ_t。
+                    // 与高空云共用（cloud_lighting.glsl::cloudScatterStep）。
                     scatteredLight+=stepScatter;
                     // 累加进像素总散射光 RGB。
 
@@ -1209,7 +1184,6 @@ float fogNoise)
                     {
                         transmittance*=stepTransmittance;
                         // 仅 0 阶更新视线透射；高阶不重复扣 T，避免过度变暗。
-
                     }                    
                 }
             }
@@ -1614,7 +1588,7 @@ float fogNoise)
   posKm+windOffset ──► inBasicNoise × gradientShape ──► basicCloudNoiseWithCoverage
   posKm-windOffset ──► inDetailNoise ──► detailNoiseMixByHeight ──► remap侵蚀
   normalizedHeight ──► densityShape
-  return cloudDensity × densityShape  →  主 march 里称 stepCloudDensity
+  return max(cloudDensity×densityShape, highCloudDensity)  →  主 march stepCloudDensity
 
 --------------------------------------------------------------------------------
 【cloudColorCompute 入参/出参  L300】

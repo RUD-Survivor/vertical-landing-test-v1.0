@@ -83,6 +83,9 @@ struct VkSceneSystem {
     VkTexture2D     cloudWeatherTex;
     // cloud_common.glsl::cloudMap() localCoverage（binding 9）
     VkTexture2D     cloudCurlTex;
+    // ── 双层云：Profile LUT（binding 31）+ 高空云 Hi weather map（binding 32）──
+    VkTexture2D     cloudProfileLutTex;
+    VkTexture2D     cloudHiWeatherTex;
     // Weather map ImGui 预览：同 image 上的通道 swizzle view（R/G/B/A → 灰度 RGB）
     VkImageView     weatherVisViewR = VK_NULL_HANDLE;
     VkImageView     weatherVisViewG = VK_NULL_HANDLE;
@@ -281,6 +284,8 @@ struct VkSceneSystem {
         cloudDetailTex.destroy(ctx);
         cloudWeatherTex.destroy(ctx);
         cloudCurlTex.destroy(ctx);
+        cloudProfileLutTex.destroy(ctx);
+        cloudHiWeatherTex.destroy(ctx);
     }
 
     // -----------------------------------------------------------------------
@@ -572,6 +577,34 @@ struct VkSceneSystem {
             weatherVisViewA = makeSwizzleView(VK_COMPONENT_SWIZZLE_A);
             if (!weatherVisViewR || !weatherVisViewG || !weatherVisViewB || !weatherVisViewA)
                 return false;
+        }
+
+        // ── 5) Profile LUT（云类型廓形，CPU bake）───────────────────────────
+        {
+            std::vector<uint8_t> data;
+            if (!ProfileLutBake::generate(data)) {
+                fprintf(stderr, "[VkScene] Profile LUT bake failed\n");
+                return false;
+            }
+            if (!cloudProfileLutTex.upload(ctx, data.data(),
+                    ProfileLutBake::kWidth, ProfileLutBake::kHeight)) {
+                fprintf(stderr, "[VkScene] Profile LUT upload failed\n");
+                return false;
+            }
+        }
+
+        // ── 6) 高空云 Hi weather map（CPU bake，第二套天气图）──────────────
+        {
+            std::vector<uint8_t> data;
+            if (!HiWeatherMapBake::generate(data)) {
+                fprintf(stderr, "[VkScene] Hi weather map bake failed\n");
+                return false;
+            }
+            if (!cloudHiWeatherTex.upload(ctx, data.data(),
+                    HiWeatherMapBake::kWidth, HiWeatherMapBake::kHeight)) {
+                fprintf(stderr, "[VkScene] Hi weather map upload failed\n");
+                return false;
+            }
         }
 
         printf("[VkScene] Cloud textures baked and uploaded.\n");

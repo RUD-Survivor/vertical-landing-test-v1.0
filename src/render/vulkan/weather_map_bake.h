@@ -214,3 +214,153 @@ inline bool generate(std::vector<uint8_t>& out) {
 }
 
 } // namespace WeatherMapBake
+
+// ==========================================================================
+// ProfileLutBake — 云类型垂直廓形 LUT 的 CPU 烘焙
+//
+// 布局（与 cloud_profile.glsl 采样约定一致，同 HanPi）：
+//   U = 归一化高度 ∈[0,1]（0=云底，1=云顶）       → kWidth
+//   V = 径向距离 ∈[0,1]（0=中心，1=边缘）         → kHeight
+//   R = 积云 Cu 廓形   G = 塔状积云 Tcu 廓形   B = 积雨云 Cb 廓形
+// 三条通道是同族公式的不同参数：Cu 用原 cloudMap() 硬编码的
+//   gradientShape = remap(h,0,0.1,0.1,1.0)*remap(h,0.1,0.8,1.0,0.2)
+//   （即"旧高度 profile 函数"整体作为积云预设），Tcu/Cb 依次变高变厚。
+// 类型轴（weather.g）在 shader 里做三段插值：cloud_profile.glsl。
+// V（径向）轴当前按 kEdgeThin=1.0 烘焙为均匀，廓形与旧 gradientShape 逐点一致；
+// 不会因"天气图中心/边缘"产生全局衰减而压低覆盖率（旧实现踩过这个坑）。
+// ==========================================================================
+namespace ProfileLutBake {
+
+constexpr int   kWidth    = 256; // U = 归一化高度
+constexpr int   kHeight   = 64;  // V = 径向距离（预留）
+constexpr int   kChannels = 4;
+// 径向边缘变薄系数：1.0=均匀（默认，廓形与旧 gradientShape 逐点一致，不压覆盖率）；
+// 调 <1 才启用"中心厚、边缘薄"的 HanPi radialDist 衰减。
+constexpr float kEdgeThin = 1.0f;
+
+// 与旧 cloudMap 的 remap() 一致：saturate 的线性重映射。
+inline float remap01(float h, float a, float b, float c, float d) {
+    float t = (h - a) / (b - a);
+    t = t < 0.f ? 0.f : (t > 1.f ? 1.f : t);
+    return c + t * (d - c);
+}
+
+// 参数化垂直廓形（与旧 gradientShape 同族）：
+//   底部 0→riseEnd    : baseVal → 1.0
+//   腰部 riseEnd→holdEnd: 1.0 → topVal
+// Cu 参数取 riseEnd=0.10, holdEnd=0.80, baseVal=0.10, topVal=0.20 时与旧曲线完全一致。
+inline float profile(float h, float riseEnd, float holdEnd, float baseVal, float topVal) {
+    float lo = remap01(h, 0.0f, riseEnd, baseVal, 1.0f);
+    float hi = remap01(h, riseEnd, holdEnd, 1.0f, topVal);
+    return lo * hi;
+}
+
+inline bool generate(std::vector<uint8_t>& out) {
+    using WeatherMapBake::detail::clampU8;
+    using WeatherMapBake::detail::sat01;
+    out.assign((size_t)kWidth * (size_t)kHeight * (size_t)kChannels, 0);
+
+    for (int y = 0; y < kHeight; y++) {
+        float radial = ((float)y + 0.5f) / (float)kHeight; // 0=中心 1=边缘
+        // 径向调制（预留）：kEdgeThin=1.0 时恒为 1.0（廓形与旧 gradientShape 逐点一致）；
+        // 调 <1 才启用"中心厚、边缘薄"的 HanPi radialDist 衰减。
+        const float radialScale = 1.0f - (1.0f - kEdgeThin) * sat01(radial);
+        for (int x = 0; x < kWidth; x++) {
+            float h = ((float)x + 0.5f) / (float)kWidth; // 0=云底 1=云顶
+
+            float cu  = profile(h, 0.10f, 0.80f, 0.10f, 0.20f); // 积云（旧曲线）
+            float tcu = profile(h, 0.06f, 0.90f, 0.05f, 0.10f); // 塔状积云：快升起、更高、顶薄
+            float cb  = profile(h, 0.10f, 0.98f, 0.30f, 0.40f); // 积雨云：厚底、到顶、顶端残留
+
+            cu  *= radialScale;
+            tcu *= radialScale;
+            cb  *= radialScale;
+
+            size_t idx = ((size_t)y * (size_t)kWidth + (size_t)x) * (size_t)kChannels;
+            out[idx]     = clampU8(cu);
+            out[idx + 1] = clampU8(tcu);
+            out[idx + 2] = clampU8(cb);
+            out[idx + 3] = 255;
+        }
+    }
+    printf("[ProfileLutBake] Baking profile LUT %dx%d (U=height, V=radial, RGB=Cu/Tcu/Cb)\n",
+           kWidth, kHeight);
+    return true;
+}
+
+} // namespace ProfileLutBake
+
+// ==========================================================================
+// HiWeatherMapBake — 第二套天气图（高空云 Hi weather map）的 CPU 烘焙
+//
+// 通道布局（与 cloud_common.glsl 采样约定一致）：
+//   R = HiMask（高空云覆盖）
+//   G = HiType（0=As 高层云，1=Ac 高积云）
+//   B = 0（预留 MS 权重）
+//   A = 255（不透明，供 ImGui 预览；云 shader 只采样 R/G，不受影响）
+//
+// 与 Lo 天气图同分辨率、同 UV（球面经纬度），独立烘焙：
+// 高空云以温带/极地中高层卷云为主，ITCZ 上方少量，整体比低云稀疏、成层。
+// ==========================================================================
+namespace HiWeatherMapBake {
+
+constexpr int   kWidth    = 2048;
+constexpr int   kHeight   = 1024;
+constexpr int   kChannels = 4;
+
+inline bool generate(std::vector<uint8_t>& out) {
+    using namespace WeatherMapBake::detail;
+    out.assign((size_t)kWidth * (size_t)kHeight * (size_t)kChannels, 0);
+
+    printf("[HiWeatherMapBake] Baking hi weather map %dx%d (cirrus/As/Ac)...\n",
+           kWidth, kHeight);
+
+    for (int y = 0; y < kHeight; y++) {
+        float lat = ((float)y / (float)kHeight - 0.5f) * 180.f;
+        for (int x = 0; x < kWidth; x++) {
+            float lon = ((float)x / (float)kWidth - 0.5f) * 360.f;
+
+            float absLat = fabsf(lat);
+            // 高空云倾向：温带急流侧 + 极地 + 少量 ITCZ 砧状卷云
+            float wTemp = gauss(absLat, 52.f, 14.f), wPolar = gauss(absLat, 76.f, 9.f);
+            float wItcz = gauss(absLat, 3.f, 7.f);
+            float wSum = wTemp + wPolar + wItcz + 1e-6f;
+            wTemp /= wSum; wPolar /= wSum; wItcz /= wSum;
+
+            // 球面坐标 + domain warp（与 Lo 图同族，但用不同种子与频率）
+            float lonR = lon * (WeatherMapBake::kPi / 180.f), latR = lat * (WeatherMapBake::kPi / 180.f);
+            float cl = cosf(latR);
+            float sx = cl * cosf(lonR), sy = cl * sinf(lonR), sz = sinf(latR);
+
+            float wx = fbm(sx * 1.7f + 91.3f, sy * 1.7f - 57.1f, sz * 1.7f + 33.9f, 3);
+            float wy = fbm(sx * 1.7f - 12.7f, sy * 1.7f + 84.6f, sz * 1.7f + 71.2f, 3);
+            float wz = fbm(sx * 1.7f + 66.4f, sy * 1.7f + 3.8f,  sz * 1.7f - 44.5f, 3);
+            float qx = sx + (wx * 2.f - 1.f) * 0.5f;
+            float qy = sy + (wy * 2.f - 1.f) * 0.5f;
+            float qz = sz + (wz * 2.f - 1.f) * 0.5f;
+
+            // 大尺度层云场 + 风切变拉丝（沿经向细长，模拟急流卷云带）
+            float synoptic = fbm(qx * 4.0f + 5.f, qy * 4.0f, qz * 4.0f - 13.f, 4);
+            float streak = fbm(sx * 1.1f + sy * 5.3f, sz * 2.6f, sx * 0.4f - sy * 0.25f + 70.f, 3);
+            float band = sat01(synoptic * 0.7f + streak * 0.45f * wTemp);
+
+            // 高空云整体偏稀疏：base 低、对比拉高
+            float base = sat01(wTemp * 0.85f + wPolar * 0.6f + wItcz * 0.35f);
+            float cover = sat01(base * (0.10f + 0.9f * band));
+            cover = powf(cover, 1.6f);
+
+            // 类型：As 覆盖大片平稳区（低 synoptic 高频），Ac 出现在碎块/对流顶
+            float acLike = sat01(synoptic * 1.6f - 0.25f);
+            float hiType = sat01(0.15f + (0.85f - 0.15f) * acLike);
+
+            size_t idx = ((size_t)y * (size_t)kWidth + (size_t)x) * (size_t)kChannels;
+            out[idx]     = clampU8(cover);
+            out[idx + 1] = clampU8(hiType);
+            out[idx + 2] = 0;
+            out[idx + 3] = 255; // A=不透明，ImGui 预览才能看见（R=HiMask G=HiType）
+        }
+    }
+    return true;
+}
+
+} // namespace HiWeatherMapBake

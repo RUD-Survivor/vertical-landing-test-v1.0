@@ -168,10 +168,34 @@ struct AtmosphereConfig
     float cloudPhiFwdDepthPow;           // C_bottom：底部置信度恢复速度；0=禁用底部软化
     float cloudPhiFwdDepthBias;          // C_bottom：底部锚点偏移（>0 云底保留更多漫射）
     float cloudPhiFwdBoundaryConfidence; // C_top：云顶受光置信度强度（0=禁用，1=全量）
-    // 补到 16 字节整数倍，让 gpu_frame_data.h 的 C++ 镜像尺寸与 std140 严格相等。
-    float phiFwdPad0;
-    float phiFwdPad1;
-    float phiFwdPad2;
+
+    // ── 双层云：Profile LUT 类型轴 + 高空云（第二层） ────────────────────────
+    // Profile LUT（inCloudProfileLut，binding 31）：U=归一化高度，V=径向距离，
+    // RGB=Cu/Tcu/Cb 三条垂直廓形（Cu 轴处 bake 了原 gradientShape 曲线）。
+    // 本组把 weather.g 的 cloudType 重新映射到 LUT 类型轴（0=Cu,0.5=Tcu,1=Cb）。
+    // 廓形即 LUT 曲线本身，不设运行时倍率（旧 cloudProfileScale 乘在 coverage
+    // remap 之前会悄悄改变云体覆盖率，已移除；提亮/压暗请用 cloudDensity）。
+    float cloudProfileTypeBias;      // cloudType 偏移（先减 0.5 再乘对比度后加回 0.5+此值）
+    float cloudProfileTypeContrast;  // cloudType 对比度（>1 拉开类型、<1 收敛到中部）
+    float cloudProfilePad0;
+    float cloudProfilePad1;
+
+    // 高空云（inCloudHiWeather，binding 32）：R=HiMask（高空云覆盖）G=HiType(As/Ac)。
+    // 密度纯 2D，与低云同 σ 单位，max() 进 cloudMap 共用主 march（见 cloud_high_layer.glsl）。
+    float hiCloudCoverage;           // 高空云全局覆盖倍率（0=关闭第二层）
+    float hiCloudBottom;             // 高空云带底（slab 归一化高度 0~1）
+    float hiCloudTop;                // 高空云带顶（slab 归一化高度 0~1）
+    float hiCloudDensity;            // 高空云密度（与低云 cloudMap 同单位）
+
+    float hiCloudThreshold;          // hi 覆盖阈值（低于此值密度=0）
+    float hiCloudSoftness;           // 阈值过渡宽度
+    float hiCloudType;               // 高空云类型偏好（0=As，1=Ac；与天气图 G 各取一半）
+    float hiCloudPad0;
+    // 补到 16 字节整数倍（std140 嵌套 struct 向上取整到 16；与 gpu_frame_data.h 同名 pad）。
+    // 块内总计 15 个 float（60B），配合前段 692B → 整 struct 752B（=47×16，对齐成立）。
+    float cloudProfilePad2;
+    float cloudProfilePad3;
+    float cloudProfilePad4;
 };
 
 struct SkyInfo
