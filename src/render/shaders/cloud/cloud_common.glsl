@@ -488,28 +488,23 @@ ParticipatingMedia volumetricShadow(vec3 posKm,vec3 sunDirection,const in Atmosp
     float phiTAbs=1.0;     // T_abs：无逃逸漫射源的吸收存活率（按 σ_a=(1-ω₀)σ_t 极慢衰减）
     float phiKappaSum=0.0; // ∫κ ds：观测点→当前步入口，用于 G 的体积衰减 exp(-∫κ ds)
     float phiODSum=0.0;    // ∫σ_t ds：各向同性建立权重 C_iso 用
-    float phiSrcConfidence=1.0; // B_eff = C_top × C_bottom，整条光路共用（只取决于观测点）
+
+    // 观测点属性（整条光路共用，见 phiFwdBoundaryTerms）：
+    //   phiCTop       —— 云顶/侧向受光置信度（2D 高度场的属性，光步几 km 内变化可忽略）
+    //   phiColumnProx —— 云柱厚度代理，供 C_bottom 的软化尺度用
+    //   C_bottom 故意不放这里：它评估的是「源点离云底多近」，必须用光步采样点自身高度，
+    //   否则观测点在云底、光步往太阳进入云芯时，源点在较高处但置信度用了观测点的低高度，
+    //   会把整条光步的漫射场全部砍掉——正好抵消 phi_fwd 修「云底不黑」的初衷。
+    float phiCTop=1.0;
+    float phiColumnProxy=0.0;
+    const float phiDepthPow=frameData.sky.atmosphereConfig.cloudPhiFwdDepthPow;
+    const float phiDepthBias=frameData.sky.atmosphereConfig.cloudPhiFwdDepthBias;
 
     if(bPhiFwdOn)
     {
-        // 边界项：观测点算一次即可——它回答的是「这一柱云的相关边界朝不朝太阳」，
-        // 是观测点的属性，不随光步位置变化（逐步重算只是浪费 4×N 次天气图采样）。
         vec2 boundary=phiFwdBoundaryTerms(posKm,sunDirection,atmosphere);
-        float cTop=boundary.x;
-
-        // C_bottom：云底不该和云顶/侧向受光边界同等可信——太阳基本不从云体下方注入。
-        // 只在底部附近做软化，不是整根高度衰减。厚云柱恢复更慢（H_soft 随厚度放大）。
-        float cBottom=1.0;
-        float depthPow=frameData.sky.atmosphereConfig.cloudPhiFwdDepthPow;
-        if(depthPow>0.0)
-        {
-            float localHeight=(length(posKm)-atmosphere.cloudAreaStartHeight)/atmosphere.cloudAreaThickness;
-            float hAnchored=max(localHeight+frameData.sky.atmosphereConfig.cloudPhiFwdDepthBias,0.0);
-            float hSoft=max(kPhiFwdBottomSoftBase*mix(1.0,4.0,boundary.y),1e-3);
-            cBottom=1.0-exp(-hAnchored/hSoft*depthPow);
-        }
-
-        phiSrcConfidence=cTop*cBottom;
+        phiCTop=boundary.x;
+        phiColumnProxy=boundary.y;
     }
 
     for(uint j=0;j<StepLightNum;j++)
@@ -556,7 +551,19 @@ ParticipatingMedia volumetricShadow(vec3 posKm,vec3 sunDirection,const in Atmosp
             // 1/r 几何扩展：r 用「观测点到本步采样点」的真实距离（米）。
             float invR=1.0/max(d*1000.0,stepM*0.5);
 
-            phiFwd+=phiTAbs*qSrc*invD*msBuild*phiSrcConfidence*volAtten*invR*phiIntensity;
+            // C_bottom：底部入射置信度，用「本步源点」自身高度评估——太阳基本不从云体
+            // 下方注入，靠近云底的源不可信。厚云柱底部恢复更慢（H_soft 随厚度放大）。
+            // 源点在云芯/云顶时 cBottom→1，不压制；只有真的贴近云底才压低。
+            float cBottom=1.0;
+            if(phiDepthPow>0.0)
+            {
+                float srcLocalHeight=(length(samplePosKm)-atmosphere.cloudAreaStartHeight)/atmosphere.cloudAreaThickness;
+                float hAnchored=max(srcLocalHeight+phiDepthBias,0.0);
+                float hSoft=max(kPhiFwdBottomSoftBase*mix(1.0,4.0,phiColumnProxy),1e-3);
+                cBottom=1.0-exp(-hAnchored/hSoft*phiDepthPow);
+            }
+
+            phiFwd+=phiTAbs*qSrc*invD*msBuild*phiCTop*cBottom*volAtten*invR*phiIntensity;
 
             phiODSum+=localOD;
             phiKappaSum+=kappaStep;
