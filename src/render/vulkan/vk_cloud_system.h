@@ -17,8 +17,8 @@
 // 30 个 binding 里，SDSM 级联阴影(28/29)、Hi-Z(30)、G-Buffer A(5) 目前绑定中性
 // 占位资源（Phase 2 待接入，见 cloud_common.glsl / cloud_composite.glsl 对应
 // 位置的注释），不影响主 march 路径。curl 噪声(9) 已接入真实纹理（vk_scene.h::
-// cloudCurlTex，见 vk_cloud_bake.h::bakeCurlNoise）。Froxel 空气透视(11) 已接入
-// 真烤的 3D 体积散射（vk_atmosphere_lut.h::VkAtmosphereLut::bakeFroxel()）。
+// cloudCurlTex，见 vk_cloud_bake.h::bakeCurlNoise）。空气透视(11) 已改为
+// Inscatter ToPoint（与场景大气同源，见 cloud_air_perspective.glsl）。
 // ==========================================================================
 
 #include "vk_context.h"
@@ -95,7 +95,7 @@ struct FlowerCloudTuneParams {
     float maxAltKm = 20.0f;
     float speed = 0.15f;
     // Bruneton/Hillaire 大气积分对"太阳辐照度"的物理量级要求，和引擎其余部分（atmo.frag 等）
-    // 手调出来的 sunIntensity(~1.0) 未必是同一套标定。Inscatter/Ambient/Froxel 按单位太阳烘焙；
+    // 手调出来的 sunIntensity(~1.0) 未必是同一套标定。Inscatter/Ambient 按单位太阳烘焙；
     // 本值是运行时全局曝光：L_sun = color × snap.sunIntensity × sunIntensityMul。
     float sunIntensityMul = 100.0f;
     // 0=正常；1–7 中间量；8–15 厚云发暗诊断（见 cloud_common.glsl dbgMode）。
@@ -160,7 +160,7 @@ struct FlowerCloudTuneParams {
     float hiCloudSoftness = 0.2f;             // 阈值过渡宽度
     float hiCloudType = 1.0f;                 // 高空云类型偏好（0=As 1=Ac）
 
-    // Froxel 空气透视：LUT 单位太阳；运行时 × L_sun × airPerspectiveSunScale
+    // Inscatter ToPoint 空气透视：单位太阳；运行时 × L_sun × airPerspectiveSunScale
     bool  airPerspectiveEnabled = true;       // cloudAirPerspectiveEnabled
     float airPerspectiveSunScale = 1.0f;      // 相对 L_sun 的雾色倍率（默认 1=与云直射同源）
     float airPerspectiveScale = 0.01f;        // 采样混合权重倍率（α'=α×此值；默认 0.01）
@@ -211,13 +211,10 @@ struct VkCloudSystem {
     // 独立初始化/关闭，避免跨子系统生命周期耦合；反正 pipeline 本身很轻量）。
     VkAtmoLutPipelines cloudLutPipelines;
     VkAtmosphereLut atmosphereLut;
-    // Froxel 空气透视需要 atmosphereLut 的 Transmittance/MultiScatter LUT 是真烤过的
-    // （aerial_perspective_lut.glsl 内部靠 integrateScatteredLuminance 查这两张表），
-    // 但云本身的大气采样早就改成实时算了（realTimeTransmittance），不需要 Sky-View/
-    // Sky-Irradiance——所以这里只在第一次调用时 bakeFull() 一次（地球大气 profile
-    // 基本不变，不用每帧重烤那两张贵的），之后只每帧刷 Froxel。
-    // Inscatter/MultiScatter/Froxel 均为单位太阳（shader 内不乘 intensity），太阳亮度
-    // 变化不再触发 bakeFull。
+    // 云空气透视走 Inscatter ToPoint，需要 bakeFull 烤出的 Transmittance + Inscatter。
+    // 云日照大气透射是实时算的（realTimeTransmittance），不需要每帧重烤 Sky-View；
+    // 地球 profile 基本不变 → 只 bakeFull 一次，之后每帧只刷 Ambient μs LUT。
+    // Inscatter 为单位太阳（shader 内不乘 intensity），太阳亮度变化不再触发 bakeFull。
     bool atmosphereLutBaked = false;
 
     // ── 1/4 分辨率 RT：颜色(L,T) / 深度 / 雾 ─────────────────────────────────
@@ -360,28 +357,23 @@ struct VkCloudSystem {
         int histSlot = 1 - slot;
 
         GpuPerFrameData fd = fillCloudFrameData(snap, *earth, cascadeCfg);
-        // 云自己的太阳/天空透射率是实时算的（见 shared_atmosphere.glsl::
-        // realTimeTransmittance），所以 Transmittance/SkyView/SkyIrradiance 不必每帧重烤。
-        // 但 binding 10/27 是活绑定：10=Froxel 空气透视，27=云环境 μs LUT（后者现在
-        // 由 cloud_ambient_mus_lut.glsl 查 Inscatter 烘出来，见下面 bakeAmbientMusLut）。
+        // 云日照透射实时算（realTimeTransmittance）；空气透视查 bakeFull 的 Inscatter ToPoint，
+        // 不必每帧重烤 Transmittance/Inscatter/SkyView。binding 11/27 是活绑定：
+        // 11=Inscatter（ToPoint AP），27=云环境 μs LUT（查 Inscatter 烘出）。
         //
         // atmosphereLut 的 UBO 同时还是 cloud_common.glsl binding 21 的数据来源（相机矩阵、
-        // 太阳方向、DebugMode 开关都在里面），必须每帧上传，不能跟着 bake() 一起跳过——
-        // 之前这里整行注释掉 bake() 时漏了这个，导致 frameData 一直是旧值，DebugMode 都
-        // 传不进 shader。所以不重烤的那条分支也要走一次只上传不 dispatch 的轻量路径。
+        // 太阳方向、DebugMode 开关都在里面），必须每帧上传，不能跟着 bake() 一起跳过。
         //
         // 单位太阳烘焙：integrateScatteredLuminance 只读 sky.color，不读 intensity。
-        // 因此 bakeFull / Froxel / Ambient 与 raymarch 可共用最后一次 upload 的 fd
-        // （含 L_sun=color×intensity）；亮度旋钮只影响运行时采样，不再触发重烤。
+        // 亮度旋钮只影响运行时采样，不再触发重烤。
         if (!atmosphereLutBaked) {
             atmosphereLut.bakeFull(ctx, cmd, frameSlot, cloudLutPipelines, fd);
             atmosphereLutBaked = true;
         } else {
             atmosphereLut.uploadFrameData(ctx, cmd, frameSlot, fd);
         }
-        // 每帧刷新云环境 μs LUT（128×1，与相机无关，纯查单位太阳 Inscatter）+ Froxel
+        // 每帧刷新云环境 μs LUT（128×1，与相机无关，纯查单位太阳 Inscatter）
         atmosphereLut.bakeAmbientMusLut(ctx, cmd, frameSlot, cloudLutPipelines);
-        atmosphereLut.bakeFroxel(ctx, cmd, frameSlot, cloudLutPipelines);
 
         updateCloudDescriptorSet(ctx, taa, slot, histSlot, fd, shadowAtlasView, cascadeInfoBuf);
 
@@ -807,9 +799,8 @@ private:
         // 之前这里绑定的是 1x1 全零占位纹理，cloudMap() 的 localCoverage 项恒为 0。
         VkDescriptorImageInfo curl{ VK_NULL_HANDLE, curlNoiseView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
         VkDescriptorImageInfo transLut{ VK_NULL_HANDLE, atmosphereLut.transmittanceView(), VK_IMAGE_LAYOUT_GENERAL };
-        // 已接入：真实 Froxel 3D 体积散射（aerial_perspective_lut.glsl 每帧烘焙），
-        // 之前绑定的是中性占位纹理，cloud_common.glsl 的空气透视混合恒等于不生效。
-        VkDescriptorImageInfo froxel{ VK_NULL_HANDLE, atmosphereLut.froxelViewForRender(), VK_IMAGE_LAYOUT_GENERAL };
+        // 空气透视：Bruneton Inscatter ToPoint（bakeFull 烤出；与场景大气同源）
+        VkDescriptorImageInfo inscatter{ VK_NULL_HANDLE, atmosphereLut.inscatterLutView(), VK_IMAGE_LAYOUT_GENERAL };
         VkDescriptorImageInfo qColorRW{ VK_NULL_HANDLE, quarterColorView, VK_IMAGE_LAYOUT_GENERAL };
         VkDescriptorImageInfo qColorRO{ VK_NULL_HANDLE, quarterColorView, VK_IMAGE_LAYOUT_GENERAL };
         VkDescriptorImageInfo fColorRW{ VK_NULL_HANDLE, fullColorView[slot], VK_IMAGE_LAYOUT_GENERAL };
@@ -851,7 +842,7 @@ private:
         imgW(4,4,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,&depth);       imgW(5,5,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,&gbufA);
         imgW(6,6,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,&basicN);      imgW(7,7,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,&detailN);
         imgW(8,8,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,&weatherI);    imgW(9,9,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,&curl);
-        imgW(10,10,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,&transLut);  imgW(11,11,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,&froxel);
+        imgW(10,10,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,&transLut);  imgW(11,11,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,&inscatter);
         imgW(12,12,VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,&fColorRW);  imgW(13,13,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,&fColorRO);
         imgW(14,14,VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,&qDepthRW);  imgW(15,15,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,&qDepthRO);
         imgW(16,16,VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,&fDepthRW);  imgW(17,17,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,&fDepthRO);

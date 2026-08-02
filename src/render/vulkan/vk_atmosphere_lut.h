@@ -601,6 +601,8 @@ struct VkAtmosphereLut {
     VkImageView skyViewLutView()    const { return view_[2]; }
     VkImageView skyIrradianceCubeView() const { return cubeView; }
     VkImageView cloudAmbientMusLutView() const { return ambientMusView; }
+    VkImageView inscatterLutView()  const { return inscatterView; }
+    VkImageView singleMieLutView()  const { return singleMieView; }
     VkBuffer    frameUBO(int frameSlot) const { return uboBuf[frameSlot % FRAMES_IN_FLIGHT]; }
 
     // 只做 UBO 上传（memcpy + host->compute 可见性 barrier）。cloud_common.glsl（binding 21）

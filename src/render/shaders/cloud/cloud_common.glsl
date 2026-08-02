@@ -28,8 +28,8 @@ layout (set = 0, binding = 7) uniform texture3D inDetailNoise; // 3D 细节噪�
 layout (set = 0, binding = 8) uniform texture2D inWeatherTexture; // 2D 天气图（coverage/type/humidity）；区域云量与类型变化
 layout (set = 0, binding = 9) uniform texture2D inCloudCurlNoise; // 2D curl 噪声；局部扰动形状与 coverage 变化
 
-layout (set = 0, binding = 10) uniform texture2D inTransmittanceLut; // 大气透射率 LUT；采样点处太阳/天空大气衰减
-layout (set = 0, binding = 11) uniform texture3D inFroxelScatter; // Froxel 体积散射 LUT；云与场景间的空气透视/高度雾
+layout (set = 0, binding = 10) uniform texture2D inTransmittanceLut; // 大气透射率 LUT；ToPoint 段透射 +（日照路径已改实时）
+layout (set = 0, binding = 11) uniform texture3D inInscatterLut; // Bruneton Inscatter；云空气透视 GetSkyRadianceToPoint
 
 layout (set = 0, binding = 12, rgba16f) uniform image2D imageCloudReconstructionTexture; // 全分辨率云重建 RT（可写）；上采样/滤波后输出
 layout (set = 0, binding = 13) uniform texture2D inCloudReconstructionTexture; // 全分辨率云重建 RT（只读）；合成 pass 与 temporal 采样
@@ -75,6 +75,7 @@ layout (set = 0, binding = 32) uniform texture2D inCloudHiWeather;  // 双层云
 #include "cloud_profile.glsl"
 #include "cloud_high_layer.glsl" // highCloudDensity：与低云同 σ 单位，max() 进 cloudMap
 #include "cloud_lighting.glsl"   // 公共光照组装（sampleCloudAmbient/powder/散射公式）
+#include "cloud_air_perspective.glsl" // Inscatter ToPoint 空气透视
 //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 //note:现在是Set1 的 sampler3D uNoiseTex3D 等，layout 完全不同。替换时要 重排 descriptor，或改 cloud_common.glsl 的 binding 对齐现有 vk_descriptors.h
 
@@ -825,7 +826,7 @@ float fogNoise)
         vec3 rayHitPos=vec3(0.0);//在这里声明命中位置
         // rayHitPos：沿视线 march 的「透射率加权平均命中位置」(km，大气空间坐标)。
         // 主循环里每步做 rayHitPos += samplePos * transmittance，越靠前、越亮的采样权重越大。
-        // march 结束后除以 rayHitPosWeight，得到云层的代表深度，供 cloudZ 与空气透视(Froxel)使用。
+        // march 结束后除以 rayHitPosWeight，得到云层的代表深度，供 cloudZ 与空气透视(ToPoint)使用。
 
         float rayHitPosWeight=0.0;
         // rayHitPosWeight：与 rayHitPos 配套的权重累加和（各步 transmittance 之和）。
@@ -1249,8 +1250,7 @@ float fogNoise)
         }
 
         // Apply some additional effect.
-        // march 循环结束后：用加权平均命中点写 cloudZ，并对 scatteredLight 做空气透视（Froxel）。
-        // RocketSim3D：单 pass cloud.frag 无 cloudZ / Froxel；背景已由 atmo pass 提供，通常整段可跳过。
+        // march 循环结束后：用加权平均命中点写 cloudZ，并对 scatteredLight 做空气透视（Inscatter ToPoint）。
         if(rayHitPosWeight>0.0)
         // rayHitPosWeight>0 表示本像素 march 中至少有过非零云密度且累加了权重；全无云则跳过。
         {
@@ -1291,47 +1291,27 @@ float fogNoise)
             // 直接复用（等价于原来晚一点做的 rayHitPos-=worldPos，只是不再影响上面的投影）。
 
             float rayHitHeight=length(rayHitPos);
-            // rayHitHeight：相机到加权命中点的直线距离 (km)。
-            // 空气透视用「云离相机多远」查 Froxel，不是屏幕 z。
+            // rayHitHeight：相机到加权命中点的直线距离 (km)。近距 fade 用，不是查表索引。
 
             //apply air perspective
-            // 空气透视：相机与云之间的大气散射，使远处云发雾、发蓝、对比度降（观察路径上的雾，非太阳光路径）。
-            // Froxel 按单位太阳烘焙（integrateScatteredLuminance 不乘 intensity）；这里乘 L_sun
-            // 与云直射/环境同源。AirPerspectiveSunScale 是相对 L_sun 的艺术微调。
+            // 空气透视：相机→云命中点的大气段散射（Bruneton GetSkyRadianceToPoint）。
+            // 与场景 atmo_inside/atmo_shell 的 ToPoint 路径同源（Inscatter + Transmittance LUT）。
+            // Inscatter 为单位太阳；这里乘 L_sun。AirPerspectiveSunScale / Scale 仍为艺术微调。
             if(frameData.sky.atmosphereConfig.cloudAirPerspectiveEnabled != 0)
             {
-                float slice =aerialPerspectiveDepthToSlice(rayHitHeight);//aerialPerspectiveDepthToSlice：shared_atmosphere.glsl
-                // slice：rayHitHeight → Froxel LUT 深度 slice 索引（浮点），预烘焙体积散射查表用。
+                // 近距 fade：<2km 淡出，避免贴脸 AP 突变（旧 Froxel slice<0.5 同量级）。
+                float nearFade=saturate(rayHitHeight*(1.0/2.0));
+                vec3 cloudHitPos=worldPos+rayHitPos; // 行星中心相对 (km)
+                vec4 airPerspective=cloudAirPerspectiveToPoint(
+                    worldPos, cloudHitPos, worldDir, sunDirection, atmosphere);
+                airPerspective*=nearFade;
 
-                float weight=1.0;
-                if(slice<0.5)
-                {
-                    //We multiply by weight to fade to 0 at depth 0. That works for luminance and opacity
-                    weight =saturate(slice*2.0);
-                    // 极近距离 slice<0.5：weight 0→1 线性 fade，避免相机贴脸时空气透视突变/闪烁。
-
-                    slice=0.5;
-                    // 同时把 slice 钳到 0.5，LUT 采样不低于此层，近处用 weight 淡出而非 extrapolate。
-                }
-                ivec3 sliceLutSize=textureSize(inFroxelScatter,0);//inFroxelScatter：binding 11，vk_atmosphere_lut.h 烘焙
-                // inFroxelScatter：3D Froxel 体积散射 LUT（屏幕 uv × 深度 w × RGBA）。
-                // .rgb=该位置应叠的大气散射色；.a=原云色应被洗淡的比例。
-
-                float w=sqrt(slice/float(sliceLutSize.z));// squared distribution
-                // 纹理第三维 w∈[0,1]：sqrt 使深度分布偏近处密、远处疏（更多 slice 留给近距细节）。
-
-                vec4 airPerspective=weight*texture(sampler3D(inFroxelScatter,linearClampEdgeSampler),vec3(uv,w));
-                // airPerspective：本像素、该云距离下的空气雾色(RGB)与洗淡量(A)，× weight 处理近距 fade。
-                // uv=屏幕位置；w=深度层。
-                // 单位太阳 LUT → 运行时乘 L_sun；α 仍只受艺术 Scale（不随太阳亮度变）。
                 vec3 Lsun=frameData.sky.color*frameData.sky.intensity;
                 airPerspective.rgb*=Lsun*frameData.sky.atmosphereConfig.cloudAirPerspectiveSunScale;
-                // 艺术 Scale 只缩放混合权重 α（默认 0.01）：L' = L×(1-α')+fog×α'
-                // 避免旧式 fog×(1-T) 在厚云上整份叠加 HDR 雾，以及高 Scale 时 α 灭云却 RGB≈0 涂黑。
+                // 艺术 Scale 只缩放混合权重 α：L' = L×(1-α')+fog×α'
                 float apScale=frameData.sky.atmosphereConfig.cloudAirPerspectiveScale;
                 float apAlpha=saturate(airPerspective.a*apScale);
                 scatteredLight=scatteredLight*(1.0-apAlpha)+airPerspective.rgb*apAlpha;
-                // 标准空气透视 lerp：按 α' 把云色混向雾色；SunScale 仍只影响烘焙 fog.rgb。
             }
         }
     }
@@ -1517,7 +1497,7 @@ float fogNoise)
 //     只是 cloudMap() 里的采样 UV 从 posKm.xz 平面坐标改成了球面经纬度。
 //   • inTransmittanceLut / inSkyViewLut / inSkyIrradiance 现在是真实数据，由
 //     vk_atmosphere_lut.h 每帧针对当前云所在行星重新烘焙（见该文件头注释）。
-//   • inFroxelScatter / inSDSMShadowDepth+cascadeInfos / inHiz / inGBufferA
+//   • inInscatterLut(ToPoint AP) / inSDSMShadowDepth+cascadeInfos / inHiz / inGBufferA
 //     仍是 Phase 2 占位（中性哑资源），对应代码位置有单独注释标注，不影响主 march 路径。
 // 以下历史笔记（Weather/3D 噪声/uThreshLo 等）针对的是"沿用 cloud.frag 老参数"的另一
 // 条迁移路线，本次未采用，保留仅供参考。
@@ -1536,7 +1516,7 @@ float fogNoise)
 
   [输入 Set0 binding]
     frameData(21)  inBasicNoise/Detail/Weather/Curl(6-9)
-    inTransmittanceLut(10)  inSkyViewLut(20)  inFroxelScatter(11)
+    inTransmittanceLut(10)  inSkyViewLut(20)  inInscatterLut(11)
     inSkyIrradiance(27)  inHiz(30)  blueNoise(SSBO Set2)
 
   [本文件核心]
@@ -1574,7 +1554,7 @@ float fogNoise)
     ← cloudMap, volumetricShadow, powderEffectNew, getParticipatingMediaPhase
     ← lookupSkylight, getDensity, dualLobPhase, hgPhase, rayleighPhase
     ← convertToAtmosphereUnit, lutTransmittanceParamsToUv, raySphereIntersect*
-    ← inTransmittanceLut, inSkyViewLut, inFroxelScatter, inSkyIrradiance, inHiz
+    ← inTransmittanceLut, inSkyViewLut, inInscatterLut, inSkyIrradiance, inHiz
 
 --------------------------------------------------------------------------------
 【cloudMap 数据流  L99-168】
@@ -1691,7 +1671,7 @@ float fogNoise)
   rayHitPos /= rayHitPosWeight
   cloudZ ← (viewProj × rayHitPos).z/w          → 云深度 RT
   rayHitHeight ← length(rayHitPos - worldPos)
-  airPerspective ← inFroxelScatter(uv, w)       // RS3D: 通常跳过
+  airPerspective ← Inscatter ToPoint(cam→cloudHit)  // 与场景大气同源
   scatteredLight ← L×(1-α) + fogRGB×(1-transmittance)
 
 --------------------------------------------------------------------------------
@@ -1729,7 +1709,7 @@ float fogNoise)
   volumetricShadow      ↔  getOpticalDepth (二选一)
   lookupSkylight        ↔  atmo pass 背景 (不移植 LUT)
   Transmittance LUT     ↔  exp(-coeff×depth) 实时
-  Froxel 空气透视       ↔  atmo 合成 (不移植)
+  Inscatter ToPoint AP  ↔  场景 atmo ToPoint（已接入）
   cloudZ + 深度 RT      ↔  无 (除非半分辨率+TAA)
   bFog / lightingFog    ↔  无 (atmo.frag 已有)
   result(L,T)           ↔  FragColor(color×α, α)  α=1-viewTrans

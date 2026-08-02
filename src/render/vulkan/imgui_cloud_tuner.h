@@ -431,7 +431,7 @@ inline void FlowerCloudTunerImGui(bool* p_open, FlowerCloudTuneParams& p,
 
     // ── 12. 空气透视 / 环境天光 ───────────────────────────────────────────
     if (ImGui::CollapsingHeader("空气透视 / 环境天光")) {
-        ImGui::Text("空气透视 (Froxel)");
+        ImGui::Text("空气透视 (Inscatter ToPoint)");
         ImGui::Checkbox("AirPerspective Enabled", &p.airPerspectiveEnabled);
         ImGui::SliderFloat("AirPerspectiveSunScale", &p.airPerspectiveSunScale, 0.001f, 30.0f, "%.3f", ImGuiSliderFlags_Logarithmic);
         ImGui::SliderFloat("AirPerspectiveScale", &p.airPerspectiveScale, 0.0f, 1.0f, "%.3f", ImGuiSliderFlags_Logarithmic);
