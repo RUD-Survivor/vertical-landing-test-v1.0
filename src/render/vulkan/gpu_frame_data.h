@@ -124,7 +124,7 @@ struct GpuAtmosphereConfig {
     float cloudMarchEdgeGradHigh = 0.018f;
 
     int32_t cloudAirPerspectiveEnabled = 1;
-    float cloudAirPerspectiveScale = 0.01f;
+    float cloudAirPerspectiveScale = 1.f; // AP 强度；1=全物理
     float cloudAirPerspectiveSunScale = 1.f; // 相对 L_sun；默认 1=与云直射同源
     float cloudAmbientExposure = 5.f;
     float cloudAmbientAnalyticBlend = 0.f;

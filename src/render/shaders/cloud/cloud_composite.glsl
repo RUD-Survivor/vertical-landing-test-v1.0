@@ -88,9 +88,9 @@ void main()
 
     if(bComposite)
     {
-        // Composite planar cloud.
-
-        result = srcColor.rgb * cloudColor.a + cloudColor.rgb;//背景颜色*透射率+云自身散射光  
+        // Composite：result = src×T_eff + L'
+        // T_eff = A（含 luma(T_air)×T_cloud）；L' 已含 L_air + T_air×L_cloud。
+        result = srcColor.rgb * cloudColor.a + cloudColor.rgb;
 
         if(fogColor.a >= 0.0f)//有雾才叠，当a==-1时表示该像素未算雾
         {

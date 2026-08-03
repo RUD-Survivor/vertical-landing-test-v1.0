@@ -5,7 +5,13 @@
 // 依赖 cloud_common.glsl 已声明：
 //   inTransmittanceLut(10) inInscatterLut(11) linearClampEdgeSampler
 // Inscatter 为单位太阳；Mie 走 combined A=Mie.r 外推（场景 mieStorageMode=0）。
-// 调用方再乘 L_sun。
+// 调用方：L' = L_air×L_sun + T_air×L_cloud；T_eff = luma(T_air)×T_cloud 写入 alpha。
+
+struct CloudAirPerspective
+{
+    vec3 scattered;     // 相机→云段 in-scatter（单位太阳）
+    vec3 transmittance; // 同段 RGB 透射 T_air
+};
 
 vec3 cloudApExtrapolateSingleMie(vec3 scattering, float mieRed,
                                  vec3 rayleighScattering, vec3 mieScattering)
@@ -69,18 +75,21 @@ vec3 cloudApApplyPhases(vec3 scattering, vec3 singleMie, float nu, float mu_s, f
     return scattering * cloudApRayleighPhase(nu) + singleMie * cloudApMiePhase(nu, gMie);
 }
 
-// 返回：.rgb = 相机→云段 in-scatter（单位太阳），.a = 1 - luma(T_view)
-vec4 cloudAirPerspectiveToPoint(
+CloudAirPerspective cloudAirPerspectiveToPoint(
     vec3 camRelKm,
     vec3 cloudRelKm,
     vec3 viewDir,
     vec3 sunDir,
     const in AtmosphereParameters atmosphere)
 {
+    CloudAirPerspective ap;
+    ap.scattered = vec3(0.0);
+    ap.transmittance = vec3(1.0);
+
     vec3 p0 = camRelKm;
     if (length(p0) > atmosphere.topRadius) {
         if (!moveToTopAtmosphere(p0, viewDir, atmosphere.topRadius))
-            return vec4(0.0);
+            return ap;
     }
 
     float r = length(p0);
@@ -94,7 +103,7 @@ vec4 cloudAirPerspectiveToPoint(
     bool hitGround = inscatterRayIntersectsGround(atmosphere, r, mu);
     float d = max(dot(cloudRelKm - p0, viewDir), 0.0);
     if (d <= 1e-4)
-        return vec4(0.0);
+        return ap;
 
     vec3 T = cloudApSegmentTransmittance(
         r, mu, d, hitGround, atmosphere.bottomRadius, atmosphere.topRadius);
@@ -108,14 +117,13 @@ vec4 cloudAirPerspectiveToPoint(
         inInscatterLut, linearClampEdgeSampler, atmosphere, r_p, mu_p, mu_s_p, nu, hitGround);
 
     vec3 diffR = max(s0.scattering - T * s1.scattering, vec3(0.0));
-    // combined 路径：Mie.r 段差后外推（与场景 ToPoint mieStorageMode=0 一致）
     float diffMieRed = max(s0.mieRed - T.r * s1.mieRed, 0.0);
     vec3 diffMie = cloudApExtrapolateSingleMie(
         diffR, diffMieRed, atmosphere.rayleighScattering, atmosphere.mieScattering);
 
-    vec3 scattered = cloudApApplyPhases(diffR, diffMie, nu, mu_s, atmosphere.miePhaseG);
-    float opacity = clamp(1.0 - dot(T, vec3(0.299, 0.587, 0.114)), 0.0, 1.0);
-    return vec4(scattered, opacity);
+    ap.scattered = cloudApApplyPhases(diffR, diffMie, nu, mu_s, atmosphere.miePhaseG);
+    ap.transmittance = T;
+    return ap;
 }
 
 #endif

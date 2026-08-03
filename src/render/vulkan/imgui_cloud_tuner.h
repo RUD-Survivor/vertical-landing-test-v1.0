@@ -448,11 +448,12 @@ inline void FlowerCloudTunerImGui(bool* p_open, FlowerCloudTuneParams& p,
 
     // ── 12. 空气透视 / 环境天光 ───────────────────────────────────────────
     if (ImGui::CollapsingHeader("空气透视 / 环境天光")) {
-        ImGui::Text("空气透视 (Inscatter ToPoint)");
+        ImGui::Text("空气透视 (Inscatter ToPoint，物理)");
         ImGui::Checkbox("AirPerspective Enabled", &p.airPerspectiveEnabled);
         ImGui::SliderFloat("AirPerspectiveSunScale", &p.airPerspectiveSunScale, 0.001f, 30.0f, "%.3f", ImGuiSliderFlags_Logarithmic);
-        ImGui::SliderFloat("AirPerspectiveScale", &p.airPerspectiveScale, 0.0f, 1.0f, "%.3f", ImGuiSliderFlags_Logarithmic);
-        ImGui::TextDisabled("混合权重 α'=α×Scale；L'=L×(1-α')+fog×α'（默认 0.01）");
+        ImGui::SliderFloat("AirPerspectiveScale", &p.airPerspectiveScale, 0.0f, 1.0f, "%.3f");
+        ImGui::TextDisabled("L'=L_air×Lsun×SunScale + T_air×L；T_eff≈luma(T_air)×T_cloud");
+        ImGui::TextDisabled("Scale=AP 强度(1=全物理)；SunScale 只乘 L_air");
         ImGui::Separator();
         ImGui::Text("环境天光 (μs LUT，与相机无关)");
         ImGui::SliderFloat("AmbientExposure", &p.ambientExposure, 0.1f, 50.0f, "%.2f", ImGuiSliderFlags_Logarithmic);

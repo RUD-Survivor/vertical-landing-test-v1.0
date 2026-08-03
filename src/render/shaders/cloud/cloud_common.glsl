@@ -1019,15 +1019,13 @@ float fogNoise)
                     *saturate(1.0-GroundOcc+normalizedHeight)
                     *frameData.sky.atmosphereConfig.cloudFogFade;
 
-                vec3 ambientLit=upScaleColor*powderEffect*(1.0-dot(sunDirection,normalize(samplePos)));
+                vec3 ambientLit=upScaleColor*powderEffect;
                 // ambientLit：云内环境光（天光经云自阴影后的散射照明）。
                 // 不乘 atmosphereTransmittance：那是「太阳方向」的路径衰减，而环境光走的是
                 // 整个天空半球；upScaleColor 本身就是大气积分的结果，已含各方向衰减，
                 // 再乘一遍等于重复衰减，低太阳角时会把环境光额外压暗并染上太阳路径的红。
-                // (1-dot(sunDirection,localUp))：太阳越贴近地平线（局部天顶角越大），环境天光占比越大；
-                // 正午直射主导时减弱。原版用 sunDirection.y 假设 Y 恒为当地天顶，行星尺度下
-                // 改成 dot(sunDirection, normalize(samplePos))（samplePos 已是行星中心为原点）。
-                // 乘 powderEffect：环境路也带一点粉末感。
+                // 昼夜/太阳高度由 sampleCloudAmbient 的 μs LUT 编码，不再乘 (1-μs) 正午压制。
+                // 乘 powderEffect：Legacy 模式下环境路也带一点粉末感。
 
                 // ── 介质光学系数：把 cloudMap 密度变成 RTE 里的 σ_s、σ_t ──
                 // 参与介质渲染方程（沿视线）：dL/ds = -σ_t·L + σ_s·L_in，dT/ds = -σ_t·T
@@ -1291,22 +1289,27 @@ float fogNoise)
             // 直接复用（等价于原来晚一点做的 rayHitPos-=worldPos，只是不再影响上面的投影）。
 
             //apply air perspective
-            // 空气透视：相机→云命中点的大气段散射（Bruneton GetSkyRadianceToPoint）。
-            // 与场景 atmo_inside/atmo_shell 的 ToPoint 路径同源（Inscatter + Transmittance LUT）。
-            // Inscatter 为单位太阳；这里乘 L_sun。AirPerspectiveSunScale / Scale 仍为艺术微调。
-            // 近距不做 fade：ToPoint 在 d≈0 时已返回 0，短路径物理上 T≈1/L≈0。
+            // 物理空气透视（与场景 ToPoint 同构）：
+            //   L' = L_air×L_sun + T_air×L_cloud
+            //   T_eff ≈ luma(T_air)×T_cloud  → 写入 alpha，composite 做 src×T_eff + L'
+            // AirPerspectiveScale∈[0,1]：整段 AP 强度（0=关，1=全物理）。
+            // AirPerspectiveSunScale：只乘 L_air。
             if(frameData.sky.atmosphereConfig.cloudAirPerspectiveEnabled != 0)
             {
                 vec3 cloudHitPos=worldPos+rayHitPos; // 行星中心相对 (km)
-                vec4 airPerspective=cloudAirPerspectiveToPoint(
+                CloudAirPerspective ap=cloudAirPerspectiveToPoint(
                     worldPos, cloudHitPos, worldDir, sunDirection, atmosphere);
 
+                float apScale=saturate(frameData.sky.atmosphereConfig.cloudAirPerspectiveScale);
                 vec3 Lsun=frameData.sky.color*frameData.sky.intensity;
-                airPerspective.rgb*=Lsun*frameData.sky.atmosphereConfig.cloudAirPerspectiveSunScale;
-                // 艺术 Scale 只缩放混合权重 α：L' = L×(1-α')+fog×α'
-                float apScale=frameData.sky.atmosphereConfig.cloudAirPerspectiveScale;
-                float apAlpha=saturate(airPerspective.a*apScale);
-                scatteredLight=scatteredLight*(1.0-apAlpha)+airPerspective.rgb*apAlpha;
+                vec3 T_air=mix(vec3(1.0), ap.transmittance, apScale);
+                vec3 L_air=ap.scattered*Lsun
+                    *frameData.sky.atmosphereConfig.cloudAirPerspectiveSunScale*apScale;
+
+                scatteredLight=L_air+T_air*scatteredLight;
+                // 云 RT 仅 4 通道：背景衰减用 luma(T_air)×T_cloud；L_cloud 已乘完整 RGB T_air。
+                float T_airLuma=dot(ap.transmittance, vec3(0.299, 0.587, 0.114));
+                transmittance*=mix(1.0, saturate(T_airLuma), apScale);
             }
         }
     }
@@ -1436,14 +1439,12 @@ float fogNoise)
     }
 
     //Dual mix transmittance
-    // flower 合成约定：RGB 存「未乘透射的散射辐射」L_scatter，A 存视线透射 T_view（不是传统 premultiplied alpha）。
-    // 后续 composite pass：finalColor = result.rgb + background.rgb * result.a
-    // 等价于 alpha_opacity = 1 - T：云越厚 T 越小，背景被挡越多。
+    // 合成约定：RGB = L'（含 AP：L_air + T_air×L_cloud），A = T_eff≈luma(T_air)×T_cloud。
+    // composite：final = src×A + RGB  ↔  L_air + T_air×L_cloud + T_eff×src
     vec4 result=vec4(scatteredLight,transmittance);
-    // result.rgb = scatteredLight：整条视线 cloud march（+ 789 行空气透视）累积的云散射光 RGB，HDR 辐射度。
-    // result.a   = transmittance：视线剩余透射 T_view∈[0,1]；1=全透明（无云），0=全挡背景。
-    // 与 cloud.frag 对比：那边输出 vec4(cloudColor*alpha, alpha)，alpha=1-viewTrans，已 tone-map 并 premultiply；
-    // flower 此处在 compute pass 写 raw L+T 到 imageCloudRenderTexture（binding 2），合成时再与 inHdrSceneColor 混合。
+    // result.rgb = scatteredLight：云散射 + 相机→云大气 in-scatter。
+    // result.a   = transmittance：T_cloud，若启用 AP 则已乘 luma(T_air)。
+    // flower 此处写 raw L+T 到 imageCloudRenderTexture；合成时再与 inHdrSceneColor 混合。
 
     if(any(isnan(result))||any(isinf(result)))
     {
@@ -1627,7 +1628,7 @@ float fogNoise)
 
       sunlightTerm ← atmosphereTransmittance × sunColor × scale
       groundLit    ← albedo×Ambient × nearGround × FogFade   // 仅云底；受 GroundContribution
-      ambientLit   ← upScaleColor × powder × (1-sunDir·up)
+      ambientLit   ← upScaleColor × powder
 
       σ_t ← density;  σ_s ← density × albedo
       scatteringCoefficients[ms], extinctionCoefficients[ms]  // MsCount=2
@@ -1667,8 +1668,7 @@ float fogNoise)
   rayHitPos /= rayHitPosWeight
   cloudZ ← (viewProj × rayHitPos).z/w          → 云深度 RT
   rayHitHeight ← length(rayHitPos - worldPos)
-  airPerspective ← Inscatter ToPoint(cam→cloudHit)  // 与场景大气同源
-  scatteredLight ← L×(1-α) + fogRGB×(1-transmittance)
+  airPerspective ← Inscatter ToPoint → L'=L_air+T_air×L，T_eff≈luma(T_air)×T_cloud
 
 --------------------------------------------------------------------------------
 【cloudColorCompute 阶段 4 — God Ray / bFog】

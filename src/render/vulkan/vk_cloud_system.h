@@ -86,13 +86,13 @@ struct FlowerCloudTuneParams {
     float phiFwdDepthBias = 0.0f;           // 底部锚点偏移；>0 云底保留更多漫射
     float phiFwdBoundaryConfidence = 1.0f;  // 云顶受光置信度强度（0=禁用背光抑制）
 
-    float phaseForward  = 0.f;
-    float phaseBackward = -0.5f;
-    float phaseMixFactor = 0.5f;
+    float phaseForward  = 0.8f;
+    float phaseBackward = -0.2f;
+    float phaseMixFactor = 0.125f;
     float powderScale = 1.0f;
     float powderPow   = 1.0f;
     // 0=Off 1=Legacy 2=Sugar；默认 Legacy
-    int   powderMode = 1;
+    int   powderMode = 2;
     bool  powderSugarAllMs = false;
     float powderSugarGain = 2.0f;
     float powderSugarViewWeight = 1.0f;
@@ -103,7 +103,7 @@ struct FlowerCloudTuneParams {
     // Bruneton/Hillaire 大气积分对"太阳辐照度"的物理量级要求，和引擎其余部分（atmo.frag 等）
     // 手调出来的 sunIntensity(~1.0) 未必是同一套标定。Inscatter/Ambient 按单位太阳烘焙；
     // 本值是运行时全局曝光：L_sun = color × snap.sunIntensity × sunIntensityMul。
-    float sunIntensityMul = 100.0f;
+    float sunIntensityMul = 3.0f;
     // 0=正常；1–7 中间量；8–15 厚云发暗诊断（见 cloud_common.glsl dbgMode）。
     // 借用 cloudSunLitMapOctave 传给 shader。
     int debugMode = 0;
@@ -166,13 +166,13 @@ struct FlowerCloudTuneParams {
     float hiCloudSoftness = 0.2f;             // 阈值过渡宽度
     float hiCloudType = 1.0f;                 // 高空云类型偏好（0=As 1=Ac）
 
-    // Inscatter ToPoint 空气透视：单位太阳；运行时 × L_sun × airPerspectiveSunScale
+    // Inscatter ToPoint 空气透视：L'=L_air×L_sun + T_air×L；T_eff≈luma(T_air)×T_cloud
     bool  airPerspectiveEnabled = true;       // cloudAirPerspectiveEnabled
-    float airPerspectiveSunScale = 1.0f;      // 相对 L_sun 的雾色倍率（默认 1=与云直射同源）
-    float airPerspectiveScale = 0.1f;        // 采样混合权重倍率（α'=α×此值；默认 0.01）
+    float airPerspectiveSunScale = 1.0f;      // 相对 L_sun 的 L_air 倍率
+    float airPerspectiveScale = 1.0f;         // AP 强度 [0,1]；1=全物理
 
     // 环境天光：单位太阳 μs LUT × L_sun × ambientExposure
-    float ambientExposure = 1.0f;
+    float ambientExposure = 12.0f;
     float ambientAnalyticBlend = 0.f;
 
     // God Ray（400m 近距体积雾光柱 march，cloud_composite.glsl:108 起）。默认关闭——
