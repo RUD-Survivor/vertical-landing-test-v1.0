@@ -107,6 +107,12 @@ struct AtmosphereConfig
     float cloudPowderScale;
     float cloudPowderPow;
 
+    // Powder 模式：0=Off 1=Legacy(powderEffectNew) 2=Sugar(堆糖 2·Beer·(1-e^{-2τ}))
+    int   cloudPowderMode;
+    int   cloudPowderSugarAllMs;        // Sugar：0=仅 ms0，1=每阶都乘
+    float cloudPowderSugarGain;         // 原文 ×2；可调
+    float cloudPowderSugarViewWeight;   // 0=按 -VoL 门控，1=全向套用原文
+
     float cloudLightStepMul;
     float cloudLightBasicStep;
     int  cloudLightStepNum;
@@ -162,7 +168,7 @@ struct AtmosphereConfig
     // ── phi_fwd 物理漫射场（cloud_common.glsl::volumetricShadow / cloudColorCompute）──
     // 扩散近似（τ≫1、g_eff→0）下的各向同性多重散射，沿太阳光步用 1D 格林函数累加，
     // 作为与 Frostbite MsCount 假 MS 正交的「加性」散射项。Intensity=0 时整条路径跳过。
-    float cloudPhiFwdIntensity;          // 总强度；0=关闭（画面与未接入前一致）
+    float cloudPhiFwdIntensity;          // 标定强度（非 0~1）；0=关。吸收 1/(4πD) 等，常用 10~1000
     float cloudPhiFwdMsBuildScale;       // C_iso：各向同性 MS 建立速度（越大越早转漫射）
     float cloudPhiFwdCompress;           // 软饱和压缩；0=线性不压缩
     float cloudPhiFwdDepthPow;           // C_bottom：底部置信度恢复速度；0=禁用底部软化
@@ -190,12 +196,8 @@ struct AtmosphereConfig
     float hiCloudThreshold;          // hi 覆盖阈值（低于此值密度=0）
     float hiCloudSoftness;           // 阈值过渡宽度
     float hiCloudType;               // 高空云类型偏好（0=As，1=Ac；与天气图 G 各取一半）
-    float hiCloudPad0;
-    // 补到 16 字节整数倍（std140 嵌套 struct 向上取整到 16；与 gpu_frame_data.h 同名 pad）。
-    // 块内总计 15 个 float（60B），配合前段 692B → 整 struct 752B（=47×16，对齐成立）。
-    float cloudProfilePad2;
-    float cloudProfilePad3;
-    float cloudProfilePad4;
+    // 原 hiCloudPad0 + cloudProfilePad2/3/4（16B）已挪到 cloudPowderMode 块，保 752B。
+    // 本段 11×float=44B；前段含 powder 模式块 708B → 752B（=47×16）。
 };
 
 struct SkyInfo

@@ -96,6 +96,12 @@ struct GpuAtmosphereConfig {
     float cloudPowderScale = 1.f;
     float cloudPowderPow = 1.f;
 
+    // 0=Off 1=Legacy 2=Sugar；默认 Legacy，与接入堆糖前行为一致
+    int32_t cloudPowderMode = 1;
+    int32_t cloudPowderSugarAllMs = 0;
+    float cloudPowderSugarGain = 2.f;
+    float cloudPowderSugarViewWeight = 1.f;
+
     float cloudLightStepMul = 1.5f;
     float cloudLightBasicStep = 0.033f;
     int32_t cloudLightStepNum = 6;
@@ -164,12 +170,7 @@ struct GpuAtmosphereConfig {
     float hiCloudThreshold = 0.05f;
     float hiCloudSoftness = 0.2f;
     float hiCloudType = 1.f;
-    float hiCloudPad0 = 0.f;
-    // 补到 16 字节整数倍（std140 嵌套 struct 向上取整到 16；与 shared_struct.glsl 同名 pad）。
-    // 块内总计 15 个 float（60B），配合前段 692B → 整 struct 752B（=47×16，对齐成立）。
-    float cloudProfilePad2 = 0.f;
-    float cloudProfilePad3 = 0.f;
-    float cloudProfilePad4 = 0.f;
+    // 原 hiCloudPad0 + cloudProfilePad2/3/4（16B）已挪到 cloudPowderMode 块，保 752B。
 };
 static_assert(sizeof(GpuAtmosphereConfig) == 752, "GpuAtmosphereConfig must match std140 AtmosphereConfig");
 

@@ -71,25 +71,31 @@ struct FlowerCloudTuneParams {
     bool  noiseLodEnabled = true;
     float noiseLodNMin = CloudNoiseLadder::kDefaultLodNMin;
     float noiseLodShadowDistScale = CloudNoiseLadder::kDefaultLodShadowDistScale;
-    float multiScatterExtinction = 0.5f;
-    float multiScatterScatter    = 0.5f;
+    float multiScatterExtinction = 0.175f;
+    float multiScatterScatter    = 1.0f;
 
     // ── phi_fwd 物理漫射场（cloud_common.glsl::volumetricShadow / cloudColorCompute）──
     // 扩散近似（τ≫1、g_eff→0）下的各向同性多重散射：沿太阳光步用 1D 格林函数累加，
     // 视线侧作为「加性」项注入，与上面的 Frostbite 假 MS 正交——两套分开调，
     // 先固定 multiScatter*，再开 phiFwd。Intensity=0 时 shader 整条路径跳过。
-    float phiFwdIntensity = 4.0f;           // 0=关闭（画面与接入前一致）
+    // 标定旋钮（非 0~1）：公式含 σ_t²·Δs·(1/r_m)，常用可见量级约 10~1000。
+    float phiFwdIntensity = 1000.0f;         // 0=关闭；默认提到可见区，过曝再降或开 Compress
     float phiFwdMsBuildScale = 1.0f;        // 各向同性建立速度；越大越早从方向性转漫射
     float phiFwdCompress = 0.0f;            // 软饱和；0=线性不压缩
     float phiFwdDepthPow = 1.0f;            // 底部置信度恢复速度；0=禁用底部软化
     float phiFwdDepthBias = 0.0f;           // 底部锚点偏移；>0 云底保留更多漫射
     float phiFwdBoundaryConfidence = 1.0f;  // 云顶受光置信度强度（0=禁用背光抑制）
 
-    float phaseForward  = 0.6f;
-    float phaseBackward = -0.2f;
+    float phaseForward  = 0.f;
+    float phaseBackward = -0.5f;
     float phaseMixFactor = 0.5f;
     float powderScale = 1.0f;
-    float powderPow   = 0.1f;
+    float powderPow   = 1.0f;
+    // 0=Off 1=Legacy 2=Sugar；默认 Legacy
+    int   powderMode = 1;
+    bool  powderSugarAllMs = false;
+    float powderSugarGain = 2.0f;
+    float powderSugarViewWeight = 1.0f;
     float sunLightScale = 1.0f;
     float minAltKm = 1.0f;
     float maxAltKm = 20.0f;
@@ -126,7 +132,7 @@ struct FlowerCloudTuneParams {
     // 沿太阳方向体积阴影步进（volumetricShadow）
     float lightStepMul = 1.5f;                // cloudLightStepMul
     float lightBasicStepKm = 0.03f;          // cloudLightBasicStep (km)
-    int   lightStepNum = 8;                   // cloudLightStepNum
+    int   lightStepNum = 12;                   // cloudLightStepNum
 
     // 天气 / 风
     float weatherUVScale = 1.f;               // cloudWeatherUVScale
@@ -163,7 +169,7 @@ struct FlowerCloudTuneParams {
     // Inscatter ToPoint 空气透视：单位太阳；运行时 × L_sun × airPerspectiveSunScale
     bool  airPerspectiveEnabled = true;       // cloudAirPerspectiveEnabled
     float airPerspectiveSunScale = 1.0f;      // 相对 L_sun 的雾色倍率（默认 1=与云直射同源）
-    float airPerspectiveScale = 0.01f;        // 采样混合权重倍率（α'=α×此值；默认 0.01）
+    float airPerspectiveScale = 0.1f;        // 采样混合权重倍率（α'=α×此值；默认 0.01）
 
     // 环境天光：单位太阳 μs LUT × L_sun × ambientExposure
     float ambientExposure = 1.0f;
@@ -546,6 +552,10 @@ private:
         ac.cloudPhaseMixFactor = tuneParams.phaseMixFactor;
         ac.cloudPowderScale = tuneParams.powderScale;
         ac.cloudPowderPow = tuneParams.powderPow;
+        ac.cloudPowderMode = (tuneParams.powderMode < 0) ? 0 : (tuneParams.powderMode > 2 ? 2 : tuneParams.powderMode);
+        ac.cloudPowderSugarAllMs = tuneParams.powderSugarAllMs ? 1 : 0;
+        ac.cloudPowderSugarGain = tuneParams.powderSugarGain;
+        ac.cloudPowderSugarViewWeight = tuneParams.powderSugarViewWeight;
         ac.cloudShadingSunLightScale = tuneParams.sunLightScale;
         ac.cloudSpeed = tuneParams.speed;
         ac.cloudSunLitMapOctave = tuneParams.debugMode;

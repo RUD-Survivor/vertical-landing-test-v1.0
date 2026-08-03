@@ -393,10 +393,14 @@ inline void FlowerCloudTunerImGui(bool* p_open, FlowerCloudTuneParams& p,
         ImGui::Separator();
         ImGui::Text("PhiFwd 漫射场（各向同性 MS，加性）");
         ImGui::TextDisabled("与上面 MsExtinction/MsScatter 正交：先固定假 MS，再调本组");
-        ImGui::SliderFloat("PhiFwdIntensity", &p.phiFwdIntensity, 0.0f, 4.0f, "%.3f");
-        ImGui::TextDisabled("0=关闭（画面回到接入前）；建议 0→0.2→1 逐步加");
+        // Intensity 吸收离散格林函数里缺的 1/(4πD) 等常数，再乘米制 1/r，
+        // 不是 0~1 物理量；0~4 通常 ≪ 直射，厚云芯要用 10^1~10^3 量级才看得见。
+        ImGui::SliderFloat("PhiFwdIntensity", &p.phiFwdIntensity, 0.0f, 10000.0f, "%.1f", ImGuiSliderFlags_Logarithmic);
+        ImGui::TextDisabled("0=关；对数滑条。先 dbg16 确认非黑，再 0→10→100→1000 对厚云暗部");
         ImGui::SliderFloat("PhiFwdMsBuild", &p.phiFwdMsBuildScale, 0.0f, 8.0f, "%.2f");
+        ImGui::TextDisabled("越大越早建立各向同性；0=几乎不积 φ");
         ImGui::SliderFloat("PhiFwdCompress", &p.phiFwdCompress, 0.0f, 4.0f, "%.2f");
+        ImGui::TextDisabled("软饱和；0=线性。Intensity 很大时用 0.1~1 防云芯爆");
         ImGui::SliderFloat("PhiFwdDepthPow", &p.phiFwdDepthPow, 0.0f, 4.0f, "%.2f");
         ImGui::SliderFloat("PhiFwdDepthBias", &p.phiFwdDepthBias, -0.3f, 0.5f, "%.3f");
         ImGui::TextDisabled("底部置信度：Pow=0 禁用；Bias>0 让云底保留更多漫射光");
@@ -409,8 +413,21 @@ inline void FlowerCloudTunerImGui(bool* p_open, FlowerCloudTuneParams& p,
         ImGui::SliderFloat("PhaseForward", &p.phaseForward, 0.0f, 0.99f, "%.3f");
         ImGui::SliderFloat("PhaseBackward", &p.phaseBackward, -0.99f, 0.0f, "%.3f");
         ImGui::SliderFloat("PhaseMix", &p.phaseMixFactor, 0.0f, 1.0f, "%.3f");
-        ImGui::SliderFloat("PowderScale", &p.powderScale, 0.0f, 4.0f, "%.2f");
-        ImGui::SliderFloat("PowderPow", &p.powderPow, 0.0f, 4.0f, "%.2f");
+        ImGui::Separator();
+        const char* powderModes[] = { "Off", "Legacy", "Sugar" };
+        ImGui::Combo("PowderMode", &p.powderMode, powderModes, 3);
+        ImGui::TextDisabled("Off=无粉末; Legacy=density×高×VoL; Sugar=2·Beer·(1-e^{-2τ})");
+        if (p.powderMode == 1) {
+            ImGui::SliderFloat("PowderScale", &p.powderScale, 0.0f, 4.0f, "%.2f");
+            ImGui::SliderFloat("PowderPow", &p.powderPow, 0.0f, 4.0f, "%.2f");
+        } else if (p.powderMode == 2) {
+            ImGui::Checkbox("SugarApplyToAllMs", &p.powderSugarAllMs);
+            ImGui::TextDisabled("关=仅 ms0（推荐）; 开=每阶都乘（易与 Ms/phi_fwd 叠亮）");
+            ImGui::SliderFloat("SugarGain", &p.powderSugarGain, 0.0f, 4.0f, "%.2f");
+            ImGui::TextDisabled("原文 ×2；薄处 energy≈Beer，中等 τ 鼓包");
+            ImGui::SliderFloat("SugarViewWeight", &p.powderSugarViewWeight, 0.0f, 1.0f, "%.2f");
+            ImGui::TextDisabled("0=按 -VoL 门控（太阳在身后）; 1=全向套用原文");
+        }
     }
 
     // ── 11. 光照与高度 ────────────────────────────────────────────────────

@@ -299,6 +299,10 @@ inline void fillPlanetAtmosphereProfile(GpuAtmosphereConfig& cfg, int32_t atmoId
     cfg.cloudPhaseMixFactor = 0.5f;
     cfg.cloudPowderScale = 1.0f;
     cfg.cloudPowderPow = 1.0f;
+    cfg.cloudPowderMode = 1; // Legacy
+    cfg.cloudPowderSugarAllMs = 0;
+    cfg.cloudPowderSugarGain = 2.0f;
+    cfg.cloudPowderSugarViewWeight = 1.0f;
     cfg.cloudLightStepMul = 1.5f;
     cfg.cloudLightBasicStep = 0.033f;
     cfg.cloudLightStepNum = 6;

@@ -974,45 +974,29 @@ float fogNoise)
 
                 }
 
-                //compute powder term
-                float powderEffect;
-                // powderEffect：粉末/银边效应乘子；厚云背光、云底、掠射时提亮，避免死黑。
+                // powder：互斥模式 Off / Legacy / Sugar（cloudPowderMode，默认 Legacy）。
+                // Legacy → powderEffect 乘子（density×高×VoL）；Sugar → 改写 sunVisibility（见 ms 循环）；
+                // Off/Sugar 时 powderEffect=1，避免与堆糖双计银边。
+                float powderEffect=1.0;
+                const int powderMode=frameData.sky.atmosphereConfig.cloudPowderMode;
+                if(powderMode==CLOUD_POWDER_MODE_LEGACY)
                 {
-                    // depthProbability：粉末的「厚度因子」（名字带 Probability，但不是统计学概率，而是 0~若干 的强度标量）。
-                    // 物理直觉：局部越厚，光在微滴里多次散射越多，背光侧越容易出现银边/粉边；薄处应弱。
-                    // 计算分三步：
-                    //   (1) raw = stepCloudDensity * 8.0 * cloudPowderPow
-                    //       stepCloudDensity 即本步云密度；*8 放大灵敏度（与 cloud.frag 的 powderDepth 同源）；
-                    //       cloudPowderPow 是美术强度旋钮。
-                    //   (2) clamp(raw, 0, cloudPowderScale) 封顶，防极密处粉末爆炸。
-                    //   (3) pow(..., exponent)。Flower 原 remap(h,0.3,0.85,0.5,2.0) 在云顶钳到指数 2，
-                    // 太空俯视不透明顶会被压暗；恒用 0.5（√）保留厚度对比/立体感且顶不发黑。
+                    // depthProbability：厚度因子（非概率）。raw=density*8*Pow，clamp 到 Scale，再 √。
                     const float heightPowExponent=0.5;
                     float depthProbability=pow(clamp(stepCloudDensity*8.0*frameData.sky.atmosphereConfig.cloudPowderPow,0.0,frameData.sky.atmosphereConfig.cloudPowderScale),heightPowExponent);
-
                     depthProbability+=0.05;
-                    // 保底 0.05，薄云/低密度也有轻微粉末，避免完全死黑。
-
                     float verticalProbability=pow(remap(normalizedHeight,0.07,0.22,0.1,1.0),0.8);
-                    // verticalProbability：粉末的「高度因子」，与 depthProbability 正交。
-                    // remap(h,0.07,0.22,0.1,1.0)：云底 7%~22% 高度带从 0.1 升到 1.0（积云下缘银边最明显）；
-                    // h<0.07 → 0.1；h>0.22 → 1.0。再 pow(...,0.8) 略压曲线，过渡更柔。
-
-                    powderEffect=powderEffectNew(depthProbability,verticalProbability,VoL);//粉末效应
-                    // VoL=视线·光向：背光 VoL 负 → powder 更强；顺光减弱，防正面过曝。
-                    // dbg 12：强制 1，对照积分上限。
-                    if(dbgMode==12)
-                    {
-                        powderEffect=1.0;
-                    }
-                    // dbg 13/14：累加实际参与光照的 powder / 云内高度。
-                    if(dbgMode==13||dbgMode==14)
-                    {
-                        dbgPowderAcc+=powderEffect*transmittance;
-                        dbgHeightAcc+=normalizedHeight*transmittance;
-                        dbgSampleWeight+=transmittance;
-                    }
-
+                    powderEffect=powderEffectNew(depthProbability,verticalProbability,VoL);
+                }
+                if(dbgMode==12)
+                {
+                    powderEffect=1.0;
+                }
+                if(dbgMode==13||dbgMode==14)
+                {
+                    dbgPowderAcc+=powderEffect*transmittance;
+                    dbgHeightAcc+=normalizedHeight*transmittance;
+                    dbgSampleWeight+=transmittance;
                 }
 
                 
@@ -1145,6 +1129,22 @@ float fogNoise)
                     // sunVisibilityTerm：太阳路的云遮挡系数 T∈[0,1]（来自 volumetricShadow 沿 sunDirection）。
                     // 0=采样点与太阳之间云很厚，直射几乎全挡；1=之间几乎无云。
                     // ms=0 是真实云影；ms=1 是高阶近似，影更浅（多次散射把暗部提亮）。
+
+                    // Sugar 模式：用光路 τ 套堆糖 energy=gain·Beer·(1-e^{-2τ})，替代纯 Beer。
+                    // AllMs=0 时只改 ms0（推荐）；=1 时每阶都乘（易与 Frostbite Ms / phi_fwd 叠亮）。
+                    if(powderMode==CLOUD_POWDER_MODE_SUGAR)
+                    {
+                        const bool applySugar=(frameData.sky.atmosphereConfig.cloudPowderSugarAllMs!=0)||(ms==0);
+                        if(applySugar)
+                        {
+                            sunVisibilityTerm=powderSugarSunVisibility(
+                                sunVisibilityTerm,
+                                participatingMedia.extinctionAcc[ms],
+                                VoL,
+                                frameData.sky.atmosphereConfig.cloudPowderSugarGain,
+                                frameData.sky.atmosphereConfig.cloudPowderSugarViewWeight);
+                        }
+                    }
 
                     // dbg 11：在强制影之前累加真实 sunVis[0]（只看直射影深，不看高阶）。
                     if(dbgMode==11&&ms==0)
@@ -1290,21 +1290,16 @@ float fogNoise)
             // 后面 792 行 rayHitHeight 需要"相机到命中点"的偏移向量，正好是 offsetKm，
             // 直接复用（等价于原来晚一点做的 rayHitPos-=worldPos，只是不再影响上面的投影）。
 
-            float rayHitHeight=length(rayHitPos);
-            // rayHitHeight：相机到加权命中点的直线距离 (km)。近距 fade 用，不是查表索引。
-
             //apply air perspective
             // 空气透视：相机→云命中点的大气段散射（Bruneton GetSkyRadianceToPoint）。
             // 与场景 atmo_inside/atmo_shell 的 ToPoint 路径同源（Inscatter + Transmittance LUT）。
             // Inscatter 为单位太阳；这里乘 L_sun。AirPerspectiveSunScale / Scale 仍为艺术微调。
+            // 近距不做 fade：ToPoint 在 d≈0 时已返回 0，短路径物理上 T≈1/L≈0。
             if(frameData.sky.atmosphereConfig.cloudAirPerspectiveEnabled != 0)
             {
-                // 近距 fade：<2km 淡出，避免贴脸 AP 突变（旧 Froxel slice<0.5 同量级）。
-                float nearFade=saturate(rayHitHeight*(1.0/2.0));
                 vec3 cloudHitPos=worldPos+rayHitPos; // 行星中心相对 (km)
                 vec4 airPerspective=cloudAirPerspectiveToPoint(
                     worldPos, cloudHitPos, worldDir, sunDirection, atmosphere);
-                airPerspective*=nearFade;
 
                 vec3 Lsun=frameData.sky.color*frameData.sky.intensity;
                 airPerspective.rgb*=Lsun*frameData.sky.atmosphereConfig.cloudAirPerspectiveSunScale;
@@ -1538,7 +1533,7 @@ float fogNoise)
   A  1-72    头、binding 0-30、shared_sampler/bluenoise include
   B  74-92   getDensity, MsCount, ParticipatingMedia struct, remap
   C  99-168  cloudMap() → 云密度标量
-  D  173-239  getParticipatingMediaPhase, powder, powderEffectNew, lookupSkylight
+  D  lighting  getParticipatingMediaPhase, powderEffectNew, powderSugarSunVisibility, lookupSkylight
   E  241-297 volumetricShadow() → transmittanceToLight[MsCount] + phiFwd（各向同性漫射场）
        ← phiFwdTopHeightProxy / phiFwdBoundaryTerms（边界项 B_eff，天气图 coverage 差分）
   F  300-1014 cloudColorCompute() ★主入口
@@ -1627,7 +1622,8 @@ float fogNoise)
       participatingMedia        ← volumetricShadow(samplePos, sunDirection, bPhiFwd=true)
       participatingMediaAmbient ← volumetricShadow(samplePos, vec3(0,1,0), bPhiFwd=false)  // 可选
 
-      powderEffect ← powderEffectNew(depthProbability, verticalProbability, VoL)
+      powderEffect ← Legacy? powderEffectNew(...) : 1
+      // Sugar：ms 循环里 sunVis ← powderSugarSunVisibility(beer, τ, VoL, gain, viewW)
 
       sunlightTerm ← atmosphereTransmittance × sunColor × scale
       groundLit    ← albedo×Ambient × nearGround × FogFade   // 仅云底；受 GroundContribution

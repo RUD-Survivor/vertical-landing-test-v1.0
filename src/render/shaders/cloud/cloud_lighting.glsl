@@ -6,14 +6,21 @@
 //
 // 低云 / 高空云并进 cloudMap 后共用主 march，以下函数为光照组装：
 //   • sampleCloudAmbient       环境天光（μs LUT × L_sun × Exposure）
-//   • powderEffectNew          粉末/银边（depth×height 随 VoL）
+//   • powderEffectNew          Legacy 粉末/银边（density×height 随 VoL）
+//   • powderSugarSunVisibility 堆糖：2·Beer·(1-e^{-2τ})，可按 VoL 门控
 //   • cloudInScatterLuminance  组装某散射阶入射光 L_in（太阳路+可选环境/地面路）
 //   • cloudScatterStep         RTE 前向积分的一步散射增量
+//
+// cloudPowderMode：0=Off 1=Legacy 2=Sugar（互斥；默认 Legacy）。
 //
 // 依赖（由 cloud_common.glsl 在 include 前提供）：
 //   frameData（binding 21）、inCloudAmbientMusLut（binding 27）、
 //   linearClampEdgeSampler（Set1）、analyticSkyAmbient（shared_atmosphere.glsl）。
 // ==========================================================================
+
+#define CLOUD_POWDER_MODE_OFF     0
+#define CLOUD_POWDER_MODE_LEGACY  1
+#define CLOUD_POWDER_MODE_SUGAR   2
 
 // 环境天光：单位太阳 μs LUT × L_sun × cloudAmbientExposure（与相机无关）。
 vec3 sampleCloudAmbient(const in AtmosphereParameters atmosphere, vec3 posKm, vec3 sunDirection)
@@ -30,7 +37,7 @@ vec3 sampleCloudAmbient(const in AtmosphereParameters atmosphere, vec3 posKm, ve
     return mix(lutColor, analytic, analBlend) * expos * Lsun;
 }
 
-// 粉末/银边：让云在背光、厚、云底时不要太黑，并随朝向太阳变化。
+// Legacy 粉末/银边：让云在背光、厚、云底时不要太黑，并随朝向太阳变化。
 // depth=厚度因子；height=云底概率；VoL=dot(视线,光向)（背光为负）。
 float powderEffectNew(float depth, float height, float VoL)
 {
@@ -38,6 +45,17 @@ float powderEffectNew(float depth, float height, float VoL)
     r = r * r;
     height = height * (1.0 - r) + r;
     return depth * height;
+}
+
+// 堆糖（Powdered Sugar）：用光路光学深度 τ 修正 Beer，折痕/凸起对比。
+// beer = exp(-τ)；sugar = 1-exp(-2τ)；energy = gain·beer·sugar（gain 默认 2）。
+// viewWeight：1=全向套用原文；0=仅当太阳在身后（-VoL）时混入。
+float powderSugarSunVisibility(float beer, float tau, float VoL, float gain, float viewWeight)
+{
+    float sugar = 1.0 - exp(-tau * 2.0);
+    float lightEnergy = max(gain, 0.0) * beer * sugar;
+    float applyW = mix(saturate(-VoL), 1.0, saturate(viewWeight));
+    return mix(beer, lightEnergy, applyW);
 }
 
 // 组装某散射阶的入射光 L_in（单位：亮度）：
