@@ -66,8 +66,9 @@ void main()
     // vec4 cloudColor = kuwaharaFilter(inCloudReconstructionTexture, linearClampEdgeSampler,uv);
 
     //读来自cloud_reconstruct的三张全分辨率RT
-    vec4 cloudColor = texture(sampler2D(inCloudReconstructionTexture, linearClampEdgeSampler), uv);//rgb是云散射光L，a是视线透射T[0,1]
+    vec4 cloudColor = texture(sampler2D(inCloudReconstructionTexture, linearClampEdgeSampler), uv);//rgb是云散射光L'，a是云视线透射T_cloud
     vec4 fogColor = texture(sampler2D(inCloudFogReconstructionTexture, linearClampEdgeSampler), uv);//
+    vec3 airT = texture(sampler2D(inCloudAirTReconstructionTexture, linearClampEdgeSampler), uv).rgb; // 相机→云大气 RGB 透射
     //linearClampEdgeSampler：双线性 + 边缘 clamp
 
     float cloudDepth = texture(sampler2D(inCloudDepthReconstructionTexture, linearClampEdgeSampler), uv).r;
@@ -88,9 +89,9 @@ void main()
 
     if(bComposite)
     {
-        // Composite：result = src×T_eff + L'
-        // T_eff = A（含 luma(T_air)×T_cloud）；L' 已含 L_air + T_air×L_cloud。
-        result = srcColor.rgb * cloudColor.a + cloudColor.rgb;
+        // Composite：result = src×(T_air×T_cloud) + L'
+        // L' 已含 L_air + T_air×L_cloud；T_cloud = cloudColor.a。
+        result = srcColor.rgb * (airT * cloudColor.a) + cloudColor.rgb;
 
         if(fogColor.a >= 0.0f)//有雾才叠，当a==-1时表示该像素未算雾
         {

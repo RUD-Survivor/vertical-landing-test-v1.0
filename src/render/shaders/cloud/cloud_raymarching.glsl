@@ -58,20 +58,23 @@ void main()
 
     float depth = 1.0f;
     vec4 fogLighting = vec4(0.0);
+    vec3 airTransmittance = vec3(1.0);
 
     vec4 cloudColor = cloudColorCompute(atmosphere, uv, blueNoise2, depth, workPos, worldDir,
-        frameData.sky.atmosphereConfig.cloudGodRay != 0, fogLighting, blueNoise2);
+        frameData.sky.atmosphereConfig.cloudGodRay != 0, fogLighting, blueNoise2, airTransmittance);
 
     if(bQuarterRes)
     {
         imageStore(imageCloudRenderTexture, workPos, cloudColor);
         imageStore(imageCloudDepthTexture, workPos, vec4(depth));
         imageStore(imageCloudFogRenderTexture, workPos, fogLighting);
+        imageStore(imageCloudAirTRenderTexture, workPos, vec4(airTransmittance, 1.0));
     }
     else
     {
         imageStore(imageCloudReconstructionTexture, workPos, cloudColor);
         imageStore(imageCloudDepthReconstructionTexture, workPos, vec4(depth));
         imageStore(imageCloudFogReconstructionTexture, workPos, fogLighting);
+        imageStore(imageCloudAirTReconstructionTexture, workPos, vec4(airTransmittance, 1.0));
     }
 }

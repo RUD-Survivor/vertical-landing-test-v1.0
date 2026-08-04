@@ -39,15 +39,17 @@ void main()
     const bool bPrevUvValid = onRange(uvPrev, vec2(0.0), vec2(1.0)) && (!bCameraCut);//重投影点还在屏幕内；飞出屏幕的历史无效；相机瞬切（切镜头/传送）时上一帧对不上，禁用 history
     //如果为true用history采样，为false只用当前 1/4 双线性上采样，不做时域混合
 
-    //———————————————————————————完整时域重投影逻辑，在全分辨率上，把 1/4 分辨率的云数据「填洞 + 时域稳定」，输出三张全分辨率 RT————————————————————————————————————
+    //———————————————————————————完整时域重投影逻辑，在全分辨率上，把 1/4 分辨率的云数据「填洞 + 时域稳定」————————————————————————————————————
     vec4 color = vec4(0.0);
     vec4 fog = vec4(0.0);
+    vec4 airT = vec4(1.0);
     float depthZ = 0.0;
     if(bPrevUvValid)//
     {
         // Evaluate, fetch it.
         vec4 curColor   = texelFetch(inCloudRenderTexture, workPos / 4, 0);
         vec4 curFog   = texelFetch(inCloudFogRenderTexture, workPos / 4, 0);
+        vec4 curAirT  = texelFetch(inCloudAirTRenderTexture, workPos / 4, 0);
         float curDepthZ = texelFetch(inCloudDepthTexture,  workPos / 4, 0).r;
 
         float preDepthZ = texture(sampler2D(inCloudDepthReconstructionTextureHistory,  linearClampEdgeSampler), uvPrev).r;
@@ -62,6 +64,7 @@ void main()
             depthZ = curDepthZ;
         #if 1// flower 直出：本帧 raymarch 结果直接写入，不做方差钳制时域混合（试效果）
             color = curColor;
+            airT = curAirT;
         #else
             if(abs(preDepthZ - curDepthZ) > 0.1)
             {
@@ -112,6 +115,7 @@ void main()
             if(abs(preDepthZ - curDepthZ) > 0.1)//云的深度不一致（云层遮挡关系变了/云位置变了/相机位置变了）,0.1阈值为经验值
             {
                 fog = curFog;//只用本帧curFog
+                airT = curAirT;
             }
             else//深度一致
             {
@@ -149,6 +153,7 @@ void main()
                 }
 
                 fog  = mix(clampColorHistory,  curFog, 0.5);//各50%混合history和curFog，不仅稳定又要能跟上变化
+                airT = curAirT;
             }
         #endif
         }
@@ -157,6 +162,7 @@ void main()
             // Prev uv valid, sample history with prev Uv.
             color  =  texture(sampler2D(inCloudReconstructionTextureHistory,  linearClampEdgeSampler), uvPrev);//读上一帧全分辨率云颜色 history，RGB = 散射L，A = 透射T
             fog  =  texture(sampler2D(inCloudFogReconstructionTextureHistory,  linearClampEdgeSampler), uvPrev);//上一帧全分辨率雾/God Ray history
+            airT =  texture(sampler2D(inCloudAirTReconstructionTextureHistory, linearClampEdgeSampler), uvPrev);
             depthZ = preDepthZ;//上一帧的代表深度
             //linearClampEdgeSampler：在 history 上双线性采样；边缘 clamp，避免 repeat 伪影
         }
@@ -176,6 +182,8 @@ void main()
         fog = texture(sampler2D(inCloudFogRenderTexture, linearClampEdgeSampler), uv);
         // God Ray / 低层体积雾；RS3D 若未启用 God Ray，此 RT 可能全 0
 
+        airT = texture(sampler2D(inCloudAirTRenderTexture, linearClampEdgeSampler), uv);
+
         depthZ = texture(sampler2D(inCloudDepthTexture, linearClampEdgeSampler), uv).r;
         // 云代表深度 cloudZ；与 texelFetch 点采样不同，这里对 1/4 深度做双线性插值
     }
@@ -186,6 +194,9 @@ void main()
 
     imageStore(imageCloudFogReconstructionTexture, workPos, fog);
     // binding 24：全分辨率雾/God Ray；composite pass 叠加到场景
+
+    imageStore(imageCloudAirTReconstructionTexture, workPos, airT);
+    // binding 35：全分辨率相机→云大气 RGB 透射 T_air
 
     imageStore(imageCloudDepthReconstructionTexture, workPos, vec4(depthZ));
     // binding 16：全分辨率云深度；下一帧作为 inCloudDepthReconstructionTextureHistory 参与重投影

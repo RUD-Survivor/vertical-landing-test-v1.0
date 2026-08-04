@@ -452,8 +452,8 @@ inline void FlowerCloudTunerImGui(bool* p_open, FlowerCloudTuneParams& p,
         ImGui::Checkbox("AirPerspective Enabled", &p.airPerspectiveEnabled);
         ImGui::SliderFloat("AirPerspectiveSunScale", &p.airPerspectiveSunScale, 0.001f, 30.0f, "%.3f", ImGuiSliderFlags_Logarithmic);
         ImGui::SliderFloat("AirPerspectiveScale", &p.airPerspectiveScale, 0.0f, 1.0f, "%.3f");
-        ImGui::TextDisabled("L'=L_air×Lsun×SunScale + T_air×L；T_eff≈luma(T_air)×T_cloud");
-        ImGui::TextDisabled("Scale=AP 强度(1=全物理)；SunScale 只乘 L_air");
+        ImGui::TextDisabled("L'=L_air×Lsun×SunScale + T_air×L；composite=src×(T_air×T_cloud)+L'");
+        ImGui::TextDisabled("Scale=AP 强度(1=全物理)；SunScale 只乘 L_air；T_air 为独立 RGB RT");
         ImGui::Separator();
         ImGui::Text("环境天光 (μs LUT，与相机无关)");
         ImGui::SliderFloat("AmbientExposure", &p.ambientExposure, 0.1f, 50.0f, "%.2f", ImGuiSliderFlags_Logarithmic);

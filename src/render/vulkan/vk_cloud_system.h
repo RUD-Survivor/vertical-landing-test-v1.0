@@ -5,20 +5,17 @@
 // Pass 顺序（在 TAA geometry pass 之后、TAA resolve 之前）：
 //   0. VkAtmosphereLut::bake()   — 每帧针对当前云所在行星重烘 Transmittance/
 //                                  MultiScatter/SkyView LUT + Sky Irradiance cubemap
-//   1. cloud_raymarching  (comp) — 1/4 分辨率 ray march，输出 L+T / 深度 / 雾
+//   1. cloud_raymarching  (comp) — 1/4 分辨率 ray march，输出 L+T / 深度 / 雾 / T_air
 //   2. cloud_reconstruct  (comp) — 时域重建到全分辨率（history ping-pong）
-//   3. cloud_composite    (comp) — 合成回 HDR 场景色
+//   3. cloud_composite    (comp) — 合成回 HDR：src×(T_air×T_cloud)+L'
 //
 // 对应 shader: src/render/shaders/cloud/{cloud_common,cloud_raymarching,
 // cloud_reconstruct,cloud_composite}.glsl，descriptor 布局逐字段对应
-// cloud_common.glsl 顶部 binding 0-30 的声明（Set 0）+ shared_sampler.glsl
+// cloud_common.glsl 顶部 binding 0-37 的声明（Set 0）+ shared_sampler.glsl
 // 的 10 个采样器（Set 1）+ Heitz Sobol 蓝噪声 SSBO（Set 2，shared_blue_noise.glsl）。
 //
-// 30 个 binding 里，SDSM 级联阴影(28/29)、Hi-Z(30)、G-Buffer A(5) 目前绑定中性
-// 占位资源（Phase 2 待接入，见 cloud_common.glsl / cloud_composite.glsl 对应
-// 位置的注释），不影响主 march 路径。curl 噪声(9) 已接入真实纹理（vk_scene.h::
-// cloudCurlTex，见 vk_cloud_bake.h::bakeCurlNoise）。空气透视(11) 已改为
-// Inscatter ToPoint（与场景大气同源，见 cloud_air_perspective.glsl）。
+// SDSM 级联阴影(28/29)、Hi-Z(30)、G-Buffer A(5) 目前绑定中性占位资源。
+// curl(9) 已接入真实纹理。空气透视：Inscatter ToPoint + 独立 RGB T_air RT(33-37)。
 // ==========================================================================
 
 #include "vk_context.h"
@@ -166,9 +163,9 @@ struct FlowerCloudTuneParams {
     float hiCloudSoftness = 0.2f;             // 阈值过渡宽度
     float hiCloudType = 1.0f;                 // 高空云类型偏好（0=As 1=Ac）
 
-    // Inscatter ToPoint 空气透视：L'=L_air×L_sun + T_air×L；T_eff≈luma(T_air)×T_cloud
+    // Inscatter ToPoint 空气透视：L'=L_air×L_sun + T_air×L；T_air 独立 RGB RT
     bool  airPerspectiveEnabled = true;       // cloudAirPerspectiveEnabled
-    float airPerspectiveSunScale = 1.0f;      // 相对 L_sun 的 L_air 倍率
+    float airPerspectiveSunScale = 2.5f;      // 相对 L_sun 的 L_air 倍率
     float airPerspectiveScale = 1.0f;         // AP 强度 [0,1]；1=全物理
 
     // 环境天光：单位太阳 μs LUT × L_sun × ambientExposure
@@ -223,15 +220,18 @@ struct VkCloudSystem {
     // Inscatter 为单位太阳（shader 内不乘 intensity），太阳亮度变化不再触发 bakeFull。
     bool atmosphereLutBaked = false;
 
-    // ── 1/4 分辨率 RT：颜色(L,T) / 深度 / 雾 ─────────────────────────────────
+    // ── 1/4 分辨率 RT：颜色(L,T) / 深度 / 雾 / 大气段透射 T_air ─────────────
     VkImage quarterColorImg=VK_NULL_HANDLE, quarterDepthImg=VK_NULL_HANDLE, quarterFogImg=VK_NULL_HANDLE;
+    VkImage quarterAirTImg=VK_NULL_HANDLE;
     VmaAllocation quarterColorAlloc=VK_NULL_HANDLE, quarterDepthAlloc=VK_NULL_HANDLE, quarterFogAlloc=VK_NULL_HANDLE;
+    VmaAllocation quarterAirTAlloc=VK_NULL_HANDLE;
     VkImageView quarterColorView=VK_NULL_HANDLE, quarterDepthView=VK_NULL_HANDLE, quarterFogView=VK_NULL_HANDLE;
+    VkImageView quarterAirTView=VK_NULL_HANDLE;
 
-    // ── 全分辨率 RT：颜色/深度/雾，ping-pong ×2（[frameSlot] 当前写，[1-frameSlot] 当帧的 history）
-    VkImage fullColorImg[2]={}, fullDepthImg[2]={}, fullFogImg[2]={};
-    VmaAllocation fullColorAlloc[2]={}, fullDepthAlloc[2]={}, fullFogAlloc[2]={};
-    VkImageView fullColorView[2]={}, fullDepthView[2]={}, fullFogView[2]={};
+    // ── 全分辨率 RT：颜色/深度/雾/T_air，ping-pong ×2（[frameSlot] 当前写，[1-frameSlot] history）
+    VkImage fullColorImg[2]={}, fullDepthImg[2]={}, fullFogImg[2]={}, fullAirTImg[2]={};
+    VmaAllocation fullColorAlloc[2]={}, fullDepthAlloc[2]={}, fullFogAlloc[2]={}, fullAirTAlloc[2]={};
+    VkImageView fullColorView[2]={}, fullDepthView[2]={}, fullFogView[2]={}, fullAirTView[2]={};
 
     // ── Phase 2 占位资源（SDSM/Froxel/Hi-Z/GBufferA；curl 噪声已用真实纹理，见 curlNoiseView）──
     VkImage dummy2DImg=VK_NULL_HANDLE; VmaAllocation dummy2DAlloc=VK_NULL_HANDLE; VkImageView dummy2DView=VK_NULL_HANDLE;
@@ -671,10 +671,12 @@ private:
         if (!createStorage2D(ctx, quarterExt, kColorFmt, quarterColorImg, quarterColorAlloc, quarterColorView)) return false;
         if (!createStorage2D(ctx, quarterExt, kDepthFmt, quarterDepthImg, quarterDepthAlloc, quarterDepthView)) return false;
         if (!createStorage2D(ctx, quarterExt, kColorFmt, quarterFogImg,   quarterFogAlloc,   quarterFogView))   return false;
+        if (!createStorage2D(ctx, quarterExt, kColorFmt, quarterAirTImg,  quarterAirTAlloc,  quarterAirTView))  return false;
         for (int i=0;i<2;i++) {
             if (!createStorage2D(ctx, extent, kColorFmt, fullColorImg[i], fullColorAlloc[i], fullColorView[i])) return false;
             if (!createStorage2D(ctx, extent, kDepthFmt, fullDepthImg[i], fullDepthAlloc[i], fullDepthView[i])) return false;
             if (!createStorage2D(ctx, extent, kColorFmt, fullFogImg[i],   fullFogAlloc[i],   fullFogView[i]))   return false;
+            if (!createStorage2D(ctx, extent, kColorFmt, fullAirTImg[i],  fullAirTAlloc[i],  fullAirTView[i]))  return false;
         }
         if (!createStorage2D(ctx, {1,1}, VK_FORMAT_R16G16B16A16_SFLOAT, dummy2DImg, dummy2DAlloc, dummy2DView)) return false;
 
@@ -719,9 +721,9 @@ private:
             if (vkCreateDescriptorSetLayout(ctx.device, &ci, nullptr, &samplerSetLayout) != VK_SUCCESS) return false;
         }
 
-        // ── Set 0：cloud_common.glsl binding 0-32 ──
+        // ── Set 0：cloud_common.glsl binding 0-37 ──
         {
-            VkDescriptorSetLayoutBinding b[33]{};
+            VkDescriptorSetLayoutBinding b[38]{};
             auto img  = [&](int i, VkDescriptorType t){ b[i] = { (uint32_t)i, t, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr }; };
             img(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE); img(1, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
             img(2, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE); img(3, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
@@ -744,9 +746,14 @@ private:
             img(30, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
             img(31, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE); // inCloudProfileLut 2D（双层云廓形）
             img(32, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE); // inCloudHiWeather 2D（高空云天气图）
+            img(33, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE); // imageCloudAirTRenderTexture 1/4
+            img(34, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE); // inCloudAirTRenderTexture
+            img(35, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE); // imageCloudAirTReconstructionTexture
+            img(36, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE); // inCloudAirTReconstructionTexture
+            img(37, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE); // inCloudAirTReconstructionTextureHistory
 
             VkDescriptorSetLayoutCreateInfo ci{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-            ci.bindingCount = 33; ci.pBindings = b;
+            ci.bindingCount = 38; ci.pBindings = b;
             if (vkCreateDescriptorSetLayout(ctx.device, &ci, nullptr, &cloudSetLayout) != VK_SUCCESS) return false;
         }
 
@@ -756,8 +763,8 @@ private:
         if (vkCreatePipelineLayout(ctx.device, &plci, nullptr, &cloudPipelineLayout) != VK_SUCCESS) return false;
 
         VkDescriptorPoolSize sizes[] = {
-            { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 8 * FRAMES_IN_FLIGHT },
-            { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 25 * FRAMES_IN_FLIGHT },
+            { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 12 * FRAMES_IN_FLIGHT },
+            { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 32 * FRAMES_IN_FLIGHT },
             { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 * FRAMES_IN_FLIGHT },
             { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1 * FRAMES_IN_FLIGHT },
             { VK_DESCRIPTOR_TYPE_SAMPLER, 10 },
@@ -827,6 +834,11 @@ private:
         VkDescriptorImageInfo fFogRW{ VK_NULL_HANDLE, fullFogView[slot], VK_IMAGE_LAYOUT_GENERAL };
         VkDescriptorImageInfo fFogRO{ VK_NULL_HANDLE, fullFogView[slot], VK_IMAGE_LAYOUT_GENERAL };
         VkDescriptorImageInfo fFogHist{ VK_NULL_HANDLE, fullFogView[histSlot], VK_IMAGE_LAYOUT_GENERAL };
+        VkDescriptorImageInfo qAirTRW{ VK_NULL_HANDLE, quarterAirTView, VK_IMAGE_LAYOUT_GENERAL };
+        VkDescriptorImageInfo qAirTRO{ VK_NULL_HANDLE, quarterAirTView, VK_IMAGE_LAYOUT_GENERAL };
+        VkDescriptorImageInfo fAirTRW{ VK_NULL_HANDLE, fullAirTView[slot], VK_IMAGE_LAYOUT_GENERAL };
+        VkDescriptorImageInfo fAirTRO{ VK_NULL_HANDLE, fullAirTView[slot], VK_IMAGE_LAYOUT_GENERAL };
+        VkDescriptorImageInfo fAirTHist{ VK_NULL_HANDLE, fullAirTView[histSlot], VK_IMAGE_LAYOUT_GENERAL };
         VkDescriptorImageInfo skyIrr{ VK_NULL_HANDLE, atmosphereLut.cloudAmbientMusLutView(), VK_IMAGE_LAYOUT_GENERAL };
         // shadowAtlasView 是深度图（SHADER_READ_ONLY_OPTIMAL），采样时走 point-clamp 采样器
         // （cloud_composite.glsl 里 pointClampEdgeSampler），跟其它 SAMPLED_IMAGE 一致不需要
@@ -842,7 +854,7 @@ private:
                                              cascadeInfoBuf ? sizeof(GpuCascadeInfo) * (size_t)VkCascadeShadowSystem::kMaxCascades
                                                             : sizeof(GpuCascadeInfo) };
 
-        VkWriteDescriptorSet w[33]{};
+        VkWriteDescriptorSet w[38]{};
         auto imgW = [&](int i, uint32_t binding, VkDescriptorType t, VkDescriptorImageInfo* info) {
             w[i].sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; w[i].dstSet=set; w[i].dstBinding=binding;
             w[i].descriptorType=t; w[i].descriptorCount=1; w[i].pImageInfo=info;
@@ -870,8 +882,11 @@ private:
         imgW(30,30,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,&hiz);
         imgW(31,31,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,&profileLut);
         imgW(32,32,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,&hiWeather);
+        imgW(33,33,VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,&qAirTRW);   imgW(34,34,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,&qAirTRO);
+        imgW(35,35,VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,&fAirTRW);   imgW(36,36,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,&fAirTRO);
+        imgW(37,37,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,&fAirTHist);
 
-        vkUpdateDescriptorSets(ctx.device, 33, w, 0, nullptr);
+        vkUpdateDescriptorSets(ctx.device, 38, w, 0, nullptr);
     }
 
     bool createPipelines(VulkanContext& ctx) {
@@ -911,7 +926,13 @@ private:
         d(quarterColorImg,quarterColorAlloc,quarterColorView);
         d(quarterDepthImg,quarterDepthAlloc,quarterDepthView);
         d(quarterFogImg,quarterFogAlloc,quarterFogView);
-        for (int i=0;i<2;i++) { d(fullColorImg[i],fullColorAlloc[i],fullColorView[i]); d(fullDepthImg[i],fullDepthAlloc[i],fullDepthView[i]); d(fullFogImg[i],fullFogAlloc[i],fullFogView[i]); }
+        d(quarterAirTImg,quarterAirTAlloc,quarterAirTView);
+        for (int i=0;i<2;i++) {
+            d(fullColorImg[i],fullColorAlloc[i],fullColorView[i]);
+            d(fullDepthImg[i],fullDepthAlloc[i],fullDepthView[i]);
+            d(fullFogImg[i],fullFogAlloc[i],fullFogView[i]);
+            d(fullAirTImg[i],fullAirTAlloc[i],fullAirTView[i]);
+        }
         d(dummy2DImg,dummy2DAlloc,dummy2DView);
         d(dummy3DImg,dummy3DAlloc,dummy3DView);
         cloudRtInitialized = false;

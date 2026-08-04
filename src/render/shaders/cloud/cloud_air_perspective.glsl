@@ -5,7 +5,7 @@
 // 依赖 cloud_common.glsl 已声明：
 //   inTransmittanceLut(10) inInscatterLut(11) linearClampEdgeSampler
 // Inscatter 为单位太阳；Mie 走 combined A=Mie.r 外推（场景 mieStorageMode=0）。
-// 调用方：L' = L_air×L_sun + T_air×L_cloud；T_eff = luma(T_air)×T_cloud 写入 alpha。
+// 调用方：L' = L_air×L_sun + T_air×L_cloud；T_air 写入独立 RGB RT。
 
 struct CloudAirPerspective
 {

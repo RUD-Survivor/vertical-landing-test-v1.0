@@ -65,7 +65,12 @@ layout (set = 0, binding = 30) uniform texture2D inHiz; // 层次化 Z（Hi-Z）
 layout (set = 0, binding = 31) uniform texture2D inCloudProfileLut; // 双层云：云类型垂直廓形 LUT（U=类型轴 0=Cu/0.5=Tcu/1=Cb，V=归一化高度，R=廓形）
 layout (set = 0, binding = 32) uniform texture2D inCloudHiWeather;  // 双层云：高空云第二套天气图（R=HiMask G=HiType As/Ac）
 
-
+// 相机→云大气段 RGB 透射 T_air（AP）；composite：src × (T_air × T_cloud) + L'
+layout (set = 0, binding = 33, rgba16f) uniform image2D imageCloudAirTRenderTexture;
+layout (set = 0, binding = 34) uniform texture2D inCloudAirTRenderTexture;
+layout (set = 0, binding = 35, rgba16f) uniform image2D imageCloudAirTReconstructionTexture;
+layout (set = 0, binding = 36) uniform texture2D inCloudAirTReconstructionTexture;
+layout (set = 0, binding = 37) uniform texture2D inCloudAirTReconstructionTextureHistory;
 
 //用宏指定 Descriptor Set 编号，再引入公共采样器定义
 #define SHARED_SAMPLER_SET 1
@@ -594,7 +599,8 @@ ivec2 workPos,
 vec3 worldDir,
 bool bFog,
 inout vec4 lightingFog,
-float fogNoise)
+float fogNoise,
+inout vec3 airTransmittance)
 {
     // Hi-Z：Phase 2 待接入。inHiz 目前绑定占位纹理，且这个值本就未参与任何 tMax 截断判断
     // （见文件末 ROADMAP 注释），故不再读取，避免采样一张没意义的占位深度。
@@ -1291,7 +1297,7 @@ float fogNoise)
             //apply air perspective
             // 物理空气透视（与场景 ToPoint 同构）：
             //   L' = L_air×L_sun + T_air×L_cloud
-            //   T_eff ≈ luma(T_air)×T_cloud  → 写入 alpha，composite 做 src×T_eff + L'
+            //   T_air → 独立 RGB RT；composite：src×(T_air×T_cloud)+L'
             // AirPerspectiveScale∈[0,1]：整段 AP 强度（0=关，1=全物理）。
             // AirPerspectiveSunScale：只乘 L_air。
             if(frameData.sky.atmosphereConfig.cloudAirPerspectiveEnabled != 0)
@@ -1307,9 +1313,7 @@ float fogNoise)
                     *frameData.sky.atmosphereConfig.cloudAirPerspectiveSunScale*apScale;
 
                 scatteredLight=L_air+T_air*scatteredLight;
-                // 云 RT 仅 4 通道：背景衰减用 luma(T_air)×T_cloud；L_cloud 已乘完整 RGB T_air。
-                float T_airLuma=dot(ap.transmittance, vec3(0.299, 0.587, 0.114));
-                transmittance*=mix(1.0, saturate(T_airLuma), apScale);
+                airTransmittance=T_air;
             }
         }
     }
@@ -1439,12 +1443,9 @@ float fogNoise)
     }
 
     //Dual mix transmittance
-    // 合成约定：RGB = L'（含 AP：L_air + T_air×L_cloud），A = T_eff≈luma(T_air)×T_cloud。
-    // composite：final = src×A + RGB  ↔  L_air + T_air×L_cloud + T_eff×src
+    // RGB = L'（含 AP）；A = T_cloud（云本身视线透射，不含 T_air）。
+    // T_air 写入独立 RT；composite：src×(T_air×T_cloud)+L'
     vec4 result=vec4(scatteredLight,transmittance);
-    // result.rgb = scatteredLight：云散射 + 相机→云大气 in-scatter。
-    // result.a   = transmittance：T_cloud，若启用 AP 则已乘 luma(T_air)。
-    // flower 此处写 raw L+T 到 imageCloudRenderTexture；合成时再与 inHdrSceneColor 混合。
 
     if(any(isnan(result))||any(isinf(result)))
     {
