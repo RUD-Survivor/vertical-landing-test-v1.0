@@ -119,15 +119,15 @@ static void PreviewImageAspect(ImTextureID tid, float aspect) {
 }
 
 // Profile LUT 三条云类型廓形曲线预览（与 ProfileLutBake::profile 同参数烘焙，
-// 所见即所采）。Cu=原 gradientShape 高度函数（积云预设），Tcu/Cb 为同族变体。
+// 所见即所采）。Cu/Tcu/Cb 为同族参数变体，峰值中上部、顶部归零。
 static void ProfileLutCurvePlot() {
     const int N = 64;
     float cu[N], tcu[N], cb[N];
     for (int i = 0; i < N; i++) {
         const float h = (float)i / (float)(N - 1);
-        cu[i]  = ProfileLutBake::profile(h, 0.10f, 0.80f, 0.10f, 0.20f); // 积云（旧曲线）
-        tcu[i] = ProfileLutBake::profile(h, 0.06f, 0.90f, 0.05f, 0.10f); // 塔状积云
-        cb[i]  = ProfileLutBake::profile(h, 0.10f, 0.98f, 0.30f, 0.40f); // 积雨云
+        cu[i]  = ProfileLutBake::profile(h, 0.55f, 1.00f, 0.04f, 0.00f); // 积云：峰值在中部
+        tcu[i] = ProfileLutBake::profile(h, 0.65f, 1.00f, 0.03f, 0.00f); // 塔状积云
+        cb[i]  = ProfileLutBake::profile(h, 0.75f, 1.00f, 0.06f, 0.00f); // 积雨云
     }
     const ImVec2 size(ImGui::GetContentRegionAvail().x, 34.f);
     ImGui::PushStyleColor(ImGuiCol_PlotLines, ImVec4(0.35f, 0.65f, 1.00f, 1.f)); // Cu 蓝
@@ -303,7 +303,7 @@ inline void FlowerCloudTunerImGui(bool* p_open, FlowerCloudTuneParams& p,
     // ── 6. 双层云 · Profile LUT（云类型廓形） ─────────────────────────────
     if (ImGui::CollapsingHeader("双层云 · Profile LUT", ImGuiTreeNodeFlags_DefaultOpen)) {
         ImGui::TextDisabled("LUT: U=归一化高度 V=径向 RGB=Cu/Tcu/Cb；weather.g 提供云类型");
-        ImGui::TextDisabled("类型轴 0=Cu 0.5=Tcu 1=Cb；Cu 曲线 = 原 gradientShape 高度函数（积云预设）");
+        ImGui::TextDisabled("类型轴 0=Cu 0.5=Tcu 1=Cb；廓形近似 LWC：峰值中上部、顶部归零");
         ImGui::SliderFloat("TypeBias", &p.profileTypeBias, -0.5f, 0.5f, "%.3f");
         ImGui::SliderFloat("TypeContrast", &p.profileTypeContrast, 0.1f, 4.0f, "%.2f");
         ImGui::TextDisabled(">1 拉开 Cu/Tcu/Cb 差异；<1 收敛到中部类型");

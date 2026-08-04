@@ -177,7 +177,7 @@ struct AtmosphereConfig
 
     // ── 双层云：Profile LUT 类型轴 + 高空云（第二层） ────────────────────────
     // Profile LUT（inCloudProfileLut，binding 31）：U=归一化高度，V=径向距离，
-    // RGB=Cu/Tcu/Cb 三条垂直廓形（Cu 轴处 bake 了原 gradientShape 曲线）。
+    // RGB=Cu/Tcu/Cb 三条垂直廓形（近似 LWC 钟形，峰值中上部、顶部归零）。
     // 本组把 weather.g 的 cloudType 重新映射到 LUT 类型轴（0=Cu,0.5=Tcu,1=Cb）。
     // 廓形即 LUT 曲线本身，不设运行时倍率（旧 cloudProfileScale 乘在 coverage
     // remap 之前会悄悄改变云体覆盖率，已移除；提亮/压暗请用 cloudDensity）。

@@ -247,8 +247,9 @@ float cloudMap(vec3 posMeter,float normalizedHeight,float lodDistScale)//单位�
     float coverage=saturate(Coverage*(localCoverage+weatherValue.x));
     //合成这一位置的最终覆盖率，Coverage全局云量参数，weatherValue.x天气图大尺度bias，三者相加再 × 全局coverage，最后saturate到[0,1]
 
-    // 垂直廓形走 Profile LUT（cloud_profile.glsl）：weather.g 提供云类型，类型 0（Cu）处
-    // bake 了本条原 gradientShape 曲线，所以 cloudType=0 时与旧行为一致。
+    // 垂直廓形走 Profile LUT（cloud_profile.glsl）：weather.g 提供云类型，
+    // 类型 0（Cu）起、1（Cb）止，三段插值得到该高度的廓形强度。
+    // 廓形为近似 LWC 的钟形曲线（峰值中上部、顶部归零），云顶边界由此定义。
     // 类型轴映射（对比度/偏移）+ 三段插值（Cu/Tcu/Cb）+ 径向维度都在模块内完成。
     float gradientShape=cloudProfileHeightGradient(cloudProfileTypeAxis(weatherValue.g),normalizedHeight,sampleUv);
 
@@ -289,11 +290,10 @@ float cloudMap(vec3 posMeter,float normalizedHeight,float lodDistScale)//单位�
 
 
     float densityShape=saturate(0.01+normalizedHeight*1.15)*Density*
-    remap(normalizedHeight,0.0,0.1,0.0,1.0)*
-    remap(normalizedHeight,0.8,1.0,1.0,0.0);
+    remap(normalizedHeight,0.0,0.1,0.0,1.0);
     //0.01 + height*1.15：云底略薄，往上略增
     //remap(0, 0.1, 0, 1)：最底10%从0变浓至1
-    //第二个remap：只在云顶衰减
+    //云顶边界由 Profile LUT 顶部归零负责，此处不再做顶部 fade（避免与 LUT 双倍削顶）
 
     float cloudDensity=remap(basicCloudNoiseWithCoverage,detailNoiseMixByHeight,1.0,0.0,1.0);
     //remap(..., detailMix, 1, 0, 1)，从 detailMix 到 1 映射成 [0,1]：细节区相当于「挖掉」一部分形状 → 边缘侵蚀、镂空
@@ -1562,9 +1562,10 @@ inout vec3 airTransmittance)
   posKm.xz ──► inWeatherTexture ──► weatherValue.x ──┐
   posMeter.xz+time ──► inCloudCurlNoise ──► localCoverage ──┤──► coverage
   frameData.cloudCoverage ────────────────────────────────────┘
+  normalizedHeight+weather.g ──► Profile LUT（Cu/Tcu/Cb）──► gradientShape
   posKm+windOffset ──► inBasicNoise × gradientShape ──► basicCloudNoiseWithCoverage
   posKm-windOffset ──► inDetailNoise ──► detailNoiseMixByHeight ──► remap侵蚀
-  normalizedHeight ──► densityShape
+  normalizedHeight ──► densityShape（仅底部淡入+全局密度，无顶部 fade）
   return max(cloudDensity×densityShape, highCloudDensity)  →  主 march stepCloudDensity
 
 --------------------------------------------------------------------------------

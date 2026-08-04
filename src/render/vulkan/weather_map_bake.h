@@ -222,11 +222,11 @@ inline bool generate(std::vector<uint8_t>& out) {
 //   U = 归一化高度 ∈[0,1]（0=云底，1=云顶）       → kWidth
 //   V = 径向距离 ∈[0,1]（0=中心，1=边缘）         → kHeight
 //   R = 积云 Cu 廓形   G = 塔状积云 Tcu 廓形   B = 积雨云 Cb 廓形
-// 三条通道是同族公式的不同参数：Cu 用原 cloudMap() 硬编码的
-//   gradientShape = remap(h,0,0.1,0.1,1.0)*remap(h,0.1,0.8,1.0,0.2)
-//   （即"旧高度 profile 函数"整体作为积云预设），Tcu/Cb 依次变高变厚。
+// 三条通道是同族公式的不同参数：Cu 为积云预设，Tcu/Cb 依次变高变厚。
+// 2026-08 重构为近似 LWC 的钟形曲线：峰值在中上部、顶部平滑归零；
+// 云顶边界由 LUT 自身定义，densityShape 不再做顶部 fade（见 cloud_common.glsl）。
 // 类型轴（weather.g）在 shader 里做三段插值：cloud_profile.glsl。
-// V（径向）轴当前按 kEdgeThin=1.0 烘焙为均匀，廓形与旧 gradientShape 逐点一致；
+// V（径向）轴当前按 kEdgeThin=1.0 烘焙为均匀（无径向衰减）；
 // 不会因"天气图中心/边缘"产生全局衰减而压低覆盖率（旧实现踩过这个坑）。
 // ==========================================================================
 namespace ProfileLutBake {
@@ -234,7 +234,7 @@ namespace ProfileLutBake {
 constexpr int   kWidth    = 256; // U = 归一化高度
 constexpr int   kHeight   = 64;  // V = 径向距离（预留）
 constexpr int   kChannels = 4;
-// 径向边缘变薄系数：1.0=均匀（默认，廓形与旧 gradientShape 逐点一致，不压覆盖率）；
+// 径向边缘变薄系数：1.0=均匀（默认，不压覆盖率）；
 // 调 <1 才启用"中心厚、边缘薄"的 HanPi radialDist 衰减。
 constexpr float kEdgeThin = 1.0f;
 
@@ -245,10 +245,10 @@ inline float remap01(float h, float a, float b, float c, float d) {
     return c + t * (d - c);
 }
 
-// 参数化垂直廓形（与旧 gradientShape 同族）：
-//   底部 0→riseEnd    : baseVal → 1.0
-//   腰部 riseEnd→holdEnd: 1.0 → topVal
-// Cu 参数取 riseEnd=0.10, holdEnd=0.80, baseVal=0.10, topVal=0.20 时与旧曲线完全一致。
+// 参数化垂直廓形（近似 LWC 钟形）：
+//   底部 0→riseEnd    : baseVal → 1.0（峰值，默认取中上部）
+//   腰部 riseEnd→holdEnd: 1.0 → topVal（顶部归零，topVal=0）
+// 峰值位置由 riseEnd 控制，峰值越高云越厚；类型越高 riseEnd 越大。
 inline float profile(float h, float riseEnd, float holdEnd, float baseVal, float topVal) {
     float lo = remap01(h, 0.0f, riseEnd, baseVal, 1.0f);
     float hi = remap01(h, riseEnd, holdEnd, 1.0f, topVal);
@@ -262,15 +262,15 @@ inline bool generate(std::vector<uint8_t>& out) {
 
     for (int y = 0; y < kHeight; y++) {
         float radial = ((float)y + 0.5f) / (float)kHeight; // 0=中心 1=边缘
-        // 径向调制（预留）：kEdgeThin=1.0 时恒为 1.0（廓形与旧 gradientShape 逐点一致）；
+        // 径向调制（预留）：kEdgeThin=1.0 时恒为 1.0（无径向衰减）；
         // 调 <1 才启用"中心厚、边缘薄"的 HanPi radialDist 衰减。
         const float radialScale = 1.0f - (1.0f - kEdgeThin) * sat01(radial);
         for (int x = 0; x < kWidth; x++) {
             float h = ((float)x + 0.5f) / (float)kWidth; // 0=云底 1=云顶
 
-            float cu  = profile(h, 0.10f, 0.80f, 0.10f, 0.20f); // 积云（旧曲线）
-            float tcu = profile(h, 0.06f, 0.90f, 0.05f, 0.10f); // 塔状积云：快升起、更高、顶薄
-            float cb  = profile(h, 0.10f, 0.98f, 0.30f, 0.40f); // 积雨云：厚底、到顶、顶端残留
+            float cu  = profile(h, 0.55f, 1.00f, 0.04f, 0.00f); // 积云：峰值在中部、顶部归零（近似 LWC）
+            float tcu = profile(h, 0.65f, 1.00f, 0.03f, 0.00f); // 塔状积云：峰值偏高、更厚
+            float cb  = profile(h, 0.75f, 1.00f, 0.06f, 0.00f); // 积雨云：峰值更高、顶部缓降
 
             cu  *= radialScale;
             tcu *= radialScale;
