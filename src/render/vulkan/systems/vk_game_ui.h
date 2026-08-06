@@ -2187,6 +2187,7 @@ private:
     // ================================================================
     void _drawFlightHUD(FlightScene* fs, int ww, int wh) {
         if (!fs) return;
+        if (!fs->hudManager.hud.show_hud) return;
         auto& trans = fs->world.get<TransformComponent>(fs->rocket_entity);
         auto& vel   = fs->world.get<VelocityComponent>(fs->rocket_entity);
         auto& prop  = fs->world.get<PropulsionComponent>(fs->rocket_entity);

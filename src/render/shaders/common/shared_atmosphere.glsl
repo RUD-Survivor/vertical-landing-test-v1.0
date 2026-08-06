@@ -57,6 +57,10 @@ struct AtmosphereParameters
 
 	float cloudAreaStartHeight; // km
     float cloudAreaThickness;
+
+    // Flower 原始结构遗留：单张云阴影盒的矩阵。本引擎的云→地表阴影已改为级联实现
+    // （见 common/shared_cloud_shadow.glsl + cloud/cloud_shadow.glsl），这两个字段
+    // 当前无人消费、C++ 侧也不再填充，保留只为维持与 shared_struct.glsl 的布局一致。
     mat4 cloudShadowViewProj;
     mat4 cloudShadowViewProjInverse;
 };

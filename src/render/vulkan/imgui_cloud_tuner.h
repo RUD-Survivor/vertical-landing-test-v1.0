@@ -147,9 +147,11 @@ static void ProfileLutCurvePlot() {
 // 用法: FlowerCloudTunerImGui(&open, cloudSystem.tuneParams, &weatherPreview);
 // 面板按功能折叠分组（CollapsingHeader），默认展开双层云等常用组。
 // ==========================================================================
+// cloudShadow：可选，仅用于显示云影级联的运行时状态（本帧实际覆盖半径），不做修改。
 inline void FlowerCloudTunerImGui(bool* p_open, FlowerCloudTuneParams& p,
                                   WeatherMapImGuiPreview* weatherPreview = nullptr,
-                                  VkCascadeShadowSystem* shadow = nullptr) {
+                                  VkCascadeShadowSystem* shadow = nullptr,
+                                  const VkCloudShadowSystem* cloudShadow = nullptr) {
     if (ImGui::IsKeyPressed(ImGuiKey_F3, false)) *p_open = !*p_open;
     if (!*p_open) return;
 
@@ -484,6 +486,39 @@ inline void FlowerCloudTunerImGui(bool* p_open, FlowerCloudTuneParams& p,
             ImGui::SliderFloat("EdgeLerpThreshold", &shadow->cascadeEdgeLerpThreshold, 0.5f, 1.0f, "%.3f");
         } else {
             ImGui::TextDisabled("级联阴影系统未接入（shadow==nullptr）");
+        }
+    }
+
+    // ── 13.5 云→地表阴影级联（Cloud CSM）──────────────────────────────────
+    if (ImGui::CollapsingHeader("云→地表阴影（级联）", ImGuiTreeNodeFlags_DefaultOpen)) {
+        CloudShadowTuneParams& cs = p.cloudShadow;
+        ImGui::Text("沿太阳方向对云壳做 Beer-Lambert 积分 → 地表着色器衰减直射光");
+        ImGui::Checkbox("云阴影启用", &cs.enabled);
+        ImGui::SliderFloat("阴影强度", &cs.strength, 0.0f, 1.0f, "%.2f");
+        ImGui::TextDisabled("1 = 纯物理透过率；<1 为美术减弱。环境光不受影响");
+
+        ImGui::SeparatorText("级联划分");
+        ImGui::SliderInt("级数", &cs.cascadeCount, 1, VkCloudShadowSystem::kMaxCascades);
+        ImGui::SliderInt("每级分辨率", &cs.perCascadeDim, 128, 2048, "%d", ImGuiSliderFlags_Logarithmic);
+        ImGui::TextDisabled("级数/分辨率改动需重建窗口生效（图集尺寸决定 dispatch 规模）");
+        ImGui::SliderFloat("最近级半径 (km)", &cs.nearRadiusKm, 0.5f, 200.0f, "%.1f", ImGuiSliderFlags_Logarithmic);
+        ImGui::SliderFloat("最远级上限 (km)", &cs.maxRadiusKm, 50.0f, 8000.0f, "%.0f", ImGuiSliderFlags_Logarithmic);
+        ImGui::SliderFloat("最远级下限 (km)", &cs.minFarRadiusKm, 5.0f, 500.0f, "%.0f", ImGuiSliderFlags_Logarithmic);
+        ImGui::TextDisabled("最远级 = clamp(地平线距离, 下限, 上限) × 倍率");
+        ImGui::SliderFloat("拆分 λ", &cs.splitLambda, 0.0f, 1.0f, "%.2f");
+        ImGui::TextDisabled("0=均匀，1=对数（近处更密）");
+        ImGui::SliderFloat("整体范围倍率", &cs.extentMul, 0.25f, 4.0f, "%.2f");
+        ImGui::SliderFloat("跨级混合起点", &cs.blendStart, 0.5f, 0.99f, "%.2f");
+
+        ImGui::SeparatorText("积分");
+        ImGui::SliderInt("每条光线步数", &cs.marchSteps, 8, 128);
+
+        if (cloudShadow) {
+            ImGui::Separator();
+            ImGui::Text("图集 %ux%u  |  本帧最远覆盖 %.1f km  |  %s",
+                        cloudShadow->atlasWidth(), cloudShadow->atlasHeight(),
+                        cloudShadow->farRadiusKm(),
+                        cloudShadow->active() ? "生效中" : "未渲染");
         }
     }
 

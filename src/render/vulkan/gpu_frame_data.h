@@ -190,7 +190,7 @@ struct GpuSkyInfo {
 static_assert(sizeof(GpuSkyInfo) == 848, "GpuSkyInfo must match std140 SkyInfo");
 
 // -----------------------------------------------------------------------
-// PerFrameData — 1872 bytes. binding 21 (cloud_common.glsl) / binding 8 (atmosphere_common.glsl).
+// PerFrameData — 1888 bytes. binding 21 (cloud_common.glsl) / binding 8 (atmosphere_common.glsl).
 // -----------------------------------------------------------------------
 struct GpuPerFrameData {
     float appTime[4] = {};       // .x runtime .y sin .z cos .w pad
@@ -236,8 +236,11 @@ struct GpuPerFrameData {
     float renderWidth = 0.f, renderHeight = 0.f, displayWidth = 0.f, displayHeight = 0.f;
 
     GpuSkyInfo sky;
+
+    // 相机绝对世界位置（km，浮动原点）；God Ray 级联阴影查询用（见 shared_struct.glsl 同名字段）。
+    float camPosAbsKm[4] = {};
 };
-static_assert(sizeof(GpuPerFrameData) == 1872, "GpuPerFrameData must match std140 PerFrameData");
+static_assert(sizeof(GpuPerFrameData) == 1888, "GpuPerFrameData must match std140 PerFrameData");
 
 // -----------------------------------------------------------------------
 // CascadeInfo — 176 bytes. SDSM cascade SSBO 元素（binding 29）。

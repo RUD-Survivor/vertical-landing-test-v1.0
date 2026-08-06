@@ -281,6 +281,10 @@ struct PerFrameData
     float displayHeight;
 
     SkyInfo sky;
+
+    // 相机绝对世界位置（km，浮动原点）。cloud_composite 的 God Ray 级联阴影查询需要它把
+    // rayPosWP（相对行星中心米制）换算成级联矩阵使用的绝对世界空间（见 cloud_composite.glsl）。
+    vec4 camPosAbsKm;
 };
 
 // See GPUStaticMeshStandardPBR in shader_struct.h

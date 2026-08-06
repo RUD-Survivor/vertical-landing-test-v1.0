@@ -109,40 +109,33 @@ void main()
     if (frameData.sky.atmosphereConfig.cloudGodRay != 0)
     {
         const uint  kGodRaySteps = 64;//定步数
-        const float kMaxMarchingDistance = 400.0f;//最大步进距离=步数*步长
-
-        // We are revert z.
-        //重复UV坐标转成世界空间视线方向，感觉没必要
-        vec4 clipSpace = vec4(uv.x * 2.0f - 1.0f, 1.0f - uv.y * 2.0f, 0.0, 1.0);
-        vec4 viewPosH = frameData.camInvertProj * clipSpace;
-        vec3 viewSpaceDir = viewPosH.xyz / viewPosH.w;
-        vec3 worldDir = normalize((frameData.camInvertView * vec4(viewSpaceDir, 0.0)).xyz);
-
+        const float kMaxMarchingDistance = 400.0f;//最大步进距离=步数*步长（米）
+        vec3 preGodRayResult = result.rgb;//NaN 兜底回退用（此时 result 已含云 + bFog 合成）
 
         AtmosphereParameters atmosphere = getAtmosphereParameters(frameData);//大气参数
         const SkyInfo sky = frameData.sky;//天空参数
-        vec3 worldPosWP      = getWorldPos(uv, sceneZ, frameData);//用场景深度反投天空像素坐标和几何像素坐标
-        vec3 pixelToCameraWP = frameData.camWorldPos.xyz - worldPosWP;//从像素世界点指向相机的向量
 
-        float pixelToCameraDistanceWP = max(1e-5f, length(pixelToCameraWP));//防除零，单位米
-        vec3 rayDirWP = pixelToCameraWP / pixelToCameraDistanceWP;//归一化后成单位向量
-
-        float marchingDistance = min(kMaxMarchingDistance, pixelToCameraDistanceWP);//如果起点过远，裁到最大步进距离内
-        if(pixelToCameraDistanceWP > kMaxMarchingDistance)
-        {
-            worldPosWP = frameData.camWorldPos.xyz - rayDirWP * marchingDistance;//只 march 靠近相机的 400 m
-        }
-
+        // 世界视线方向：shader 顶部已重建（camInvertView * 视空间单位方向），是纯单位向量，
+        // 与行星中心原点无关。不要再走 getWorldPos() 反投影求视线——getWorldPos 返回相机
+        // 绝对世界空间(km)，而 frameData.camWorldPos 是相对行星中心(米)，两者混减会被行星
+        // 中心偏移(~1.5e8km)主导，把 rayDir 拉到「指向行星中心」的方向（旧代码的 bug）。
         vec3 sunDirection = -normalize(frameData.sky.direction);//指向太阳的方向
         float VoL = dot(worldDir, sunDirection);//视线与太阳夹角的cos值，cos值越大越靠近太阳
-        
-        float stepLength = marchingDistance / float(kGodRaySteps);//每步长度
-        vec3 stepRay = rayDirWP * stepLength;//沿像素到相机每步的位移向量
-    
-        // Interval noise is better than blue noise here.
-        float taaOffset = interleavedGradientNoise(workPos, frameData.frameIndex.x % frameData.jitterPeriod);//未使用
 
-        vec3 rayPosWP = worldPosWP + stepRay * (blueNoise2 + 0.05);//第一步偏移0.05-1.05个步长，打破规则分层banding
+        // 场景几何距离（米）：标准深度 z∈[0,1]（近0远1）反线性化；天空像素 z=1 → far → 被 clamp 到 400m。
+        // 公式直接由标准投影矩阵推得 d = n·f / (f - z·(f-n))，n/f = camInfo.z/.w(米)。
+        // 不要用 shared_functions.glsl::linearizeDepth——那是 Reversed-Z 约定，方向正好相反。
+        float sceneDistM = frameData.camInfo.w * frameData.camInfo.z
+            / max(1e-6f, frameData.camInfo.w - sceneZ * (frameData.camInfo.w - frameData.camInfo.z));
+
+        float marchingDistance = min(kMaxMarchingDistance, sceneDistM);//近处几何像素只 march 到物体表面，不穿过
+
+        float stepLength = marchingDistance / float(kGodRaySteps);//每步长度
+        vec3 stepRay = -worldDir * stepLength;//沿视线朝相机方向每步位移
+
+        // 起点=相机前方 marchingDistance 处，往回退半步 jitter 打破规则分层 banding。
+        // camWorldPos(米, 相对行星中心)+单位方向 → 与主云 march 一致的世界米制坐标。
+        vec3 rayPosWP = frameData.camWorldPos.xyz + worldDir * (marchingDistance - stepLength * (blueNoise2 + 0.05));
 
         //累加器初始化
         float transmittance2  = 1.0;//透射率a
@@ -174,7 +167,10 @@ void main()
                 // Loop to find suitable cascade.
                 for(uint cascadeId = 0; cascadeId < sky.cacsadeConfig.cascadeCount; cascadeId ++)//cascadeCount有几段
                 {   //cascadeInfos[cascadeId].viewProj把雾点世界坐标转换成该段的深度图的UV和深度
-                    shadowCoord = projectPos(rayPosWP, cascadeInfos[cascadeId].viewProj);//viewProj把雾点世界坐标转换成该段的深度图的UV和深度
+                    // 级联矩阵是绝对世界空间(km)（shadow pass 里地形顶点 = planetCenterAbs + 局部偏移），
+                    // 而 rayPosWP 是相对行星中心的米制，需先用相机绝对位置换算回绝对世界 km。
+                    vec3 rayPosAbsKm = frameData.camPosAbsKm.xyz + rayPosWP * 0.001;
+                    shadowCoord = projectPos(rayPosAbsKm, cascadeInfos[cascadeId].viewProj);//viewProj把雾点世界坐标转换成该段的深度图的UV和深度
                     if(onRange(shadowCoord.xyz, vec3(sky.cacsadeConfig.cascadeBorderAdopt), vec3(1.0f - sky.cacsadeConfig.cascadeBorderAdopt)))//看该点是否落在此cascade的有效UV区，cascadeBorderAdopt是边缘调整处
                     {
                         break;//找到了，此时activeCascadeId就是
@@ -215,8 +211,10 @@ void main()
                 atmosphereTransmittance = texture(sampler2D(inTransmittanceLut, linearClampEdgeSampler), sampleUv).rgb;//预烘焙 LUT：在该高度、该太阳角度下，光穿过大气还剩多少
             }//经过大气衰减过后的太阳透射率
 
-            float density = getDensity(distance(rayPosWP, frameData.camWorldPos.xyz));//雾的浓度
-            //getDensity来源未知
+            float density = getDensity(length(rayPosWP) - atmosphere.bottomRadius * 1000.0);//雾的浓度：相对地表高度（米）
+            //length(rayPosWP)=到行星中心距离（米，rayPosWP 是相对行星中心坐标）；
+            //atmosphere.bottomRadius(km)*1000=地表半径（米）；差=相对地表高度。
+            //外太空/轨道高度 → density≈0，God Ray 只存在于近地低空（丁达尔发生的地方）。
 
             float sigmaS = density;//散射系数
             float sigmaE = max(sigmaS, 1e-8f);//消光系数，约等于散射系数
@@ -239,6 +237,13 @@ void main()
         }
 
         result.rgb = result.rgb * transmittance2 + scatteredLight2;//当前场景颜色HDR*雾的总透射率+雾的散射光
+
+        if(any(isnan(result))||any(isinf(result)))
+        {
+            // NaN/Inf 兜底：数值爆炸时退回无 God Ray 的合成结果，避免 NaN 写入 HDR 渲染成纯黑
+            // （与 cloud_common.glsl 主云 march 的 result NaN guard 同理）。
+            result.rgb = preGodRayResult;
+        }
     }
 
 

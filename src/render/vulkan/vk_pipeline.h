@@ -829,10 +829,12 @@ struct VkTerrainPipeline {
 
         // lambda 封装管线创建，避免 goto 跳过初始化引起的 C2362
         bool ok = [&]() -> bool {
-            VkDescriptorSetLayoutBinding b0[2]={
+            VkDescriptorSetLayoutBinding b0[4]={
                 {0,VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,1,VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT,nullptr},
-                {1,VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,1,VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT,nullptr}};
-            VkDescriptorSetLayoutCreateInfo s0{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,nullptr,0,2,b0};
+                {1,VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,1,VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT,nullptr},
+                {2,VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,1,VK_SHADER_STAGE_FRAGMENT_BIT,nullptr},  // 云影级联图集
+                {3,VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,1,VK_SHADER_STAGE_FRAGMENT_BIT,nullptr}};         // 云影级联描述(CloudShadowData)
+            VkDescriptorSetLayoutCreateInfo s0{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,nullptr,0,4,b0};
             if(vkCreateDescriptorSetLayout(ctx.device,&s0,nullptr,&set0Layout)!=VK_SUCCESS) return false;
             VkDescriptorSetLayoutBinding b1[4];
             for(int i=0;i<4;i++) b1[i]={(uint32_t)i,VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,1,VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT,nullptr};

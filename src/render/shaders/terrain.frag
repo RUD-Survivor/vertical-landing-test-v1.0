@@ -1,5 +1,10 @@
 #version 450
+#extension GL_GOOGLE_include_directive : enable
 // Terrain fragment shader — Vulkan port, logic identical to OpenGL version
+
+// 云→地表阴影级联的采样契约（结构体 + 选级/PCF）。生产端是 cloud/cloud_shadow.glsl，
+// 本文件只是众多消费端之一；新增消费端（植被/海面）照抄这三行绑定即可。
+#include "common/shared_cloud_shadow.glsl"
 
 // Textures (Set 1, same as vertex shader)
 layout(set = 1, binding = 1) uniform sampler2D uHydroMap;
@@ -17,6 +22,16 @@ layout(set = 0, binding = 0) uniform FrameUBO {
     float time;
 } frame;
 
+// TerrainData (Set 0, binding 1) — 地形自身的每帧数据
+layout(set = 0, binding = 1, std140) uniform TerrainData {
+    vec4  planetCenterRel;
+} terrain;
+
+// 云→地表阴影级联：图集（R32F，N 级横向并排）+ 级联描述。两者都由
+// VkCloudShadowSystem 拥有，本着色器只读。云关闭时 config.x=0，采样函数直接返回 1。
+layout(set = 0, binding = 2) uniform sampler2D uCloudShadowAtlas;
+layout(set = 0, binding = 3, std140) uniform CloudShadowUBO { CloudShadowData data; } uCloudShadow;
+
 // Push constants
 layout(push_constant) uniform PC {
     mat4  model;
@@ -24,6 +39,12 @@ layout(push_constant) uniform PC {
     float maxElevation;
     int   nodeLevel;
     int   hasLocalHydro;
+    vec3  nodePos;
+    float _pad0;
+    vec3  nodeSide;
+    float _pad1;
+    vec3  nodeUp;
+    float _pad2;
 } pc;
 
 layout(location = 0) in vec3 vRelViewPos;
@@ -155,7 +176,15 @@ void main() {
 
     float diff = max(dot(N, L), 0.0);
     float ambient = 0.18;
-    vec3 result = surfColor * (ambient + diff * (1.1 - ambient));
+
+    // 云→地表阴影。坐标系：frame.viewPos / pc.model[3]（行星中心）/ vRelViewPos 都是
+    // 浮动原点下的 km，级联矩阵按"相对行星中心 km"构建，所以这里相减即可对齐。
+    // 只乘在直射项上：云影里之所以不是全黑，正是因为天空漫射（ambient）仍照得到。
+    vec3 planetCenterAbs = vec3(pc.model[3][0], pc.model[3][1], pc.model[3][2]);
+    vec3 posRelPlanetKm  = frame.viewPos + vRelViewPos - planetCenterAbs;
+    float sunVis = cloudShadowSunVisibility(uCloudShadow.data, uCloudShadowAtlas, posRelPlanetKm);
+
+    vec3 result = surfColor * (ambient + diff * (1.1 - ambient) * sunVis);
 
     // uViewMode disabled in Vulkan path (no climate overlay yet)
 

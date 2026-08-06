@@ -334,7 +334,8 @@ static void renderVulkanFrame(GLFWwindow* window) {
         }
         PerfOverlayImGui(&g_perfOverlayOpen, ww, wh, presentName);
     }
-    FlowerCloudTunerImGui(&g_flowerCloudTunerOpen, g_vkR3D.cloudSystem.tuneParams, &g_weatherMapPreview, &g_vkR3D.shadowSystem);
+    FlowerCloudTunerImGui(&g_flowerCloudTunerOpen, g_vkR3D.cloudSystem.tuneParams, &g_weatherMapPreview,
+                          &g_vkR3D.shadowSystem, &g_vkR3D.cloudSystem.cloudShadow);
     AtmoTunerImGui(&g_atmoTunerOpen, g_vkR3D.atmoTune, g_vkR3D.scene.atmoLutCache);
     SkyTunerImGui(&g_skyTunerOpen, g_vkR3D.sky.tune);
     ImGui::Render();

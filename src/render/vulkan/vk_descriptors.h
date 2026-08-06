@@ -219,9 +219,12 @@ struct AtmoPushConstants {
 
 // Terrain patch 专属 UBO（binding 1 of Set 0）
 // nodePos/nodeSide/nodeUp 已移至 push constants（每 draw call 更新），此处只保留每帧常量
+// 地形自身的每帧数据。云→地表阴影的级联描述不放这里：它由 VkCloudShadowSystem 拥有，
+// 通过独立的 UBO（terrain set0 binding 3）提供，这样植被/海面等其他消费端可以直接
+// 复用同一个 buffer，不必各自在自己的 UBO 里复制一份。
 struct TerrainDataUBO {
-    float planetCenterRel[4]; // 16 bytes — planet center relative to camera (per-frame constant)
-};
+    float planetCenterRel[4];       // 16 bytes — planet center relative to camera (per-frame constant)
+}; // total: 16 bytes
 
 // -----------------------------------------------------------------------
 // VkDescriptorManager — owns layouts, pool, and per-frame UBO resources

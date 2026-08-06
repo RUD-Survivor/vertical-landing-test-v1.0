@@ -13,6 +13,7 @@
 #include "../vk_cloud_bake.h"
 #include "../weather_map_bake.h"
 #include "../vk_atmosphere_lut.h" // 大气重构：VkAtmoLutCache + fillAtmoLutFrameData
+#include "../vk_cloud_shadow.h"  // GpuCloudShadowData：地形 Set0 binding 3 的 UBO 布局
 #include "../../math/math3d.h"   // Vec3, Mat4
 
 #include <unordered_map>
@@ -71,6 +72,12 @@ struct VkSceneSystem {
     void*         terrainDataMapped[2]= {nullptr, nullptr};
     VkDescriptorSet terrainSet0[2]    = {VK_NULL_HANDLE, VK_NULL_HANDLE};
 
+    // 云影级联 UBO 的占位：云系统还没起来（或不在有云的星球上）时绑它。内容恒为全零，
+    // 即 CloudShadowData.config.x = 0，采样函数会直接返回 1，等价于「无阴影」。
+    static constexpr VkDeviceSize kTerrainCloudShadowFallbackSize = sizeof(GpuCloudShadowData);
+    VkBuffer      terrainCloudShadowFallbackUbo   = VK_NULL_HANDLE;
+    VmaAllocation terrainCloudShadowFallbackAlloc = VK_NULL_HANDLE;
+
     // Terrain 全局纹理（Set1: tectonic/hydro/climate/null）
     VkTexture2D     terrainTectonicTex;
     VkTexture2D     terrainHydroTex;
@@ -105,10 +112,13 @@ struct VkSceneSystem {
 
     int _frameIdx = 0;
 
+    VkDevice _device = VK_NULL_HANDLE; // 供 updateTerrainCloudShadow 等拿不到 ctx 的方法使用
+
     // -----------------------------------------------------------------------
     bool init(VulkanContext& ctx, VkDescriptorManager& d,
               VkFormat colorFmt, VkFormat depthFmt) {
         desc = &d;
+        _device = ctx.device;
 
         if (!meshPipe.init(ctx, d, colorFmt, depthFmt,
                 "src/render/shaders/spirv/mesh.vert.spv",
@@ -244,6 +254,10 @@ struct VkSceneSystem {
                 vmaDestroyBuffer(ctx.allocator, terrainDataUbo[i], terrainDataAlloc[i]);
                 terrainDataUbo[i] = VK_NULL_HANDLE;
             }
+        }
+        if (terrainCloudShadowFallbackUbo != VK_NULL_HANDLE) {
+            vmaDestroyBuffer(ctx.allocator, terrainCloudShadowFallbackUbo, terrainCloudShadowFallbackAlloc);
+            terrainCloudShadowFallbackUbo = VK_NULL_HANDLE;
         }
         if (vegInstanceVbo != VK_NULL_HANDLE) {
             vmaDestroyBuffer(ctx.allocator, vegInstanceVbo, vegInstanceAlloc);
@@ -714,6 +728,39 @@ struct VkSceneSystem {
         _bindMeshPipe(cmd);
     }
 
+    // 每帧把云→地表阴影级联的资源接到地形 Set0（binding 2 = 图集，binding 3 = 级联描述）。
+    //
+    // 这些资源由 VkCloudShadowSystem 拥有，本系统只是引用；之所以每帧重绑而不是 init
+    // 时绑死，是因为云系统可能在窗口 resize 时重建图集，句柄会变。任一句柄为空时回退到
+    // 占位资源（1x1 白纹理 + 全零 UBO → config.x=0 → 采样函数直接返回 1，等价于无阴影）。
+    //
+    // 只更新当前帧的 set：另一帧的 set 可能还在被上一帧的 command buffer 使用。
+    void updateTerrainCloudShadow(VkImageView atlasView, VkSampler atlasSampler, VkBuffer cascadeUbo, VkDeviceSize cascadeUboSize) {
+        int fi = _frameIdx % 2;
+
+        VkDescriptorImageInfo atlasInfo{};
+        atlasInfo.sampler     = atlasSampler ? atlasSampler : nullTex.sampler;
+        atlasInfo.imageView   = atlasView    ? atlasView    : nullTex.view;
+        atlasInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+        VkDescriptorBufferInfo uboInfo{};
+        uboInfo.buffer = cascadeUbo ? cascadeUbo : terrainCloudShadowFallbackUbo;
+        uboInfo.offset = 0;
+        uboInfo.range  = cascadeUbo ? cascadeUboSize : kTerrainCloudShadowFallbackSize;
+        if (uboInfo.buffer == VK_NULL_HANDLE) return;
+
+        VkWriteDescriptorSet w[2]{};
+        w[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        w[0].dstSet = terrainSet0[fi]; w[0].dstBinding = 2;
+        w[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        w[0].descriptorCount = 1; w[0].pImageInfo = &atlasInfo;
+        w[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        w[1].dstSet = terrainSet0[fi]; w[1].dstBinding = 3;
+        w[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        w[1].descriptorCount = 1; w[1].pBufferInfo = &uboInfo;
+        vkUpdateDescriptorSets(_device, 2, w, 0, nullptr);
+    }
+
 private:
     // 绑定 mesh 管线 + set0 (UBO) + set1 (null 纹理) — 帧内默认状态
     void _bindMeshPipe(VkCommandBuffer cmd) {
@@ -856,7 +903,7 @@ private:
         VkDescriptorSetLayout layout = terrainPipe.set0Layout;
         if (layout == VK_NULL_HANDLE) return false;
 
-        // 创建 TerrainData UBO（每帧 64 bytes）
+        // 每帧一份 TerrainData UBO
         for (int i = 0; i < 2; i++) {
             VkBufferCreateInfo bci{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
             bci.size = sizeof(TerrainDataUBO);
@@ -868,6 +915,22 @@ private:
             if (vmaCreateBuffer(ctx.allocator, &bci, &aci, &terrainDataUbo[i], &terrainDataAlloc[i], &info) != VK_SUCCESS)
                 return false;
             terrainDataMapped[i] = info.pMappedData;
+        }
+
+        // 云影级联的占位 UBO：全零写一次即可，之后不再改动（内容语义 = 无阴影）。
+        {
+            VkBufferCreateInfo bci{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+            bci.size = kTerrainCloudShadowFallbackSize;
+            bci.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+            VmaAllocationCreateInfo aci{};
+            aci.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
+            aci.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
+            VmaAllocationInfo info;
+            if (vmaCreateBuffer(ctx.allocator, &bci, &aci,
+                                &terrainCloudShadowFallbackUbo, &terrainCloudShadowFallbackAlloc, &info) != VK_SUCCESS)
+                return false;
+            GpuCloudShadowData zero{};
+            memcpy(info.pMappedData, &zero, sizeof(zero));
         }
 
         // 分配 descriptor sets（terrain 使用自己的 pool）
@@ -888,7 +951,18 @@ private:
             tdbi.buffer = terrainDataUbo[i];
             tdbi.offset = 0; tdbi.range = sizeof(TerrainDataUBO);
 
-            VkWriteDescriptorSet w[2]{};
+            // binding 2/3 = 云影级联图集 + 级联描述。初始绑占位资源；云系统就绪后由
+            // updateTerrainCloudShadow() 每帧重定向到真实资源。
+            VkDescriptorImageInfo csdi{};
+            csdi.sampler = nullTex.sampler;
+            csdi.imageView = nullTex.view;
+            csdi.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+            VkDescriptorBufferInfo csbi{};
+            csbi.buffer = terrainCloudShadowFallbackUbo;
+            csbi.offset = 0; csbi.range = kTerrainCloudShadowFallbackSize;
+
+            VkWriteDescriptorSet w[4]{};
             w[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             w[0].dstSet = terrainSet0[i]; w[0].dstBinding = 0;
             w[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -897,7 +971,15 @@ private:
             w[1].dstSet = terrainSet0[i]; w[1].dstBinding = 1;
             w[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
             w[1].descriptorCount = 1; w[1].pBufferInfo = &tdbi;
-            vkUpdateDescriptorSets(ctx.device, 2, w, 0, nullptr);
+            w[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            w[2].dstSet = terrainSet0[i]; w[2].dstBinding = 2;
+            w[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            w[2].descriptorCount = 1; w[2].pImageInfo = &csdi;
+            w[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            w[3].dstSet = terrainSet0[i]; w[3].dstBinding = 3;
+            w[3].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            w[3].descriptorCount = 1; w[3].pBufferInfo = &csbi;
+            vkUpdateDescriptorSets(ctx.device, 4, w, 0, nullptr);
         }
         return true;
     }

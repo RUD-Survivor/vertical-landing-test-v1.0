@@ -72,6 +72,15 @@ layout (set = 0, binding = 35, rgba16f) uniform image2D imageCloudAirTReconstruc
 layout (set = 0, binding = 36) uniform texture2D inCloudAirTReconstructionTexture;
 layout (set = 0, binding = 37) uniform texture2D inCloudAirTReconstructionTextureHistory;
 
+// 云→地表阴影级联：太阳方向积分的云透过率图集（R32F，T∈[0,1]，N 级横向并排）。
+// cloud_shadow.glsl 写入，地表着色器（terrain.frag 等）采样。级联描述见 binding 39。
+layout (set = 0, binding = 38, r32f) uniform image2D imageCloudShadowTexture;
+
+// 级联描述（矩阵 + 图集切片布局）。结构定义与地表消费端共用同一个头文件，
+// 保证生产/消费两侧对矩阵约定的理解不会各自漂移。C++ 侧见 vk_cloud_shadow.h。
+#include "../common/shared_cloud_shadow.glsl"
+layout (set = 0, binding = 39) uniform UniformCloudShadowData { CloudShadowData cloudShadowData; };
+
 //用宏指定 Descriptor Set 编号，再引入公共采样器定义
 #define SHARED_SAMPLER_SET 1
 #include "../common/shared_sampler.glsl"
@@ -94,9 +103,16 @@ bool cloudUseQuarterRes()
     return frameData.sky.atmosphereConfig.updateFaceIndex != 0u;
 }
 
-float getDensity(float heightMeter)//单位为米
+float getDensity(float heightAboveSurfaceMeter)//参数：相对地表高度（米）
 {
-    return exp(-heightMeter * 0.001) * 0.001 * 0.001 * frameData.sky.atmosphereConfig.cloudGodRayScale;//可调强度来自 AtmosphereConfig，目前缺frameData与调用方法
+    // God Ray 是近地大气现象：密度随「相对地表高度」指数衰减，而不是随「到相机的距离」。
+    // 用后者会导致外太空/轨道高度上（相机周围 400m 内仍有一段非零距离）也叠加一层雾——
+    // 这就是「God Ray 扩散到全宇宙」的来源。改高度依赖后，相机在数百 km 高空时
+    // heightAboveSurface 巨大 → density 自动归零，不需要额外 if 门控。
+    // falloff=2.5/km：地表 0.0002/m（400m 光柱 τ≈0.08，可见且不遮天），
+    // 2km 高度降到 2e-5、5km 降到 7e-8，天然把 God Ray 限制在低空。
+    float hKm = heightAboveSurfaceMeter * 0.001;
+    return exp(-hKm * 2.5) * 0.0002 * frameData.sky.atmosphereConfig.cloudGodRayScale;
 }//高度相关的指数衰减密度，给 God Ray / 体积雾 pass 用，不是主云体 cloudMap() 的密度
 
 #define MsCount 2//多重散射阶数
@@ -1328,7 +1344,9 @@ inout vec3 airTransmittance)
         // 与 composite 近距 God Ray（400m）对齐的短雾兜底；仰视云底时用球壳求交距离。
         const float kFogNearFallbackKm=0.4;
         // 地平线掠射到云底可达数百 km；不封顶则近处密度×巨步长仍会把 T 打穿。
-        const float kFogMarchMaxKm=20.0;
+        // 密度已改为「相对地表高度」指数衰减（getDensity），超出低空几 km 后自动归零，
+        // 所以 march 上限从 20km 缩到 5km 不会损失光柱，但能避免近地长 march 把天空乘暗。
+        const float kFogMarchMaxKm=5.0;
 
         vec3 camLocalUp=normalize(worldPos);
         float fogMarchKm=kFogNearFallbackKm;
@@ -1419,8 +1437,10 @@ inout vec3 airTransmittance)
                 lutTransmittanceParamsToUv(atmosphere,sampleViewHeight,viewZenithCosAngle,sampleUv);
                 atmosphereTransmittance=texture(sampler2D(inTransmittanceLut,linearClampEdgeSampler),sampleUv).rgb;
             }
-            float density=getDensity(distance(rayPosWP,frameData.camWorldPos.xyz));
-            // getDensity：exp(-d×0.001)×系数×cloudGodRayScale；此处 d=到相机距离(米)。
+            float density=getDensity(length(rayPosWP)-atmosphere.bottomRadius*1000.0);
+            // getDensity：相对地表高度(米)的指数雾 × cloudGodRayScale。用「到相机距离」的话
+            // 在外太空（相机远离行星）也会有非零密度，导致深空背景被叠蓝雾——这是
+            // 「God Ray 扩散到全宇宙」的根源，故这里必须用样本高度而非到相机距离。
 
             vec3 sigmaS=vec3(density);
             const float sigmaA=0.0;
@@ -1440,6 +1460,14 @@ inout vec3 airTransmittance)
         // mean(vec3)：shared_functions.glsl，(R+G+B)/3。
 
         lightingFog.xyz=scatteredLightTotal;
+
+        if(any(isnan(lightingFog))||any(isinf(lightingFog)))
+        {
+            // NaN/Inf 兜底：数值爆炸时标记为「未算雾」（w=-1），composite 侧 fogColor.a<0
+            // 直接跳过该像素；避免 NaN 写入 fog RT 后经 history ping-pong 持续污染天空成纯黑
+            // （与主云 march 的 result NaN guard 同理）。
+            lightingFog=vec4(0.0,0.0,0.0,-1.0);
+        }
     }
 
     //Dual mix transmittance

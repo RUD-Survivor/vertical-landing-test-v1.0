@@ -414,6 +414,17 @@ struct VkRenderer3D {
             planetTd.planetCenterRel[1] = snap.terrainPatches[0].planetCenterRel[1];
             planetTd.planetCenterRel[2] = snap.terrainPatches[0].planetCenterRel[2];
             planetTd.planetCenterRel[3] = 0.f;
+            // 云→地表阴影级联：地形采样的是上一帧 cloud shadow pass 的结果（本帧的 shadow
+            // pass 要等几何 pass 结束后才跑），所以这里上传的是「最近一次成功渲染」的那批
+            // 级联矩阵，与图集当前内容严格对应。首帧还没渲染过，uploadTerrainData() 会写入
+            // 全零（config.x=0），terrain.frag 的采样函数据此直接返回 1 = 无阴影。
+            auto& cloudShadow = cloudSystem.cloudShadow;
+            const bool cloudShadowActive = cloudShadow.uploadTerrainData(_frameIdx);
+            scene.updateTerrainCloudShadow(
+                cloudShadowActive ? cloudShadow.atlasView()    : VK_NULL_HANDLE,
+                cloudShadowActive ? cloudShadow.atlasSampler() : VK_NULL_HANDLE,
+                cloudShadowActive ? cloudShadow.terrainUbo(_frameIdx) : VK_NULL_HANDLE,
+                sizeof(GpuCloudShadowData));
             for (const auto& tp : snap.terrainPatches) {
                 TerrainPushConstants tpc{};
                 memcpy(tpc.model, tp.model, 64);

@@ -157,6 +157,8 @@ if %ERRORLEVEL% neq 0 goto :fail
 if %ERRORLEVEL% neq 0 goto :fail
 %GLSLC% -fshader-stage=compute %SHADER_DIR%\cloud\cloud_composite.glsl -o %OUT_DIR%\cloud_composite.comp.spv
 if %ERRORLEVEL% neq 0 goto :fail
+%GLSLC% -fshader-stage=compute %SHADER_DIR%\cloud\cloud_shadow.glsl -o %OUT_DIR%\cloud_shadow.comp.spv
+if %ERRORLEVEL% neq 0 goto :fail
 %GLSLC% %SHADER_DIR%\vegetation.vert -o %OUT_DIR%\vegetation.vert.spv
 if %ERRORLEVEL% neq 0 goto :fail
 %GLSLC% %SHADER_DIR%\vegetation.frag -o %OUT_DIR%\vegetation.frag.spv

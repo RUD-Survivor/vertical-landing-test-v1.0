@@ -28,6 +28,7 @@
 #include "cloud_noise_ladder.h"
 #include "vk_blue_noise.h"
 #include "vk_shadow_cascade.h"
+#include "vk_cloud_shadow.h"
 #include "gpu_frame_data.h"
 #include "../scene_snapshot.h"
 #include "../../math/math3d.h"
@@ -178,6 +179,11 @@ struct FlowerCloudTuneParams {
     // God Ray 关着阴影渲染是纯浪费（没人读图集）。
     bool  godRayEnabled = false;
     float godRayScale = 1.0f; // cloudGodRayScale：光轴强度倍率
+
+    // ── 云→地表阴影级联 ──────────────────────────────────────────────────────
+    // 实现在独立模块 vk_cloud_shadow.h（VkCloudShadowSystem），这里只是把它的
+    // 参数纳进同一个 tuner 面板。云系统本身不关心级联怎么切、图集怎么排。
+    CloudShadowTuneParams cloudShadow;
 };
 
 // 以 basicNoiseScale 为锚点重算整条频带阶梯（Cloud Tuner 的"重建阶梯"按钮）。
@@ -260,6 +266,11 @@ struct VkCloudSystem {
 
     VkPipeline raymarchPipe=VK_NULL_HANDLE, reconstructPipe=VK_NULL_HANDLE, compositePipe=VK_NULL_HANDLE;
 
+    // ── 云→地表阴影级联（独立子系统，见 vk_cloud_shadow.h）──
+    // 云系统只负责两件事：把它的图集/UBO 接进云 descriptor set（binding 38/39），
+    // 以及在 composite 之后调它的 render()。级联几何与图集布局都封装在子系统内部。
+    VkCloudShadowSystem cloudShadow;
+
     VkBlueNoiseBuffers blueNoise;
 
     bool cloudRtInitialized = false;
@@ -335,22 +346,26 @@ struct VkCloudSystem {
                       const SceneSnapshot& snap, int frameSlot, bool drawClouds,
                       VkImageView shadowAtlasView = VK_NULL_HANDLE, VkBuffer cascadeInfoBuf = VK_NULL_HANDLE,
                       const GpuCascadeShadowConfig* cascadeCfg = nullptr) {
-        if (!enabled) return;
-        if (!tuneParams.flowerCloudEnabled) return;
+        // 任何一条提前返回都要让云影子系统同步失效，否则地形会拿着旧图集按新相机位置
+        // 采样，出现错位残留的云影。
+        if (!enabled)                        { cloudShadow.markInactive(); return; }
+        if (!tuneParams.flowerCloudEnabled)  { cloudShadow.markInactive(); return; }
         if (!drawClouds) {
             if (skipLogOnce) {
                 fprintf(stderr, "[VkCloudSystem] Phase1 skip: drawClouds=false (need Earth atmoIdx=3 + showClouds)\n");
                 skipLogOnce = false;
             }
+            cloudShadow.markInactive();
             return;
         }
         skipLogOnce = true; // 下次真的又被跳过时，还能再打一次（不是一辈子只报一次）
-        if (raymarchPipe == VK_NULL_HANDLE) return;
+        if (raymarchPipe == VK_NULL_HANDLE) { cloudShadow.markInactive(); return; }
 
         const CelestialDraw* earth = nullptr;
         for (const auto& cd : snap.celestials) { if (cd.atmoIdx == 3 && cd.showClouds) { earth = &cd; break; } }
         if (!earth) {
             fprintf(stderr, "[VkCloudSystem] Phase1 skip: earth==nullptr despite drawClouds=true (snap 不一致?)\n");
+            cloudShadow.markInactive();
             return;
         }
 
@@ -415,6 +430,14 @@ struct VkCloudSystem {
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, compositePipe);
         dispatch2D(cmd, extent);
 
+        // ── 云→地表阴影级联 ──
+        // 在 composite 之后跑，不影响本帧云渲染。地形几何 pass 本帧已结束，所以这张
+        // 图集从下一帧起才对地形生效（首帧无阴影，由子系统的 _rendered 标志兜住）。
+        // descriptor set 沿用上面绑好的 cloudSet[slot]：阴影 compute 要读同一套噪声与
+        // 天气图，binding 38/39 已经指向子系统的图集与 UBO。
+        cloudShadow.tune = tuneParams.cloudShadow;
+        cloudShadow.render(cmd, makeCloudShadowInput(snap, *earth, fd), slot);
+
         transitionImage(cmd, hdrImage, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
             VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT,
             VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
@@ -451,6 +474,11 @@ private:
         // 否则会被再缩小 1000 倍，相当于相机深埋地心，云 ray march 一开始就被判定为撞地提前退出。
         float camRelPlanetKm[3] = { snap.camPos[0]-earth.center[0], snap.camPos[1]-earth.center[1], snap.camPos[2]-earth.center[2] };
         fd.camWorldPos[0]=camRelPlanetKm[0]*1000.0f; fd.camWorldPos[1]=camRelPlanetKm[1]*1000.0f; fd.camWorldPos[2]=camRelPlanetKm[2]*1000.0f;
+
+        // 相机绝对世界位置（km）：cloud_composite 的 God Ray 级联阴影查询需要它与 cascade viewProj
+        // 同一空间（绝对浮动原点，见 vk_shadow_cascade.h::buildCascadeViewProj，shadow pass 里地形
+        // 顶点 = planetCenterAbs + 局部偏移）。snap.camPos 与传给 shadowSystem.render 的是同一个值。
+        fd.camPosAbsKm[0] = snap.camPos[0]; fd.camPosAbsKm[1] = snap.camPos[1]; fd.camPosAbsKm[2] = snap.camPos[2];
 
         // fovy/aspect：噪声屏幕足迹 LOD（cloud_noise_lod.glsl）要用竖直视场把世界周期换算成
         // 像素数。snap.proj 由 math3d.h::Mat4::perspective 生成，m[5] = 1/tan(fovy/2)，从矩阵
@@ -610,7 +638,35 @@ private:
         ac.hiCloudSoftness = tuneParams.hiCloudSoftness;
         ac.hiCloudType = tuneParams.hiCloudType;
 
+        // 注：云→地表阴影的正交盒矩阵不在这里算。它已经拆到 VkCloudShadowSystem
+        // （vk_cloud_shadow.h）里按级联生成，通过独立的 UBO（binding 39）下发。
+        // GpuAtmosphereConfig 里遗留的 cloudSpaceViewProject / cloudShadowExtent 是
+        // Flower 原始结构的字段，当前无人消费，保持零值。
+
         return fd;
+    }
+
+    // 把本帧的相机/太阳/行星几何翻译成云影子系统的输入。
+    //
+    // 这是两个模块之间唯一的数据契约：VkCloudShadowSystem 不认识 SceneSnapshot 也不认识
+    // GpuPerFrameData，只吃这一个纯数据结构。将来云层几何来源变了（比如换成逐星球配置），
+    // 只需要改这一个函数。
+    CloudShadowFrameInput makeCloudShadowInput(const SceneSnapshot& snap,
+                                               const CelestialDraw& earth,
+                                               const GpuPerFrameData& fd) const {
+        const GpuAtmosphereConfig& ac = fd.sky.atmosphereConfig;
+        CloudShadowFrameInput in{};
+        for (int i = 0; i < 3; i++) {
+            in.camRelPlanetKm[i] = snap.camPos[i] - earth.center[i];
+            in.sunDirToPlanet[i] = snap.lightDir[i];   // 子系统内部归一化
+        }
+        in.planetRadiusKm      = ac.bottomRadius;
+        in.cloudBottomRadiusKm = ac.cloudAreaStartHeight;
+        in.cloudTopRadiusKm    = ac.cloudAreaStartHeight + ac.cloudAreaThickness;
+        // 地形起伏余量：只用于给包围球留冗余（多留一点纯粹是深度范围略宽，无精度代价），
+        // 但小于真实山峰高度会让高海拔地面掉出盒外。取 15km，地球最高点 8.8km 有充分余量。
+        in.terrainReliefKm     = 15.0f;
+        return in;
     }
 
     bool createSamplers(VulkanContext& ctx) {
@@ -680,6 +736,11 @@ private:
         }
         if (!createStorage2D(ctx, {1,1}, VK_FORMAT_R16G16B16A16_SFLOAT, dummy2DImg, dummy2DAlloc, dummy2DView)) return false;
 
+        // 云→地表阴影级联的图集与 UBO 由子系统自己创建（它才知道级数/分辨率怎么排）。
+        // 必须在 createDescriptors() 之前完成，因为 binding 38/39 要指向它们。
+        cloudShadow.tune = tuneParams.cloudShadow;
+        if (!cloudShadow.initResources(ctx)) return false;
+
         // dummy 3D（Froxel 占位）
         {
             VkImageCreateInfo ici{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
@@ -721,9 +782,9 @@ private:
             if (vkCreateDescriptorSetLayout(ctx.device, &ci, nullptr, &samplerSetLayout) != VK_SUCCESS) return false;
         }
 
-        // ── Set 0：cloud_common.glsl binding 0-37 ──
+        // ── Set 0：cloud_common.glsl binding 0-38 ──
         {
-            VkDescriptorSetLayoutBinding b[38]{};
+            VkDescriptorSetLayoutBinding b[40]{};
             auto img  = [&](int i, VkDescriptorType t){ b[i] = { (uint32_t)i, t, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr }; };
             img(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE); img(1, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
             img(2, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE); img(3, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
@@ -751,9 +812,11 @@ private:
             img(35, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE); // imageCloudAirTReconstructionTexture
             img(36, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE); // inCloudAirTReconstructionTexture
             img(37, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE); // inCloudAirTReconstructionTextureHistory
+            img(38, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE); // imageCloudShadowTexture（云影级联图集，写）
+            b[39] = { 39, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr }; // CloudShadowData
 
             VkDescriptorSetLayoutCreateInfo ci{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-            ci.bindingCount = 38; ci.pBindings = b;
+            ci.bindingCount = 40; ci.pBindings = b;
             if (vkCreateDescriptorSetLayout(ctx.device, &ci, nullptr, &cloudSetLayout) != VK_SUCCESS) return false;
         }
 
@@ -763,9 +826,9 @@ private:
         if (vkCreatePipelineLayout(ctx.device, &plci, nullptr, &cloudPipelineLayout) != VK_SUCCESS) return false;
 
         VkDescriptorPoolSize sizes[] = {
-            { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 12 * FRAMES_IN_FLIGHT },
+            { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 14 * FRAMES_IN_FLIGHT },
             { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 32 * FRAMES_IN_FLIGHT },
-            { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 * FRAMES_IN_FLIGHT },
+            { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2 * FRAMES_IN_FLIGHT }, // b21 PerFrameData + b39 CloudShadowData
             { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1 * FRAMES_IN_FLIGHT },
             { VK_DESCRIPTOR_TYPE_SAMPLER, 10 },
         };
@@ -849,12 +912,15 @@ private:
         // ── 双层云：Profile LUT + 高空云 Hi weather map（vk_scene.h 烘焙，SHADER_READ_ONLY）──
         VkDescriptorImageInfo profileLut{ VK_NULL_HANDLE, profileLutView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
         VkDescriptorImageInfo hiWeather{ VK_NULL_HANDLE, hiWeatherView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+        // 云影级联图集：cloud_shadow compute 写入时处于 GENERAL
+        VkDescriptorImageInfo shadow{ VK_NULL_HANDLE, cloudShadow.atlasView(), VK_IMAGE_LAYOUT_GENERAL };
+        VkDescriptorBufferInfo shadowCascades{ cloudShadow.computeUbo(slot), 0, sizeof(GpuCloudShadowData) };
         VkDescriptorBufferInfo ubo{ atmosphereLut.frameUBO(slot), 0, sizeof(GpuPerFrameData) };
         VkDescriptorBufferInfo cascadeSsbo{ cascadeInfoBuf ? cascadeInfoBuf : dummyCascadeBuf, 0,
                                              cascadeInfoBuf ? sizeof(GpuCascadeInfo) * (size_t)VkCascadeShadowSystem::kMaxCascades
                                                             : sizeof(GpuCascadeInfo) };
 
-        VkWriteDescriptorSet w[38]{};
+        VkWriteDescriptorSet w[40]{};
         auto imgW = [&](int i, uint32_t binding, VkDescriptorType t, VkDescriptorImageInfo* info) {
             w[i].sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; w[i].dstSet=set; w[i].dstBinding=binding;
             w[i].descriptorType=t; w[i].descriptorCount=1; w[i].pImageInfo=info;
@@ -885,8 +951,11 @@ private:
         imgW(33,33,VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,&qAirTRW);   imgW(34,34,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,&qAirTRO);
         imgW(35,35,VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,&fAirTRW);   imgW(36,36,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,&fAirTRO);
         imgW(37,37,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,&fAirTHist);
+        imgW(38,38,VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,&shadow);
+        w[39].sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; w[39].dstSet=set; w[39].dstBinding=39;
+        w[39].descriptorType=VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER; w[39].descriptorCount=1; w[39].pBufferInfo=&shadowCascades;
 
-        vkUpdateDescriptorSets(ctx.device, 38, w, 0, nullptr);
+        vkUpdateDescriptorSets(ctx.device, 40, w, 0, nullptr);
     }
 
     bool createPipelines(VulkanContext& ctx) {
@@ -903,14 +972,18 @@ private:
             vkDestroyShaderModule(ctx.device, mod, nullptr);
             return res == VK_SUCCESS;
         };
+        // 云影 compute 复用同一个 pipeline layout（它要读同一套噪声/天气图），
+        // 但 pipeline 本身归子系统持有 —— 谁 dispatch 谁负责生命周期。
         return make("src/render/shaders/spirv/cloud_raymarching.comp.spv", raymarchPipe)
             && make("src/render/shaders/spirv/cloud_reconstruct.comp.spv", reconstructPipe)
-            && make("src/render/shaders/spirv/cloud_composite.comp.spv", compositePipe);
+            && make("src/render/shaders/spirv/cloud_composite.comp.spv", compositePipe)
+            && cloudShadow.initPipeline(ctx, cloudPipelineLayout);
     }
 
     void destroyPipelines(VkDevice dev) {
         auto d=[&](VkPipeline& p){ if(p){vkDestroyPipeline(dev,p,nullptr);p=VK_NULL_HANDLE;} };
         d(raymarchPipe); d(reconstructPipe); d(compositePipe);
+        cloudShadow.destroyPipeline(dev);
         if (cloudPipelineLayout) { vkDestroyPipelineLayout(dev, cloudPipelineLayout, nullptr); cloudPipelineLayout=VK_NULL_HANDLE; }
     }
 
@@ -935,6 +1008,7 @@ private:
         }
         d(dummy2DImg,dummy2DAlloc,dummy2DView);
         d(dummy3DImg,dummy3DAlloc,dummy3DView);
+        cloudShadow.destroyResources(ctx);
         cloudRtInitialized = false;
     }
 };
