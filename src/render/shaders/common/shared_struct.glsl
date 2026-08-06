@@ -144,10 +144,10 @@ struct AtmosphereConfig
     float cloudAmbientExposure;       // 环境光相对倍率（LUT×L_sun 之后再乘）
     float cloudAmbientAnalyticBlend;  // 与 analyticSkyAmbient 混合 [0,1]
     int   cloudIrradianceBakeAtShell; // 保留布局；SkyView 烘焙高度（atmo 路径）
-    // Curl 假资产 localCoverage（云管线；复用原 padAmbient 槽位，保 632B）
-    float cloudCurlUVScale;           // UV = km * scale（旧硬编码 0.001）
-    float cloudCurlStrength;          // 叠到 weather.x；0=关
-    float cloudCurlContrast;          // saturate(x*c - c*0.25)*strength
+    // Curl 无散矢量场（bake 的 64³ RGBA8；位移噪声采样位置，见 cloud_common.glsl::cloudMap）
+    float cloudCurlUVScale;           // 采样频率 1/km（0.02 → 涡旋周期 ~50km）
+    float cloudCurlStrength;          // 位移幅度 km；0=关
+    float cloudCurlContrast;          // 高度衰减指数（越大扰动越贴云底）
 
     // 噪声频带阶梯（cloud_common.glsl::cloudMap）。形状链 Basic/Meso/Fine 共用同一张
     // 128³ inBasicNoise，只换世界频率（单位 1/km，纹理平铺周期 = 1/scale km）；

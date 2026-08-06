@@ -136,10 +136,10 @@ struct FlowerCloudTuneParams {
     float weatherUVScale = 1.f;               // cloudWeatherUVScale
     float windDirX = 1.f, windDirY = 0.f, windDirZ = 0.f; // cloudDirection
 
-    // Curl 纹理 → localCoverage（cloud_common.glsl；假 curl = Worley/Perlin 2D）
-    float curlUVScale = 0.001f;               // cloudCurlUVScale；轨道可试 0.0002
-    float curlStrength = 0.0f;                // cloudCurlStrength；0=关闭碎点
-    float curlContrast = 3.0f;                // cloudCurlContrast
+    // Curl 无散矢量场 → 位移噪声采样位置（cloud_common.glsl::cloudMap；bake 见 cloud_curlnoise.glsl）
+    float curlUVScale = 0.02f;   // cloudCurlUVScale；采样频率 1/km（0.02 → 涡旋周期 ~50km）
+    float curlStrength = 0.4f;   // cloudCurlStrength；位移幅度 km；0=关闭湍流
+    float curlContrast = 1.0f;   // cloudCurlContrast；高度衰减指数（越大扰动越贴云底）
 
     // 地面光 / 环境
     float fogFade = 1.0f;                       // cloudFogFade：云底 groundLit 倍率（云顶已归零）
@@ -246,7 +246,7 @@ struct VkCloudSystem {
 
     // ── 噪声/天气纹理（复用 vk_scene.h 已烘焙好的资源，不重复创建）─────────────
     VkImageView basicNoiseView=VK_NULL_HANDLE, detailNoiseView=VK_NULL_HANDLE, weatherView=VK_NULL_HANDLE;
-    VkImageView curlNoiseView=VK_NULL_HANDLE; // Phase 2：真实 curl 湍流细节纹理（vk_scene.h::cloudCurlTex）
+    VkImageView curlNoiseView=VK_NULL_HANDLE; // 真实 curl 无散矢量场（vk_scene.h::cloudCurlTex，64³ RGBA8）
     // ── 双层云：Profile LUT + 高空云 Hi weather map（vk_scene.h 烘焙）─────
     VkImageView profileLutView=VK_NULL_HANDLE;
     VkImageView hiWeatherView=VK_NULL_HANDLE;
@@ -875,8 +875,8 @@ private:
         VkDescriptorImageInfo basicN{ VK_NULL_HANDLE, basicNoiseView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
         VkDescriptorImageInfo detailN{ VK_NULL_HANDLE, detailNoiseView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
         VkDescriptorImageInfo weatherI{ VK_NULL_HANDLE, weatherView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
-        // Phase 2 已接入：真实 curl 湍流细节纹理（vk_scene.h::cloudCurlTex，见 vk_cloud_bake.h::bakeCurlNoise），
-        // 之前这里绑定的是 1x1 全零占位纹理，cloudMap() 的 localCoverage 项恒为 0。
+        // 真实 curl 无散矢量场（vk_scene.h::cloudCurlTex，见 vk_cloud_bake.h::bakeCurlNoise），
+        // 之前这里绑定的是 1x1 全零占位纹理，cloudMap() 的湍流位移项恒为 0。
         VkDescriptorImageInfo curl{ VK_NULL_HANDLE, curlNoiseView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
         VkDescriptorImageInfo transLut{ VK_NULL_HANDLE, atmosphereLut.transmittanceView(), VK_IMAGE_LAYOUT_GENERAL };
         // 空气透视：Bruneton Inscatter ToPoint（bakeFull 烤出；与场景大气同源）

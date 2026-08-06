@@ -311,9 +311,9 @@ inline void fillPlanetAtmosphereProfile(GpuAtmosphereConfig& cfg, int32_t atmoId
     cfg.cloudSunLitMapOctave = 1;
     cfg.cloudNoiseScale = 1.0f;
     cfg.cloudGodRay = 0; // Phase 2 待接入（依赖 SDSM 级联阴影）
-    cfg.cloudCurlUVScale = 0.001f;
-    cfg.cloudCurlStrength = 0.0f;
-    cfg.cloudCurlContrast = 3.0f;
+    cfg.cloudCurlUVScale = 0.02f;
+    cfg.cloudCurlStrength = 0.4f;
+    cfg.cloudCurlContrast = 1.0f;
     (void)cloudExtinction; // 云消光由 FlowerCloudTuneParams / cloudMap Density 侧提供，这里不重复
 }
 

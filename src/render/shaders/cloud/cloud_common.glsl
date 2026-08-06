@@ -26,7 +26,7 @@ layout (set = 0, binding = 5) uniform texture2D inGBufferA; // G-Buffer A（如�
 layout (set = 0, binding = 6) uniform texture3D inBasicNoise; // 3D 基础噪声（Perlin-Worley）；云块大形状与覆盖率
 layout (set = 0, binding = 7) uniform texture3D inDetailNoise; // 3D 细节噪声（Worley）；云边缘侵蚀与内部细节
 layout (set = 0, binding = 8) uniform texture2D inWeatherTexture; // 2D 天气图（coverage/type/humidity）；区域云量与类型变化
-layout (set = 0, binding = 9) uniform texture2D inCloudCurlNoise; // 2D curl 噪声；局部扰动形状与 coverage 变化
+layout (set = 0, binding = 9) uniform texture3D inCloudCurlNoise; // 3D curl 无散矢量场（RGB=方向 A=幅度）；位移噪声采样位置
 
 layout (set = 0, binding = 10) uniform texture2D inTransmittanceLut; // 大气透射率 LUT；ToPoint 段透射 +（日照路径已改实时）
 layout (set = 0, binding = 11) uniform texture3D inInscatterLut; // Bruneton Inscatter；云空气透视 GetSkyRadianceToPoint
@@ -239,29 +239,28 @@ float cloudMap(vec3 posMeter,float normalizedHeight,float lodDistScale)//单位�
 
     vec4 weatherValue=texture(sampler2D(inWeatherTexture,linearRepeatSampler),sampleUv);//查2D天气图，.x区域coverage bias .g/.b/.a云类型、湿度等
 
-    // Curl（假资产：bake 的 Worley/Perlin 2D）→ localCoverage。
-    // UV 用局部东/北向 km（不随浮点原点漂移）；频率/强度/对比均由 Cloud Tuner 控制。
-    float cosLat=max(cos(latRad),0.01);
-    float eastKm=lonRad*(frameData.sky.atmosphereConfig.bottomRadius)*cosLat;
-    float northKm=latRad*frameData.sky.atmosphereConfig.bottomRadius;
+    // Curl 无散矢量场（bake 的真 curl noise，64³ RGBA8）→ 位移 3D 噪声采样位置。
+    // 这是 curl noise 的标准用法：不是改 coverage，而是把采样点沿矢量场推一点，
+    // 让云的形状/边缘产生湍流卷曲。采样坐标与 basic/detail 共用 windOffset，所以
+    // 涡旋随云一起随风平流、自然演化；高度权重把扰动压在云底（云底薄、边缘碎），
+    // 云顶基本不动。RGB=方向（*2-1 还原），A=幅度（0~1，乘 curlStrength 得 km）。
     float curlUVScale=frameData.sky.atmosphereConfig.cloudCurlUVScale;
     float curlStrength=frameData.sky.atmosphereConfig.cloudCurlStrength;
     float curlContrast=frameData.sky.atmosphereConfig.cloudCurlContrast;
-    // 旧硬编码等价：uvScale=0.001 → (time*speed*50 + km*1000)*1e-6 + 0.5
-    vec2 curlUv=vec2(eastKm,northKm)*curlUVScale
-        +vec2(frameData.appTime.x*cloudSpeed*(50.0*curlUVScale),0.0)
-        +vec2(0.5);
-    float localCoverage=0.0;
-    if(curlStrength>1e-5)
+    vec3 curlDisplacement=vec3(0.0);
+    if(curlStrength>1e-5 && curlUVScale>1e-6)
     {
-        localCoverage=texture(sampler2D(inCloudCurlNoise,linearRepeatSampler),curlUv).x;
-        // saturate(x*c - c*0.25)*strength；c=3 → 旧式 *3-0.75
-        localCoverage=saturate(localCoverage*curlContrast-curlContrast*0.25)*curlStrength;
+        vec4 curlData=texture(sampler3D(inCloudCurlNoise,linearRepeatSampler),(posKm+windOffset)*curlUVScale);
+        vec3 curlDir=curlData.rgb*2.0-1.0;
+        float curlMag=curlData.a;
+        float heightWeight=pow(1.0-saturate(normalizedHeight),max(curlContrast,0.01));
+        curlDisplacement=curlDir*curlMag*curlStrength*heightWeight;
     }
-    //大尺度云量靠天气图，curl 只负责中小尺度碎块
+    //大尺度云量靠天气图，curl 只负责中小尺度的湍流卷曲
 
-    float coverage=saturate(Coverage*(localCoverage+weatherValue.x));
-    //合成这一位置的最终覆盖率，Coverage全局云量参数，weatherValue.x天气图大尺度bias，三者相加再 × 全局coverage，最后saturate到[0,1]
+    float coverage=saturate(Coverage*weatherValue.x);
+    //合成这一位置的最终覆盖率：Coverage 全局云量参数 × weatherValue.x 天气图大尺度 bias，最后 saturate 到[0,1]
+    //（旧版 localCoverage 叠加已移除——curl 现在只做采样位移，不再改覆盖率）
 
     // 垂直廓形走 Profile LUT（cloud_profile.glsl）：weather.g 提供云类型，
     // 类型 0（Cu）起、1（Cb）止，三段插值得到该高度的廓形强度。
@@ -274,10 +273,11 @@ float cloudMap(vec3 posMeter,float normalizedHeight,float lodDistScale)//单位�
     float lodDistKm=length(posKm-convertToAtmosphereUnit(frameData.camWorldPos.xyz,frameData));
     float lodPixelTheta=cloudLodPixelThetaFromFrame();
 
-    float basicNoise=sampleCloudShapeNoise(posKm,windOffset,lodDistKm,lodPixelTheta,lodDistScale);
+    float basicNoise=sampleCloudShapeNoise(posKm+curlDisplacement,windOffset,lodDistKm,lodPixelTheta,lodDistScale);
     //形状链：Basic/Meso/Fine 三档共用 inBasicNoise（Perlin-Worley，cloud_basicnoise.glsl 烘出来的），
     //只换世界频率 scale（1/km）；windOffset 让三档按同一个世界风速平移（物理上同一团云在动）。
     //一张 128³ 纹理有效频带 f=4…64（Nyquist），单档只能盖 ×16 的世界尺度，所以要多档接力。
+    //采样位置 +curlDisplacement：curl 矢量场把采样点推开，云的形状沿湍流方向被扭曲成卷曲。
 
     float basicCloudNoise=basicNoise*gradientShape;
     //3D 噪声 × 垂直高度包络 = 带正确层高分布的云块形状
@@ -294,8 +294,8 @@ float cloudMap(vec3 posMeter,float normalizedHeight,float lodDistScale)//单位�
     float detailNoiseMixByHeight=0.0;
     if(detailAmp>kCloudBandAmpEpsilon)
     {
-        vec3 sampleDetailNoise=posKm-windOffset*0.15;
-        //与基础噪声略反风偏移，避免完全对齐
+        vec3 sampleDetailNoise=(posKm+curlDisplacement)-windOffset*0.15;
+        //与基础噪声略反风偏移，避免完全对齐；curl 位移同样作用于侵蚀链，边缘随湍流打散
 
         float detailNoiseComposite=texture(sampler3D(inDetailNoise,linearRepeatSampler),sampleDetailNoise*frameData.sky.atmosphereConfig.cloudDetailNoiseScale).r;
         //3DWorley细节噪声采样，从烘焙好的细节3D纹理（cloud_detailnoise.glsl）采样
@@ -1587,9 +1587,9 @@ inout vec3 airTransmittance)
   输出: cloudDensity
 
   posMeter ──► +wind×height×500 ──► posKm
-  posKm.xz ──► inWeatherTexture ──► weatherValue.x ──┐
-  posMeter.xz+time ──► inCloudCurlNoise ──► localCoverage ──┤──► coverage
-  frameData.cloudCoverage ────────────────────────────────────┘
+  posKm ──► inWeatherTexture ──► weatherValue.x ──┐
+  posKm+windOffset ──► inCloudCurlNoise ──► 位移 posKm（湍流卷曲）─┐
+  frameData.cloudCoverage ────────────────────────────────────────┴──► coverage
   normalizedHeight+weather.g ──► Profile LUT（Cu/Tcu/Cb）──► gradientShape
   posKm+windOffset ──► inBasicNoise × gradientShape ──► basicCloudNoiseWithCoverage
   posKm-windOffset ──► inDetailNoise ──► detailNoiseMixByHeight ──► remap侵蚀

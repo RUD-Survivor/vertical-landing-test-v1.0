@@ -88,8 +88,10 @@ struct VkSceneSystem {
     VkTexture3D     cloudNoiseTex;
     VkTexture3D     cloudDetailTex;
     VkTexture2D     cloudWeatherTex;
-    // cloud_common.glsl::cloudMap() localCoverage（binding 9）
-    VkTexture2D     cloudCurlTex;
+    // cloud_common.glsl::cloudMap() 湍流位移矢量场（binding 9，64³ RGBA8 真 curl noise）
+    VkTexture3D     cloudCurlTex;
+    // Curl 纹理 ImGui 预览：3D 纹理的 z=0 切片 2D view（ImGui 只能显示 2D）
+    VkImageView     curlVisView = VK_NULL_HANDLE;
     // ── 双层云：Profile LUT（binding 31）+ 高空云 Hi weather map（binding 32）──
     VkTexture2D     cloudProfileLutTex;
     VkTexture2D     cloudHiWeatherTex;
@@ -294,6 +296,7 @@ struct VkSceneSystem {
         destroyVis(weatherVisViewG);
         destroyVis(weatherVisViewB);
         destroyVis(weatherVisViewA);
+        destroyVis(curlVisView);
         cloudNoiseTex.destroy(ctx);
         cloudDetailTex.destroy(ctx);
         cloudWeatherTex.destroy(ctx);
@@ -550,11 +553,25 @@ struct VkSceneSystem {
             return false;
         }
 
-        // ── 3) Curl noise 256² R8 (GPU) ──────────────────────────────────
-        if (!cloudCurlTex.createStorage2D(ctx, 256, 256, VK_FORMAT_R8_UNORM) ||
+        // ── 3) Curl noise 64³ RGBA8 (GPU)：真实无散矢量场（RGB=方向 A=幅度）──
+        if (!cloudCurlTex.createStorage3D(ctx, 64, 64, 64, VK_FORMAT_R8G8B8A8_UNORM) ||
             !cloudBake.bakeCurlNoise(ctx, cloudCurlTex)) {
             fprintf(stderr, "[VkScene] GPU curl noise bake failed\n");
             return false;
+        }
+        // ImGui 预览只能显示 2D：为 curl 3D 纹理建一个 z=0 切片的 2D view。
+        {
+            VkImageViewCreateInfo vci{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+            vci.image                       = cloudCurlTex.image;
+            vci.viewType                    = VK_IMAGE_VIEW_TYPE_2D;
+            vci.format                      = VK_FORMAT_R8G8B8A8_UNORM;
+            vci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            vci.subresourceRange.levelCount = 1;
+            vci.subresourceRange.layerCount = 1;
+            if (vkCreateImageView(ctx.device, &vci, nullptr, &curlVisView) != VK_SUCCESS) {
+                fprintf(stderr, "[VkScene] Curl vis view create failed\n");
+                curlVisView = VK_NULL_HANDLE;
+            }
         }
 
         // ── 4) Weather map：CPU 生成像素 → upload → ImGui swizzle view ───

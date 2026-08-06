@@ -351,12 +351,12 @@ inline void FlowerCloudTunerImGui(bool* p_open, FlowerCloudTuneParams& p,
         ImGui::SliderFloat3("WindDir", &p.windDirX, -1.f, 1.f, "%.2f");
         ImGui::SliderFloat("Speed", &p.speed, 0.0f, 2.0f, "%.3f");
         ImGui::Separator();
-        ImGui::Text("Curl / localCoverage（假 curl 纹理）");
-        ImGui::SliderFloat("CurlUVScale", &p.curlUVScale, 0.00001f, 0.01f, "%.5f", ImGuiSliderFlags_Logarithmic);
-        ImGui::SliderFloat("CurlStrength", &p.curlStrength, 0.0f, 1.0f, "%.3f");
-        ImGui::SliderFloat("CurlContrast", &p.curlContrast, 0.5f, 8.0f, "%.2f");
-        ImGui::TextDisabled("Strength=0 关闭碎点；轨道可试 UV≈0.0002 Strength≈0.1");
-        ImGui::TextDisabled("旧硬编码: UV=0.001 Strength=0.2 Contrast=3");
+        ImGui::Text("Curl 无散矢量场（位移噪声采样位置，产生湍流卷曲）");
+        ImGui::SliderFloat("CurlUVScale", &p.curlUVScale, 0.001f, 1.0f, "%.4f", ImGuiSliderFlags_Logarithmic);
+        ImGui::SliderFloat("CurlStrength (km)", &p.curlStrength, 0.0f, 5.0f, "%.3f");
+        ImGui::SliderFloat("CurlHeightFalloff", &p.curlContrast, 0.1f, 4.0f, "%.2f");
+        ImGui::TextDisabled("Strength=0 关闭湍流；UV=0.02 → 涡旋周期约 50km（按 1/UV）");
+        ImGui::TextDisabled("Falloff 越大扰动越集中云底；云顶基本不动");
         if (weatherPreview && weatherPreview->ready) {
             static int weatherVisChannel = 0;
             const char* channelItems[] = {
@@ -377,7 +377,7 @@ inline void FlowerCloudTunerImGui(bool* p_open, FlowerCloudTuneParams& p,
         if (weatherPreview && weatherPreview->curlReady) {
             PreviewImageAspect(weatherPreview->curlTexId(), 1.f);
             if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("bake 的 256² R8（Worley+Perlin），非真 curl 矢量场");
+                ImGui::SetTooltip("bake 的 64³ RGBA8 真 curl 无散矢量场（RGB=方向 A=幅度），预览为 z=0 切片");
         }
     }
 
