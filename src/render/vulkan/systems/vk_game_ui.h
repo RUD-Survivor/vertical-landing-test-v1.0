@@ -2291,11 +2291,11 @@ private:
           row("LAT/LON:", buf, {0.4f,0.8f,1,1}); }
         row("高度:", _fmtAlt(tele.altitude));
         row("速度:", _fmtSpd(speed));
-        { float vv2=(float)vel.vertical_velocity;
+        { float vv2=(float)tele.velocity;
           ImVec4 vc = (vv2 < -50.f) ? ImVec4{1,0.3f,0.3f,1} : (vv2 < 0.f ? ImVec4{1,0.8f,0.3f,1} : ImVec4{0.5f,1,0.5f,1});
           char buf[24]; snprintf(buf,24,"%.1f m/s", vv2);
           row("垂直速度:", buf, vc); }
-        row("水平速度:", _fmtSpd(vel.horizontal_velocity));
+        row("水平速度:", _fmtSpd(tele.local_vx));
         { char buf[48]; snprintf(buf,48,"%.1f kN  (TWR:%.2f)", prop.thrust_power/1000.0, twr);
           row("推力:", buf, {1,0.6f,0.2f,1}); }
         { char buf[48]; snprintf(buf,48,"%.1f t  (燃料:%.1f t)", total_mass/1000.0, prop.fuel/1000.0);
