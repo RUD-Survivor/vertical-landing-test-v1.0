@@ -635,7 +635,7 @@ else {
         snap.camPos[0] = (float)ctx.camEye_rel.x;
         snap.camPos[1] = (float)ctx.camEye_rel.y;
         snap.camPos[2] = (float)ctx.camEye_rel.z;
-        snap.time = (float)glfwGetTime();
+        snap.time = glfwGetTime();
         snap.frameIndex = frame;
 
         // ---- 2. 光照方向 ----

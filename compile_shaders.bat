@@ -27,6 +27,16 @@ echo [ 3/21] earth.frag
 %GLSLC% %SHADER_DIR%\earth.frag -o %OUT_DIR%\earth.frag.spv
 if %ERRORLEVEL% neq 0 goto :fail
 
+echo [Ocean] independent surface vertex and optical fragment shaders
+rem Optimization removes function-local copies of the shared cascade UBO.
+rem Required for water performance with cloud shadows enabled.
+%GLSLC% -O -DOCEAN_SURFACE=1 %SHADER_DIR%\terrain.vert -o %OUT_DIR%\ocean.vert.spv
+if %ERRORLEVEL% neq 0 goto :fail
+%GLSLC% -O %SHADER_DIR%\ocean.frag -o %OUT_DIR%\ocean.frag.spv
+if %ERRORLEVEL% neq 0 goto :fail
+%GLSLC% -O -fshader-stage=compute %SHADER_DIR%\ocean_sky.comp -o %OUT_DIR%\ocean_sky.comp.spv
+if %ERRORLEVEL% neq 0 goto :fail
+
 echo [ 4/21] gas_giant.frag
 %GLSLC% %SHADER_DIR%\gas_giant.frag -o %OUT_DIR%\gas_giant.frag.spv
 if %ERRORLEVEL% neq 0 goto :fail

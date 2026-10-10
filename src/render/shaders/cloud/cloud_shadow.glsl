@@ -100,7 +100,8 @@ void main()
     // Beer-Lambert 积分。cloudMap 取米制位置、返回米制消光系数 σ_t，
     // 而这里的步长是 km，所以最后统一乘 1000 换算（与主 march 的 τ=σ×Δs_km×1000 同一约定）。
     const float kMetersPerKm = 1000.0;
-    int   steps = int(cloudShadowData.marchConfig.x);
+    // 中文说明：防止异常参数产生零步除法或无界工作量；保留高画质调参空间。
+    int   steps = clamp(int(cloudShadowData.marchConfig.x), 1, 128);
     float dt    = (t1 - t0) / float(steps);
     float tau   = 0.0;
     float t     = t0 + dt * 0.5; // 中点法：同样步数下比左端点法更接近真值

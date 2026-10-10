@@ -465,7 +465,8 @@ inline void FlowerCloudTunerImGui(bool* p_open, FlowerCloudTuneParams& p,
 
     // ── 13. God Ray / 级联阴影 ────────────────────────────────────────────
     if (ImGui::CollapsingHeader("God Ray / 级联阴影")) {
-        ImGui::Text("God Ray（近距 400m 体积光柱）");
+        ImGui::Text("God Ray（最长 8km，8–48 步，云底以下）");
+        ImGui::TextWrapped("穿云光束需要开启云→地表阴影；地形级联阴影为可选遮挡。");
         ImGui::Checkbox("God Ray 启用", &p.godRayEnabled);
         ImGui::SliderFloat("God Ray 强度", &p.godRayScale, 0.0f, 8.0f, "%.2f");
         ImGui::TextDisabled("需要下面的级联阴影也开启，否则光柱不受地形遮挡");

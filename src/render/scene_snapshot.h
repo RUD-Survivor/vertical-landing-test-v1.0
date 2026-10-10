@@ -143,7 +143,7 @@ struct SceneSnapshot {
     float proj[16];
     float camPos[3];
     float lightDir[3];    // 归一化光照方向
-    float time;
+    double time;         // CPU phase rebasing must retain sub-frame precision.
 
     // ---- 天体 ----
     std::vector<CelestialDraw> celestials;

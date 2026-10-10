@@ -1,4 +1,9 @@
 #version 450
+#extension GL_GOOGLE_include_directive : enable
+#include "common/water_surface.glsl"
+#ifdef OCEAN_SURFACE
+#include "common/ocean_waves.glsl"
+#endif
 // Terrain vertex shader — Vulkan port, logic identical to OpenGL version
 
 layout(set = 0, binding = 0) uniform FrameUBO {
@@ -212,16 +217,14 @@ void main() {
     }
 
     float sLevel = 0.45;
-    float hydroDiff = hydro.r - hRefined;
-    float hydroMask = smoothstep(0.000001, 0.00002, hydroDiff);
-    hRefined = mix(hRefined, hydro.r, hydroMask * 1.0);
+    // Do not replace the bed with flood-fill height: water has its own draw.
 
     if (hRefined < sLevel && hRefined > 0.38) {
         float shelfT = (hRefined - 0.38) / (sLevel - 0.38);
         hRefined = mix(0.395, sLevel - 0.001, smoothstep(0.0, 1.0, shelfT));
     }
 
-    float finalH = (hRefined < sLevel) ? 0.0 : (hRefined - sLevel) / (1.0 - sLevel) * pc.maxElevation / pc.planetRadius;
+    float finalH = waterBedKm(hRefined, pc.maxElevation) / pc.planetRadius;
 
     float currentSlope = 0.0;
     if (hRefined >= sLevel) {
@@ -251,6 +254,21 @@ void main() {
     hRefined = mix(hRefined, sLevel + 0.015, kscMask);
     finalH = mix(finalH, 0.005 / pc.planetRadius, smoothstep(0.08, 0.02, distToKSC));
 
+    float depthMeters = waterDepthMeters(hRefined, hydro.r, pc.maxElevation);
+#ifdef OCEAN_SURFACE
+    // Same topology and height inputs as terrain; dry fragments are discarded.
+    finalH = waterLevelKm(hRefined, hydro.r, pc.maxElevation) / pc.planetRadius;
+    vec3 cameraLocal = transpose(mat3(pc.model) / pc.planetRadius)
+        * (frame.viewPos - pc.model[3].xyz);
+    float camAltitudeM = max(0.0, (length(cameraLocal) - pc.planetRadius
+        - waterLevelKm(hRefined, hydro.r, pc.maxElevation)) * 1000.0);
+    // Global altitude filter (never per-node) keeps identical boundary vertices identical.
+    float geometryFade = 1.0 - smoothstep(100.0, 1500.0, camAltitudeM);
+    OceanWaves waves = oceanWaves(normPos, pc.planetRadius * 1000.0,
+        frame.time, 0.0, depthMeters);
+    finalH += waves.heightM * geometryFade * 0.001 / pc.planetRadius;
+#endif
+
     mat3 localRotScale = mat3(pc.model);
     // pc.model column 3 = absolute planet center in floating-origin world space
     vec3 planetCenterAbs = vec3(pc.model[3][0], pc.model[3][1], pc.model[3][2]);
@@ -260,7 +278,7 @@ void main() {
     vNormal = localRotScale * normPos;
     vUV = aUV;
     vLocalPos = normPos;
-    vWaterDepth = max(0.0, hydro.r - hRefined);
+    vWaterDepth = depthMeters;
     vSlope = currentSlope;
     gl_Position = frame.proj * frame.view * vec4(worldPos, 1.0);
     gl_Position.y = -gl_Position.y;

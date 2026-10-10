@@ -90,6 +90,7 @@ struct VkSceneSystem {
     VkTexture2D     cloudWeatherTex;
     // cloud_common.glsl::cloudMap() 湍流位移矢量场（binding 9，64³ RGBA8 真 curl noise）
     VkTexture3D     cloudCurlTex;
+    VkTexture2D     cloudCurlPreviewTex; // independent 2D copy; no sampler2D-view-of-3D feature required
     // Curl 纹理 ImGui 预览：3D 纹理的 z=0 切片 2D view（ImGui 只能显示 2D）
     VkImageView     curlVisView = VK_NULL_HANDLE;
     // ── 双层云：Profile LUT（binding 31）+ 高空云 Hi weather map（binding 32）──
@@ -296,7 +297,8 @@ struct VkSceneSystem {
         destroyVis(weatherVisViewG);
         destroyVis(weatherVisViewB);
         destroyVis(weatherVisViewA);
-        destroyVis(curlVisView);
+        curlVisView = VK_NULL_HANDLE; // view owned by the preview texture
+        cloudCurlPreviewTex.destroy(ctx);
         cloudNoiseTex.destroy(ctx);
         cloudDetailTex.destroy(ctx);
         cloudWeatherTex.destroy(ctx);
@@ -541,19 +543,24 @@ struct VkSceneSystem {
             fprintf(stderr, "[VkScene] GPU curl noise bake failed\n");
             return false;
         }
-        // ImGui 预览只能显示 2D：为 curl 3D 纹理建一个 z=0 切片的 2D view。
+        // ImGui samples 2D. Copy z=0 into an actual 2D image instead of creating
+        // an incompatible 2D view of a 3D image (VUID-image-06728).
         {
-            VkImageViewCreateInfo vci{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
-            vci.image                       = cloudCurlTex.image;
-            vci.viewType                    = VK_IMAGE_VIEW_TYPE_2D;
-            vci.format                      = VK_FORMAT_R8G8B8A8_UNORM;
-            vci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            vci.subresourceRange.levelCount = 1;
-            vci.subresourceRange.layerCount = 1;
-            if (vkCreateImageView(ctx.device, &vci, nullptr, &curlVisView) != VK_SUCCESS) {
-                fprintf(stderr, "[VkScene] Curl vis view create failed\n");
-                curlVisView = VK_NULL_HANDLE;
-            }
+            std::vector<uint8_t> blank(64 * 64 * 4, 0);
+            if (!cloudCurlPreviewTex.upload(ctx, blank.data(), 64, 64)) return false;
+            VkCommandBuffer cmd = beginSingleTimeCommands(ctx);
+            transitionImage(cmd, cloudCurlTex.image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+            transitionImage(cmd, cloudCurlPreviewTex.image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+            VkImageCopy copy{};
+            copy.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+            copy.dstSubresource = copy.srcSubresource;
+            copy.extent = {64, 64, 1};
+            vkCmdCopyImage(cmd, cloudCurlTex.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                cloudCurlPreviewTex.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+            transitionImage(cmd, cloudCurlTex.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+            transitionImage(cmd, cloudCurlPreviewTex.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+            endSingleTimeCommands(ctx, cmd);
+            curlVisView = cloudCurlPreviewTex.view;
         }
 
         // ── 4) Weather map：CPU 生成像素 → upload → ImGui swizzle view ───
@@ -645,12 +652,13 @@ struct VkSceneSystem {
 
     // -----------------------------------------------------------------------
     // 上传地形纹理并创建 Set1 descriptor set（每次飞行开始时调用一次）
-    // tectonicData: float[w*h], values in [0,255] (normalized to [0,1] as RGBA8 R channel)
+    // tectonicData: float[w*h*4], normalized height in R. Float precision is
+    // essential: RGBA8 steps were 52m below sea / 178m on land at maxElev=25km.
     // hydroData:    float[w*h*4] RGBA32F (R=filledHeight, G=accumulation, B=strahler, A=flowDir)
     bool uploadTerrainTextures(VulkanContext& ctx,
-                               const uint8_t* tectonicRGBA8, uint32_t tw, uint32_t th,
+                               const float*   tectonicFloat4, uint32_t tw, uint32_t th,
                                const float*   hydroFloat4,   uint32_t hw, uint32_t hh) {
-        if (!terrainTectonicTex.upload(ctx, tectonicRGBA8, tw, th))
+        if (!terrainTectonicTex.uploadFloat4(ctx, tectonicFloat4, tw, th))
             return false;
         if (!terrainHydroTex.uploadFloat4(ctx, hydroFloat4, hw, hh))
             return false;

@@ -129,7 +129,7 @@ void main() {
     float mMask = smoothstep(0.55, 0.75, hRefined);
 
     vec3 N = normalize(vNormal);
-    if (vWaterDepth < 0.0001 && distToCam < 8.0) {
+    if (vWaterDepth < 0.02 && distToCam < 8.0) {
         float nScale = 1500.0 * (1.0 + mMask * 2.0);
         float nAmp = 0.05 * (1.0 - smoothstep(1.0, 8.0, distToCam));
         float d10 = noise3d(vLocalPos * 3000000.0) * 0.4;
@@ -144,8 +144,6 @@ void main() {
         N = normalize(N + (TN * microN.x + BN * microN.y) * nAmp * 2.0);
     }
 
-    vec3 deepWater = vec3(0.01, 0.06, 0.15);
-    vec3 shallowWater = vec3(0.05, 0.35, 0.45);
     vec3 beach = vec3(0.72, 0.68, 0.52);
     vec3 lowland = vec3(0.12, 0.32, 0.10);
     vec3 forest = vec3(0.06, 0.22, 0.05);
@@ -156,9 +154,9 @@ void main() {
     vec3 surfColor;
     float sLevel = 0.45;
 
-    if (hRefined < sLevel || vWaterDepth > 0.000001) {
-        float depth = (hRefined < sLevel) ? (sLevel - hRefined) : vWaterDepth * 2.0;
-        surfColor = mix(shallowWater, deepWater, smoothstep(0.0, 0.15, depth));
+    if (hRefined < sLevel || vWaterDepth > 0.02) {
+        // Actual submerged substrate. Water color/attenuation belongs to ocean.frag.
+        surfColor = mix(beach, vec3(0.12, 0.14, 0.13), smoothstep(0.0, 1000.0, vWaterDepth));
     } else {
         float landH = (hRefined - sLevel) / (1.0 - sLevel);
         float albedoVar = noise3d(vLocalPos * 120.0) * 0.1 + 0.95;

@@ -1,4 +1,6 @@
 #version 450
+#extension GL_GOOGLE_include_directive : enable
+#include "common/water_surface.glsl"
 // terrain_shadow.vert — 级联阴影贴图的地形深度专用顶点着色器。
 //
 // 复制自 terrain.vert 的程序化高度场逻辑（tectonic/hydro 采样 + 山脊/沟壑/岩石
@@ -206,16 +208,14 @@ void main() {
     }
 
     float sLevel = 0.45;
-    float hydroDiff = hydro.r - hRefined;
-    float hydroMask = smoothstep(0.000001, 0.00002, hydroDiff);
-    hRefined = mix(hRefined, hydro.r, hydroMask * 1.0);
+    // Shadow geometry must match the bed, not the independently rendered water.
 
     if (hRefined < sLevel && hRefined > 0.38) {
         float shelfT = (hRefined - 0.38) / (sLevel - 0.38);
         hRefined = mix(0.395, sLevel - 0.001, smoothstep(0.0, 1.0, shelfT));
     }
 
-    float finalH = (hRefined < sLevel) ? 0.0 : (hRefined - sLevel) / (1.0 - sLevel) * pc.maxElevation / pc.planetRadius;
+    float finalH = waterBedKm(hRefined, pc.maxElevation) / pc.planetRadius;
 
     if (hRefined >= sLevel) {
         float epsS = 0.0015;

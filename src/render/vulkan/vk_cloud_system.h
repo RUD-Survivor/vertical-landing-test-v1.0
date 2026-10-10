@@ -109,12 +109,12 @@ struct FlowerCloudTuneParams {
     // ── 管线 / cloud_common.glsl frameData.sky.atmosphereConfig ─────────────
     // useQuarterRes → updateFaceIndex（1=Bayer 1/4 + reconstruct，0=全分辨率 raymarch）
     bool useQuarterRes = true;
-    int  marchingStepNum = 256;              // cloudMarchingStepNum（baseline）
+    int  marchingStepNum = 96;               // 中文说明：降低默认主光线采样预算，避免笔记本 GPU 的长时间 dispatch。
     float maxTracingDistanceKm = 350.f;       // cloudMaxTraceingDistance
     float tracingStartMaxDistanceKm = 1e8f;   // cloudTracingStartMaxDistance
     float stepTMinKm = 0.05f;               // cloudMarchStepMinKm
     float stepTMaxKm = 0.5f;                // cloudMarchStepMaxKm
-    int   marchStepHardMax = 2048;          // cloudMarchStepHardMax
+    int   marchStepHardMax = 256;           // 中文说明：限制自适应缩步的最坏计算量；可在调参面板提高。
 
     // 第二层：壳内真空跳步（cloudMarchEmptySkip / EmptyStepKm）
     bool  emptySkipEnabled = true;          // cloudMarchEmptySkip
@@ -130,7 +130,7 @@ struct FlowerCloudTuneParams {
     // 沿太阳方向体积阴影步进（volumetricShadow）
     float lightStepMul = 1.5f;                // cloudLightStepMul
     float lightBasicStepKm = 0.03f;          // cloudLightBasicStep (km)
-    int   lightStepNum = 12;                   // cloudLightStepNum
+    int   lightStepNum = 6;                    // 中文说明：光照采样位于主步进内部，降低它可减少嵌套采样量。
 
     // 天气 / 风
     float weatherUVScale = 1.f;               // cloudWeatherUVScale
@@ -350,9 +350,10 @@ struct VkCloudSystem {
                       const GpuCascadeShadowConfig* cascadeCfg = nullptr) {
         // 任何一条提前返回都要让云影子系统同步失效，否则地形会拿着旧图集按新相机位置
         // 采样，出现错位残留的云影。
-        if (!enabled)                        { cloudShadow.markInactive(); return; }
-        if (!tuneParams.flowerCloudEnabled)  { cloudShadow.markInactive(); return; }
+        if (!enabled)                        { hasPrevViewProj=false; cloudShadow.markInactive(); return; }
+        if (!tuneParams.flowerCloudEnabled)  { hasPrevViewProj=false; cloudShadow.markInactive(); return; }
         if (!drawClouds) {
+            hasPrevViewProj = false;
             if (skipLogOnce) {
                 fprintf(stderr, "[VkCloudSystem] Phase1 skip: drawClouds=false (need Earth atmoIdx=3 + showClouds)\n");
                 skipLogOnce = false;
@@ -361,11 +362,12 @@ struct VkCloudSystem {
             return;
         }
         skipLogOnce = true; // 下次真的又被跳过时，还能再打一次（不是一辈子只报一次）
-        if (raymarchPipe == VK_NULL_HANDLE) { cloudShadow.markInactive(); return; }
+        if (raymarchPipe == VK_NULL_HANDLE) { hasPrevViewProj=false; cloudShadow.markInactive(); return; }
 
         const CelestialDraw* earth = nullptr;
         for (const auto& cd : snap.celestials) { if (cd.atmoIdx == 3 && cd.showClouds) { earth = &cd; break; } }
         if (!earth) {
+            hasPrevViewProj = false;
             fprintf(stderr, "[VkCloudSystem] Phase1 skip: earth==nullptr despite drawClouds=true (snap 不一致?)\n");
             cloudShadow.markInactive();
             return;
@@ -429,16 +431,17 @@ struct VkCloudSystem {
             computeBarrier(cmd);
         }
 
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, compositePipe);
-        dispatch2D(cmd, extent);
-
         // ── 云→地表阴影级联 ──
-        // 在 composite 之后跑，不影响本帧云渲染。地形几何 pass 本帧已结束，所以这张
-        // 图集从下一帧起才对地形生效（首帧无阴影，由子系统的 _rendered 标志兜住）。
+        // 在 composite 之前生成，让 God Ray 使用本帧云透射率。
+        // 地形几何 pass 已结束，地形仍在下一帧消费该图集。
         // descriptor set 沿用上面绑好的 cloudSet[slot]：阴影 compute 要读同一套噪声与
         // 天气图，binding 38/39 已经指向子系统的图集与 UBO。
         cloudShadow.tune = tuneParams.cloudShadow;
         cloudShadow.render(cmd, makeCloudShadowInput(snap, *earth, fd), slot);
+        computeBarrier(cmd);
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, compositePipe);
+        dispatch2D(cmd, extent);
+        cloudShadow.finishComputeReads(cmd);
 
         transitionImage(cmd, hdrImage, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
             VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT,
@@ -515,7 +518,8 @@ private:
         // 时一帧内相机实际挪动的距离足以让同一世界点在屏幕上明显移位，"假装没动"的
         // 重投影会把 history 采样到错误位置，叠加 16 帧 Bayer 轮转就是稀疏噪点花屏、
         // 高速时永远收敛不了的根因之一。改成真正缓存"上一次调用时的 camViewProj"。
-        if (hasPrevViewProj) {
+        const bool historyValid = hasPrevViewProj;
+        if (historyValid) {
             memcpy(fd.camViewProjPrev, prevCamViewProj, 64);
         } else {
             memcpy(fd.camViewProjPrev, fd.camViewProj, 64); // 首帧无历史，退化成恒等变换
@@ -531,7 +535,11 @@ private:
         bool bModeCut = (prevCameraMode != -1) && (snap.cameraMode != prevCameraMode);
         prevCameraMode = snap.cameraMode;
 
-        fd.jitterPeriod = 16; fd.bEnableJitter = 0; fd.bCameraCut = bModeCut ? 1u : 0u;
+        // A matching matrix does not make newly allocated history valid.
+        // Bootstrap every pixel from the current quarter-resolution trace;
+        // otherwise 15/16 Bayer pixels reuse undefined L/T and erase the scene.
+        fd.jitterPeriod = 16; fd.bEnableJitter = 0;
+        fd.bCameraCut = (!historyValid || bModeCut) ? 1u : 0u;
         fd.skyValid = 1; fd.skySDSMValid = 0; fd.fixExposure = 1.0f; fd.bAutoExposure = 0;
         fd.renderWidth = (float)extent.width; fd.renderHeight = (float)extent.height;
         fd.displayWidth = fd.renderWidth; fd.displayHeight = fd.renderHeight;
@@ -726,6 +734,9 @@ private:
     }
 
     bool createImages(VulkanContext& ctx) {
+        // Initial allocation and resize both discard temporal cloud history.
+        hasPrevViewProj = false;
+        prevCameraMode = -1;
         if (!createStorage2D(ctx, quarterExt, kColorFmt, quarterColorImg, quarterColorAlloc, quarterColorView)) return false;
         if (!createStorage2D(ctx, quarterExt, kDepthFmt, quarterDepthImg, quarterDepthAlloc, quarterDepthView)) return false;
         if (!createStorage2D(ctx, quarterExt, kColorFmt, quarterFogImg,   quarterFogAlloc,   quarterFogView))   return false;

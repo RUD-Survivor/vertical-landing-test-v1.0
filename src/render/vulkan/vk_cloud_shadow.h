@@ -51,7 +51,7 @@ struct CloudShadowTuneParams {
     // 下面两项决定图集显存与 dispatch 规模，只在 initResources() 时生效，
     // 运行时改需要重建（窗口 resize 会顺带重建）。
     int   cascadeCount  = 4;      // 级数 [1, kMaxCascades]
-    int   perCascadeDim = 512;    // 每级边长（图集宽 = dim × count，高 = dim）
+    int   perCascadeDim = 256;    // 中文说明：边长减半使图集像素数降至四分之一，降低每帧阴影预算。
 
     float nearRadiusKm  = 4.0f;   // 第 0 级的地面圆盘半径
     float maxRadiusKm   = 3000.0f;// 最远级半径上限（地平线更近时以地平线为准）
@@ -60,7 +60,7 @@ struct CloudShadowTuneParams {
     float splitLambda   = 0.85f;  // 0=均匀拆分，1=对数拆分（近级更密）
     float extentMul     = 1.0f;   // 整体半径倍率（调试用）
     float blendStart    = 0.85f;  // 跨级混合起点（归一化偏心度）
-    int   marchSteps    = 48;     // 每条光线的积分步数
+    int   marchSteps    = 24;     // 中文说明：配合 256 分辨率，默认最大采样量约为原来的八分之一。
 };
 
 // --------------------------------------------------------------------------
@@ -182,6 +182,17 @@ struct VkCloudShadowSystem {
     void render(VkCommandBuffer cmd, const CloudShadowFrameInput& in, int slot) {
         if (!tune.enabled || _pipeline == VK_NULL_HANDLE || _atlasImage == VK_NULL_HANDLE) {
             markInactive();
+            // Composite statically declares binding 38 even when config.x is zero.
+            if (_atlasImage && _atlasReadOnly) {
+                transitionImage(cmd, _atlasImage,
+                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
+                    VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT,
+                    VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
+                _atlasReadOnly = false;
+            }
+            GpuCloudShadowData off{};
+            if (_computeUboMapped[slot % FRAMES_IN_FLIGHT])
+                memcpy(_computeUboMapped[slot % FRAMES_IN_FLIGHT], &off, sizeof(off));
             return;
         }
         slot %= FRAMES_IN_FLIGHT;
@@ -199,12 +210,17 @@ struct VkCloudShadowSystem {
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, _pipeline);
         vkCmdDispatch(cmd, (atlasWidth() + 7) / 8, (atlasHeight() + 7) / 8, 1);
 
+        // Remain GENERAL for same-frame God Ray storage-image reads.
+        _rendered = true;
+    }
+
+    void finishComputeReads(VkCommandBuffer cmd) {
+        if (!_atlasImage || _atlasReadOnly) return;
         transitionImage(cmd, _atlasImage,
             VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT,
+            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT,
             VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
         _atlasReadOnly = true;
-        _rendered = true;
     }
 
     // 云本帧没渲染（关闭 / 不在地球）：让地表侧立刻退化成无阴影，

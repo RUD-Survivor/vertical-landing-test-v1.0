@@ -27,6 +27,42 @@ vec3 drawSun(vec3 rayDir, vec3 sunDir)
 
 
 layout (local_size_x = 8, local_size_y = 8) in;//线程组布局，每个 work group 64 个线程，常见 GPU 友好尺寸，C++侧dispatch(ceil(w/8), ceil(h/8), 1) 覆盖整张 HDR RT
+// Bilinear reads clamped to a single atlas slice (four R32F loads).
+float godRayCloudCascade(int c, vec2 uv)
+{
+    int dim = imageSize(imageCloudShadowTexture).y;
+    vec2 p = clamp(uv * float(dim) - 0.5, vec2(0), vec2(dim - 1));
+    ivec2 lo = ivec2(floor(p));
+    ivec2 hi = min(lo + 1, ivec2(dim - 1));
+    vec2 f = fract(p);
+    ivec2 offset = ivec2(c * dim, 0);
+    return mix(mix(imageLoad(imageCloudShadowTexture, offset + lo).r,
+                   imageLoad(imageCloudShadowTexture, offset + ivec2(hi.x, lo.y)).r, f.x),
+               mix(imageLoad(imageCloudShadowTexture, offset + ivec2(lo.x, hi.y)).r,
+                   imageLoad(imageCloudShadowTexture, offset + hi).r, f.x), f.y);
+}
+
+float godRayCloudVisibility(vec3 posKm)
+{
+    int count = min(int(cloudShadowData.config.x), kCloudShadowMaxCascades);
+    for (int c = 0; c < count; ++c)
+    {
+        vec3 uvd = cloudShadowProject(cloudShadowData, c, posKm);
+        if (!cloudShadowInside(uvd)) continue;
+        float t = godRayCloudCascade(c, uvd.xy);
+        float fit = cloudShadowFit(uvd);
+        if (c + 1 < count && fit > cloudShadowData.config.w)
+        {
+            vec3 next = cloudShadowProject(cloudShadowData, c + 1, posKm);
+            if (cloudShadowInside(next))
+                t = mix(t, godRayCloudCascade(c + 1, next.xy),
+                    clamp((fit - cloudShadowData.config.w) / max(1.0 - cloudShadowData.config.w, 1e-4), 0.0, 1.0));
+        }
+        return mix(1.0, clamp(t, 0.0, 1.0), clamp(cloudShadowData.config.y, 0.0, 1.0));
+    }
+    return 1.0;
+}
+
 void main()
 {
     //——————————————————————————————————composite pass 准备阶段——————————————————————————————————
@@ -102,14 +138,16 @@ void main()
         //远距离丁达尔效应不明显，若想要 km 级丁达尔（云缝阳光、远景光轴），需要例如：
         //加长 God Ray march（成本高）；
         //或在云 raymarch 内加强向太阳方向的散射（你们已有 powder/自阴影，更接近真实丁达尔）
-    // 400m 近距 God Ray march。P0 的行星坐标换算已从 flower 近地 Y-up 假设（+vec3(0,bottomRadius,0)）
+    // 最长 8km、云底以下的 God Ray march。使用球面径向坐标。
     // 改成球面径向：rayPosWP/frameData.camWorldPos 都是"相对当前行星中心"的米制坐标（见
     // cloud_common.glsl::cloudMap() 顶部注释），*0.001 转公里后本身就已经是从行星中心出发的
     // 径向向量，不需要再加任何固定轴偏移——加了反而是错的（假设行星中心固定在 Y=-bottomRadius）。
-    if (frameData.sky.atmosphereConfig.cloudGodRay != 0)
+    if (frameData.sky.atmosphereConfig.cloudGodRay != 0
+        && frameData.sky.atmosphereConfig.cloudGodRayScale > 0.0
+        && length(frameData.camWorldPos.xyz) * 0.001 < getAtmosphereParameters(frameData).cloudAreaStartHeight)
     {
-        const uint  kGodRaySteps = 64;//定步数
-        const float kMaxMarchingDistance = 400.0f;//最大步进距离=步数*步长（米）
+        const uint  kGodRaySteps = 48;
+        const float kMaxMarchingDistance = 8000.0;
         vec3 preGodRayResult = result.rgb;//NaN 兜底回退用（此时 result 已含云 + bFog 合成）
 
         AtmosphereParameters atmosphere = getAtmosphereParameters(frameData);//大气参数
@@ -122,20 +160,32 @@ void main()
         vec3 sunDirection = -normalize(frameData.sky.direction);//指向太阳的方向
         float VoL = dot(worldDir, sunDirection);//视线与太阳夹角的cos值，cos值越大越靠近太阳
 
-        // 场景几何距离（米）：标准深度 z∈[0,1]（近0远1）反线性化；天空像素 z=1 → far → 被 clamp 到 400m。
-        // 公式直接由标准投影矩阵推得 d = n·f / (f - z·(f-n))，n/f = camInfo.z/.w(米)。
-        // 不要用 shared_functions.glsl::linearizeDepth——那是 Reversed-Z 约定，方向正好相反。
-        float sceneDistM = frameData.camInfo.w * frameData.camInfo.z
-            / max(1e-6f, frameData.camInfo.w - sceneZ * (frameData.camInfo.w - frameData.camInfo.z));
+        // 场景几何距离（米）：用实际投影还原；天空直接使用 8km 上限。
+        // snap.proj is OpenGL-style; geometry maps clip Z from [-1,1] to [0,1].
+        // Undo that mapping before inverse projection. View-space units are km;
+        // use ray length (not axial Z) so off-axis geometry clips fog correctly.
+        float sceneDistM = kMaxMarchingDistance;
+        if (sceneZ < 1.0)
+        {
+            vec4 sceneViewH = frameData.camInvertProj
+                * vec4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, sceneZ * 2.0 - 1.0, 1.0);
+            sceneDistM = length(sceneViewH.xyz / sceneViewH.w) * 1000.0;
+        }
 
         float marchingDistance = min(kMaxMarchingDistance, sceneDistM);//近处几何像素只 march 到物体表面，不穿过
+        // Total-column shadow maps are valid below cloud base, not within clouds.
+        float cloudBaseExitKm = raySphereIntersectInside(frameData.camWorldPos.xyz * 0.001,
+            worldDir, vec3(0), atmosphere.cloudAreaStartHeight);
+        marchingDistance = min(marchingDistance, max(cloudBaseExitKm, 0.0) * 1000.0);
+        uint stepCount = uint(clamp(ceil(marchingDistance / 125.0), 8.0, float(kGodRaySteps)));
 
-        float stepLength = marchingDistance / float(kGodRaySteps);//每步长度
-        vec3 stepRay = -worldDir * stepLength;//沿视线朝相机方向每步位移
+        float stepLength = marchingDistance / float(stepCount);
 
-        // 起点=相机前方 marchingDistance 处，往回退半步 jitter 打破规则分层 banding。
+        // 从相机前方首个步长内开始，向远处积分；jitter 打破规则分层。
         // camWorldPos(米, 相对行星中心)+单位方向 → 与主云 march 一致的世界米制坐标。
-        vec3 rayPosWP = frameData.camWorldPos.xyz + worldDir * (marchingDistance - stepLength * (blueNoise2 + 0.05));
+        // Front-to-back integration: all jittered samples stay inside [0, distance].
+        vec3 rayOffsetM = vec3(0);
+        vec3 rayPosWP = frameData.camWorldPos.xyz + rayOffsetM;
 
         //累加器初始化
         float transmittance2  = 1.0;//透射率a
@@ -150,8 +200,19 @@ void main()
         //接下来循环每步合成sunSkyLuminance = groundToCloudTransfertIsoScatter
         //        + visibilityTerm * sunColor * phase * atmosphereTransmittance;
 
-        for(uint i = 0; i < kGodRaySteps; i ++)//步进循环
+        for(uint i = 0; i < stepCount; i ++)
         {//————————————————————先算太阳光是否被其他物体遮挡住，即从太阳看过去，是不是已经有别的东西——————
+            // Quadratic partition: fine near camera, coarse in the distance.
+            float a = float(i) / float(stepCount);
+            float b = float(i + 1u) / float(stepCount);
+            float t0 = marchingDistance * a * a;
+            float t1 = marchingDistance * b * b;
+            stepLength = t1 - t0;
+            rayOffsetM = worldDir * mix(t0, t1, clamp(blueNoise2, 0.0, 1.0));
+            rayPosWP = frameData.camWorldPos.xyz + rayOffsetM;
+            float density = getDensity(max(0.0, length(rayPosWP) - atmosphere.bottomRadius * 1000.0));
+            if (density < 1e-8) continue;
+            if (transmittance2 < 0.01) break;
             float visibilityTerm = 1.0;//默认全亮，无阴影
             {
                 // 级联阴影已接入（vk_shadow_cascade.h::VkCascadeShadowSystem 每帧渲染地形深度图集）。
@@ -169,8 +230,11 @@ void main()
                 {   //cascadeInfos[cascadeId].viewProj把雾点世界坐标转换成该段的深度图的UV和深度
                     // 级联矩阵是绝对世界空间(km)（shadow pass 里地形顶点 = planetCenterAbs + 局部偏移），
                     // 而 rayPosWP 是相对行星中心的米制，需先用相机绝对位置换算回绝对世界 km。
-                    vec3 rayPosAbsKm = frameData.camPosAbsKm.xyz + rayPosWP * 0.001;
+                    // Keep the small camera-relative offset separate for precision.
+                    vec3 rayPosAbsKm = frameData.camPosAbsKm.xyz + rayOffsetM * 0.001;
                     shadowCoord = projectPos(rayPosAbsKm, cascadeInfos[cascadeId].viewProj);//viewProj把雾点世界坐标转换成该段的深度图的UV和深度
+                    // terrain_shadow.vert applies this same OpenGL -> Vulkan Z mapping.
+                    shadowCoord.z = shadowCoord.z * 0.5 + 0.5;
                     if(onRange(shadowCoord.xyz, vec3(sky.cacsadeConfig.cascadeBorderAdopt), vec3(1.0f - sky.cacsadeConfig.cascadeBorderAdopt)))//看该点是否落在此cascade的有效UV区，cascadeBorderAdopt是边缘调整处
                     {
                         break;//找到了，此时activeCascadeId就是
@@ -189,10 +253,10 @@ void main()
                         
                         // Also add altas bias and z bias.
                         shadowPosOnAltas.x = (shadowPosOnAltas.x + float(activeCascadeId)) * perCascadeOffsetUV;//多级 cascade 拼在同一张 inSDSMShadowDepth 里，所以要+ activeCascadeId 再 * (1/count) = 跳到对应条带平移uv对应到正确条带中
-                        shadowPosOnAltas.z += 0.001 * (activeCascadeId + 1.0);//把当前点稍微推离太阳一点，防摩尔纹
+                        shadowPosOnAltas.z -= 0.001 * (activeCascadeId + 1.0); // receiver bias toward light
 
                         float depthShadow = texture(sampler2D(inSDSMShadowDepth, pointClampEdgeSampler), shadowPosOnAltas.xy).r;//采样雾点所在位置的表面深度
-                        visibilityTerm = shadowPosOnAltas.z > depthShadow ? 1.0 : 0.0;//深度比较，看雾在表面前面还是后面，在后面被遮挡设为0
+                        visibilityTerm = shadowPosOnAltas.z <= depthShadow ? 1.0 : 0.0;
                     }
                 }//若全部超出 → activeCascadeId == cascadeCount → 不采样，保持 visibilityTerm = 1
 
@@ -211,7 +275,6 @@ void main()
                 atmosphereTransmittance = texture(sampler2D(inTransmittanceLut, linearClampEdgeSampler), sampleUv).rgb;//预烘焙 LUT：在该高度、该太阳角度下，光穿过大气还剩多少
             }//经过大气衰减过后的太阳透射率
 
-            float density = getDensity(length(rayPosWP) - atmosphere.bottomRadius * 1000.0);//雾的浓度：相对地表高度（米）
             //length(rayPosWP)=到行星中心距离（米，rayPosWP 是相对行星中心坐标）；
             //atmosphere.bottomRadius(km)*1000=地表半径（米）；差=相对地表高度。
             //外太空/轨道高度 → density≈0，God Ray 只存在于近地低空（丁达尔发生的地方）。
@@ -221,6 +284,7 @@ void main()
 
 
             vec3 phaseTimesScattering = vec3(miePhaseValue + rayleighPhaseValue);
+            visibilityTerm *= godRayCloudVisibility(rayPosWP * 0.001);
             vec3 sunSkyLuminance = groundToCloudTransfertIsoScatter + visibilityTerm * sunColor * phaseTimesScattering * atmosphereTransmittance;
             //groundToCloudTransfertIsoScatter环境底光；visibilityTerm * sun * phase * atmosphereTransmittance直射太阳光经相位大气衰减，被遮挡则为0
             //总入射光
@@ -233,7 +297,6 @@ void main()
             transmittance2 *= stepTransmittance;//总的雾透射率
 
             // Step.
-            rayPosWP += stepRay;//沿采样点向相机再走一步
         }
 
         result.rgb = result.rgb * transmittance2 + scatteredLight2;//当前场景颜色HDR*雾的总透射率+雾的散射光

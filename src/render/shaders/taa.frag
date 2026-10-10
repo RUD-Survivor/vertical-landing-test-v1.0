@@ -7,6 +7,7 @@ layout(location = 0) out vec4 outColor;
 layout(set = 0, binding = 0) uniform sampler2D currentColor;   // RGBA16F 当前帧
 layout(set = 0, binding = 1) uniform sampler2D historyColor;   // RGBA16F 历史帧 (ping-pong)
 layout(set = 0, binding = 2) uniform sampler2D depthTex;       // D32_SFLOAT 深度缓冲
+layout(set = 0, binding = 4) uniform sampler2D waterReactive;
 
 // Set 0, binding 3: reprojection matrices
 layout(set = 0, binding = 3, std140) uniform TAAMatrices {
@@ -16,7 +17,14 @@ layout(set = 0, binding = 3, std140) uniform TAAMatrices {
 
 layout(push_constant) uniform TAAParams {
     float blendFactor;   // 0.1 = 平滑 TAA，1.0 = 禁用
+    int encodeSrgb;
 } pc;
+
+vec3 linearToSrgb(vec3 linear) {
+    vec3 c=max(linear,vec3(0));
+    return mix(1.055*pow(c,vec3(1.0/2.4))-0.055,12.92*c,
+        lessThanEqual(c,vec3(0.0031308)));
+}
 
 void main() {
     vec4 current = texture(currentColor, inUV);
@@ -50,12 +58,14 @@ void main() {
 
     if (!isSkyPixel) {
         // 从深度重建世界坐标 → 重投影到上一帧 UV
-        vec4 clipPos   = vec4(inUV * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
+        // Geometry flips clip Y for Vulkan's positive-height viewport.
+        vec4 clipPos   = vec4(inUV.x * 2.0 - 1.0, 1.0 - inUV.y * 2.0,
+                              depth * 2.0 - 1.0, 1.0);
         vec4 worldPos  = mats.invViewProj * clipPos;
         worldPos      /= worldPos.w;
         vec4 prevClip  = mats.prevViewProj * worldPos;
         prevClip      /= prevClip.w;
-        vec2 prevUV    = prevClip.xy * 0.5 + 0.5;
+        vec2 prevUV    = vec2(prevClip.x, -prevClip.y) * 0.5 + 0.5;
 
         // 检查重投影 UV 是否在有效范围内
         bool valid = all(greaterThan(prevUV, vec2(0.01))) &&
@@ -64,7 +74,8 @@ void main() {
             historyUV = prevUV;
             // 运动自适应混合：移动越快，当前帧权重越高
             float motion = length(prevUV - inUV);
-            blend = clamp(blend + motion * 4.0, blend, 0.9);
+            // blendFactor=1 must remain current-only for display validation.
+            blend = clamp(blend + motion * 4.0, blend, max(blend, 0.9));
         } else {
             blend = 1.0;  // 无效重投影 → 全用当前帧
         }
@@ -79,5 +90,9 @@ void main() {
     vec4 history = texture(historyColor, historyUV);
     history.rgb  = clamp(history.rgb, cMin, cMax);
 
+    blend = max(blend, texture(waterReactive, inUV).r);
     outColor = mix(history, current, blend);
+    // History remains linear HDR. Encode exactly once, after temporal blending.
+    // SRGB attachments perform this conversion in hardware instead.
+    if(pc.encodeSrgb != 0)outColor.rgb=linearToSrgb(outColor.rgb);
 }

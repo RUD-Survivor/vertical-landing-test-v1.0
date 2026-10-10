@@ -20,7 +20,8 @@
 // Push constants for TAA resolve pass
 struct TAAParams {
     float blendFactor = 0.1f;  // 0.1 = smooth, 1.0 = disable TAA (debug)
-    float _pad[3]     = {};
+    int encodeSrgb = 0;        // UNORM attachments require explicit display transfer.
+    float _pad[2] = {};
 };
 static_assert(sizeof(TAAParams) <= 128, "TAAParams exceeds push constant limit");
 
@@ -77,6 +78,7 @@ struct VkTAA {
 
     int  currentIdx   = 0;     // ping-pong, flipped by swap() each frame
     bool historyReady = false; // false = history 图像需在帧内 cmd buffer 里初始化
+    bool encodeOutputSrgb = false;
 
     // -----------------------------------------------------------------------
     // init — 创建全部资源（图像、采样器、管线、描述符集）
@@ -324,6 +326,7 @@ struct VkTAA {
     void drawResolve(VkCommandBuffer cmd, float blendFactor = 0.1f) const {
         TAAParams params{};
         params.blendFactor = blendFactor;
+        params.encodeSrgb = encodeOutputSrgb ? 1 : 0;
         vkCmdPushConstants(cmd, resolveLayout,
             VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(TAAParams), &params);
         vkCmdDraw(cmd, 3, 1, 0, 0);  // 全屏三角，无顶点缓冲区
@@ -417,7 +420,7 @@ private:
             ici.arrayLayers   = 1;
             ici.samples       = VK_SAMPLE_COUNT_1_BIT;
             ici.tiling        = VK_IMAGE_TILING_OPTIMAL;
-            ici.usage         = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+            ici.usage         = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
             ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
             VmaAllocationCreateInfo aci{};
             aci.usage = VMA_MEMORY_USAGE_GPU_ONLY;
@@ -485,7 +488,7 @@ private:
         }
 
         // Descriptor set layout: 0=current, 1=history, 2=depth, 3=matrices UBO
-        VkDescriptorSetLayoutBinding bindings[4]{};
+        VkDescriptorSetLayoutBinding bindings[5]{};
         for (uint32_t i = 0; i < 3; ++i) {
             bindings[i].binding         = i;
             bindings[i].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -497,8 +500,9 @@ private:
         bindings[3].descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         bindings[3].descriptorCount = 1;
         bindings[3].stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT;
+        bindings[4] = {4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
         VkDescriptorSetLayoutCreateInfo setCI{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-        setCI.bindingCount = 4;
+        setCI.bindingCount = 5;
         setCI.pBindings    = bindings;
         if (vkCreateDescriptorSetLayout(ctx.device, &setCI, nullptr, &resolveSetLayout) != VK_SUCCESS) {
             fprintf(stderr, "[VkTAA] Failed to create descriptor set layout\n");
@@ -566,6 +570,8 @@ private:
         VkPipelineRenderingCreateInfo renderingCI{ VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO };
         renderingCI.colorAttachmentCount    = 1;
         renderingCI.pColorAttachmentFormats = &swapFormat;
+        encodeOutputSrgb = swapFormat == VK_FORMAT_B8G8R8A8_UNORM
+                        || swapFormat == VK_FORMAT_R8G8B8A8_UNORM;
         // 无 depthAttachmentFormat：resolve pass 不使用深度附件
 
         VkGraphicsPipelineCreateInfo pipeCI{ VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
@@ -599,7 +605,7 @@ private:
     bool createDescriptors(VulkanContext& ctx) {
         VkDescriptorPoolSize poolSizes[2]{};
         poolSizes[0].type            = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        poolSizes[0].descriptorCount = 6;  // 2 sets × 3 samplers
+        poolSizes[0].descriptorCount = 8;  // 2 sets × 4 samplers
         poolSizes[1].type            = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         poolSizes[1].descriptorCount = 2;  // 2 sets × 1 UBO
         VkDescriptorPoolCreateInfo poolCI{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
@@ -648,7 +654,7 @@ private:
             imgs[1] = { colorSampler, colorViews[1-i], VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
             imgs[2] = { depthSampler, depthView,       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
 
-            VkWriteDescriptorSet writes[4]{};
+            VkWriteDescriptorSet writes[5]{};
             for (uint32_t b = 0; b < 3; ++b) {
                 writes[b].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
                 writes[b].dstSet          = resolveSets[i];
@@ -667,7 +673,10 @@ private:
             writes[3].descriptorCount = 1;
             writes[3].descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
             writes[3].pBufferInfo     = &bufInfo;
-            vkUpdateDescriptorSets(ctx.device, 4, writes, 0, nullptr);
+            VkDescriptorImageInfo fallback{colorSampler, colorViews[i], VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+            writes[4] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, resolveSets[i], 4, 0, 1,
+                VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, &fallback, nullptr, nullptr};
+            vkUpdateDescriptorSets(ctx.device, 5, writes, 0, nullptr);
         }
         return true;
     }
@@ -688,6 +697,15 @@ private:
     }
 
     // 4×4 矩阵 inverse（纯数值，精度足够用于 TAA 重投影）
+public:
+    void updateWaterMask(VulkanContext& ctx, VkImageView view) {
+        VkDescriptorImageInfo image{colorSampler, view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        VkWriteDescriptorSet w{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+        w.dstSet=resolveSets[currentIdx];w.dstBinding=4;w.descriptorType=VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        w.descriptorCount=1;w.pImageInfo=&image;
+        vkUpdateDescriptorSets(ctx.device,1,&w,0,nullptr);
+    }
+private:
     static void computeInverseVP(const float* m, float* inv) {
         float a00=m[0], a01=m[4], a02=m[8],  a03=m[12];
         float a10=m[1], a11=m[5], a12=m[9],  a13=m[13];

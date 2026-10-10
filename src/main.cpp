@@ -205,14 +205,13 @@ static bool initVulkanFlight(bool skipBuilder = false) {
         const int tw = tecSim->width, th = tecSim->height;
         const int hw = hydSim->width, hh = hydSim->height;
 
-        // Tectonic: RGBA8（高度值 → R 通道，[0,1] → [0,255]）
-        std::vector<uint8_t> tecRGBA8(tw * th * 4);
+        // Preserve metric shallow-water detail: no 8-bit height quantization.
+        std::vector<float> tecFloat4(tw * th * 4);
         for (int i = 0; i < tw * th; i++) {
-            uint8_t r = (uint8_t)(std::min(1.0f, std::max(0.0f, tecSim->gridHeight[i])) * 255.f);
-            tecRGBA8[i * 4 + 0] = r;
-            tecRGBA8[i * 4 + 1] = 0;
-            tecRGBA8[i * 4 + 2] = 0;
-            tecRGBA8[i * 4 + 3] = 255;
+            tecFloat4[i * 4 + 0] = std::clamp(tecSim->gridHeight[i], 0.0f, 1.0f);
+            tecFloat4[i * 4 + 1] = 0;
+            tecFloat4[i * 4 + 2] = 0;
+            tecFloat4[i * 4 + 3] = 1;
         }
 
         // Hydro: RGBA32F — R:filledHeight, G:accumulation, B:strahler(raw), A:flowDir
@@ -225,7 +224,7 @@ static bool initVulkanFlight(bool skipBuilder = false) {
         }
 
         if (!g_vkR3D.scene.uploadTerrainTextures(g_vkCtx,
-                tecRGBA8.data(), (uint32_t)tw, (uint32_t)th,
+                tecFloat4.data(), (uint32_t)tw, (uint32_t)th,
                 hydFloat4.data(), (uint32_t)hw, (uint32_t)hh)) {
             fprintf(stderr, "[Vulkan] Failed to upload terrain textures\n");
         } else {
@@ -339,6 +338,15 @@ static void renderVulkanFrame(GLFWwindow* window) {
         g_vkR3D.render(frame.commandBuffer, g_frameSync.currentFrame, snap, g_vkCtx.swapExtent);
     }
     g_vkTAA.endGeometryPass(frame.commandBuffer);
+
+    // Water writes surface depth before atmosphere/cloud composition. Its input
+    // color and opaque depth are separate snapshots. Clear reactive outside flight.
+    {
+        SceneSnapshot emptyWaterScene{};
+        g_vkR3D.oceanSystem.render(g_vkCtx, frame.commandBuffer, g_vkTAA, g_vkR3D.scene,
+            inFlight ? g_lastFlightSnap : emptyWaterScene, g_frameSync.currentFrame,
+            g_vkCtx.swapExtent, g_vkR3D.atmoTune);
+    }
 
     // 大气重构：壳内/壳外路径，必须排在这里（几何 pass 刚结束、深度已经是只读纹理）
     // 且必须在体积云之前（云管线要求进来时 HDR 颜色已经是 SHADER_READ_ONLY_OPTIMAL，

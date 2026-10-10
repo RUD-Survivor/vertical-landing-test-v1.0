@@ -820,7 +820,8 @@ struct TerrainPushConstants {
 struct VkTerrainPipeline {
     VkPipelineLayout layout=VK_NULL_HANDLE; VkPipeline pipeline=VK_NULL_HANDLE;
     VkDescriptorSetLayout set0Layout=VK_NULL_HANDLE, set1Layout=VK_NULL_HANDLE;
-    bool init(VulkanContext& ctx, VkFormat cf, VkFormat df, const char* vs, const char* fs) {
+    bool init(VulkanContext& ctx, VkFormat cf, VkFormat df, const char* vs, const char* fs,
+              VkDescriptorSetLayout waterLayout=VK_NULL_HANDLE) {
         auto vc=loadSPIRV(vs), fc=loadSPIRV(fs);
         if(vc.empty()||fc.empty()) return false;
         VkShaderModule vm=createShaderModule(ctx.device,vc), fm=createShaderModule(ctx.device,fc);
@@ -841,8 +842,8 @@ struct VkTerrainPipeline {
             VkDescriptorSetLayoutCreateInfo s1{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,nullptr,0,4,b1};
             if(vkCreateDescriptorSetLayout(ctx.device,&s1,nullptr,&set1Layout)!=VK_SUCCESS) return false;
             VkPushConstantRange pc{VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT,0,sizeof(TerrainPushConstants)};
-            VkDescriptorSetLayout sl[]={set0Layout,set1Layout};
-            VkPipelineLayoutCreateInfo pl{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,nullptr,0,2,sl,1,&pc};
+            VkDescriptorSetLayout sl[]={set0Layout,set1Layout,waterLayout};
+            VkPipelineLayoutCreateInfo pl{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,nullptr,0,waterLayout?3u:2u,sl,1,&pc};
             if(vkCreatePipelineLayout(ctx.device,&pl,nullptr,&layout)!=VK_SUCCESS) return false;
             VkPipelineShaderStageCreateInfo ss[2]={
                 {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,nullptr,0,VK_SHADER_STAGE_VERTEX_BIT,  vm,"main",nullptr},
@@ -856,10 +857,13 @@ struct VkTerrainPipeline {
             VkPipelineMultisampleStateCreateInfo ms{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,nullptr,0,VK_SAMPLE_COUNT_1_BIT,VK_FALSE,0.f,nullptr,VK_FALSE,VK_FALSE};
             VkPipelineDepthStencilStateCreateInfo ds{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,nullptr,0,VK_TRUE,VK_TRUE,VK_COMPARE_OP_LESS,VK_FALSE,VK_FALSE,{},{},0.f,0.f};
             VkPipelineColorBlendAttachmentState ba{VK_FALSE,VK_BLEND_FACTOR_ZERO,VK_BLEND_FACTOR_ZERO,VK_BLEND_OP_ADD,VK_BLEND_FACTOR_ZERO,VK_BLEND_FACTOR_ZERO,VK_BLEND_OP_ADD,0xF};
-            VkPipelineColorBlendStateCreateInfo bs{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,nullptr,0,VK_FALSE,VK_LOGIC_OP_COPY,1,&ba,{}};
+            VkPipelineColorBlendAttachmentState attachments[]={ba,ba};
+            uint32_t colorCount=waterLayout?2u:1u;
+            VkPipelineColorBlendStateCreateInfo bs{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,nullptr,0,VK_FALSE,VK_LOGIC_OP_COPY,colorCount,attachments,{}};
             VkDynamicState dyn[]={VK_DYNAMIC_STATE_VIEWPORT,VK_DYNAMIC_STATE_SCISSOR};
             VkPipelineDynamicStateCreateInfo dsi{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,nullptr,0,2,dyn};
-            VkPipelineRenderingCreateInfo rci{VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,nullptr,0,1,&cf,df,VK_FORMAT_UNDEFINED};
+            VkFormat colorFormats[]={cf,VK_FORMAT_R8_UNORM};
+            VkPipelineRenderingCreateInfo rci{VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,nullptr,0,colorCount,colorFormats,df,VK_FORMAT_UNDEFINED};
             VkGraphicsPipelineCreateInfo pci{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,&rci,0,2,ss,&vi,&ia,nullptr,&vp,&rs,&ms,&ds,&bs,&dsi,layout,VK_NULL_HANDLE,0,VK_NULL_HANDLE,-1};
             VkResult r=vkCreateGraphicsPipelines(ctx.device,VK_NULL_HANDLE,1,&pci,nullptr,&pipeline);
             if(r!=VK_SUCCESS){fprintf(stderr,"[Terrain] pipeline failed\n");return false;}

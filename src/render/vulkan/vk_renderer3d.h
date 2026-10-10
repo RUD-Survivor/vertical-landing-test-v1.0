@@ -17,6 +17,7 @@
 #include "systems/vk_sky.h"
 #include "systems/vk_effects.h"
 #include "vk_cloud_system.h"
+#include "vk_ocean.h"
 #include "../../render/scene_snapshot.h"
 
 struct VkRenderer3D {
@@ -24,6 +25,7 @@ struct VkRenderer3D {
     VkSkySystem     sky;
     VkEffectsSystem effects;
     VkCloudSystem   cloudSystem;
+    VkOceanSystem   oceanSystem;
     VkCascadeShadowSystem shadowSystem; // SDSM 级联阴影（Phase2 收尾，只投射地形，见 vk_shadow_cascade.h）
     AtmoTuneParams  atmoTune; // 大气重构调参（imgui_atmo_tuner.h），见 renderAtmoAfterGeometry
 
@@ -31,6 +33,7 @@ struct VkRenderer3D {
     bool init(VulkanContext& ctx, VkDescriptorManager& desc,
               VkFormat colorFmt, VkFormat depthFmt) {
         if (!scene.init(ctx, desc, colorFmt, depthFmt))   return false;
+        if (!oceanSystem.init(ctx, colorFmt, depthFmt)) return false;
         if (!scene.initCloudTextures(ctx))                 return false;
         if (!sky.init(ctx, desc, colorFmt, depthFmt))     return false;
         if (!effects.init(ctx, desc, colorFmt, depthFmt)) return false;
@@ -43,6 +46,7 @@ struct VkRenderer3D {
     }
 
     void shutdown(VulkanContext& ctx) {
+        oceanSystem.shutdown(ctx);
         shadowSystem.shutdown(ctx);
         cloudSystem.shutdown(ctx);
         effects.shutdownRibbonRing();

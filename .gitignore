@@ -391,6 +391,7 @@ imgui.ini
 temp_*
 
 # Build output logs (already covered by *.log for most)
+/build/tests/
 build_log.txt
 build_out.txt
 build_check_result.txt
