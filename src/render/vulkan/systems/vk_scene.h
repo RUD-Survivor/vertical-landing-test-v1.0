@@ -455,33 +455,32 @@ struct VkSceneSystem {
     }
 
     // -----------------------------------------------------------------------
-    // 大气重构·壳内路径：相机在这颗星球的大气层以内时调用（全场景最多同时一颗
-    // 星球满足，见 vk_renderer3d.h 的 cameraInside 分支路由）。内部依次：
-    //   ① 从 atmoLutCache 取得（必要时创建 + profile 变化则重烤）这颗星球的
-    //      LUT 实例；② 每帧刷新它的 Sky-View LUT（bakeSkyViewOnly，便宜，相机
-    //      高度/太阳角每帧都可能变）；③ 刷新深度绑定（TAA ping-pong 每帧不同）；
-    //      ④ 画全屏三角形（复用 atmo.vert）。
-    // bodyIdx：稳定的星球场景索引（CelestialDraw::bodyIdx），LUT 缓存的 key。
-    // camPosKm/lightDirToSun：调用方已经算好的相机世界坐标 / 该星球"指向太阳"
-    // 方向（vk_renderer3d.h 循环里已经在为每颗星球重算 light 方向，直接传进来）。
-    void drawAtmoInside(VulkanContext& ctx, VkCommandBuffer cmd, int frameSlot,
-                        VkImageView depthView, VkImageView sceneColorView,
-                        int32_t bodyIdx, const AtmoPushConstants& pc,
-                        const float camPosKm[3], const float lightDirToSun[3],
-                        const AtmoTuneParams& tune) {
-        if (atmoInsidePipe.pipeline == VK_NULL_HANDLE) return;
-
+    // Must be called outside dynamic rendering: creates/bakes LUTs and updates descriptors.
+    VkAtmosphereLut* prepareAtmosphere(VulkanContext& ctx, VkCommandBuffer cmd, int frameSlot,
+                                      VkImageView depthView, VkImageView sceneColorView,
+                                      int32_t bodyIdx, const AtmoPushConstants& pc,
+                                      const float camPosKm[3], const float lightDirToSun[3],
+                                      const AtmoTuneParams& tune, bool cameraInside) {
         const float thicknessKm = pc.outerRadius - pc.surfaceRadius;
         GpuPerFrameData fd = fillAtmoLutFrameData(camPosKm, pc.planetCenter, pc.surfaceRadius,
-                                                   thicknessKm, pc.planetIdx, lightDirToSun, &tune);
+                                                thicknessKm, pc.planetIdx, lightDirToSun, &tune);
         AtmoLutProfileKey key = AtmoLutProfileKey::fromTune(pc.planetIdx, pc.surfaceRadius, thicknessKm, tune);
         VkAtmosphereLut* lut = atmoLutCache.getOrCreate(ctx, cmd, frameSlot, bodyIdx, key, fd);
-        if (!lut) return;
-        lut->bakeSkyViewOnly(ctx, cmd, frameSlot, atmoLutCache.pipelines, fd);
+        if (!lut) return nullptr;
+        // Shell shading only uses profile LUTs; no camera-dependent SkyView bake is needed.
+        if (cameraInside)
+            lut->bakeSkyViewOnly(ctx, cmd, frameSlot, atmoLutCache.pipelines, fd);
         lut->updateRenderBindings(ctx, frameSlot, depthView, sceneColorView);
+        return lut;
+    }
+
+    // Graphics-only methods; all resources have been prepared before vkCmdBeginRendering.
+    void drawAtmoInside(VkCommandBuffer cmd, int frameSlot,
+                         VkAtmosphereLut& lut, const AtmoPushConstants& pc) {
+        if (atmoInsidePipe.pipeline == VK_NULL_HANDLE) return;
 
         atmoInsidePipe.bind(cmd);
-        VkDescriptorSet sets[2] = { desc->set0[_frameIdx], lut->renderSet[frameSlot % FRAMES_IN_FLIGHT] };
+        VkDescriptorSet sets[2] = { desc->set0[_frameIdx], lut.renderSet[frameSlot % FRAMES_IN_FLIGHT] };
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
             atmoInsidePipe.layout, 0, 2, sets, 0, nullptr);
         vkCmdPushConstants(cmd, atmoInsidePipe.layout,
@@ -492,30 +491,13 @@ struct VkSceneSystem {
     }
 
     // -----------------------------------------------------------------------
-    // 大气重构·壳外路径：相机在这颗星球的大气层以外看它时调用。画
-    // atmoSphereVbo（_buildAtmoSphere() 早就建好、之前从未被使用的单位球壳网格），
-    // 只在这颗星球实际占的那一小圈屏幕像素上跑 frag，深度测试开启，比全屏 raymarch
-    // 便宜得多。LUT 获取/刷新逻辑与 drawAtmoInside 完全一致（同一个 atmoLutCache）。
-    void drawAtmoShell(VulkanContext& ctx, VkCommandBuffer cmd, int frameSlot,
-                       VkImageView depthView, VkImageView sceneColorView,
-                       int32_t bodyIdx, const AtmoPushConstants& pc,
-                       const float camPosKm[3], const float lightDirToSun[3],
-                       const AtmoTuneParams& tune) {
+    // Shell mesh draw; depth occlusion is evaluated in the fragment shader.
+    void drawAtmoShell(VkCommandBuffer cmd, int frameSlot,
+                         VkAtmosphereLut& lut, const AtmoPushConstants& pc) {
         if (atmoShellPipe.pipeline == VK_NULL_HANDLE || atmoSphereVbo == VK_NULL_HANDLE) return;
 
-        const float thicknessKm = pc.outerRadius - pc.surfaceRadius;
-        GpuPerFrameData fd = fillAtmoLutFrameData(camPosKm, pc.planetCenter, pc.surfaceRadius,
-                                                   thicknessKm, pc.planetIdx, lightDirToSun, &tune);
-        AtmoLutProfileKey key = AtmoLutProfileKey::fromTune(pc.planetIdx, pc.surfaceRadius, thicknessKm, tune);
-        VkAtmosphereLut* lut = atmoLutCache.getOrCreate(ctx, cmd, frameSlot, bodyIdx, key, fd);
-        if (!lut) return;
-        lut->bakeSkyViewOnly(ctx, cmd, frameSlot, atmoLutCache.pipelines, fd);
-        // 壳外 frag 不采样场景深度（深度测试本身已经处理了"被更近物体挡住"），
-        // 但 Set 1 的 binding 0 仍需要一个合法视图满足布局要求，同样刷新一下。
-        lut->updateRenderBindings(ctx, frameSlot, depthView, sceneColorView);
-
         atmoShellPipe.bind(cmd);
-        VkDescriptorSet sets[2] = { desc->set0[_frameIdx], lut->renderSet[frameSlot % FRAMES_IN_FLIGHT] };
+        VkDescriptorSet sets[2] = { desc->set0[_frameIdx], lut.renderSet[frameSlot % FRAMES_IN_FLIGHT] };
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
             atmoShellPipe.layout, 0, 2, sets, 0, nullptr);
         vkCmdPushConstants(cmd, atmoShellPipe.layout,

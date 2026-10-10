@@ -514,6 +514,14 @@ void inscatterUvwzToParams(in const AtmosphereParameters atmosphere,
 	nu = clamp(uvwz.x * 2.0 - 1.0, -1.0, 1.0);
 }
 
+// Geometrically valid nu interval; it is centered on mu*mu_s, not zero.
+float inscatterClampNu(float nu, float mu, float mu_s)
+{
+    float center = mu * mu_s;
+    float span = sqrt(max(0.0, (1.0 - mu * mu) * (1.0 - mu_s * mu_s)));
+    return clamp(nu, center - span, center + span);
+}
+
 // 从 texel 索引解码 (r, mu, mu_s, nu)。r 为地心距 km。
 // 对齐 Bruneton GetRMuMuSNuFromScatteringTextureFragCoord（半 texel 中心）。
 void inscatterTexelToParams(in const AtmosphereParameters atmosphere,
@@ -533,8 +541,7 @@ void inscatterTexelToParams(in const AtmosphereParameters atmosphere,
 	inscatterUvwzToParams(atmosphere, uvwz, r, mu, mu_s, nu, rayIntersectsGround);
 
 	// nu 与 (mu, mu_s) 几何相容
-	float muBound = mu * mu_s + sqrt(max(0.0, (1.0 - mu * mu) * (1.0 - mu_s * mu_s)));
-	nu = clamp(nu, -muBound, muBound);
+	nu = inscatterClampNu(nu, mu, mu_s);
 }
 
 // 4D 归一化坐标打包为 3D 采样 UV（nu 维双线性）；对齐 Bruneton GetScattering。
@@ -576,8 +583,7 @@ vec3 sampleInscatterLut(texture3D lut, sampler s,
 	r = clamp(r, atmosphere.bottomRadius, atmosphere.topRadius);
 	mu = clamp(mu, -1.0, 1.0);
 	mu_s = clamp(mu_s, kInscatterMuSMin, 1.0);
-	float muBound = mu * mu_s + sqrt(max(0.0, (1.0 - mu * mu) * (1.0 - mu_s * mu_s)));
-	nu = clamp(nu, -muBound, muBound);
+	nu = inscatterClampNu(nu, mu, mu_s);
 
 	vec3 uvw0, uvw1;
 	float nuLerp;
@@ -599,8 +605,7 @@ BrunetonReducedScattering sampleBrunetonReducedInscatterLut(texture3D lut, sampl
 	r = clamp(r, atmosphere.bottomRadius, atmosphere.topRadius);
 	mu = clamp(mu, -1.0, 1.0);
 	mu_s = clamp(mu_s, kInscatterMuSMin, 1.0);
-	float muBound = mu * mu_s + sqrt(max(0.0, (1.0 - mu * mu) * (1.0 - mu_s * mu_s)));
-	nu = clamp(nu, -muBound, muBound);
+	nu = inscatterClampNu(nu, mu, mu_s);
 
 	vec3 uvw0, uvw1;
 	float nuLerp;

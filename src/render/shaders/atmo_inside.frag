@@ -113,17 +113,14 @@ void main() {
     }
 
     vec2  screenUv      = vNDC * 0.5 + 0.5;
-    float sceneDepthNdc = texture(sampler2D(inSceneDepth, samp), screenUv).r;
+    float sceneDepthNdc = texelFetch(inSceneDepth, ivec2(gl_FragCoord.xy), 0).r;
     float skyDepthThresh = clamp(pc.skyDepthThreshold, 0.0, 1.0);
     if (sceneDepthNdc < skyDepthThresh) {
-        vec4 clip  = vec4(vNDC.x, -vNDC.y, sceneDepthNdc * 2.0 - 1.0, 1.0);
-        vec4 viewP = inverse(frame.proj) * clip;
-        viewP     /= viewP.w;
-        vec4 worldP = inverse(frame.view) * viewP;
-        float tScene = max(dot(worldP.xyz - camPos, rayDir), 0.0);
+        float tScene, depthUncertainty;
+        atmoSceneRayDepth(sceneDepthNdc, frame.proj, frame.view, rayDir, tScene, depthUncertainty);
         // mode2：出大气混合；其余算法位在壳内仍全信深度（diskMode=0）
         int diskMode = (pc.shellDiskMode == 2) ? 2 : 0;
-        if (!atmoApplyDepthFarMix(tFar, tNear, tScene, camDist, pc.outerRadius,
+        if (!atmoApplyDepthFarMix(tFar, tNear, tScene, depthUncertainty, camDist, pc.outerRadius,
                 diskMode, pc.depthApBlendStartKm, pc.depthApBlendEndKm))
             discard;
     }
@@ -179,15 +176,14 @@ void main() {
 
     float thickness = max(pc.outerRadius - pc.surfaceRadius, 1e-3);
     float altNorm = max(camDist - pc.surfaceRadius, 0.0) / thickness;
-    float nightFactor = mix(0.01, 1.0, pc.sunVisibility);
     float baseE = atmoUnifiedExposure(
         camDist, pc.surfaceRadius, pc.outerRadius,
         pc.innerExposureNear, pc.innerExposureFar, pc.outerExposure);
     float rim = atmoInsideRim(rayDir, camPos - pc.planetCenter.xyz);
     float limbAmt = atmoLimbAmount(altNorm, pc.limbBrightnessBottom, pc.limbBrightness);
-    float exposure = baseE * atmoLimbMul(limbAmt, rim, pc.limbPower) * nightFactor;
+    float exposure = baseE * atmoLimbMul(limbAmt, rim, pc.limbPower);
 
-    vec3 sceneColor = texture(sampler2D(inSceneColor, samp), screenUv).rgb;
+    vec3 sceneColor = texelFetch(inSceneColor, ivec2(gl_FragCoord.xy), 0).rgb;
 
     // Phase A debug：整屏显示 Inscatter 天空采样（验证烘焙/查表通路）
     if (pc.inscatterDebugExposure > 0.0) {

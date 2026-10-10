@@ -81,7 +81,7 @@ struct AtmoTuneParams {
     int mieStorageMode = 0;
     // 壳外盘面：0=Disk AP（全深）；1=legacy discard（盘心无 AP）；
     // 2=出大气后 Depth↔解析球渐进混合（消远距同心纹，近地保留起伏）。
-    int shellDiskMode = 0;
+    int shellDiskMode = 2;
     // mode=2：地心距 camR 在 [outer+start, outer+end] 上 wDepth 从 1→0。
     float depthApBlendStartKm = 0.0f;    // 相对大气顶 outerRadius 的起点（km）
     float depthApBlendEndKm   = 1000.0f; // 相对大气顶的终点（km）；再远全解析球
@@ -486,6 +486,18 @@ static void _atmoLutComputeBarrier(VkCommandBuffer cmd) {
     vkCmdPipelineBarrier2(cmd, &dep);
 }
 
+// Cache images are shared by frame slots; wait for earlier sampling before rebaking.
+static void _atmoLutBeforeBakeBarrier(VkCommandBuffer cmd) {
+    VkMemoryBarrier2 b{ VK_STRUCTURE_TYPE_MEMORY_BARRIER_2 };
+    b.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+    b.srcAccessMask = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT;
+    b.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+    b.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT;
+    VkDependencyInfo dep{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+    dep.memoryBarrierCount = 1; dep.pMemoryBarriers = &b;
+    vkCmdPipelineBarrier2(cmd, &dep);
+}
+
 // 已修复：compute→compute 的 _atmoLutComputeBarrier 只保证 dstStageMask=COMPUTE_SHADER
 // 可见，不包含 FRAGMENT_SHADER——但 bakeFull()/bakeSkyViewOnly() 之后紧接着就是同一个
 // command buffer 里的 atmo_inside.frag/atmo_shell.frag 图形绘制，会在片元着色器阶段
@@ -586,11 +598,11 @@ struct VkAtmosphereLut {
         if (singleMieImage) { vmaDestroyImage(ctx.allocator, singleMieImage, singleMieAlloc); singleMieImage=VK_NULL_HANDLE; }
     }
 
-    // 每帧刷新渲染侧 Set 1 的 depth + HDR scene 视图（TAA ping-pong / 同图读写）。
+    // Refresh depth and read-only HDR snapshot bindings for this frame slot.
     void updateRenderBindings(VulkanContext& ctx, int frameSlot, VkImageView depthView, VkImageView sceneColorView) {
         int slot = frameSlot % FRAMES_IN_FLIGHT;
         VkDescriptorImageInfo iDepth{ VK_NULL_HANDLE, depthView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
-        VkDescriptorImageInfo iScene{ VK_NULL_HANDLE, sceneColorView, VK_IMAGE_LAYOUT_GENERAL };
+        VkDescriptorImageInfo iScene{ VK_NULL_HANDLE, sceneColorView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
         VkWriteDescriptorSet w[2]{};
         w[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         w[0].dstSet = renderSet[slot]; w[0].dstBinding = 0;
@@ -631,6 +643,7 @@ struct VkAtmosphereLut {
                   const VkAtmoLutPipelines& pipes, const GpuPerFrameData& fd) {
         int slot = frameSlot % FRAMES_IN_FLIGHT;
         uploadFrameData(ctx, cmd, frameSlot, fd);
+        _atmoLutBeforeBakeBarrier(cmd);
 
         VkDescriptorSet set = descSet[slot];
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipes.pipelineLayout, 0, 1, &set, 0, nullptr);
@@ -668,6 +681,7 @@ struct VkAtmosphereLut {
                           const VkAtmoLutPipelines& pipes, const GpuPerFrameData& fd) {
         int slot = frameSlot % FRAMES_IN_FLIGHT;
         uploadFrameData(ctx, cmd, frameSlot, fd);
+        _atmoLutBeforeBakeBarrier(cmd);
 
         VkDescriptorSet set = descSet[slot];
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipes.pipelineLayout, 0, 1, &set, 0, nullptr);

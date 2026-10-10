@@ -44,6 +44,11 @@ struct VkTAA {
     VkImageView   colorViews[2]  = {};
     VkSampler     colorSampler   = VK_NULL_HANDLE;  // LINEAR, CLAMP_TO_EDGE
 
+    // Read-only background for atmosphere composition, separate from the output attachment.
+    VkImage atmosphereInputImage = VK_NULL_HANDLE;
+    VmaAllocation atmosphereInputAlloc = VK_NULL_HANDLE;
+    VkImageView atmosphereInputView = VK_NULL_HANDLE;
+
     // D32 depth (StoreOp=STORE, readable as sampler2D for reprojection)
     VkImage       depthImage  = VK_NULL_HANDLE;
     VmaAllocation depthAlloc  = VK_NULL_HANDLE;
@@ -120,6 +125,34 @@ struct VkTAA {
     }
 
     // -----------------------------------------------------------------------
+    // Copy immediately before each planetary atmosphere pass, preserving earlier composition.
+    // Shared snapshot reuse is synchronized against all previous shader reads.
+    void copyAtmosphereInput(VkCommandBuffer cmd, VkExtent2D extent) {
+        transitionImage(cmd, colorImages[currentIdx],
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT,
+            VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+        transitionImage(cmd, atmosphereInputImage,
+            VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT,
+            VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
+        VkImageCopy region{};
+        region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        region.dstSubresource = region.srcSubresource;
+        region.extent = {extent.width, extent.height, 1};
+        vkCmdCopyImage(cmd, colorImages[currentIdx], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            atmosphereInputImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+        transitionImage(cmd, atmosphereInputImage,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+            VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
+        transitionImage(cmd, colorImages[currentIdx],
+            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT,
+            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+            VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+    }
+
     // Pass 1 — Geometry pass begin/end
     //
     // beginGeometryPass: 过渡 colorImages[currentIdx] → COLOR_ATTACHMENT_OPTIMAL
@@ -333,7 +366,7 @@ private:
             ici.tiling        = VK_IMAGE_TILING_OPTIMAL;
             // STORAGE: cloud composite pass imageStore's into this HDR target
             ici.usage         = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT
-                            | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+                            | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
             ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
             VmaAllocationCreateInfo aci{};
             aci.usage = VMA_MEMORY_USAGE_GPU_ONLY;
@@ -352,6 +385,28 @@ private:
                 fprintf(stderr, "[VkTAA] Failed to create color view %d\n", i);
                 return false;
             }
+        }
+        {
+            VkImageCreateInfo ici{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+            ici.imageType = VK_IMAGE_TYPE_2D;
+            ici.format = kColorFmt;
+            ici.extent = {extent.width, extent.height, 1};
+            ici.mipLevels = 1;
+            ici.arrayLayers = 1;
+            ici.samples = VK_SAMPLE_COUNT_1_BIT;
+            ici.tiling = VK_IMAGE_TILING_OPTIMAL;
+            ici.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+            ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+            VmaAllocationCreateInfo aci{};
+            aci.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+            if (vmaCreateImage(ctx.allocator, &ici, &aci, &atmosphereInputImage,
+                               &atmosphereInputAlloc, nullptr) != VK_SUCCESS) return false;
+            VkImageViewCreateInfo vci{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+            vci.image = atmosphereInputImage;
+            vci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+            vci.format = kColorFmt;
+            vci.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+            if (vkCreateImageView(ctx.device, &vci, nullptr, &atmosphereInputView) != VK_SUCCESS) return false;
         }
         {
             VkImageCreateInfo ici{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
@@ -669,6 +724,14 @@ private:
     }
 
     void destroyImages(VulkanContext& ctx) {
+        if (atmosphereInputView) {
+            vkDestroyImageView(ctx.device, atmosphereInputView, nullptr);
+            atmosphereInputView = VK_NULL_HANDLE;
+        }
+        if (atmosphereInputImage) {
+            vmaDestroyImage(ctx.allocator, atmosphereInputImage, atmosphereInputAlloc);
+            atmosphereInputImage = VK_NULL_HANDLE;
+        }
         for (int i = 0; i < 2; ++i) {
             if (colorViews[i]  != VK_NULL_HANDLE) { vkDestroyImageView(ctx.device, colorViews[i], nullptr);               colorViews[i]  = VK_NULL_HANDLE; }
             if (colorImages[i] != VK_NULL_HANDLE) { vmaDestroyImage(ctx.allocator, colorImages[i], colorAllocs[i]);        colorImages[i] = VK_NULL_HANDLE; }

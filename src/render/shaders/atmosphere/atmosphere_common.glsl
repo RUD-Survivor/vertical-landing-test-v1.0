@@ -270,15 +270,9 @@ SingleScatteringResult integrateScatteredLuminance(
     tMax = min(tMax, tMaxMax);
 
     float sampleCount = sampleCountIni;
-    float sampleCountFloor = sampleCountIni;
-    float tMaxFloor = tMax;
     if (bVariableSampleCount)
-    {
         sampleCount = mix(float(atmosphere.viewRayMarchMinSPP), float(atmosphere.viewRayMarchMaxSPP), saturate(tMax * 0.01));
-        sampleCountFloor = floor(sampleCount);
-        tMaxFloor = tMax * sampleCountFloor / sampleCount;
-    }
-
+    sampleCount = max(ceil(sampleCount), 1.0);
     float dt = tMax / sampleCount;
 
     const float uniformPhase = getUniformPhase();
@@ -302,29 +296,20 @@ SingleScatteringResult integrateScatteredLuminance(
     vec3 throughput = vec3(1.0);
     vec3 opticalDepth = vec3(0.0);
     float t = 0.0f;
-    const float sampleSegmentT = 0.3f;
+    const float sampleSegmentT = 0.5f;
 
     for (float s = 0.0; s < sampleCount; s += 1.0)
     {
-        if (bVariableSampleCount)
-        {
-            float t0 = (s) / sampleCountFloor;
-            float t1 = (s + 1.0f) / sampleCountFloor;
-
-            t0 = t0 * t0;
-            t1 = t1 * t1;
-            t0 = tMaxFloor * t0;
-            t1 = (t1 > 1.0) ? tMax : tMaxFloor * t1;
-
-            t = t0 + (t1 - t0) * sampleSegmentT;
-            dt = t1 - t0;
+        float u0 = s / sampleCount;
+        float u1 = (s + 1.0) / sampleCount;
+        if (bVariableSampleCount) {
+            u0 *= u0;
+            u1 *= u1;
         }
-        else
-        {
-            float newT = tMax * (s + sampleSegmentT) / sampleCount;
-            dt = newT - t;
-            t = newT;
-        }
+        float t0 = tMax * u0;
+        float t1 = tMax * u1;
+        dt = t1 - t0;
+        t = mix(t0, t1, sampleSegmentT);
 
         vec3 P = worldPos + t * worldDir;
         MediumSampleRGB medium = sampleMediumRGB(P, atmosphere);

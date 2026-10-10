@@ -20,7 +20,7 @@ layout(set = 1, binding = 0) uniform texture2D inSceneDepth;
 layout(set = 1, binding = 1) uniform texture2D inTransmittanceLut;
 layout(set = 1, binding = 2) uniform texture2D inSkyViewLut; // 壳内天空像素采样；须与 skyview_lut 烘焙同基
 layout(set = 1, binding = 3) uniform sampler   samp;
-layout(set = 1, binding = 4) uniform texture2D inSceneColor; // 几何 pass HDR，与 atmo 同帧同图（GENERAL 布局读写）
+layout(set = 1, binding = 4) uniform texture2D inSceneColor; // Read-only HDR snapshot taken before this atmosphere draw
 layout(set = 1, binding = 5) uniform texture3D inInscatterLut; // RGB=Rayleigh+Multi/phaseR，A=Mie.r
 layout(set = 1, binding = 6) uniform texture3D inSingleMieLut; // 可选完整 RGB 单次 Mie
 
@@ -89,32 +89,53 @@ bool intersectSphereAtCenter(vec3 ro, vec3 rd, vec3 center, float radius, out fl
     return true;
 }
 
-// Disk AP / Blend：tAnalytic 已含解析球截断；tScene 为沿射线场景深度。
-// shellDiskMode 0：全信深度；2：出大气后 wDepth 1→0 混到解析球。
-// 返回 false → 遮挡物在大气入口前，调用方 discard。
-bool atmoApplyDepthFarMix(
-    inout float tFar,
-    float tNear,
-    float tScene,
-    float camDist,
-    float outerRadius,
-    int   shellDiskMode,
-    float blendStartKm,
-    float blendEndKm)
+// Perspective depth reconstruction without inverse-matrix/world-position cancellation.
+float atmoDepthRayDistance(float depth, mat4 proj, float viewCos)
 {
-    if (tScene < tNear)
+    float denominator = 2.0 * (1.0 - depth) - (1.0 + proj[2][2]);
+    return -proj[3][2] / max(denominator * viewCos, 1e-30);
+}
+
+void atmoSceneRayDepth(float depth, mat4 proj, mat4 view, vec3 rayDir,
+                      out float distance, out float uncertainty)
+{
+    float viewCos = max(-(mat3(view) * rayDir).z, 1e-6);
+    uint bits = floatBitsToUint(clamp(depth, 0.0, 1.0));
+    // Two D32 ULPs also cover rounding in the vertex projection and depth mapping.
+    float lower = uintBitsToFloat(bits > 2u ? bits - 2u : 0u);
+    float upper = uintBitsToFloat(min(bits + 2u, floatBitsToUint(1.0)));
+    distance = atmoDepthRayDistance(depth, proj, viewCos);
+    float lo = atmoDepthRayDistance(lower, proj, viewCos);
+    float hi = atmoDepthRayDistance(upper, proj, viewCos);
+    uncertainty = max(max(distance - lo, hi - distance), 1e-4);
+}
+
+// Reject only a foreground depth interval entirely before the atmosphere.
+// Unresolved planetary depths fall back to the analytic surface; a resolved foreground
+// inside the atmosphere still clips the segment even when distant depth blending is off.
+bool atmoApplyDepthFarMix(
+    inout float tFar, float tNear, float tScene, float depthUncertainty,
+    float camDist, float outerRadius, int shellDiskMode,
+    float blendStartKm, float blendEndKm)
+{
+    if (tScene + depthUncertainty < tNear)
         return false;
+    if (tScene < tNear)
+        return true; // Entry lies in the depth uncertainty interval, not a proven occluder.
 
     float tAnalytic = tFar;
-    float tDepth    = min(tAnalytic, tScene);
-
+    float tDepth = min(tAnalytic, tScene);
     float wDepth = 1.0;
-    if (shellDiskMode == 2) {
+    bool resolvedForeground = tScene + depthUncertainty + 1.0 < tAnalytic;
+    if (shellDiskMode == 2 && !resolvedForeground) {
         float r0 = outerRadius + max(blendStartKm, 0.0);
         float r1 = outerRadius + max(blendEndKm, blendStartKm + 1.0);
         wDepth = 1.0 - smoothstep(r0, r1, camDist);
     }
-
+    if (!resolvedForeground) {
+        float segmentLength = max(tAnalytic - tNear, 1e-3);
+        wDepth *= 1.0 - smoothstep(0.1 * segmentLength, 0.5 * segmentLength, depthUncertainty);
+    }
     tFar = mix(tAnalytic, tDepth, wDepth);
     return true;
 }
@@ -243,8 +264,7 @@ void atmoInscatterParamsAtRelPos(vec3 posRel, vec3 viewDir, vec3 sunDir,
     mu_s = clamp(dot(sunDir, up), kInscatterMuSMin, 1.0);
     nu   = clamp(dot(viewDir, sunDir), -1.0, 1.0);
     hitGround = inscatterRayIntersectsGround(atmo, r, mu);
-    float muBound = mu * mu_s + sqrt(max(0.0, (1.0 - mu * mu) * (1.0 - mu_s * mu_s)));
-    nu = clamp(nu, -muBound, muBound);
+    nu = inscatterClampNu(nu, mu, mu_s);
 }
 
 struct AtmoReducedScattering {
@@ -292,8 +312,7 @@ vec3 atmoInscatterToBoundary(vec3 posRel, vec3 viewDir, vec3 sunDir,
     float mu   = dot(viewDir, up);
     float mu_s = clamp(dot(sunDir, up), kInscatterMuSMin, 1.0);
     float nu   = dot(viewDir, sunDir);
-    float muBound = mu * mu_s + sqrt(max(0.0, (1.0 - mu * mu) * (1.0 - mu_s * mu_s)));
-    nu = clamp(nu, -muBound, muBound);
+    nu = inscatterClampNu(nu, mu, mu_s);
 
     AtmoReducedScattering s = atmoGetCombinedReducedScattering(
         r, mu, mu_s, nu, hitGround, bottomRadius, topRadius,
@@ -369,8 +388,7 @@ AtmoToPointDebug atmoEvalSkyRadianceToPointDebug(vec3 p0Rel, vec3 p1Rel, vec3 vi
     float mu   = dot(viewDir, up);
     float mu_s = clamp(dot(sunDir, up), kInscatterMuSMin, 1.0);
     float nu   = dot(viewDir, sunDir);
-    float muBound = mu * mu_s + sqrt(max(0.0, (1.0 - mu * mu) * (1.0 - mu_s * mu_s)));
-    nu = clamp(nu, -muBound, muBound);
+    nu = inscatterClampNu(nu, mu, mu_s);
 
     bool hitGround = inscatterRayIntersectsGround(atmo, r, mu);
     dbg.hitGround = hitGround ? 1.0 : 0.0;
@@ -602,6 +620,10 @@ AtmoMarchResult raymarchAtmoSegment(
         optDepthR += dR; optDepthM += dM; optDepthO += dO;
 
         vec3 sunT = sunTransmittanceLUT(posRelPlanet, sunDir, bottomRadius, topRadius);
+        float sunGroundNear, sunGroundFar;
+        if (intersectSphereAtCenter(posRelPlanet, sunDir, vec3(0.0), bottomRadius,
+                sunGroundNear, sunGroundFar) && sunGroundNear > 0.0)
+            sunT = vec3(0.0);
 
         vec3 tau       = rayleighCoeff * optDepthR + mieCoeff * 1.1 * optDepthM + ozoneCoeff * optDepthO;
         vec3 selfAtten = exp(-tau);

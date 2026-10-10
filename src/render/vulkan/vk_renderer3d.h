@@ -116,9 +116,9 @@ struct VkRenderer3D {
     // endGeometryPass() 把它转成 SHADER_READ_ONLY_OPTIMAL 之后才能被当纹理采样——
     // 几何 pass 内它还是"正在写入的 attachment"，Vulkan 不允许同一张图在同一个
     // render pass 里既是 attachment 又被采样。所以这里单独开一个几何 pass 之后的
-    // 小 render pass，颜色目标复用 TAA 的 HDR 颜色（LOAD，不清空，保留几何 pass
-    // 已经画好的内容），不挂深度 attachment（深度测试改成在 shader 里手动用采样到
-    // 的场景深度比较）。
+    // pass per planet, after all LUT compute work for that planet has finished.
+    // Before each draw the accumulated HDR color is copied into a separate read-only
+    // snapshot. The output attachment is never sampled; depth is sampled separately.
     //
     // 必须排在体积云之前：云管线（renderFlowerCloudAfterGeometry）进来时要求
     // HDR 颜色已经是 SHADER_READ_ONLY_OPTIMAL（它自己再转成 GENERAL 做 compute
@@ -133,17 +133,9 @@ struct VkRenderer3D {
         VkImage     colorImg  = taa.colorImages[taa.currentIdx];
         VkImageView colorView = taa.colorViews[taa.currentIdx];
 
-        // endGeometryPass() 已经把它转成 SHADER_READ_ONLY_OPTIMAL（供 TAA/云读取），
-        // RGB 透射要在片元里采样同一张 HDR，所以 atmo pass 用 GENERAL 同时读写。
-        transitionImage(cmd, colorImg,
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
-            VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT,
-            VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-            VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
-
         VkRenderingAttachmentInfo colorAI{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
         colorAI.imageView   = colorView;
-        colorAI.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        colorAI.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
         colorAI.loadOp      = VK_ATTACHMENT_LOAD_OP_LOAD;  // 保留几何 pass 已经画好的内容
         colorAI.storeOp     = VK_ATTACHMENT_STORE_OP_STORE;
 
@@ -153,14 +145,6 @@ struct VkRenderer3D {
         ri.colorAttachmentCount = 1;
         ri.pColorAttachments    = &colorAI;
         // 不挂深度 attachment，理由见函数顶部注释。
-
-        vkCmdBeginRendering(cmd, &ri);
-        {
-            VkViewport vp{ 0.0f, 0.0f, (float)_extent.width, (float)_extent.height, 0.0f, 1.0f };
-            vkCmdSetViewport(cmd, 0, 1, &vp);
-            VkRect2D scissor{ {0, 0}, _extent };
-            vkCmdSetScissor(cmd, 0, 1, &scissor);
-        }
 
         for (const auto& cd : snap.celestials) {
             if (cd.atmoIdx == 0) continue;
@@ -231,20 +215,29 @@ struct VkRenderer3D {
             float camDist = sqrtf(camDx*camDx + camDy*camDy + camDz*camDz);
             bool  cameraInside = camDist < apc.outerRadius;
 
-            if (cameraInside) {
-                scene.drawAtmoInside(ctx, cmd, frameSlot, taa.depthView, colorView, cd.bodyIdx, apc, snap.camPos, lightDirToSun, atmoTune);
-            } else {
-                scene.drawAtmoShell(ctx, cmd, frameSlot, taa.depthView, colorView, cd.bodyIdx, apc, snap.camPos, lightDirToSun, atmoTune);
+            // All compute work and descriptor updates precede this planet's graphics pass.
+            VkAtmosphereLut* lut = scene.prepareAtmosphere(ctx, cmd, frameSlot, taa.depthView,
+                taa.atmosphereInputView, cd.bodyIdx, apc, snap.camPos, lightDirToSun, atmoTune, cameraInside);
+            if (!lut) continue;
+            taa.copyAtmosphereInput(cmd, _extent);
+            vkCmdBeginRendering(cmd, &ri);
+            {
+                VkViewport vp{ 0.0f, 0.0f, (float)_extent.width, (float)_extent.height, 0.0f, 1.0f };
+                vkCmdSetViewport(cmd, 0, 1, &vp);
+                VkRect2D scissor{ {0, 0}, _extent };
+                vkCmdSetScissor(cmd, 0, 1, &scissor);
             }
+
+            if (cameraInside)
+                scene.drawAtmoInside(cmd, frameSlot, *lut, apc);
+            else
+                scene.drawAtmoShell(cmd, frameSlot, *lut, apc);
+            vkCmdEndRendering(cmd);
+            transitionImage(cmd, colorImg,
+                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_SHADER_READ_BIT);
         }
-
-        vkCmdEndRendering(cmd);
-
-        // 转回 SHADER_READ_ONLY_OPTIMAL：云管线期望进来时 HDR 颜色已经是这个 layout。
-        transitionImage(cmd, colorImg,
-            VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-            VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
     }
 
     // Flower Phase0 — call after TAA endGeometryPass, before resolve

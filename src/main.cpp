@@ -15,6 +15,7 @@
 #include <cmath>
 #include <functional>
 #include <mutex>
+#include <cstdlib>
 
 using namespace std;
 
@@ -59,6 +60,9 @@ using namespace std;
 
 // 鼠标滚轮全局变量：用于在编辑器里缩放或上下拖动。
 static float g_scroll_y = 0.0f;
+// 中文说明：诊断开关仅由启动脚本设置，关闭对应渲染阶段以定位 GPU 掉线触发条件。
+static bool g_diagnosticNoCloud = false;
+static bool g_diagnosticNoAtmo = false;
 static void scroll_callback(GLFWwindow* /*w*/, double /*xoffset*/, double yoffset) {
   g_scroll_y += (float)yoffset;
 }
@@ -342,13 +346,13 @@ static void renderVulkanFrame(GLFWwindow* window) {
     // （workshop 的 snap 是上面 else-if 块里的局部变量，这里拿不到；workshop 是船体
     // 编辑器视角，本就不太需要看远处行星大气，先不管——如果之后发现需要，得把
     // workshop 的 snap 也提升成能在这里访问到的变量）。
-    if (inFlight) {
+    if (inFlight && !g_diagnosticNoAtmo) {
         g_vkR3D.renderAtmoAfterGeometry(g_vkCtx, frame.commandBuffer, g_vkTAA,
             g_lastFlightSnap, g_frameSync.currentFrame);
     }
 
     // Flower cloud Phase0: compute stub → composite onto HDR (sky depth >= 0.9995)
-    if (inFlight && g_vkR3D.cloudSystem.enabled) {
+    if (inFlight && !g_diagnosticNoCloud && g_vkR3D.cloudSystem.enabled) {
         g_vkR3D.renderFlowerCloudAfterGeometry(g_vkCtx, frame.commandBuffer, g_vkTAA,
             g_lastFlightSnap, g_frameSync.currentFrame);
     }
@@ -410,6 +414,19 @@ static void renderVulkanFrame(GLFWwindow* window) {
     submitInfo2.signalSemaphoreInfoCount = 1;
     submitInfo2.pSignalSemaphoreInfos    = &signalInfo;
 
+    // 每两秒记录一次提交前状态；即使显卡掉线，也能保留最后的窗口尺寸和负载配置。
+    static double lastTraceTime = -2.0;
+    if (glfwGetTime() - lastTraceTime >= 2.0) {
+        lastTraceTime = glfwGetTime();
+        FILE* trace = nullptr;
+        if (fopen_s(&trace, "gpu_trace.log", "a") == 0 && trace) {
+            fprintf(trace, "time=%.3f size=%dx%d slot=%d flight=%d cloud=%d atmo=%d\n",
+                lastTraceTime, ww, wh, g_frameSync.currentFrame, (int)inFlight,
+                (int)(inFlight && !g_diagnosticNoCloud && g_vkR3D.cloudSystem.enabled),
+                (int)(inFlight && !g_diagnosticNoAtmo));
+            fclose(trace);
+        }
+    }
     if (!checkVkFrameResult(window, "vkQueueSubmit2",
         vkQueueSubmit2(g_vkCtx.graphicsQueue, 1, &submitInfo2, frame.inFlightFence))) return;
 
@@ -489,6 +506,9 @@ std::string formatTime(double seconds, bool absolute) {
 // Part 4:主函数
 // ==========================================================
 static int runApplication() {
+  g_diagnosticNoCloud = std::getenv("ROCKET_DISABLE_CLOUD") != nullptr;
+  g_diagnosticNoAtmo = std::getenv("ROCKET_DISABLE_ATMO") != nullptr;
+  printf("[Diagnostic] cloud disabled=%d, atmosphere disabled=%d\n", (int)g_diagnosticNoCloud, (int)g_diagnosticNoAtmo);
   // --- 游戏启动与初始化 ---
   
   

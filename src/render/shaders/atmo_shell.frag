@@ -96,7 +96,7 @@ void main() {
     float myNdcDepth = (clip.z / clip.w) * 0.5 + 0.5;
     vec2  ndcXY    = clip.xy / clip.w;
     vec2  screenUv = vec2(ndcXY.x, -ndcXY.y) * 0.5 + 0.5;
-    float sceneDepthNdc = texture(sampler2D(inSceneDepth, samp), screenUv).r;
+    float sceneDepthNdc = texelFetch(inSceneDepth, ivec2(gl_FragCoord.xy), 0).r;
 
     // legacy：场景比壳片近则整像素丢弃（盘心无空气透视）
     // ToPoint debug 始终走 Disk AP，才能看太空→地表弦
@@ -128,14 +128,10 @@ void main() {
     if (!useLegacyDiscard) {
         float skyDepthThresh = clamp(pc.skyDepthThreshold, 0.0, 1.0);
         if (sceneDepthNdc < skyDepthThresh) {
-            vec2 vulkanNdc = screenUv * 2.0 - 1.0;
-            vec4 depthClip = vec4(vulkanNdc.x, -vulkanNdc.y, sceneDepthNdc * 2.0 - 1.0, 1.0);
-            vec4 viewP = inverse(frame.proj) * depthClip;
-            viewP /= viewP.w;
-            vec4 worldP = inverse(frame.view) * viewP;
-            float tScene = max(dot(worldP.xyz - camPos, rayDir), 0.0);
+            float tScene, depthUncertainty;
+            atmoSceneRayDepth(sceneDepthNdc, frame.proj, frame.view, rayDir, tScene, depthUncertainty);
             int diskMode = (pc.shellDiskMode == 2) ? 2 : 0;
-            if (!atmoApplyDepthFarMix(tFar, tNear, tScene, camDist, pc.outerRadius,
+            if (!atmoApplyDepthFarMix(tFar, tNear, tScene, depthUncertainty, camDist, pc.outerRadius,
                     diskMode, pc.depthApBlendStartKm, pc.depthApBlendEndKm))
                 discard;
         }
@@ -178,16 +174,15 @@ void main() {
 
     float thickness = max(pc.outerRadius - pc.surfaceRadius, 1e-3);
     float altNorm = max(camDist - pc.surfaceRadius, 0.0) / thickness;
-    float nightFactor = mix(0.05, 1.0, pc.sunVisibility);
     float baseE = atmoUnifiedExposure(
         camDist, pc.surfaceRadius, pc.outerRadius,
         pc.innerExposureNear, pc.innerExposureFar, pc.outerExposure);
     // 壳法线掠射：正对盘面 rim≈0，轮廓 rim≈1
     float rim = clamp(1.0 - abs(dot(vLocalNormal, viewDirFromFrag)), 0.0, 1.0);
     float limbAmt = atmoLimbAmount(altNorm, pc.limbBrightnessBottom, pc.limbBrightness);
-    float exposure = baseE * atmoLimbMul(limbAmt, rim, pc.limbPower) * nightFactor;
+    float exposure = baseE * atmoLimbMul(limbAmt, rim, pc.limbPower);
 
-    vec3 sceneColor = texture(sampler2D(inSceneColor, samp), screenUv).rgb;
+    vec3 sceneColor = texelFetch(inSceneColor, ivec2(gl_FragCoord.xy), 0).rgb;
     FragColor = atmoCompositeOut(march.scattered, march.viewT, exposure, sceneColor,
         pc.transmittanceChromaStrength);
 }
