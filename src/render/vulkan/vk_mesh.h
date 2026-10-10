@@ -17,23 +17,26 @@ inline VkCommandBuffer beginSingleTimeCommands(VulkanContext& ctx) {
     ai.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     ai.commandBufferCount = 1;
 
-    VkCommandBuffer cmd;
-    vkAllocateCommandBuffers(ctx.device, &ai, &cmd);
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    vkRequireSuccess(vkAllocateCommandBuffers(ctx.device, &ai, &cmd), "vkAllocateCommandBuffers(upload)");
 
     VkCommandBufferBeginInfo bi{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(cmd, &bi);
+    VkResult result = vkBeginCommandBuffer(cmd, &bi);
+    if (result != VK_SUCCESS) vkFreeCommandBuffers(ctx.device, ctx.commandPool, 1, &cmd);
+    vkRequireSuccess(result, "vkBeginCommandBuffer(upload)");
     return cmd;
 }
 
 inline void endSingleTimeCommands(VulkanContext& ctx, VkCommandBuffer cmd) {
-    vkEndCommandBuffer(cmd);
+    vkRequireSuccess(vkEndCommandBuffer(cmd), "vkEndCommandBuffer(upload)");
 
     VkSubmitInfo si{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
     si.commandBufferCount = 1;
     si.pCommandBuffers    = &cmd;
-    vkQueueSubmit(ctx.graphicsQueue, 1, &si, VK_NULL_HANDLE);
-    vkQueueWaitIdle(ctx.graphicsQueue);
+    vkRequireSuccess(vkQueueSubmit(ctx.graphicsQueue, 1, &si, VK_NULL_HANDLE), "vkQueueSubmit(upload)");
+    // 等待成功后才能释放命令及暂存资源；失败会由顶层捕获并退出。
+    vkRequireSuccess(vkQueueWaitIdle(ctx.graphicsQueue), "vkQueueWaitIdle(upload)");
     vkFreeCommandBuffers(ctx.device, ctx.commandPool, 1, &cmd);
 }
 
@@ -86,6 +89,8 @@ struct VkMesh {
             if (vmaCreateBuffer(ctx.allocator, &bci, &aci, &buf, &alloc, &info) != VK_SUCCESS)
                 return false;
             memcpy(info.pMappedData, src, sz);
+            // 映射不等于缓存一致；在非 coherent 内存上显式刷新，coherent 内存为安全空操作。
+            vkRequireSuccess(vmaFlushAllocation(ctx.allocator, alloc, 0, sz), "vmaFlushAllocation(dynamic mesh)");
             return true;
         };
 
@@ -137,9 +142,10 @@ private:
             return false;
         }
 
-        void* mapped;
-        vmaMapMemory(ctx.allocator, stagAlloc, &mapped);
+        void* mapped = nullptr;
+        vkRequireSuccess(vmaMapMemory(ctx.allocator, stagAlloc, &mapped), "vmaMapMemory(staging)");
         memcpy(mapped, data, size);
+        vkRequireSuccess(vmaFlushAllocation(ctx.allocator, stagAlloc, 0, size), "vmaFlushAllocation(staging)");
         vmaUnmapMemory(ctx.allocator, stagAlloc);
 
         // Device-local buffer — GPU only

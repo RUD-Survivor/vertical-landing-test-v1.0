@@ -65,7 +65,7 @@ struct VkHUDSystem {
         VkBufferCreateInfo bci{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
         bci.size=MAX_VERTS*sizeof(HudVertex); bci.usage=VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
         VmaAllocationCreateInfo aci{};
-        aci.usage=VMA_MEMORY_USAGE_CPU_TO_GPU; aci.flags=VMA_ALLOCATION_CREATE_MAPPED_BIT;
+        aci.usage=VMA_MEMORY_USAGE_CPU_TO_GPU; /* 中文说明：持久映射写入要求一致缓存。 */ aci.requiredFlags |= VK_MEMORY_PROPERTY_HOST_COHERENT_BIT; aci.flags=VMA_ALLOCATION_CREATE_MAPPED_BIT;
         VmaAllocationInfo ai;
         if(vmaCreateBuffer(ctx.allocator,&bci,&aci,&vbo,&vboAlloc,&ai)!=VK_SUCCESS)return false;
         vboMapped=ai.pMappedData; batch.reserve(MAX_VERTS);

@@ -366,11 +366,11 @@ struct VkRenderer3D {
     // 此方法只负责提交 draw call，不管理 render pass / swapchain
     // ========================================================================
     void render(VkCommandBuffer cmd, int frameIdx, const SceneSnapshot& snap, VkExtent2D extent = {1920, 1080}) {
-        (void)frameIdx; // 当前未使用（如有需要可用于 per-frame noise jitter）
         _extent = extent;
 
         // ---- 1. 帧开始 ----
-        beginFrame(cmd, snap.frameIndex % 2, snap.view, snap.proj, snap.lightDir, snap.camPos, snap.time);
+        // 必须使用已等待 fence 的帧槽，不能用模拟帧编号推算 GPU 缓冲区索引。
+        beginFrame(cmd, frameIdx, snap.view, snap.proj, snap.lightDir, snap.camPos, snap.time);
 
         // ---- 星空（先于行星，匹配 OpenGL 顺序） ----
         drawSkybox(cmd, snap.skyVibrancy, snap.aspect);

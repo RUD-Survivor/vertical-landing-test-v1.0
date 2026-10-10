@@ -805,7 +805,7 @@ private:
 
         VkBufferCreateInfo bci{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
         VmaAllocationCreateInfo aci{};
-        aci.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
+        aci.usage = VMA_MEMORY_USAGE_CPU_TO_GPU; /* 中文说明：持久映射写入要求一致缓存，避免遗漏 flush。 */ aci.requiredFlags |= VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
         aci.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
         VmaAllocationInfo info;
 
@@ -857,7 +857,7 @@ private:
         bci.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
 
         VmaAllocationCreateInfo aci{};
-        aci.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
+        aci.usage = VMA_MEMORY_USAGE_CPU_TO_GPU; /* 中文说明：持久映射写入要求一致缓存，避免遗漏 flush。 */ aci.requiredFlags |= VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
         aci.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
 
         VmaAllocationInfo info;
@@ -875,7 +875,7 @@ private:
         bci.size  = sizeof(verts);
         bci.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
         VmaAllocationCreateInfo aci{};
-        aci.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
+        aci.usage = VMA_MEMORY_USAGE_CPU_TO_GPU; /* 中文说明：持久映射写入要求一致缓存，避免遗漏 flush。 */ aci.requiredFlags |= VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
         aci.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
         VmaAllocationInfo info;
         if (vmaCreateBuffer(ctx.allocator, &bci, &aci, &billboardQuadVbo, &billboardQuadAlloc, &info) != VK_SUCCESS)
@@ -903,7 +903,7 @@ private:
             }
         }
         terrainPatchIcount = (uint32_t)idx.size();
-        VmaAllocationCreateInfo aci{}; aci.usage=VMA_MEMORY_USAGE_CPU_TO_GPU; aci.flags=VMA_ALLOCATION_CREATE_MAPPED_BIT;
+        VmaAllocationCreateInfo aci{}; aci.usage=VMA_MEMORY_USAGE_CPU_TO_GPU; /* 中文说明：持久映射写入要求一致缓存。 */ aci.requiredFlags |= VK_MEMORY_PROPERTY_HOST_COHERENT_BIT; aci.flags=VMA_ALLOCATION_CREATE_MAPPED_BIT;
         VmaAllocationInfo info;
         VkBufferCreateInfo bci{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
         bci.size=v.size()*4; bci.usage=VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
@@ -926,7 +926,7 @@ private:
             bci.size = sizeof(TerrainDataUBO);
             bci.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
             VmaAllocationCreateInfo aci{};
-            aci.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
+            aci.usage = VMA_MEMORY_USAGE_CPU_TO_GPU; /* 中文说明：持久映射写入要求一致缓存，避免遗漏 flush。 */ aci.requiredFlags |= VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
             aci.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
             VmaAllocationInfo info;
             if (vmaCreateBuffer(ctx.allocator, &bci, &aci, &terrainDataUbo[i], &terrainDataAlloc[i], &info) != VK_SUCCESS)
@@ -940,7 +940,7 @@ private:
             bci.size = kTerrainCloudShadowFallbackSize;
             bci.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
             VmaAllocationCreateInfo aci{};
-            aci.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
+            aci.usage = VMA_MEMORY_USAGE_CPU_TO_GPU; /* 中文说明：持久映射写入要求一致缓存，避免遗漏 flush。 */ aci.requiredFlags |= VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
             aci.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
             VmaAllocationInfo info;
             if (vmaCreateBuffer(ctx.allocator, &bci, &aci,
@@ -1023,7 +1023,7 @@ private:
 
         VkBufferCreateInfo bci{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
         bci.size=verts.size()*sizeof(VegV); bci.usage=VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-        VmaAllocationCreateInfo aci{}; aci.usage=VMA_MEMORY_USAGE_CPU_TO_GPU; aci.flags=VMA_ALLOCATION_CREATE_MAPPED_BIT;
+        VmaAllocationCreateInfo aci{}; aci.usage=VMA_MEMORY_USAGE_CPU_TO_GPU; /* 中文说明：持久映射写入要求一致缓存。 */ aci.requiredFlags |= VK_MEMORY_PROPERTY_HOST_COHERENT_BIT; aci.flags=VMA_ALLOCATION_CREATE_MAPPED_BIT;
         VmaAllocationInfo info;
         if(vmaCreateBuffer(ctx.allocator,&bci,&aci,&vegVertVbo,&vegVertAlloc,&info)!=VK_SUCCESS)return false;
         memcpy(info.pMappedData,verts.data(),verts.size()*sizeof(VegV));

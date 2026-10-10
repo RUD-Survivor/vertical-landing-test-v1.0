@@ -16,16 +16,30 @@
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
+#include <stdexcept>
+
+// 上传辅助函数失败时必须中止调用链，不能继续用未初始化句柄录制 GPU 命令。
+inline void vkRequireSuccess(VkResult result, const char* operation) {
+    if (result == VK_SUCCESS) return;
+    fprintf(stderr, "[Vulkan] %s failed: %d\n", operation, (int)result);
+    FILE* log = nullptr;
+    if (fopen_s(&log, "vulkan_failure.log", "a") == 0 && log) {
+        fprintf(log, "operation=%s result=%d\n", operation, (int)result);
+        fclose(log);
+    }
+    throw std::runtime_error(std::string(operation) + ": " + std::to_string((int)result));
+}
 
 // -----------------------------------------------------------------------
 // Validation layer 控制
 // -----------------------------------------------------------------------
-#ifdef _DEBUG
+#if defined(_DEBUG) || defined(ROCKET_VK_VALIDATION)
 static constexpr bool kVkEnableValidation = true;
 #else
 static constexpr bool kVkEnableValidation = false;
 #endif
 static constexpr const char* kVkValidationLayer = "VK_LAYER_KHRONOS_validation";
+inline unsigned g_vkValidationErrorCount = 0; // 测试据此判定验证层是否发现真实错误。
 
 // -----------------------------------------------------------------------
 // Debug messenger 回调
@@ -36,6 +50,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL vkDebugMsgCallback(
     const VkDebugUtilsMessengerCallbackDataEXT* data,
     void* /*user*/)
 {
+    if (severity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) ++g_vkValidationErrorCount;
     if (severity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
         fprintf(stderr, "[Vulkan] %s\n", data->pMessage);
     return VK_FALSE;
@@ -94,23 +109,22 @@ struct VulkanContext {
     // 公开接口
     // ---------------------------------------------------------------
 
-    // Phase 1 用：只初始化 Instance + Device + VMA，不创建 Surface/Swapchain。
-    // 原因：Windows 上 WGL (OpenGL) 会锁定窗口 DC，与 Vulkan WSI 冲突，
-    //       无法在同一窗口上同时创建 Vulkan surface 和 OpenGL context。
-    //       Surface/Swapchain 在 Phase 5 切换为 GLFW_NO_API 窗口后再初始化。
-    bool initCore() {
+    // 窗口表面必须早于设备选择创建，才能验证呈现队列；当前程序仅使用 Vulkan。
+    bool initCore(GLFWwindow* window) {
         if (!createInstance())     return false;
         setupDebugMessenger();     // 非致命，失败继续
-        if (!pickPhysicalDeviceNoSurface()) return false;
+        // 先创建窗口表面，再选择同时支持图形、计算和呈现的设备及队列。
+        if (!createSurface(window)) return false;
+        if (!pickPhysicalDevice()) return false;
         if (!createLogicalDevice()) return false;
         if (!initVMA())            return false;
-        printf("[Vulkan] Core initialized: %s (surface/swapchain deferred to Phase 5)\n", deviceName);
+        printf("[Vulkan] Core initialized: %s (present fences enabled)\n", deviceName);
         return true;
     }
 
     // Phase 5 用：切换 GLFW_NO_API 窗口后调用，创建 Surface + Swapchain + CommandPool
     bool initSwapchain(GLFWwindow* window) {
-        if (!createSurface(window))   return false;
+        (void)window; // 表面已在 initCore 中创建，不能重复创建并覆盖旧句柄。
         if (!createCommandPool())     return false;
         if (!createSwapchain(window)) return false;
         return true;
@@ -136,17 +150,18 @@ struct VulkanContext {
     }
 
     // call on window resize — recreates swapchain + image views
-    void recreateSwapchain(GLFWwindow* window) {
+    bool recreateSwapchain(GLFWwindow* window) {
         // Handle minimized window
         int w = 0, h = 0;
         glfwGetFramebufferSize(window, &w, &h);
         while (w == 0 || h == 0) {
-            glfwGetFramebufferSize(window, &w, &h);
+            if (glfwWindowShouldClose(window)) return false;
             glfwWaitEvents();
+            glfwGetFramebufferSize(window, &w, &h);
         }
-        vkDeviceWaitIdle(device);
+        if (vkDeviceWaitIdle(device) != VK_SUCCESS) return false;
         destroySwapchainObjects();
-        createSwapchain(window);
+        return createSwapchain(window);
     }
 
     bool isValid() const { return device != VK_NULL_HANDLE; }
@@ -180,6 +195,21 @@ private:
         std::vector<const char*> extensions(glfwExts, glfwExts + glfwExtCount);
         if (kVkEnableValidation)
             extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+        // 呈现 fence 依赖这些扩展；缺少支持时明确报错，避免回退到不可靠的等待。
+        extensions.push_back(VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME);
+        extensions.push_back(VK_EXT_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
+        uint32_t extensionCount = 0;
+        vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount, nullptr);
+        std::vector<VkExtensionProperties> available(extensionCount);
+        vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount, available.data());
+        for (const char* required : extensions) {
+            bool supported = false;
+            for (const auto& ext : available) supported |= strcmp(required, ext.extensionName) == 0;
+            if (!supported) {
+                fprintf(stderr, "[Vulkan] Required instance extension unavailable: %s\n", required);
+                return false;
+            }
+        }
 
         VkInstanceCreateInfo ci{ VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO };
         ci.pApplicationInfo        = &appInfo;
@@ -292,7 +322,7 @@ private:
                 strncpy_s(deviceName, sizeof(deviceName), props.deviceName, _TRUNCATE);
             }
         }
-        if (physDevice == VK_NULL_HANDLE) { fprintf(stderr, "[Vulkan] No suitable GPU\n"); return false; }
+        if (physDevice == VK_NULL_HANDLE) { fprintf(stderr, "[Vulkan] No suitable GPU: requires Vulkan 1.3, graphics/compute/present, anisotropy and VK_EXT_swapchain_maintenance1\n"); return false; }
         auto qfi      = findQueueFamilies(physDevice);
         graphicsFamily = qfi.graphics;
         presentFamily  = qfi.present;
@@ -321,6 +351,26 @@ private:
 
     bool isDeviceSuitable(VkPhysicalDevice dev) {
         if (!hasSwapchainExtension(dev)) return false;
+        // 特性不能只请求不查询；设备版本与各向异性也属于最低运行条件。
+        VkPhysicalDeviceProperties properties{};
+        vkGetPhysicalDeviceProperties(dev, &properties);
+        if (properties.apiVersion < VK_API_VERSION_1_3) return false;
+        uint32_t count = 0;
+        vkEnumerateDeviceExtensionProperties(dev, nullptr, &count, nullptr);
+        std::vector<VkExtensionProperties> extensions(count);
+        vkEnumerateDeviceExtensionProperties(dev, nullptr, &count, extensions.data());
+        bool maintenance = false;
+        for (const auto& ext : extensions)
+            maintenance |= strcmp(ext.extensionName, VK_EXT_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME) == 0;
+        if (!maintenance) return false;
+        VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT presentFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_EXT };
+        VkPhysicalDeviceVulkan13Features features13{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
+        features13.pNext = &presentFeatures;
+        VkPhysicalDeviceFeatures2 features{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+        features.pNext = &features13;
+        vkGetPhysicalDeviceFeatures2(dev, &features);
+        if (!features13.dynamicRendering || !features13.synchronization2
+            || !features.features.samplerAnisotropy || !presentFeatures.swapchainMaintenance1) return false;
         if (!findQueueFamilies(dev).isComplete()) return false;
         auto sc = querySwapchainSupport(dev);
         return !sc.formats.empty() && !sc.presentModes.empty();
@@ -333,7 +383,8 @@ private:
         std::vector<VkQueueFamilyProperties> families(count);
         vkGetPhysicalDeviceQueueFamilyProperties(dev, &count, families.data());
         for (uint32_t i = 0; i < count; i++) {
-            if (families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)
+            if ((families[i].queueFlags & (VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT))
+                == (VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT))
                 qfi.graphics = i;
             VkBool32 presentSupport = VK_FALSE;
             vkGetPhysicalDeviceSurfaceSupportKHR(dev, i, surface, &presentSupport);
@@ -375,19 +426,22 @@ private:
         VkPhysicalDeviceVulkan13Features features13{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
         features13.dynamicRendering = VK_TRUE;
         features13.synchronization2 = VK_TRUE;
+        VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT presentFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_EXT };
+        presentFeatures.swapchainMaintenance1 = VK_TRUE;
+        features13.pNext = &presentFeatures;
 
         VkPhysicalDeviceFeatures2 features2{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
         features2.features.samplerAnisotropy = VK_TRUE;
         features2.pNext = &features13;
 
-        const char* swapExt = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
+        const char* deviceExtensions[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_EXT_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME };
         VkDeviceCreateInfo ci{ VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
         ci.pNext                   = &features2;   // pNext 链传递 1.3 特性
         ci.pEnabledFeatures        = nullptr;      // 使用 pNext 链时必须为 null
         ci.queueCreateInfoCount    = (uint32_t)queueCIs.size();
         ci.pQueueCreateInfos       = queueCIs.data();
-        ci.enabledExtensionCount   = 1;
-        ci.ppEnabledExtensionNames = &swapExt;
+        ci.enabledExtensionCount   = 2;
+        ci.ppEnabledExtensionNames = deviceExtensions;
 
         if (vkCreateDevice(physDevice, &ci, nullptr, &device) != VK_SUCCESS) {
             fprintf(stderr, "[Vulkan] Failed to create logical device\n");

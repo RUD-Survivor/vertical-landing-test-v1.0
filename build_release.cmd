@@ -6,8 +6,9 @@ cd /d "%~dp0"
 if not exist "build" mkdir "build"
 
 :: Get timestamp safely (works on any locale)
-for /f "tokens=2 delims==" %%I in ('wmic os get localdatetime /value') do set "TS=%%I"
-set "TIMESTAMP=%TS:~0,4%%TS:~4,2%%TS:~6,2%_%TS:~8,2%%TS:~10,2%%TS:~12,2%"
+:: wmic was removed in Windows 11 24H2+, so use PowerShell instead
+for /f "usebackq delims=" %%I in (`powershell -NoProfile -Command "Get-Date -Format yyyyMMdd_HHmmss"`) do set "TIMESTAMP=%%I"
+if not defined TIMESTAMP set "TIMESTAMP=latest"
 
 echo ================================================================
 echo   RocketSim3D - Build Script
@@ -115,7 +116,8 @@ if /I "%CFG%"=="release" (
     set "CFLAGS=/nologo /utf-8 /std:c++17 /EHsc /MD /O2 /W3 /DNDEBUG"
 ) else (
     :: Use /MD (same as glfw3.lib). Do not use /MDd or /D_DEBUG.
-    set "CFLAGS=/nologo /utf-8 /std:c++17 /EHsc /MD /Od /Zi /FS /W3"
+    rem 中文说明：/Z7 避开编译期 PDB 管理器；验证层不依赖 _DEBUG 或调试 CRT。
+    set "CFLAGS=/nologo /utf-8 /std:c++17 /EHsc /MD /Od /Z7 /W3 /DROCKET_VK_VALIDATION"
 )
 
 :: Separate obj/exe trees so debug/release never share stale objects

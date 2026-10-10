@@ -230,6 +230,7 @@ struct TerrainDataUBO {
 // VkDescriptorManager — owns layouts, pool, and per-frame UBO resources
 // -----------------------------------------------------------------------
 struct VkDescriptorManager {
+    VmaAllocator memoryAllocator = VK_NULL_HANDLE;
     VkDescriptorSetLayout set0Layout = VK_NULL_HANDLE;
     VkDescriptorSetLayout set1Layout = VK_NULL_HANDLE;
 
@@ -244,6 +245,7 @@ struct VkDescriptorManager {
     VkDescriptorSet set0[FRAMES_IN_FLIGHT]{};
 
     bool init(VulkanContext& ctx) {
+        memoryAllocator = ctx.allocator;
         if (!createLayouts(ctx))      return false;
         if (!createPool(ctx))         return false;
         if (!createUBOBuffers(ctx))   return false;
@@ -266,6 +268,8 @@ struct VkDescriptorManager {
     // Call once per frame before recording draw commands
     void updateFrameUBO(int frameIndex, const FrameUBO& data) {
         memcpy(uboMapped[frameIndex], &data, sizeof(FrameUBO));
+        // 提交前使本帧 UBO 的 CPU 写入对 GPU 可见。
+        vkRequireSuccess(vmaFlushAllocation(memoryAllocator, uboAllocs[frameIndex], 0, sizeof(data)), "flush FrameUBO");
     }
 
     // Allocate a Set 1 descriptor set for one texture (caller keeps the VkDescriptorSet)

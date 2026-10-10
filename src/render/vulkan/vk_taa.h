@@ -98,12 +98,12 @@ struct VkTAA {
     // -----------------------------------------------------------------------
     // recreate — swapchain resize 后重建（管线因 Dynamic Viewport 无需重建）
     // -----------------------------------------------------------------------
-    void recreate(VulkanContext& ctx,
+    bool recreate(VulkanContext& ctx,
                   VkExtent2D    extent,
                   VkFormat      swapFormat,
                   const char*   vertSpv,
                   const char*   fragSpv) {
-        vkDeviceWaitIdle(ctx.device);
+        if (vkDeviceWaitIdle(ctx.device) != VK_SUCCESS) return false;
         // 描述符集随 pool 销毁一同释放
         if (resolvePool         != VK_NULL_HANDLE) { vkDestroyDescriptorPool    (ctx.device, resolvePool,         nullptr); resolvePool         = VK_NULL_HANDLE; }
         if (resolvePipeline     != VK_NULL_HANDLE) { vkDestroyPipeline          (ctx.device, resolvePipeline,     nullptr); resolvePipeline     = VK_NULL_HANDLE; }
@@ -111,11 +111,12 @@ struct VkTAA {
         if (resolveSetLayout    != VK_NULL_HANDLE) { vkDestroyDescriptorSetLayout(ctx.device, resolveSetLayout,   nullptr); resolveSetLayout    = VK_NULL_HANDLE; }
         destroyImages(ctx);
         currentIdx = 0;
+        _matricesReady = false; // 窗口尺寸改变后，旧投影矩阵不能作为重投影历史。
 
-        createImages(ctx, extent);
+        if (!createImages(ctx, extent)) return false;
         historyReady = false;  // 新图像是 UNDEFINED，在帧内 cmd buffer 里初始化
-        createResolvePipeline(ctx, swapFormat, vertSpv, fragSpv);
-        createDescriptors(ctx);
+        return createResolvePipeline(ctx, swapFormat, vertSpv, fragSpv)
+            && createDescriptors(ctx);
     }
 
     // -----------------------------------------------------------------------
@@ -154,7 +155,8 @@ struct VkTAA {
         transitionImage(cmd, colorImages[currentIdx],
             VK_IMAGE_LAYOUT_UNDEFINED,
             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-            VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,             VK_ACCESS_2_NONE,
+            // 等待上一帧对 ping-pong 颜色图的历史采样，避免读写重叠。
+            VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT,
             VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
 
         transitionToDepthAttachment(cmd, depthImage);
@@ -197,8 +199,8 @@ struct VkTAA {
         transitionImage(cmd, depthImage,
             VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT, VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-            VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,     VK_ACCESS_2_SHADER_READ_BIT);
+            VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT, VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+            VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
     }
 
     // -----------------------------------------------------------------------
@@ -234,12 +236,25 @@ struct VkTAA {
     }
 
     // 上传矩阵到 UBO（在 drawResolve 前调用，由调用方指定 frameSlot）
-    void uploadMatrices(int frameSlot) {
+    void uploadMatrices(VulkanContext& ctx, int frameSlot) {
         TAAMatrices m;
         memcpy(m.invViewProj,  _currInvViewProj, 64);
         memcpy(m.prevViewProj, _prevViewProj,     64);
-        if (matrixMapped[frameSlot])
+        if (matrixMapped[frameSlot]) {
             memcpy(matrixMapped[frameSlot], &m, sizeof(TAAMatrices));
+            // 写入后刷新 CPU 缓存，不能假设所有显卡内存都支持 HOST_COHERENT。
+            vkRequireSuccess(vmaFlushAllocation(ctx.allocator, matrixAlloc[frameSlot], 0, sizeof(m)), "flush TAA matrices");
+        }
+        // 图像 ping-pong 索引在缩放时会重置，不能假设它与帧槽索引相等。
+        // 当前描述符集上次使用已由该帧槽 fence（或缩放时的设备等待）保护。
+        VkDescriptorBufferInfo bufferInfo{ matrixUBO[frameSlot], 0, sizeof(TAAMatrices) };
+        VkWriteDescriptorSet write{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+        write.dstSet = resolveSets[currentIdx];
+        write.dstBinding = 3;
+        write.descriptorCount = 1;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        write.pBufferInfo = &bufferInfo;
+        vkUpdateDescriptorSets(ctx.device, 1, &write, 0, nullptr);
     }
 
     // -----------------------------------------------------------------------
@@ -553,6 +568,8 @@ private:
 
         // 创建矩阵 UBO (每帧一份, CPU_TO_GPU persistent mapped)
         for (int i = 0; i < 2; ++i) {
+            // Resizing rebuilds descriptor sets, but these fixed-size buffers remain valid.
+            if (matrixUBO[i] != VK_NULL_HANDLE) continue;
             VkBufferCreateInfo bci{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
             bci.size  = sizeof(TAAMatrices);
             bci.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;

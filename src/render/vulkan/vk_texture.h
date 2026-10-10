@@ -54,6 +54,8 @@ struct VkTexture2D {
                 return false;
             }
             memcpy(info.pMappedData, pixels, (size_t)size);
+            // 提交上传前刷新暂存内存，保证非一致缓存设备也能读到纹理数据。
+            vkRequireSuccess(vmaFlushAllocation(ctx.allocator, stagingAlloc, 0, size), "flush texture staging");
         }
 
         // --- GPU image ---
@@ -140,6 +142,7 @@ struct VkTexture2D {
                 fprintf(stderr, "[VkTexture2D] uploadFloat4: staging failed\n"); return false;
             }
             memcpy(info.pMappedData, data, (size_t)size);
+            vkRequireSuccess(vmaFlushAllocation(ctx.allocator, stagingAlloc, 0, size), "flush texture staging");
         }
         VkFormat fmt = VK_FORMAT_R32G32B32A32_SFLOAT;
         {
@@ -349,6 +352,8 @@ struct VkTexture3D {
                 return false;
             }
             memcpy(info.pMappedData, pixels, (size_t)size);
+            // 三维噪声纹理与二维纹理使用相同的缓存刷新规则。
+            vkRequireSuccess(vmaFlushAllocation(ctx.allocator, stagingAlloc, 0, size), "flush 3D texture staging");
         }
 
         // --- GPU image (3D) ---

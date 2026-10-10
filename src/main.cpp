@@ -237,16 +237,45 @@ static bool initVulkanFlight(bool skipBuilder = false) {
 static void renderFlightSceneVulkan(VkCommandBuffer cmd, int frameSlot) {
     g_lastFlightSnap = g_flightScene->extractRenderSnapshot();
     g_vkTAA.updateMatrices(g_lastFlightSnap.view, g_lastFlightSnap.proj);
-    g_vkTAA.uploadMatrices(frameSlot);
-    g_vkR3D.render(cmd, 0, g_lastFlightSnap, g_vkCtx.swapExtent);
+    g_vkTAA.uploadMatrices(g_vkCtx, frameSlot);
+    g_vkR3D.render(cmd, frameSlot, g_lastFlightSnap, g_vkCtx.swapExtent);
+}
+
+static bool checkVkFrameResult(GLFWwindow* window, const char* operation, VkResult result) {
+    if (result == VK_SUCCESS) return true;
+    int width = 0, height = 0;
+    glfwGetFramebufferSize(window, &width, &height);
+    fprintf(stderr, "[Vulkan] Fatal: %s returned %d (%dx%d)\n", operation, (int)result, width, height);
+    FILE* log = nullptr;
+    if (fopen_s(&log, "vulkan_failure.log", "a") == 0 && log) {
+        fprintf(log, "time=%.3f operation=%s result=%d framebuffer=%dx%d\n",
+            glfwGetTime(), operation, (int)result, width, height);
+        fclose(log);
+    }
+    glfwSetWindowShouldClose(window, GLFW_TRUE);
+    return false;
 }
 
 static void handleVkSwapchainResize(GLFWwindow* window) {
-    g_vkCtx.recreateSwapchain(window);
-    g_vkTAA.recreate(g_vkCtx, g_vkCtx.swapExtent, g_vkCtx.swapFormat,
+    // 先等待呈现引擎释放旧信号量，再销毁旧交换链；渲染 fence 不能替代此等待。
+    if (!checkVkFrameResult(window, "waitForPresent", g_frameSync.waitForPresent(g_vkCtx.device))) return;
+    if (!g_vkCtx.recreateSwapchain(window)) {
+        checkVkFrameResult(window, "recreateSwapchain failed (status synthesized; see stderr)", VK_ERROR_INITIALIZATION_FAILED);
+        return;
+    }
+    g_frameSync.destroyPresentObjects(g_vkCtx.device);
+    if (!g_frameSync.createPresentObjects(g_vkCtx.device, g_vkCtx.swapImages.size())) {
+        checkVkFrameResult(window, "createPresentObjects", VK_ERROR_INITIALIZATION_FAILED);
+        return;
+    }
+    if (!g_vkTAA.recreate(g_vkCtx, g_vkCtx.swapExtent, g_vkCtx.swapFormat,
         "src/render/shaders/spirv/taa.vert.spv",
-        "src/render/shaders/spirv/taa.frag.spv");
-    g_vkR3D.cloudSystem.recreate(g_vkCtx, g_vkCtx.swapExtent);
+        "src/render/shaders/spirv/taa.frag.spv")
+        || !g_vkR3D.cloudSystem.recreate(g_vkCtx, g_vkCtx.swapExtent)) {
+        checkVkFrameResult(window, "recreateRenderTargets failed (status synthesized; see stderr)", VK_ERROR_INITIALIZATION_FAILED);
+        return;
+    }
+    warmup = 0;
     g_vkSwapchainDirty = false;
 }
 
@@ -256,24 +285,38 @@ static void renderVulkanFrame(GLFWwindow* window) {
     auto& frame = g_frameSync.current();
     VkSemaphore acquireSem = g_frameSync.nextAcquireSem();
 
-    vkWaitForFences(g_vkCtx.device, 1, &frame.inFlightFence, VK_TRUE, UINT64_MAX);
+    if (!checkVkFrameResult(window, "vkWaitForFences",
+        vkWaitForFences(g_vkCtx.device, 1, &frame.inFlightFence, VK_TRUE, 5000000000ULL))) return;
 
     uint32_t imageIdx = 0;
     VkResult result = vkAcquireNextImageKHR(g_vkCtx.device, g_vkCtx.swapchain,
         UINT64_MAX, acquireSem, VK_NULL_HANDLE, &imageIdx);
-    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
+    if (result == VK_ERROR_OUT_OF_DATE_KHR) {
         handleVkSwapchainResize(window); return;
     }
-    if (result != VK_SUCCESS) return;
+    // SUBOPTIMAL 仍然成功获取图像并置位信号量，必须提交消费后才能重建。
+    if (result == VK_SUBOPTIMAL_KHR) g_vkSwapchainDirty = true;
+    else if (!checkVkFrameResult(window, "vkAcquireNextImageKHR", result)) return;
 
     VkSemaphore renderSem = g_frameSync.renderSems[imageIdx];
 
-    vkResetFences(g_vkCtx.device, 1, &frame.inFlightFence);
-    vkResetCommandBuffer(frame.commandBuffer, 0);
+    if (!checkVkFrameResult(window, "vkResetFences", vkResetFences(g_vkCtx.device, 1, &frame.inFlightFence))) return;
+    if (!checkVkFrameResult(window, "vkResetCommandBuffer", vkResetCommandBuffer(frame.commandBuffer, 0))) return;
 
     VkCommandBufferBeginInfo beginInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(frame.commandBuffer, &beginInfo);
+    if (!checkVkFrameResult(window, "vkBeginCommandBuffer", vkBeginCommandBuffer(frame.commandBuffer, &beginInfo))) return;
+    // 多帧在途仍会复用云的中间图像和共享深度；同队列也需要显式内存依赖。
+    // 先采用保守屏障保证正确性，后续可按各 pass 的读写范围细化以恢复并行度。
+    VkMemoryBarrier2 sharedBarrier{ VK_STRUCTURE_TYPE_MEMORY_BARRIER_2 };
+    sharedBarrier.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+    sharedBarrier.srcAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+    sharedBarrier.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+    sharedBarrier.dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+    VkDependencyInfo sharedDependency{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+    sharedDependency.memoryBarrierCount = 1;
+    sharedDependency.pMemoryBarriers = &sharedBarrier;
+    vkCmdPipelineBarrier2(frame.commandBuffer, &sharedDependency);
 
     int ww = (int)g_vkCtx.swapExtent.width;
     int wh = (int)g_vkCtx.swapExtent.height;
@@ -288,8 +331,8 @@ static void renderVulkanFrame(GLFWwindow* window) {
     } else if (inWorkshop) {
         SceneSnapshot snap = g_gameUI.buildWorkshopSnapshot(ww, wh, g_flightScene);
         g_vkTAA.updateMatrices(snap.view, snap.proj);
-        g_vkTAA.uploadMatrices(g_frameSync.currentFrame);
-        g_vkR3D.render(frame.commandBuffer, 0, snap, g_vkCtx.swapExtent);
+        g_vkTAA.uploadMatrices(g_vkCtx, g_frameSync.currentFrame);
+        g_vkR3D.render(frame.commandBuffer, g_frameSync.currentFrame, snap, g_vkCtx.swapExtent);
     }
     g_vkTAA.endGeometryPass(frame.commandBuffer);
 
@@ -345,7 +388,7 @@ static void renderVulkanFrame(GLFWwindow* window) {
         g_vkCtx.swapExtent);
     // swapchain 已由 renderToSwapchain 转回 PRESENT_SRC_KHR
 
-    vkEndCommandBuffer(frame.commandBuffer);
+    if (!checkVkFrameResult(window, "vkEndCommandBuffer", vkEndCommandBuffer(frame.commandBuffer))) return;
 
     // 提交（Vulkan 1.3 vkQueueSubmit2）
     VkCommandBufferSubmitInfo cmdInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO };
@@ -367,9 +410,18 @@ static void renderVulkanFrame(GLFWwindow* window) {
     submitInfo2.signalSemaphoreInfoCount = 1;
     submitInfo2.pSignalSemaphoreInfos    = &signalInfo;
 
-    vkQueueSubmit2(g_vkCtx.graphicsQueue, 1, &submitInfo2, frame.inFlightFence);
+    if (!checkVkFrameResult(window, "vkQueueSubmit2",
+        vkQueueSubmit2(g_vkCtx.graphicsQueue, 1, &submitInfo2, frame.inFlightFence))) return;
 
     VkPresentInfoKHR presentInfo{ VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
+    VkFence presentFence = g_frameSync.presentFences[imageIdx];
+    // 每张图像的呈现 fence 独立复用，重置前必须确认上一轮呈现已释放资源。
+    if (!checkVkFrameResult(window, "waitPresentFence", vkWaitForFences(g_vkCtx.device, 1, &presentFence, VK_TRUE, UINT64_MAX))) return;
+    if (!checkVkFrameResult(window, "resetPresentFence", vkResetFences(g_vkCtx.device, 1, &presentFence))) return;
+    VkSwapchainPresentFenceInfoEXT presentFenceInfo{ VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_FENCE_INFO_EXT };
+    presentFenceInfo.swapchainCount = 1;
+    presentFenceInfo.pFences = &presentFence;
+    presentInfo.pNext = &presentFenceInfo;
     presentInfo.waitSemaphoreCount = 1;
     presentInfo.pWaitSemaphores    = &renderSem;
     presentInfo.swapchainCount     = 1;
@@ -377,8 +429,13 @@ static void renderVulkanFrame(GLFWwindow* window) {
     presentInfo.pImageIndices      = &imageIdx;
 
     result = vkQueuePresentKHR(g_vkCtx.presentQueue, &presentInfo);
+    // 内存不足表示未入队；OUT_OF_DATE/SURFACE_LOST 则仍会执行呈现队列操作。
+    g_frameSync.presentPending[imageIdx] = result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR
+        || result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_ERROR_SURFACE_LOST_KHR
+        || result == VK_ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT;
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR)
         g_vkSwapchainDirty = true;
+    else if (!checkVkFrameResult(window, "vkQueuePresentKHR", result)) return;
 
     g_vkTAA.swap();
     g_frameSync.advance();
@@ -431,7 +488,7 @@ std::string formatTime(double seconds, bool absolute) {
 // ==========================================================
 // Part 4:主函数
 // ==========================================================
-int main() {
+static int runApplication() {
   // --- 游戏启动与初始化 ---
   
   
@@ -456,9 +513,9 @@ int main() {
   PhysicsSystem::InitSolarSystem();
 
   // 完整 Vulkan 初始化序列
-  if (!g_vkCtx.initCore()
+  if (!g_vkCtx.initCore(window)
    || !g_vkCtx.initSwapchain(window)
-   || !g_frameSync.init(g_vkCtx.device, g_vkCtx.commandPool)
+   || !g_frameSync.init(g_vkCtx.device, g_vkCtx.commandPool, g_vkCtx.swapImages.size())
    || !g_vkDesc.init(g_vkCtx)
    || !g_vkR3D.init(g_vkCtx, g_vkDesc, VkTAA::kColorFmt, VkTAA::kDepthFmt)
    || !g_vkTAA.init(g_vkCtx, g_vkCtx.swapExtent, g_vkCtx.swapFormat,
@@ -562,7 +619,9 @@ int main() {
 
   orbit_predictor.Stop();
 
-  vkDeviceWaitIdle(g_vkCtx.device);
+  // 正常退出也等待呈现资源释放；设备丢失时跳过不可完成的等待。
+  if (vkDeviceWaitIdle(g_vkCtx.device) == VK_SUCCESS)
+      g_frameSync.waitForPresent(g_vkCtx.device);
   delete g_flightScene; g_flightScene = nullptr;
   delete g_vkTerrain;   g_vkTerrain   = nullptr;
   g_weatherMapPreview.unregister();
@@ -576,4 +635,14 @@ int main() {
 
   glfwTerminate();
   return 0;
+}
+
+int main() {
+    try {
+        return runApplication();
+    } catch (const std::exception& error) {
+        // 上传或映射失败时立即停止，避免后续使用无效 GPU 资源；详细错误已落盘。
+        fprintf(stderr, "[Vulkan] Fatal: %s\n", error.what());
+        return EXIT_FAILURE;
+    }
 }

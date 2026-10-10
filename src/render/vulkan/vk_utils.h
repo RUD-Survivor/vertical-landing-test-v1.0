@@ -49,6 +49,9 @@ inline void transitionImage(VkCommandBuffer    cmd,
     barrier.oldLayout           = oldLayout;
     barrier.newLayout           = newLayout;
     barrier.image               = image;
+    // 普通布局转换不转移队列所有权，不能使用结构体默认的队列编号零。
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.subresourceRange    = { aspect, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS };
 
     VkDependencyInfo dep{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
@@ -83,12 +86,13 @@ inline void transitionToPresent(VkCommandBuffer cmd, VkImage image) {
 
 // 未定义 → 深度附件（渲染开始前）
 inline void transitionToDepthAttachment(VkCommandBuffer cmd, VkImage image) {
+    // UNDEFINED 只丢弃旧内容，不免除跨帧读写依赖；共享深度图必须等待前序访问。
     transitionImage(cmd, image,
         VK_IMAGE_LAYOUT_UNDEFINED,
         VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-        VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,    VK_ACCESS_2_NONE,
-        VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
-        VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
+        VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT,
+        VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+        VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
 }
 
 // 未定义 → 着色器采样（纹理上传完成后）
@@ -102,6 +106,8 @@ inline void transitionToShaderRead(VkCommandBuffer cmd, VkImage image,
     barrier.oldLayout        = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     barrier.newLayout        = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     barrier.image            = image;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels, 0, VK_REMAINING_ARRAY_LAYERS };
 
     VkDependencyInfo dep{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };

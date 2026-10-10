@@ -311,8 +311,8 @@ struct VkCloudSystem {
         return true;
     }
 
-    void recreate(VulkanContext& ctx, VkExtent2D ext) {
-        vkDeviceWaitIdle(ctx.device);
+    bool recreate(VulkanContext& ctx, VkExtent2D ext) {
+        if (vkDeviceWaitIdle(ctx.device) != VK_SUCCESS) return false;
         destroyPipelines(ctx.device);
         destroyDescriptorsDynamic(ctx.device);
         destroyImages(ctx);
@@ -320,7 +320,9 @@ struct VkCloudSystem {
         quarterExt = { std::max(1u, (ext.width + 3) / 4), std::max(1u, (ext.height + 3) / 4) };
         if (!createImages(ctx) || !createDescriptors(ctx) || !createPipelines(ctx)) {
             fprintf(stderr, "[VkCloudSystem] recreate failed\n");
+            return false;
         }
+        return true;
     }
 
     void shutdown(VulkanContext& ctx) {
@@ -762,7 +764,7 @@ private:
         }
 
         // dummy cascade SSBO（1 个全零 GpuCascadeInfo 元素；cascadeCount=0 时永远不会被读到）
-        {
+        if (dummyCascadeBuf == VK_NULL_HANDLE) {
             VkBufferCreateInfo bci{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
             bci.size = sizeof(GpuCascadeInfo); bci.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
             VmaAllocationCreateInfo aci{}; aci.usage = VMA_MEMORY_USAGE_GPU_ONLY;
@@ -774,7 +776,7 @@ private:
 
     bool createDescriptors(VulkanContext& ctx) {
         // ── Set 1：采样器（10 个） ──
-        {
+        if (samplerSetLayout == VK_NULL_HANDLE) {
             VkDescriptorSetLayoutBinding b[10]{};
             for (int i=0;i<10;i++) b[i] = { (uint32_t)i, VK_DESCRIPTOR_TYPE_SAMPLER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr };
             VkDescriptorSetLayoutCreateInfo ci{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };

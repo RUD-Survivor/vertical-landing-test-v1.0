@@ -383,7 +383,7 @@ private:
         bci.size = sizeof(GpuCloudShadowData);
         bci.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
         VmaAllocationCreateInfo aci{};
-        aci.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
+        aci.usage = VMA_MEMORY_USAGE_CPU_TO_GPU; /* 中文说明：持久映射写入要求一致缓存，避免遗漏 flush。 */ aci.requiredFlags |= VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
         aci.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
 
         GpuCloudShadowData zero{}; // config.x = 0 → 无阴影，作为所有 UBO 的安全初值
