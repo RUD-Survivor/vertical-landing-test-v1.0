@@ -371,6 +371,8 @@ static void renderVulkanFrame(GLFWwindow* window) {
         g_vkCtx.swapExtent);
     VkFrameRenderer::setViewportScissor(frame.commandBuffer, g_vkCtx.swapExtent);
     float taaBlend = (++warmup < 60) ? 1.0f : 0.1f;
+    g_vkTAA.displayExposure = inFlight ? g_vkR3D.atmoTune.displayExposure : 1.f;
+    g_vkTAA.applyToneMap = inFlight;
     g_vkTAA.drawResolve(frame.commandBuffer, taaBlend);
     g_vkTAA.endResolvePass(frame.commandBuffer, g_vkCtx.swapImages[imageIdx]);
     // swapchain 现在处于 PRESENT_SRC_KHR

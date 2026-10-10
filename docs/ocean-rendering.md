@@ -99,3 +99,26 @@ SSR 关闭后的 Y 完全相同；关闭短波法线后 Y=0.00915980，反而稍
 最终 39 个 GPU 场景（含分项诊断和零云消光对照）通过，分项加法守恒检查、显示转换检查和 Vulkan 验证层均通过。日志为 `build/tests/ocean-radiometry-final.log`；半球积分与灰卡结果也写入该日志。
 
 辐射亮度与辐照度、余弦积分及反射方程的物理定义参考 [PBRT: Radiometry](https://pbr-book.org/4ed/Radiometry%2C_Spectra%2C_and_Color/Radiometry)、[PBRT: Surface Reflection](https://pbr-book.org/4ed/Radiometry%2C_Spectra%2C_and_Color/Surface_Reflection)；太阳辐照度与天空辐射亮度区分参考 [Bruneton atmosphere model API](https://ebruneton.github.io/precomputed_atmospheric_scattering/atmosphere/model.h.html)。
+
+## 统一辐射与呈现链路修正
+
+以下实现取代上节“维持默认色彩、仅隔离原因”的阶段状态。当前 Vulkan 地形／海洋及大气壳内、壳外正常绘制路径采用相对线性辐射单位：单位太阳辐照度为 1.1，乘场景快照的太阳强度；天空表仍按单位太阳烘焙，运行时缩放。云的独立太阳美术倍率默认从 3 改为中性 1。水体太阳光使用白色入射光，颜色衰减由大气透射与水体吸收产生。
+
+新增 `ocean_irradiance.comp`，从 64×32×32 天空辐射表积分 32 个太阳高度的余弦半球辐照度。32×2 RGBA16F 表的第一行保存入射辐照度，第二行加入介电入水透射；体散射使用第二行，泡沫与灰卡使用第一行。它与天空表同时按大气 profile 缓存，太阳强度变化无需重烤。表内存为 512 字节；额外积分在 profile 变化时进行，不在每个水面片元中循环。
+
+水体保留单层各向同性散射近似，源项为入水辐照度除以 4π；这还不是完整水下方向输运。泡沫和地形使用 Lambert 的 1/π 归一化。地形天空项仍是常量环境辐照度近似，未接入海洋的半球表。普通大气合成去除自身曝光、limb 美术增益与提前 ACES，改为 `solarIrradiance × scatter + scene × transmittance`。大气旧曝光／limb 字段保留 ABI，相关无效滑条移除；专用调试可视化保留自己的编码，不属于正常颜色路径。
+
+TAA 的输入与历史保持线性 HDR；最终 resolve 在时间混合之后统一曝光、ACES，再做一次 sRGB 编码。UNORM 显式编码，SRGB 附件由硬件编码。飞行默认曝光为 3.25，可在大气调参面板调整；非飞行菜单保持原有输出行为。使用归一化日照下的 18% 灰卡作为曝光参考：测试灰卡线性 HDR Y=0.04101919，最终映射后的线性 Y=0.18561636。此为明确的相对灰卡标定，没有真实 lux、相机光谱或摄影参考标定。
+
+验证分阶段完成：
+
+- CPU 共 8 阶段：原有水位、Fresnel、相位／极点、坡度过滤、重投影；新增余弦半球积分与 Lambert 能量守恒，数值辐射输运与解析吸收／散射解的比较，最终曝光与显示转换的单调性、黑值、高光及 sRGB 分段边界。原有 12 项 Python 测试也通过。
+- GPU 共 44 场景：32 个太阳高度的两行积分与 CPU 独立三线性积分比较，最大相对误差 0.478%；32×64 与加密至 128×256 的余弦积分最大相对误差 0.0507%。入水透射不增加辐照度。包含原有夜间、极点、轨道、浅水、岸线、零散射、长时钟、浮动原点、resize、云历史与水面分项守恒验证。
+- 补充太阳强度 0／2／10：零日照水面 HDR 为零；倍率分别为 2.000000、10.000153，单位太阳缓存不失效。晴天和灰卡真实交换链像素与 CPU 曝光→ACES→sRGB 参考最大误差 1/255，黑洞像素比例为零。
+- 晴天固定视角水面 HDR Y=0.00972052，交换链 RGB8 平均约 (17.46,37.65,69.77)。该场景不包含太阳反射高光中心，不能要求海面整体达到灰卡亮度。默认厚云仍遮蔽直射光。
+
+构建及验证记录：`build/tests/radiometry-release-full.log`、`radiometry-cpu-final.log`、`radiometry-python.log`、`radiometry-final-gpu.log`。图像 `ocean-radiometry-clear-day.png` 和 `ocean-radiometry-steady2-display.png` 来自实际交换链回读，没有额外后处理提亮。
+
+强制全量 Release 构建（`build_release.cmd force`）及所有 shader 编译通过。最终 GPU 验证层错误为零，仍有既有未使用顶点属性／输出警告。GPU 时间戳覆盖水面复制和绘制；独立运行的晴天 720p 样例约 2.15 ms，和全量构建并行时同一设备约 5 ms，设备负载明显影响测量，不能据此宣布帧率预算已验收。稳定性能回归还需要锁定设备时钟与运行负载；新增辐照度积分按 profile 缓存，强度改变的缓存稳定性已验证。
+
+本阶段验收范围是相对辐射尺度、积分、合成与最终输出。云层尚未进入水面的环境反射／天空环境光，地形环境光与水下体散射仍有近似；旧 OpenGL、fallback 行星和部分其他材质不在此次辐射迁移范围。图像仍有波浪形态、反射覆盖和远处细节需改进，不能以这些数值检查代替完整的真实海洋外观验收。

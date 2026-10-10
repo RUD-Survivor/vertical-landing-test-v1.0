@@ -1,4 +1,6 @@
 #version 450
+#extension GL_GOOGLE_include_directive : enable
+#include "common/radiometry.glsl"
 
 layout(location = 0) in  vec2 inUV;
 layout(location = 0) out vec4 outColor;
@@ -18,13 +20,9 @@ layout(set = 0, binding = 3, std140) uniform TAAMatrices {
 layout(push_constant) uniform TAAParams {
     float blendFactor;   // 0.1 = 平滑 TAA，1.0 = 禁用
     int encodeSrgb;
+    float exposure;
+    int toneMap;
 } pc;
-
-vec3 linearToSrgb(vec3 linear) {
-    vec3 c=max(linear,vec3(0));
-    return mix(1.055*pow(c,vec3(1.0/2.4))-0.055,12.92*c,
-        lessThanEqual(c,vec3(0.0031308)));
-}
 
 void main() {
     vec4 current = texture(currentColor, inUV);
@@ -94,5 +92,6 @@ void main() {
     outColor = mix(history, current, blend);
     // History remains linear HDR. Encode exactly once, after temporal blending.
     // SRGB attachments perform this conversion in hardware instead.
-    if(pc.encodeSrgb != 0)outColor.rgb=linearToSrgb(outColor.rgb);
+    if(pc.toneMap != 0)outColor.rgb=radiometryToneMap(outColor.rgb,pc.exposure);
+    if(pc.encodeSrgb != 0)outColor.rgb=radiometrySrgb(outColor.rgb);
 }

@@ -162,20 +162,10 @@ inline void AtmoTunerImGui(bool* p_open, AtmoTuneParams& p, VkAtmoLutCache& lutC
     ImGui::TextDisabled("程序化星场/银河细节：F5 星空调参面板。");
 
     ImGui::Separator();
-    ImGui::Text("曝光基准（建议 InnerFar ≈ Outer，减少穿壳跳变）");
-    ImGui::SliderFloat("InnerExposureNear (贴地)", &p.innerExposureNear, 0.5f, 50.0f, "%.1f");
-    ImGui::SliderFloat("InnerExposureFar (近大气顶)", &p.innerExposureFar, 0.5f, 50.0f, "%.1f");
-    ImGui::SliderFloat("OuterExposure", &p.outerExposure, 1.0f, 5000.0f, "%.0f", ImGuiSliderFlags_Logarithmic);
-    ImGui::TextDisabled("altNorm=0 用 Near，>=0.6 用 Far，再 smooth 接到 Outer");
+    ImGui::SliderFloat("Display exposure", &p.displayExposure, 0.01f, 100.f, "%.2f", ImGuiSliderFlags_Logarithmic);
+    ImGui::TextDisabled("Linear HDR -> exposure -> ACES -> sRGB");
 
     ImGui::Separator();
-    ImGui::Text("Limb（仅边缘；高度从底渐变到顶）");
-    ImGui::SliderFloat("LimbBrightnessBottom (大气底)", &p.limbBrightnessBottom, 0.5f, 30.0f, "%.1f");
-    ImGui::SliderFloat("LimbBrightness (大气顶/默认)", &p.limbBrightness, 0.5f, 30.0f, "%.1f");
-    ImGui::SliderFloat("LimbPower (边缘锐度)", &p.limbPower, 0.5f, 8.0f, "%.1f");
-    ImGui::TextDisabled("amount = mix(Bottom, Top, smoothstep(0,1,altNorm))；壳外 altNorm>=1 用 Top。");
-    ImGui::TextDisabled("E = Exposure * mix(1, amount, rim^Power)。");
-
     ImGui::Separator();
     ImGui::Text("壳内天空分支 (atmo_inside)");
     ImGui::SliderFloat("SkyDepthThreshold", &p.skyDepthThreshold, 0.9999f, 1.0f, "%.6f",

@@ -36,6 +36,8 @@ if %ERRORLEVEL% neq 0 goto :fail
 if %ERRORLEVEL% neq 0 goto :fail
 %GLSLC% -O -fshader-stage=compute %SHADER_DIR%\ocean_sky.comp -o %OUT_DIR%\ocean_sky.comp.spv
 if %ERRORLEVEL% neq 0 goto :fail
+%GLSLC% -O -fshader-stage=compute %SHADER_DIR%\ocean_irradiance.comp -o %OUT_DIR%\ocean_irradiance.comp.spv
+if %ERRORLEVEL% neq 0 goto :fail
 
 echo [ 4/21] gas_giant.frag
 %GLSLC% %SHADER_DIR%\gas_giant.frag -o %OUT_DIR%\gas_giant.frag.spv

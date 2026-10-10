@@ -1,4 +1,5 @@
 #pragma once
+#include "../radiometry.h"
 // ==========================================================================
 // vk_atmosphere_lut.h — 实时大气 LUT 栈：Transmittance / MultiScatter / SkyView
 // + Sky Irradiance cubemap。
@@ -40,6 +41,7 @@
 // 算 apc.outerRadius（替代原来硬编码的 +160.0f）；其余三个直接塞进 AtmoPushConstants
 // 尾部（vk_descriptors.h），壳内/壳外 shader 直接读，不再是 shader 里的魔法数字。
 struct AtmoTuneParams {
+    float displayExposure = Radiometry::defaultDisplayExposure; // final presentation only
     float shellThicknessKm = 160.0f;  // 大气壳厚度（曾经是所有星球统一硬编码 160km）
     float spaceVisStart    = 0.55f;   // altNorm 达到此值开始透出星空/深空色（旧路径；统一合成后保留）
     float spaceVisEnd      = 1.0f;    // altNorm 达到此值完全是深空（星空全透出）

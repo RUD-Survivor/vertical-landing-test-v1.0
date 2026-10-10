@@ -2,6 +2,7 @@
 #include "systems/vk_scene.h"
 #include "vk_taa.h"
 #include "../ocean_model.h"
+#include "../radiometry.h"
 #include "../scene_snapshot.h"
 
 // Single-layer water: independent geometry, opaque color/depth snapshots, surface
@@ -34,36 +35,48 @@ struct VkOceanSystem {
     VkExtent2D extent={};
     bool imagesReady=false, bedReady=false;
     VkPipeline skyBake=VK_NULL_HANDLE;
+    VkPipeline irradianceBake=VK_NULL_HANDLE;
     VkTexture3D skyLut;
+    VkTexture2D irradianceLut;
     float skyKey[18]={}; bool skyReady=false;
     int debugView=0; // Radiometry probes; zero is the normal water path.
 
     bool init(VulkanContext& ctx, VkFormat colorFmt, VkFormat depthFmt) {
-        VkDescriptorSetLayoutBinding b[6]={};
+        VkDescriptorSetLayoutBinding b[8]={};
         for(uint32_t i=0;i<4;++i) b[i]={i,i==3?VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
             1,VkShaderStageFlags(i==3?VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT:VK_SHADER_STAGE_FRAGMENT_BIT),nullptr};
         b[2].stageFlags|=VK_SHADER_STAGE_COMPUTE_BIT;b[3].stageFlags|=VK_SHADER_STAGE_COMPUTE_BIT;
         b[4]={4,VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,1,VK_SHADER_STAGE_COMPUTE_BIT,nullptr};
-        b[5]={5,VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,1,VK_SHADER_STAGE_FRAGMENT_BIT,nullptr};
+        b[5]={5,VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,1,VK_SHADER_STAGE_FRAGMENT_BIT|VK_SHADER_STAGE_COMPUTE_BIT,nullptr};
+        b[6]={6,VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,1,VK_SHADER_STAGE_FRAGMENT_BIT,nullptr};
+        b[7]={7,VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,1,VK_SHADER_STAGE_COMPUTE_BIT,nullptr};
         VkDescriptorSetLayoutCreateInfo ci{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-        ci.bindingCount=6;ci.pBindings=b;
+        ci.bindingCount=8;ci.pBindings=b;
         if(vkCreateDescriptorSetLayout(ctx.device,&ci,nullptr,&resourcesLayout)!=VK_SUCCESS)return false;
         if(!pipeline.init(ctx,colorFmt,depthFmt,"src/render/shaders/spirv/ocean.vert.spv",
             "src/render/shaders/spirv/ocean.frag.spv",resourcesLayout))return false;
         if(!skyLut.createStorage3D(ctx,64,32,32,VK_FORMAT_R16G16B16A16_SFLOAT))return false;
+        if(!irradianceLut.createStorage2D(ctx,32,2,VK_FORMAT_R16G16B16A16_SFLOAT,VK_IMAGE_USAGE_TRANSFER_SRC_BIT))return false;
         // Sky table coordinates include boundary samples; repeat would wrap
         // zenith to horizon or daylight to night during trilinear filtering.
         vkDestroySampler(ctx.device,skyLut.sampler,nullptr);skyLut.sampler=VK_NULL_HANDLE;
         VkSamplerCreateInfo sampler{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};sampler.magFilter=sampler.minFilter=VK_FILTER_LINEAR;
         sampler.addressModeU=sampler.addressModeV=sampler.addressModeW=VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
         vkRequireSuccess(vkCreateSampler(ctx.device,&sampler,nullptr,&skyLut.sampler),"ocean sky sampler");
+        vkDestroySampler(ctx.device,irradianceLut.sampler,nullptr);irradianceLut.sampler=VK_NULL_HANDLE;
+        vkRequireSuccess(vkCreateSampler(ctx.device,&sampler,nullptr,&irradianceLut.sampler),"ocean irradiance sampler");
         auto code=loadSPIRV("src/render/shaders/spirv/ocean_sky.comp.spv");if(code.empty())return false;
         VkShaderModule module=createShaderModule(ctx.device,code);if(!module)return false;
         VkComputePipelineCreateInfo compute{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};compute.layout=pipeline.layout;
         compute.stage={VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,nullptr,0,VK_SHADER_STAGE_COMPUTE_BIT,module,"main",nullptr};
         VkResult result=vkCreateComputePipelines(ctx.device,VK_NULL_HANDLE,1,&compute,nullptr,&skyBake);
         vkDestroyShaderModule(ctx.device,module,nullptr);if(result!=VK_SUCCESS)return false;
-        VkDescriptorPoolSize sizes[]={{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,8},{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,2},{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,2}};
+        code=loadSPIRV("src/render/shaders/spirv/ocean_irradiance.comp.spv");if(code.empty())return false;
+        module=createShaderModule(ctx.device,code);if(!module)return false;
+        compute.stage.module=module;
+        result=vkCreateComputePipelines(ctx.device,VK_NULL_HANDLE,1,&compute,nullptr,&irradianceBake);
+        vkDestroyShaderModule(ctx.device,module,nullptr);if(result!=VK_SUCCESS)return false;
+        VkDescriptorPoolSize sizes[]={{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,10},{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,2},{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,4}};
         VkDescriptorPoolCreateInfo pi{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
         pi.maxSets=2;pi.poolSizeCount=3;pi.pPoolSizes=sizes;
         if(vkCreateDescriptorPool(ctx.device,&pi,nullptr,&pool)!=VK_SUCCESS)return false;
@@ -91,7 +104,9 @@ struct VkOceanSystem {
     void shutdown(VulkanContext& ctx) {
         destroyImages(ctx);
         if(skyBake)vkDestroyPipeline(ctx.device,skyBake,nullptr);skyBake=VK_NULL_HANDLE;
+        if(irradianceBake)vkDestroyPipeline(ctx.device,irradianceBake,nullptr);irradianceBake=VK_NULL_HANDLE;
         skyLut.destroy(ctx);skyReady=false;
+        irradianceLut.destroy(ctx);
         pipeline.shutdown(ctx.device);
         if(pool)vkDestroyDescriptorPool(ctx.device,pool,nullptr);
         pool=VK_NULL_HANDLE;
@@ -173,7 +188,8 @@ struct VkOceanSystem {
         u.absorption[0]=.18f;u.absorption[1]=.025f;u.absorption[2]=.007f;
         u.scattering[0]=.001f;u.scattering[1]=.002f;u.scattering[2]=.003f;
         // Match terrain's unit-sun illumination, rather than a separate water exposure.
-        u.params[0]=1.1f;u.params[1]=1.f;u.params[2]=float(std::max(0.0,(len-earth->radius)*1000));
+        u.params[0]=Radiometry::solarIrradiance(snap.sunIntensity);u.params[1]=1.f;
+        u.params[2]=float(std::max(0.0,(len-earth->radius)*1000));
         u.params[3]=sc.gMie;
         memcpy(mapped[slot],&u,sizeof(u));
         vkRequireSuccess(vmaFlushAllocation(ctx.allocator,uboAllocs[slot],0,sizeof(u)),"flush ocean uniforms");
@@ -188,15 +204,17 @@ struct VkOceanSystem {
             {taa.depthSampler,bedView,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
             {taa.colorSampler,lut->transmittanceView(),VK_IMAGE_LAYOUT_GENERAL},
             {VK_NULL_HANDLE,skyLut.view,VK_IMAGE_LAYOUT_GENERAL},
-            {skyLut.sampler,skyLut.view,VK_IMAGE_LAYOUT_GENERAL}};
+            {skyLut.sampler,skyLut.view,VK_IMAGE_LAYOUT_GENERAL},
+            {irradianceLut.sampler,irradianceLut.view,VK_IMAGE_LAYOUT_GENERAL},
+            {VK_NULL_HANDLE,irradianceLut.view,VK_IMAGE_LAYOUT_GENERAL}};
         VkDescriptorBufferInfo skyBuffer{ubos[slot],0,sizeof(u)};
-        VkWriteDescriptorSet sw[6]={};
-        for(uint32_t i=0;i<6;++i){sw[i].sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;sw[i].dstSet=sets[slot];sw[i].dstBinding=i;sw[i].descriptorCount=1;
-            sw[i].descriptorType=i==3?VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:i==4?VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        VkWriteDescriptorSet sw[8]={};
+        for(uint32_t i=0;i<8;++i){sw[i].sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;sw[i].dstSet=sets[slot];sw[i].dstBinding=i;sw[i].descriptorCount=1;
+            sw[i].descriptorType=i==3?VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:(i==4 || i==7)?VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
             if(i==3)sw[i].pBufferInfo=&skyBuffer;else sw[i].pImageInfo=&skyImages[i<3?i:i-1];}
         // Update once, BEFORE the set is bound by either compute or graphics.
         // Updating even unused bindings after a dispatch invalidates its command buffer.
-        vkUpdateDescriptorSets(ctx.device,6,sw,0,nullptr);
+        vkUpdateDescriptorSets(ctx.device,8,sw,0,nullptr);
         float nextKey[18]={earth->radius,u.sunRadius[3],u.params[3]};
         memcpy(nextKey+3,u.rayleigh,16);memcpy(nextKey+7,u.mie,16);memcpy(nextKey+11,u.ozone,16);nextKey[15]=u.ozoneShape[0];
         if(!skyReady || memcmp(nextKey,skyKey,sizeof(skyKey))!=0) {
@@ -207,6 +225,14 @@ struct VkOceanSystem {
             vkCmdBindDescriptorSets(cmd,VK_PIPELINE_BIND_POINT_COMPUTE,pipeline.layout,2,1,&sets[slot],0,nullptr);
             vkCmdDispatch(cmd,16,8,8);
             transitionImage(cmd,skyLut.image,VK_IMAGE_LAYOUT_GENERAL,VK_IMAGE_LAYOUT_GENERAL,
+                VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,VK_ACCESS_2_SHADER_WRITE_BIT,
+                VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT|VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,VK_ACCESS_2_SHADER_READ_BIT);
+            transitionImage(cmd,irradianceLut.image,skyReady?VK_IMAGE_LAYOUT_GENERAL:VK_IMAGE_LAYOUT_UNDEFINED,VK_IMAGE_LAYOUT_GENERAL,
+                VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,VK_ACCESS_2_MEMORY_READ_BIT|VK_ACCESS_2_MEMORY_WRITE_BIT,
+                VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,VK_ACCESS_2_SHADER_WRITE_BIT);
+            vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_COMPUTE,irradianceBake);
+            vkCmdDispatch(cmd,4,2,1);
+            transitionImage(cmd,irradianceLut.image,VK_IMAGE_LAYOUT_GENERAL,VK_IMAGE_LAYOUT_GENERAL,
                 VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,VK_ACCESS_2_SHADER_WRITE_BIT,
                 VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,VK_ACCESS_2_SHADER_READ_BIT);
             memcpy(skyKey,nextKey,sizeof(skyKey));skyReady=true;

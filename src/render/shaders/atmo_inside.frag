@@ -20,7 +20,7 @@ layout(set = 0, binding = 0) uniform FrameUBO {
     mat4  view;
     mat4  proj;
     vec3  lightDir;
-    float _pad0;
+    float solarIrradiance;
     vec3  viewPos;
     float time;
 } frame;
@@ -174,15 +174,6 @@ void main() {
             pc.gMie, pc.mieStorageMode, 0);
     }
 
-    float thickness = max(pc.outerRadius - pc.surfaceRadius, 1e-3);
-    float altNorm = max(camDist - pc.surfaceRadius, 0.0) / thickness;
-    float baseE = atmoUnifiedExposure(
-        camDist, pc.surfaceRadius, pc.outerRadius,
-        pc.innerExposureNear, pc.innerExposureFar, pc.outerExposure);
-    float rim = atmoInsideRim(rayDir, camPos - pc.planetCenter.xyz);
-    float limbAmt = atmoLimbAmount(altNorm, pc.limbBrightnessBottom, pc.limbBrightness);
-    float exposure = baseE * atmoLimbMul(limbAmt, rim, pc.limbPower);
-
     vec3 sceneColor = texelFetch(inSceneColor, ivec2(gl_FragCoord.xy), 0).rgb;
 
     // Phase A debug：整屏显示 Inscatter 天空采样（验证烘焙/查表通路）
@@ -196,6 +187,6 @@ void main() {
         return;
     }
 
-    FragColor = atmoCompositeOut(march.scattered, march.viewT, exposure, sceneColor,
+    FragColor = atmoCompositeOut(march.scattered, march.viewT, frame.solarIrradiance, sceneColor,
         pc.transmittanceChromaStrength);
 }

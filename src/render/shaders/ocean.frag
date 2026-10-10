@@ -16,6 +16,7 @@ layout(set=2,binding=0) uniform sampler2D sceneColor;
 layout(set=2,binding=1) uniform sampler2D sceneDepth; // opaque snapshot, never output depth
 layout(set=2,binding=2) uniform sampler2D transmittanceLut;
 layout(set=2,binding=5) uniform sampler3D oceanSkyLut;
+layout(set=2,binding=6) uniform sampler2D oceanIrradianceLut;
 layout(location=0) in vec3 vRelViewPos;
 layout(location=1) in vec3 vNormal;
 layout(location=2) in vec2 vUV;
@@ -41,15 +42,22 @@ vec3 sunTransmission(float r, float mu) {
 // camera SkyView: orbit pixels use their own local up and sun elevation.
 vec3 skyReflection(vec3 up, vec3 ray, vec3 L) {
     float mu=dot(up,ray);
-    if(mu < 0.0) return vec3(0.002); // off-screen ground fallback
     float mus=clamp(dot(up,L),-1.0,1.0);
     if(mus < -0.2) return vec3(0);
+    if(mu < 0.0) return vec3(0); // off-screen ground has no radiance source
     float den=sqrt(max(0.0,1-mu*mu))*sqrt(max(0.0,1-mus*mus));
     float cosAz=den>1e-5?clamp((dot(ray,L)-mu*mus)/den,-1.0,1.0):0.0;
     vec3 coord=vec3(sqrt(clamp(mu,0,1)),clamp((mus+0.2)/1.2,0,1),cosAz*0.5+0.5);
     vec3 size=vec3(textureSize(oceanSkyLut,0));
     coord=(coord*(size-1)+0.5)/size;
     return textureLod(oceanSkyLut,coord,0).rgb*ocean.params.x*ocean.params.y;
+}
+vec3 skyIrradiance(vec3 up,vec3 L,bool enteredWater) {
+    float mus=dot(up,L);
+    if(mus < -0.2)return vec3(0);
+    float x=clamp((mus+0.2)/1.2,0,1);
+    float width=float(textureSize(oceanIrradianceLut,0).x);
+    return textureLod(oceanIrradianceLut,vec2((x*(width-1)+0.5)/width,enteredWater?0.75:0.25),0).rgb*ocean.params.x;
 }
 
 bool projectPoint(vec3 p, out vec2 uv) {
@@ -127,7 +135,7 @@ void main() {
     vec3 P=frame.viewPos+vRelViewPos;
     float sunVis=cloudShadowSunVisibility(uCloudShadow.data,uCloudShadowAtlas,P-pc.model[3].xyz);
     vec3 sunT=sunTransmission(pc.planetRadius+0.005,dot(up,L));
-    vec3 sunColor=vec3(1,.97,.92)*ocean.params.x*sunT;
+    vec3 sunColor=vec3(ocean.params.x)*sunT;
     vec3 direct=sunColor*(D*gv*gl*Fsun/max(4*NoV,1e-5))*sunVis;
     vec3 R=reflect(-V,N);
     vec3 reflectedSky=skyReflection(up,R,L);
@@ -151,23 +159,28 @@ void main() {
     }
     vec3 T=exp(-sigma*max(pathM,0.0));
     vec3 skyDown=skyReflection(up,up,L);
-    // Isotropic in-water source is incident irradiance / (4*pi).
-    vec3 bodyLight=skyDown*0.25+sunColor*max(dot(up,L),0.0)*sunVis/(4.0*OCEAN_PI);
+    // Isotropic in-water source uses actual cosine-integrated irradiance.
+    // Dielectric entry transmission precedes scattering; view Fresnel follows it.
+    vec3 incidentSky=skyIrradiance(up,L,false);
+    float sunCos=max(dot(up,L),0.0);
+    float sunEntry=1-(F0+(1-F0)*pow(1-sunCos,5));
+    vec3 bodyLight=(skyIrradiance(up,L,true)+sunColor*sunCos*sunVis*sunEntry)/(4.0*OCEAN_PI);
     vec3 body=bottom*T+ocean.scattering.rgb/sigma*(1-T)*bodyLight;
     float coastal=(1.0-smoothstep(0.3,2.5,vWaterDepth))*smoothstep(0.02,0.3,vWaterDepth);
     float foam=clamp(smoothstep(0.16,0.30,waves.crest)*0.3+coastal*0.45,0,0.6);
     vec3 result=F*environment+direct+(1-F)*body;
-    result=mix(result,(skyDown+sunColor*NoL*sunVis)*0.65,foam);
+    vec3 foamRadiance=0.65*(incidentSky+sunColor*NoL*sunVis)/OCEAN_PI;
+    result=mix(result,foamRadiance,foam);
     // Isolate additive energy and inputs without changing beauty exposure.
     if(debugView==1)result=F*environment*(1-foam);
     if(debugView==2)result=(1-F)*body*(1-foam);
     if(debugView==3)result=direct*(1-foam);
-    if(debugView==4)result=(skyDown+sunColor*NoL*sunVis)*0.65*foam;
+    if(debugView==4)result=foamRadiance*foam;
     if(debugView==5)result=reflectedSky;
     if(debugView==6)result=skyDown;
     if(debugView==7)result=vec3(dot(up,R)<0?1:0);
     if(debugView==8)result=vec3(F);
-    if(debugView==11)result=0.18*(skyDown*OCEAN_PI+sunColor*max(dot(up,L),0))/OCEAN_PI;
+    if(debugView==11)result=0.18*(incidentSky+sunColor*sunCos*sunVis)/OCEAN_PI;
     if(debugView==12)result=vec3(sunVis);
     if(debugView==13){
         // Existing near-surface atmosphere display transform, for a same-sky

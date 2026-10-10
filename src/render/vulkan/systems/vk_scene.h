@@ -1,4 +1,5 @@
 #pragma once
+#include "../../radiometry.h"
 // ==========================================================================
 // vk_scene.h — 不透明几何渲染子系统
 // 拥有: Mesh / SVO / Planet×11 / Ring / Atmosphere / Vegetation 管线
@@ -328,7 +329,7 @@ struct VkSceneSystem {
     // 帧开始：更新 FrameUBO，绑定 mesh 管线为默认状态
     void beginFrame(VkCommandBuffer cmd, int frameIdx,
                     const float view[16], const float proj[16],
-                    const float lightDir[3], const float viewPos[3], float time) {
+                    const float lightDir[3], const float viewPos[3], float time, float sunIntensity=1.f) {
         _frameIdx = frameIdx;
         FrameUBO ubo{};
         memcpy(ubo.view,     view,     64);
@@ -336,6 +337,7 @@ struct VkSceneSystem {
         memcpy(ubo.lightDir, lightDir, 12);
         memcpy(ubo.viewPos,  viewPos,  12);
         ubo.time = time;
+        ubo.solarIrradiance = Radiometry::solarIrradiance(sunIntensity);
         desc->updateFrameUBO(frameIdx, ubo);
         _bindMeshPipe(cmd);
     }

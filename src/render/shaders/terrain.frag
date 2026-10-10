@@ -17,7 +17,7 @@ layout(set = 0, binding = 0) uniform FrameUBO {
     mat4  view;
     mat4  proj;
     vec3  lightDir;
-    float _pad0;
+    float solarIrradiance;
     vec3  viewPos;
     float time;
 } frame;
@@ -182,7 +182,7 @@ void main() {
     vec3 posRelPlanetKm  = frame.viewPos + vRelViewPos - planetCenterAbs;
     float sunVis = cloudShadowSunVisibility(uCloudShadow.data, uCloudShadowAtlas, posRelPlanetKm);
 
-    vec3 result = surfColor * (ambient + diff * (1.1 - ambient) * sunVis);
+    vec3 result = surfColor * frame.solarIrradiance * (ambient + diff * sunVis) / 3.14159265359;
 
     // uViewMode disabled in Vulkan path (no climate overlay yet)
 

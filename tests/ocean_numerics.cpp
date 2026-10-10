@@ -1,4 +1,5 @@
 #include "render/ocean_model.h"
+#include "render/radiometry.h"
 #include "math/math3d.h"
 #include <cassert>
 #include <cstdio>
@@ -75,4 +76,33 @@ int main() {
         assert((uv(previous,reconstructed)-uv(previous,point)).length()<1e-9);
     }
     puts("PASS stage 5: depth reconstruction and moving-camera history projection");
+    // Cosine quadrature and diffuse energy conservation, independent of sky LUTs.
+    double cosineIntegral=0,enteredIntegral=0;
+    for(int i=0;i<1024;++i){double mu=(i+.5)/1024;
+        cosineIntegral+=mu*2*pi/1024;
+        enteredIntegral+=mu*(1-(.020373+.979627*std::pow(1-mu,5)))*2*pi/1024;}
+    assert(std::abs(cosineIntegral-pi)<1e-12);
+    assert(enteredIntegral>0 && enteredIntegral<cosineIntegral);
+    for(double rho:{0.,.18,.65,1.})for(double energy:{0.,.1,1.,1000.})
+        assert(std::abs(Radiometry::lambert(rho,energy)*cosineIntegral-rho*energy)<1e-9);
+    puts("PASS stage 6: hemisphere cosine integration, transmitted energy and Lambert conservation");
+    // Independent midpoint integration versus the homogeneous transport solution.
+    for(double sigma:{.01,.1,1.})for(double distance:{.01,1.,10.})for(double source:{0.,.02,100.}) {
+        double step=distance/4096,scatter=0,background=.37;
+        for(int i=0;i<4096;++i)scatter+=source*std::exp(-sigma*(i+.5)*step)*step;
+        double exact=source*(-std::expm1(-sigma*distance))/sigma;
+        assert(std::abs(scatter-exact)<std::max(1e-10,exact*3e-6));
+        double composite=scatter+background*std::exp(-sigma*distance);
+        assert(std::isfinite(composite)&&composite>=scatter);
+    }
+    puts("PASS stage 7: numerical radiative transport versus analytic absorption/scattering solution");
+    for(double exposure:{0.,.01,1.,3.25,1e6}){double previous=-1;
+        for(double value:{0.,1e-9,.001,.01,.18,1.,100.,1e12}){
+            double display=Radiometry::srgb(Radiometry::aces(value,exposure));
+            assert(std::isfinite(display)&&display>=previous&&display>=0&&display<=1);previous=display;}
+        assert(Radiometry::aces(0,exposure)==0);}
+    assert(std::abs(Radiometry::srgb(.0031308)-.040449936)<1e-9);
+    assert(Radiometry::solarIrradiance(-1)==0);
+    assert(Radiometry::solarIrradiance(std::numeric_limits<float>::infinity())==0);
+    puts("PASS stage 8: display monotonicity, exposure/black/highlight boundaries and sRGB breakpoint");
 }

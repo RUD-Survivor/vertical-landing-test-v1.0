@@ -7,7 +7,7 @@
 //
 // 合成与 atmo_inside.frag 同式：
 //   L_out = L_scatter * E + L_scene * T
-// 散射：GetSkyRadianceToPoint 段 Inscatter LUT；曝光用 atmoUnifiedExposure()。
+// 散射：单位太阳 Inscatter LUT × 统一太阳辐照度；最终呈现负责曝光。
 //
 // 壳外盘面（F4 shellDiskMode）：
 //   0 Disk AP：场景深度截 [tNear,tFar]
@@ -23,7 +23,7 @@ layout(set = 0, binding = 0) uniform FrameUBO {
     mat4  view;
     mat4  proj;
     vec3  lightDir;
-    float _pad0;
+    float solarIrradiance;
     vec3  viewPos;
     float time;
 } frame;
@@ -172,17 +172,7 @@ void main() {
             pc.gMie, pc.mieStorageMode, 0);
     }
 
-    float thickness = max(pc.outerRadius - pc.surfaceRadius, 1e-3);
-    float altNorm = max(camDist - pc.surfaceRadius, 0.0) / thickness;
-    float baseE = atmoUnifiedExposure(
-        camDist, pc.surfaceRadius, pc.outerRadius,
-        pc.innerExposureNear, pc.innerExposureFar, pc.outerExposure);
-    // 壳法线掠射：正对盘面 rim≈0，轮廓 rim≈1
-    float rim = clamp(1.0 - abs(dot(vLocalNormal, viewDirFromFrag)), 0.0, 1.0);
-    float limbAmt = atmoLimbAmount(altNorm, pc.limbBrightnessBottom, pc.limbBrightness);
-    float exposure = baseE * atmoLimbMul(limbAmt, rim, pc.limbPower);
-
     vec3 sceneColor = texelFetch(inSceneColor, ivec2(gl_FragCoord.xy), 0).rgb;
-    FragColor = atmoCompositeOut(march.scattered, march.viewT, exposure, sceneColor,
+    FragColor = atmoCompositeOut(march.scattered, march.viewT, frame.solarIrradiance, sceneColor,
         pc.transmittanceChromaStrength);
 }

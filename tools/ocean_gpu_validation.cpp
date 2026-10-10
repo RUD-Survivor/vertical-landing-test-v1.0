@@ -76,8 +76,8 @@ struct DisplayProbe {
             int total=0;
             for(int k=0;k<3;++k) {
                 uint8_t v=data[4*i+(bgra?2-k:k)];sum[k]+=v;total+=v;ppm.write(reinterpret_cast<char*>(&v),1);
-                if(ref){double x=std::clamp(double(halfFloat(ref[4*i+k])),0.0,1.0);
-                    double encoded=x<=.0031308?12.92*x:1.055*std::pow(x,1/2.4)-.055;
+                if(ref){double x=std::max(double(halfFloat(ref[4*i+k])),0.0);
+                    double encoded=Radiometry::srgb(Radiometry::aces(x,Radiometry::defaultDisplayExposure));
                     maxError=std::max(maxError,std::abs(int(v)-int(std::round(encoded*255))));}
             }
             if(total<=3)++black;
@@ -119,13 +119,44 @@ static void reportSkyIrradiance(VulkanContext& ctx,VkOceanSystem& ocean,const do
     printf("SKY_IRRADIANCE RGB=(%.8f,%.8f,%.8f) zenithPi=(%.8f,%.8f,%.8f) ratio=(%.3f,%.3f,%.3f)\n",
         irradiance[0],irradiance[1],irradiance[2],zenith[0]*OceanModel::pi,zenith[1]*OceanModel::pi,zenith[2]*OceanModel::pi,
         irradiance[0]/(zenith[0]*OceanModel::pi),irradiance[1]/(zenith[1]*OceanModel::pi),irradiance[2]/(zenith[2]*OceanModel::pi));
+    double maxQuadratureError=0;
+    for(int c=0;c<3;++c){double refined=0;
+        for(int i=0;i<128;++i)for(int j=0;j<256;++j){double mu=(i+.5)/128,phi=(j+.5)*2*OceanModel::pi/256;
+            refined+=sample(mu,phi,c)*mu*2*OceanModel::pi/(128*256);}
+        double error=std::abs(refined-irradiance[c])/std::max(refined,1e-8);
+        maxQuadratureError=std::max(maxQuadratureError,error);require(error<.02,"sky cosine quadrature fails refinement check");}
+    printf("PASS SKY_QUADRATURE 32x64 versus 128x256 maxRelativeError=%.6f\n",maxQuadratureError);
     double corrected[3],grayY=0;
     const double weights[3]={.2126,.7152,.0722};
-    for(int c=0;c<3;++c){corrected[c]=grayReference[c]+.18*(irradiance[c]/OceanModel::pi-zenith[c]);grayY+=weights[c]*corrected[c];}
+    for(int c=0;c<3;++c){corrected[c]=grayReference[c];grayY+=weights[c]*corrected[c];}
     double referenceExposure=.18/grayY;
     printf("GRAY_REFERENCE hemisphericRGB=(%.8f,%.8f,%.8f) Y=%.8f exposureToLinear18=%.4f EV=%.4f\n",
         corrected[0],corrected[1],corrected[2],grayY,referenceExposure,std::log2(referenceExposure));
     require(std::isfinite(referenceExposure)&&grayY>0,"invalid gray reference");
+    double displayY=0;for(int c=0;c<3;++c)displayY+=weights[c]*Radiometry::aces(grayReference[c],Radiometry::defaultDisplayExposure);
+    printf("GRAY_DISPLAY linearY=%.8f target=0.18 exposure=%.3f\n",displayY,Radiometry::defaultDisplayExposure);
+    require(std::abs(displayY-.18)<.03,"daylight gray calibration outside tolerance");
+    double expected[2][32][3]={};
+    for(int e=0;e<32;++e){mus=-.2+1.2*e/31;
+        for(int i=0;i<32;++i)for(int j=0;j<64;++j){double mu=(i+.5)/32,phi=(j+.5)*2*OceanModel::pi/64;
+            double entry=1-(.020373+.979627*std::pow(1-mu,5));
+            for(int c=0;c<3;++c){double value=sample(mu,phi,c)/u.params[0]*mu*2*OceanModel::pi/(32*64);
+                expected[0][e][c]+=value;expected[1][e][c]+=value*entry;}}}
+    VkCommandBuffer icmd=beginSingleTimeCommands(ctx);
+    transitionImage(icmd,ocean.irradianceLut.image,VK_IMAGE_LAYOUT_GENERAL,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+    copy.imageExtent={32,2,1};
+    vkCmdCopyImageToBuffer(icmd,ocean.irradianceLut.image,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,buffer,1,&copy);
+    transitionImage(icmd,ocean.irradianceLut.image,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,VK_IMAGE_LAYOUT_GENERAL);
+    endSingleTimeCommands(ctx,icmd);
+    vkRequireSuccess(vmaInvalidateAllocation(ctx.allocator,allocation,0,VK_WHOLE_SIZE),"irradiance invalidate");
+    auto lut=static_cast<const uint16_t*>(info.pMappedData);
+    double maxRelative=0;
+    for(int row=0;row<2;++row)for(int e=0;e<32;++e)for(int c=0;c<3;++c){double actual=halfFloat(lut[((row*32+e)*4)+c]);
+        require(std::isfinite(actual)&&actual>=0,"irradiance finite/nonnegative");
+        double relative=std::abs(actual-expected[row][e][c])/std::max(1e-5,expected[row][e][c]);
+        maxRelative=std::max(maxRelative,relative);require(relative<.005,"GPU irradiance differs from hemisphere integral");
+        if(row==1)require(actual<=halfFloat(lut[e*4+c])+1e-6,"water entry creates energy");}
+    printf("PASS SKY_IRRADIANCE 32 solar elevations, both rows; maxRelativeError=%.6f\n",maxRelative);
     vmaDestroyBuffer(ctx.allocator,buffer,allocation);
 }
 int main() {
@@ -149,15 +180,17 @@ int main() {
             "full-chain-steady1","full-chain-steady2","zero-scattering","south-pole","long-clock","cloud-resize","cloud-resume",
             "radiometry-beauty","radiometry-reflection","radiometry-body","radiometry-direct","radiometry-foam",
             "radiometry-sky","radiometry-zenith","radiometry-below","radiometry-fresnel","radiometry-noSSR",
-            "radiometry-flat","radiometry-gray","radiometry-cloudvis","radiometry-shadow","zero-cloud-build","radiometry-clearvis","radiometry-visible-sky"};
-        const int debugViews[]={0,1,2,3,4,5,6,7,8,9,10,11,12,0,0,12,13};
+            "radiometry-flat","radiometry-gray","radiometry-cloudvis","radiometry-shadow","zero-cloud-build","radiometry-clearvis","radiometry-visible-sky",
+            "clear-day-display","solar-double","solar-zero","solar-ten","gray-display"};
+        const int debugViews[]={0,1,2,3,4,5,6,7,8,9,10,11,12,0,0,12,13,0,0,0,0,11};
         double dayMean=0;
         double beautyY=0,componentY=0;
         double grayReference[3]={};
-        for(int test=0;test<39;++test) {
+        double clearY=0;
+        for(int test=0;test<44;++test) {
             bool diagnostic=test>=22;
             ocean.debugView=diagnostic?debugViews[test-22]:0;
-            bool fullChain=(test>=13 && test<=16) || test==20 || test==21 || test==36;
+            bool fullChain=(test>=13 && test<=16) || test==20 || test==21 || test==36 || test==39 || test==43;
             if(test==36){renderer.cloudSystem.tuneParams.density=0;renderer.cloudSystem.tuneParams.hiCloudEnabled=false;}
             int slot=fullChain?(test-13)%2:0;
             if(test==17){tune.rayleighMul=0;tune.mieMul=0;tune.ozoneMul=0;}
@@ -183,10 +216,13 @@ int main() {
                     scene.cloudWeatherTex.view,scene.cloudCurlTex.view,scene.cloudProfileLutTex.view,scene.cloudHiWeatherTex.view),"cloud init");
             }
             SceneSnapshot snap{};
+            if(test==40)snap.sunIntensity=2;
+            if(test==41)snap.sunIntensity=0;
+            if(test==42)snap.sunIntensity=10;
             const float offset=test==7?100.f:0.f, altitude=(test==4 || test==9)?400.f:test==8?float(OceanModel::bedKm(.5001,25))+.02f:test==11?-.01f:.02f;
             float cameraX=offset+(test==16?.0001f:0.f); // 10 cm camera motion with valid TAA history
             snap.camPos[0]=cameraX;snap.camPos[1]=altitude;
-            snap.time=test==19?1e7+.016:fullChain?3.0+.05*(test-13):3.0;
+            snap.time=test==19?1e7+.016:test>=39?3.0:fullChain?3.0+.05*(test-13):3.0;
             snap.frameIndex=fullChain?test-13:0;
             snap.sunWorldPos[0]=offset+100000;snap.sunWorldPos[1]=test==1?-100000:100000;
             snap.lightDir[0]=.7071f;snap.lightDir[1]=test==1?-.7071f:.7071f;
@@ -225,7 +261,7 @@ int main() {
             TerrainDataUBO td{};
             if(fullChain) renderer.render(cmd,slot,snap,size);
             else {
-                scene.beginFrame(cmd,slot,snap.view,snap.proj,snap.lightDir,snap.camPos,snap.time);
+                scene.beginFrame(cmd,slot,snap.view,snap.proj,snap.lightDir,snap.camPos,snap.time,snap.sunIntensity);
                 scene.updateTerrainCloudShadow(VK_NULL_HANDLE,VK_NULL_HANDLE,VK_NULL_HANDLE,0);
                 if(test>=34) {
                     auto& shadow=renderer.cloudSystem.cloudShadow;
@@ -237,7 +273,9 @@ int main() {
             taa.endGeometryPass(cmd);
             vkCmdResetQueryPool(cmd,queries,0,2);
             vkCmdWriteTimestamp2(cmd,VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,queries,0);
+            float previousSkyKey[18];memcpy(previousSkyKey,ocean.skyKey,sizeof(previousSkyKey));
             ocean.render(ctx,cmd,taa,scene,snap,slot,size,tune);
+            if(test>=40)require(memcmp(previousSkyKey,ocean.skyKey,sizeof(previousSkyKey))==0,"solar intensity should not invalidate unit-sun sky cache");
             vkCmdWriteTimestamp2(cmd,VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,queries,1);
             if(fullChain) {
                 probes[0].capture(ctx,cmd,taa.colorImages[taa.currentIdx],size);
@@ -248,14 +286,15 @@ int main() {
                 probes[2].capture(ctx,cmd,taa.colorImages[taa.currentIdx],size);
                 taa.beginResolvePass(cmd,ctx.swapImages[swapIndex],ctx.swapImageViews[swapIndex],size);
                 vkCmdSetViewport(cmd,0,1,&vp);vkCmdSetScissor(cmd,0,1,&rect);
-                taa.drawResolve(cmd,test==13?1.f:.1f);
+                taa.drawResolve(cmd,(test==13 || test>=39)?1.f:.1f);
                 taa.endResolvePass(cmd,ctx.swapImages[swapIndex]);
                 display.capture(ctx,cmd,ctx.swapImages[swapIndex],size);
             }
             endSingleTimeCommands(ctx,cmd);
             if(fullChain) {
-                display.report(ctx,size,names[test],test==13?&probes[2]:nullptr);
+                display.report(ctx,size,names[test],(test==13 || test>=39)?&probes[2]:nullptr);
                 double water=probes[0].report(ctx,size,names[test],"water");
+                if(test==39)clearY=water;
                 probes[1].report(ctx,size,names[test],"atmosphere");
                 double composite=probes[2].report(ctx,size,names[test],"clouds");
                 // All camera rays hit water within the sub-cloud region in this scene.
@@ -315,6 +354,12 @@ int main() {
                 if(test==26)require(std::abs(beautyY-componentY)<beautyY*.005,"water radiometry decomposition mismatch");
                 if(test==37)require(y>.999,"zero cloud extinction must transmit sunlight");
                 if(test==33)for(int c=0;c<3;++c)grayReference[c]=rgbSum[c]/pixels;
+                if(test==40 || test==42) {
+                    double factor=test==40?2:10;
+                    require(std::abs(y-clearY*factor)<clearY*factor*.005,"water solar radiance scaling is nonlinear");
+                    printf("PASS SOLAR_SCALE factor=%.0f measured=%.6f\n",factor,y/clearY);
+                }
+                if(test==41)require(y<1e-7,"zero sunlight must produce zero water radiance");
             }
             if(test==0)dayMean=sum/(pixels*3);
             if(test==2 || test==5)require(wet==0,"dry/disabled mask must be empty");

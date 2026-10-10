@@ -1,4 +1,5 @@
 #pragma once
+#include "../radiometry.h"
 // ==========================================================================
 // vk_cloud_system.h — Flower 体积云管线 Phase 1（真实接入，替换早期 Phase0 占位）
 //
@@ -100,8 +101,8 @@ struct FlowerCloudTuneParams {
     float speed = 0.15f;
     // Bruneton/Hillaire 大气积分对"太阳辐照度"的物理量级要求，和引擎其余部分（atmo.frag 等）
     // 手调出来的 sunIntensity(~1.0) 未必是同一套标定。Inscatter/Ambient 按单位太阳烘焙；
-    // 本值是运行时全局曝光：L_sun = color × snap.sunIntensity × sunIntensityMul。
-    float sunIntensityMul = 3.0f;
+    // Relative solar multiplier, not display exposure. Neutral value is 1.
+    float sunIntensityMul = 1.0f; // relative artistic multiplier; neutral default
     // 0=正常；1–7 中间量；8–15 厚云发暗诊断（见 cloud_common.glsl dbgMode）。
     // 借用 cloudSunLitMapOctave 传给 shader。
     int debugMode = 0;
@@ -549,7 +550,7 @@ private:
         fd.sky.direction[0] = -snap.lightDir[0]; fd.sky.direction[1] = -snap.lightDir[1]; fd.sky.direction[2] = -snap.lightDir[2];
         fd.sky.color[0]=fd.sky.color[1]=fd.sky.color[2]=1.0f;
         // 运行时 L_sun = color × intensity；LUT 烘焙端不乘 intensity（单位太阳）。
-        fd.sky.intensity = snap.sunIntensity * tuneParams.sunIntensityMul;
+        fd.sky.intensity = Radiometry::solarIrradiance(snap.sunIntensity) * tuneParams.sunIntensityMul;
 
         // cascadeCfg 来自 VkCascadeShadowSystem::render() 本帧渲染结果；为空（阴影关闭/无地形
         // 面片可画）时退化成 cascadeCount=0，cloud_composite.glsl 的级联查找/God Ray 自动跳过。

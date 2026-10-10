@@ -574,15 +574,13 @@ vec3 atmoSceneTransmittance(vec3 viewT, float chromaStrength)
     return mix(vec3(T_luma), T, w);
 }
 
-// 统一合成输出：L_out = ACES(scatter*E) + scene * T_scene
-vec4 atmoCompositeOut(vec3 scattered, vec3 viewT, float exposure, vec3 sceneColor,
+// Linear HDR composition. Exposure and tone mapping occur in final presentation.
+vec4 atmoCompositeOut(vec3 scattered, vec3 viewT, float solarIrradiance, vec3 sceneColor,
                       float chromaStrength)
 {
     vec3  T_scene = atmoSceneTransmittance(viewT, chromaStrength);
-    vec3  color  = max(scattered * exposure, vec3(0.0));
-    vec3  x      = color;
-    vec3  toned  = (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);
-    return vec4(toned + sceneColor * T_scene, 1.0);
+    vec3  color  = max(scattered * solarIrradiance, vec3(0.0));
+    return vec4(color + sceneColor * T_scene, 1.0);
 }
 
 // 单趟（非嵌套）raymarch：从 rayOrigin 沿 rayDir，在 [tNear,tFar] 区间内积分

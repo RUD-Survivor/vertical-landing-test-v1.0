@@ -1,0 +1,22 @@
+#version 450
+#extension GL_GOOGLE_include_directive : enable
+#include "common/radiometry.glsl"
+layout(set=2,binding=5) uniform sampler3D skyRadiance;
+layout(set=2,binding=7,rgba16f) uniform writeonly image2D irradianceOutput;
+layout(local_size_x=8,local_size_y=1,local_size_z=1) in;
+void main() {
+    ivec2 id=ivec2(gl_GlobalInvocationID.xy),size=imageSize(irradianceOutput);
+    if(any(greaterThanEqual(id,size)))return;
+    float sunCoord=float(id.x)/float(size.x-1);
+    vec3 integral=vec3(0),lutSize=vec3(textureSize(skyRadiance,0));
+    // E = integral L(mu,phi)*mu dmu dphi. Row 0 is incident E;
+    // row 1 includes dielectric entry transmission for in-water scattering.
+    for(int i=0;i<32;++i)for(int j=0;j<64;++j) {
+        float mu=(float(i)+0.5)/32.0,phi=(float(j)+0.5)*2*RADIOMETRY_PI/64.0;
+        vec3 uv=vec3(sqrt(mu),sunCoord,cos(phi)*0.5+0.5);
+        uv=(uv*(lutSize-1)+0.5)/lutSize;
+        float entry=id.y==1?1-(0.020373+0.979627*pow(1-mu,5)):1;
+        integral+=textureLod(skyRadiance,uv,0).rgb*(mu*entry*2*RADIOMETRY_PI/(32*64));
+    }
+    imageStore(irradianceOutput,id,vec4(max(integral,vec3(0)),1));
+}

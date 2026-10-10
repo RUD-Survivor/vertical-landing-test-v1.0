@@ -19,7 +19,7 @@ struct FrameUBO {
     float view[16];     // 64 bytes
     float proj[16];     // 64 bytes
     float lightDir[3];  // 12 bytes
-    float _pad0;        //  4 bytes (vec3 std140 padding)
+    float solarIrradiance; // 4 bytes, relative linear solar irradiance
     float viewPos[3];   // 12 bytes
     float time;         //  4 bytes
 };                      // total: 160 bytes

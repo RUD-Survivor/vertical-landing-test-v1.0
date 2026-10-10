@@ -1,4 +1,5 @@
 #pragma once
+#include "../radiometry.h"
 // ==========================================================================
 // vk_taa.h — TAA ping-pong render targets + resolve pipeline (Phase 4)
 //
@@ -21,7 +22,8 @@
 struct TAAParams {
     float blendFactor = 0.1f;  // 0.1 = smooth, 1.0 = disable TAA (debug)
     int encodeSrgb = 0;        // UNORM attachments require explicit display transfer.
-    float _pad[2] = {};
+    float exposure = Radiometry::defaultDisplayExposure;
+    int toneMap = 1;
 };
 static_assert(sizeof(TAAParams) <= 128, "TAAParams exceeds push constant limit");
 
@@ -79,6 +81,8 @@ struct VkTAA {
     int  currentIdx   = 0;     // ping-pong, flipped by swap() each frame
     bool historyReady = false; // false = history 图像需在帧内 cmd buffer 里初始化
     bool encodeOutputSrgb = false;
+    float displayExposure = Radiometry::defaultDisplayExposure;
+    bool applyToneMap = true;
 
     // -----------------------------------------------------------------------
     // init — 创建全部资源（图像、采样器、管线、描述符集）
@@ -327,6 +331,8 @@ struct VkTAA {
         TAAParams params{};
         params.blendFactor = blendFactor;
         params.encodeSrgb = encodeOutputSrgb ? 1 : 0;
+        params.exposure = displayExposure;
+        params.toneMap = applyToneMap ? 1 : 0;
         vkCmdPushConstants(cmd, resolveLayout,
             VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(TAAParams), &params);
         vkCmdDraw(cmd, 3, 1, 0, 0);  // 全屏三角，无顶点缓冲区

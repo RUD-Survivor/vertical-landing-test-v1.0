@@ -68,8 +68,8 @@ struct VkRenderer3D {
     // 帧开始（更新 FrameUBO，绑定网格管线）
     void beginFrame(VkCommandBuffer cmd, int frameIdx,
                     const float view[16], const float proj[16],
-                    const float lightDir[3], const float viewPos[3], float time) {
-        scene.beginFrame(cmd, frameIdx, view, proj, lightDir, viewPos, time);
+                    const float lightDir[3], const float viewPos[3], float time, float sunIntensity=1.f) {
+        scene.beginFrame(cmd, frameIdx, view, proj, lightDir, viewPos, time, sunIntensity);
         // 暂存 view/proj 供 drawSkybox 使用（避免调用方重复传参）
         memcpy(_view, view, 64);
         memcpy(_proj, proj, 64);
@@ -367,7 +367,7 @@ struct VkRenderer3D {
 
         // ---- 1. 帧开始 ----
         // 必须使用已等待 fence 的帧槽，不能用模拟帧编号推算 GPU 缓冲区索引。
-        beginFrame(cmd, frameIdx, snap.view, snap.proj, snap.lightDir, snap.camPos, snap.time);
+        beginFrame(cmd, frameIdx, snap.view, snap.proj, snap.lightDir, snap.camPos, snap.time, snap.sunIntensity);
 
         // ---- 星空（先于行星，匹配 OpenGL 顺序） ----
         drawSkybox(cmd, snap.skyVibrancy, snap.aspect);

@@ -190,7 +190,8 @@ struct VkTexture2D {
     bool createStorage2D(VulkanContext& ctx,
                          uint32_t       w,
                          uint32_t       h,
-                         VkFormat       fmt = VK_FORMAT_R8_UNORM) {
+                         VkFormat       fmt = VK_FORMAT_R8_UNORM,
+                         VkImageUsageFlags extraUsage = 0) {
         width = w; height = h;
 
         VkImageCreateInfo ici{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
@@ -201,7 +202,7 @@ struct VkTexture2D {
         ici.arrayLayers   = 1;
         ici.samples       = VK_SAMPLE_COUNT_1_BIT;
         ici.tiling        = VK_IMAGE_TILING_OPTIMAL;
-        ici.usage         = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        ici.usage         = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | extraUsage;
         ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         VmaAllocationCreateInfo aci{};
         aci.usage = VMA_MEMORY_USAGE_GPU_ONLY;
