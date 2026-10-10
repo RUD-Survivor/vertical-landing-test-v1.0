@@ -124,6 +124,10 @@ bool atmoApplyDepthFarMix(
         return true; // Entry lies in the depth uncertainty interval, not a proven occluder.
 
     float tAnalytic = tFar;
+    // If the depth interval includes the analytic ground, it cannot prove a
+    // shorter atmospheric path. Blending the noisy midpoint causes orbital
+    // scintillation as a D32 step moves that midpoint by several kilometers.
+    if(tScene+depthUncertainty>=tAnalytic)return true;
     float tDepth = min(tAnalytic, tScene);
     float wDepth = 1.0;
     bool resolvedForeground = tScene + depthUncertainty + 1.0 < tAnalytic;

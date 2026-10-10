@@ -856,6 +856,9 @@ struct VkTerrainPipeline {
             VkPipelineRasterizationStateCreateInfo rs{VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,nullptr,0,VK_FALSE,VK_FALSE,VK_POLYGON_MODE_FILL,VK_CULL_MODE_NONE,VK_FRONT_FACE_COUNTER_CLOCKWISE,VK_FALSE,0,0,0,1.f};
             VkPipelineMultisampleStateCreateInfo ms{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,nullptr,0,VK_SAMPLE_COUNT_1_BIT,VK_FALSE,0.f,nullptr,VK_FALSE,VK_FALSE};
             VkPipelineDepthStencilStateCreateInfo ds{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,nullptr,0,VK_TRUE,VK_TRUE,VK_COMPARE_OP_LESS,VK_FALSE,VK_FALSE,{},{},0.f,0.f};
+            // At orbit distances water and its opaque bed can quantize to the
+            // same D32 value. Water owns ties; keep terrain's strict depth test.
+            if(waterLayout)ds.depthCompareOp=VK_COMPARE_OP_LESS_OR_EQUAL;
             VkPipelineColorBlendAttachmentState ba{VK_FALSE,VK_BLEND_FACTOR_ZERO,VK_BLEND_FACTOR_ZERO,VK_BLEND_OP_ADD,VK_BLEND_FACTOR_ZERO,VK_BLEND_FACTOR_ZERO,VK_BLEND_OP_ADD,0xF};
             VkPipelineColorBlendAttachmentState attachments[]={ba,ba};
             uint32_t colorCount=waterLayout?2u:1u;

@@ -62,7 +62,7 @@ struct DisplayProbe {
         vkCmdCopyImageToBuffer(cmd,image,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,buffer,1,&copy);
         transitionImage(cmd,image,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
     }
-    void report(VulkanContext& ctx,VkExtent2D size,const char* name,HdrProbe* firstFrameReference) {
+    void report(VulkanContext& ctx,VkExtent2D size,const char* name,HdrProbe* firstFrameReference,bool requireFullDaylight=true) {
         vkRequireSuccess(vmaInvalidateAllocation(ctx.allocator,allocation,0,VK_WHOLE_SIZE),"display invalidate");
         if(firstFrameReference)vkRequireSuccess(vmaInvalidateAllocation(ctx.allocator,firstFrameReference->allocation,0,VK_WHOLE_SIZE),"display reference invalidate");
         auto data=static_cast<const uint8_t*>(mapped);
@@ -82,8 +82,8 @@ struct DisplayProbe {
             }
             if(total<=3)++black;
         }
-        printf("DISPLAY %s RGB8mean=(%.2f,%.2f,%.2f) black=%.2f%% sRGBmaxError=%d\n",name,sum[0]/pixels,sum[1]/pixels,sum[2]/pixels,100.0*black/pixels,maxError);
-        require(black<pixels/100,"daytime presentation contains black holes");
+        printf("DISPLAY %s RGB8mean=(%.2f,%.2f,%.2f) black=%.2f%% sRGBmaxError=%d\n",name,sum[0]/pixels,sum[1]/pixels,sum[2]/pixels,100.0*black/pixels,ref?maxError:-1);
+        if(requireFullDaylight)require(black<pixels/100,"daytime presentation contains black holes");
         if(ref)require(maxError<=2,"presentation does not match linear-to-sRGB reference");
         vmaDestroyBuffer(ctx.allocator,buffer,allocation);
     }
@@ -159,7 +159,9 @@ static void reportSkyIrradiance(VulkanContext& ctx,VkOceanSystem& ocean,const do
     printf("PASS SKY_IRRADIANCE 32 solar elevations, both rows; maxRelativeError=%.6f\n",maxRelative);
     vmaDestroyBuffer(ctx.allocator,buffer,allocation);
 }
-int main() {
+#include "ocean_orbit_validation.h"
+int main(int argc,char** argv) {
+    bool orbitOnly=argc>1 && (std::string(argv[1])=="--orbit" || std::string(argv[1])=="--orbit-baseline");
     if(!glfwInit())return 1;
     glfwWindowHint(GLFW_CLIENT_API,GLFW_NO_API);glfwWindowHint(GLFW_VISIBLE,GLFW_FALSE);
     GLFWwindow* window=glfwCreateWindow(256,144,"Ocean GPU validation",nullptr,nullptr);
@@ -175,6 +177,7 @@ int main() {
         VkQueryPoolCreateInfo qi{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};qi.queryType=VK_QUERY_TYPE_TIMESTAMP;qi.queryCount=2;
         vkRequireSuccess(vkCreateQueryPool(ctx.device,&qi,nullptr,&queries),"query pool");
         AtmoTuneParams tune;
+        if(orbitOnly)validateOrbitOcean(ctx,renderer,taa,window,std::string(argv[1])=="--orbit");
         const char* names[]={"deep-day","deep-night","dry","shallow","orbit","disabled","resize","shifted-origin",
             "shallow-lake","coast","sunset","underwater-surface","720p","full-chain","full-chain-history",
             "full-chain-steady1","full-chain-steady2","zero-scattering","south-pole","long-clock","cloud-resize","cloud-resume",
@@ -187,7 +190,7 @@ int main() {
         double beautyY=0,componentY=0;
         double grayReference[3]={};
         double clearY=0;
-        for(int test=0;test<44;++test) {
+        for(int test=0;test<(orbitOnly?0:44);++test) {
             bool diagnostic=test>=22;
             ocean.debugView=diagnostic?debugViews[test-22]:0;
             bool fullChain=(test>=13 && test<=16) || test==20 || test==21 || test==36 || test==39 || test==43;
@@ -242,7 +245,7 @@ int main() {
             if(test==18)tp.nodeCenter[1]=-1;
             tp.planetCenterRel[0]=earth.center[0]-snap.camPos[0];tp.planetCenterRel[1]=earth.center[1]-snap.camPos[1];
             if(test!=5)snap.terrainPatches.push_back(tp);
-            taa.updateMatrices(snap.view,snap.proj);taa.uploadMatrices(ctx,slot);
+            taa.updateMatrices(snap.view,snap.proj,snap.camPos,earth.center,earth.radius);taa.uploadMatrices(ctx,slot);
             uint32_t swapIndex=0;VkFence acquireFence=VK_NULL_HANDLE;
             if(fullChain) {
                 VkFenceCreateInfo fci{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
@@ -377,7 +380,7 @@ int main() {
             require(g_vkValidationErrorCount==0,"Vulkan validation errors");
             if(fullChain)taa.swap();
         }
-        reportSkyIrradiance(ctx,ocean,grayReference);
+        if(!orbitOnly)reportSkyIrradiance(ctx,ocean,grayReference);
         vkDestroyQueryPool(ctx.device,queries,nullptr);renderer.shutdown(ctx);taa.shutdown(ctx);desc.shutdown(ctx);ctx.shutdown();
         require(g_vkValidationErrorCount==0,"shutdown validation errors");
         glfwDestroyWindow(window);glfwTerminate();puts("PASS: GPU optical water, masks, HDR, resize, night, poles, orbit, floating origin; zero validation errors");

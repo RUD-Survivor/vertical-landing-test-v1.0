@@ -27,12 +27,16 @@ struct TAAParams {
 };
 static_assert(sizeof(TAAParams) <= 128, "TAAParams exceeds push constant limit");
 
-// UBO: reprojection matrices (std140, 128 bytes)
+// UBO: reprojection matrices and optional orbital water reference (std140).
 // Must match layout(set=0, binding=3) in taa.frag
 struct TAAMatrices {
     float invViewProj[16];   // current frame inverse(proj * view)
     float prevViewProj[16];  // previous frame proj * view
+    float invRayProjection[16]; // inverse(projection * translation-free view)
+    float cameraOrigin[4];
+    float waterSphere[4]; // camera-relative center (km), radius; zero disables
 };
+static_assert(sizeof(TAAMatrices)==224,"TAA shader matrix layout mismatch");
 
 // -----------------------------------------------------------------------
 // VkTAA — ping-pong TAA render targets + resolve pipeline
@@ -76,6 +80,8 @@ struct VkTAA {
     float _prevViewProj[16]    = {};
     float _currViewProj[16]    = {};
     float _currInvViewProj[16] = {};
+    float _currInvRayProjection[16] = {};
+    float _cameraOrigin[4] = {}, _waterSphere[4] = {};
     bool  _matricesReady       = false;
 
     int  currentIdx   = 0;     // ping-pong, flipped by swap() each frame
@@ -246,7 +252,8 @@ struct VkTAA {
     // 每帧调一次：更新重投影矩阵（view/proj 均为列主序 float[16]）
     // 内部保存上一帧 VP 并计算当前帧 invViewProj
     // -----------------------------------------------------------------------
-    void updateMatrices(const float view[16], const float proj[16]) {
+    void updateMatrices(const float view[16], const float proj[16],
+                        const float* camera=nullptr,const float* planetCenter=nullptr,float waterRadius=0) {
         // 保存上一帧的 VP
         memcpy(_prevViewProj, _currViewProj, 64);
 
@@ -267,6 +274,13 @@ struct VkTAA {
         // 对于大多数相机矩阵，invViewProj ≈ viewProj 的逆
         // 完整实现见下方 computeInverse 辅助
         computeInverseVP(vp, _currInvViewProj);
+        float rayProjection[16];memcpy(rayProjection,vp,64);
+        memcpy(rayProjection+12,proj+12,16);
+        computeInverseVP(rayProjection,_currInvRayProjection);
+        memset(_cameraOrigin,0,sizeof(_cameraOrigin));memset(_waterSphere,0,sizeof(_waterSphere));
+        if(camera && planetCenter && waterRadius>0){
+            memcpy(_cameraOrigin,camera,12);_waterSphere[3]=waterRadius;
+            for(int i=0;i<3;++i)_waterSphere[i]=planetCenter[i]-camera[i];}
 
         if (!_matricesReady) {
             memcpy(_prevViewProj, _currViewProj, 64);
@@ -279,6 +293,8 @@ struct VkTAA {
         TAAMatrices m;
         memcpy(m.invViewProj,  _currInvViewProj, 64);
         memcpy(m.prevViewProj, _prevViewProj,     64);
+        memcpy(m.invRayProjection,_currInvRayProjection,64);
+        memcpy(m.cameraOrigin,_cameraOrigin,16);memcpy(m.waterSphere,_waterSphere,16);
         if (matrixMapped[frameSlot]) {
             memcpy(matrixMapped[frameSlot], &m, sizeof(TAAMatrices));
             // 写入后刷新 CPU 缓存，不能假设所有显卡内存都支持 HOST_COHERENT。

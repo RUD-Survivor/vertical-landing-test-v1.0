@@ -105,4 +105,20 @@ int main() {
     assert(Radiometry::solarIrradiance(-1)==0);
     assert(Radiometry::solarIrradiance(std::numeric_limits<float>::infinity())==0);
     puts("PASS stage 8: display monotonicity, exposure/black/highlight boundaries and sRGB breakpoint");
+    // Stage 9: D32's orbital quantization cell can exceed the water column.
+    float seaDepth=float(1-.001/400),bedDepth=float(1-.001/402);
+    assert(seaDepth==bedDepth);assert(!(seaDepth<bedDepth));assert(seaDepth<=bedDepth);
+    // Reference analytic intersections versus the shader's float calculation.
+    double maxSphereError=0;
+    for(double altitude:{400.,2000.,10000.})for(double fraction:{0.,.2,.7,.99}) {
+        double radius=6371,distance=radius+altitude,angle=fraction*std::asin(radius/distance);
+        double rx=std::sin(angle),ry=std::cos(angle);
+        double reference=distance*ry-std::sqrt(radius*radius-distance*distance*rx*rx);
+        float fx=float(rx),fy=float(ry),fd=float(distance),along=fd*fy;
+        float px=-fx*along,py=fd-fy*along;
+        float calculated=along-std::sqrt(std::max(0.f,float(radius*radius)-px*px-py*py));
+        double error=std::abs(calculated-reference);maxSphereError=std::max(maxSphereError,error);
+        assert(std::isfinite(calculated)&&calculated>0&&error<.1); // <100 m even at grazing space rays
+    }
+    printf("PASS stage 9: orbital D32 tie reproduced; sphere intersection max error %.3f m\n",maxSphereError*1000);
 }

@@ -15,6 +15,9 @@ layout(set = 0, binding = 4) uniform sampler2D waterReactive;
 layout(set = 0, binding = 3, std140) uniform TAAMatrices {
     mat4 invViewProj;    // 当前帧 inverse(proj * view)
     mat4 prevViewProj;   // 上一帧 proj * view
+    mat4 invRayProjection;
+    vec4 cameraOrigin;
+    vec4 waterSphere;
 } mats;
 
 layout(push_constant) uniform TAAParams {
@@ -49,7 +52,12 @@ void main() {
     // 深度重投影 (Depth-based reprojection)
     // ============================================================
     float depth = texture(depthTex, inUV).r;
-    bool isSkyPixel = depth >= 0.9999;
+    float reactive=texture(waterReactive,inUV).r;
+    bool farWater=reactive>0.0 && mats.waterSphere.w>0.0 &&
+        length(mats.waterSphere.xyz)-mats.waterSphere.w>20.0;
+    // Clear depth is exactly one. Orbit surfaces often exceed 0.9999;
+    // water coverage also distinguishes a surface quantized to clear depth.
+    bool isSkyPixel = depth >= 1.0 && !farWater;
 
     float blend     = pc.blendFactor;
     vec2  historyUV = inUV;
@@ -61,6 +69,17 @@ void main() {
                               depth * 2.0 - 1.0, 1.0);
         vec4 worldPos  = mats.invViewProj * clipPos;
         worldPos      /= worldPos.w;
+        if(farWater) {
+            vec3 ray=normalize((mats.invRayProjection*vec4(clipPos.xy,-1.0,1.0)).xyz);
+            vec3 center=mats.waterSphere.xyz;
+            float along=dot(ray,center);
+            vec3 perpendicular=center-ray*along;
+            float discriminant=mats.waterSphere.w*mats.waterSphere.w-dot(perpendicular,perpendicular);
+            // Sphere geometry avoids reconstructing kilometers from a depth
+            // whose quantization cell can span the entire water column.
+            float distance=along-sqrt(max(discriminant,0.0));
+            worldPos=vec4(mats.cameraOrigin.xyz+ray*distance,1.0);
+        }
         vec4 prevClip  = mats.prevViewProj * worldPos;
         prevClip      /= prevClip.w;
         vec2 prevUV    = vec2(prevClip.x, -prevClip.y) * 0.5 + 0.5;
@@ -68,6 +87,17 @@ void main() {
         // 检查重投影 UV 是否在有效范围内
         bool valid = all(greaterThan(prevUV, vec2(0.01))) &&
                      all(lessThan(prevUV, vec2(0.99)));
+        // A history lookup next to a foreground silhouette can land on the
+        // occluder. Reject that sample instead of dragging it across water.
+        if(farWater && valid) {
+            float tolerance=max(uintBitsToFloat(min(floatBitsToUint(depth)+4u,floatBitsToUint(1.0)))-depth,1e-7);
+            // History color is bilinear: reject if ANY of its four source
+            // pixels is foreground, even when the nearest depth is water.
+            ivec2 pixel=ivec2(floor(prevUV*vec2(textureSize(depthTex,0))-0.5));
+            float closest=min(min(texelFetch(depthTex,pixel,0).r,texelFetch(depthTex,pixel+ivec2(1,0),0).r),
+                min(texelFetch(depthTex,pixel+ivec2(0,1),0).r,texelFetch(depthTex,pixel+ivec2(1,1),0).r));
+            if(closest<depth-tolerance)valid=false;
+        }
         if (valid) {
             historyUV = prevUV;
             // 运动自适应混合：移动越快，当前帧权重越高
@@ -88,7 +118,7 @@ void main() {
     vec4 history = texture(historyColor, historyUV);
     history.rgb  = clamp(history.rgb, cMin, cMax);
 
-    blend = max(blend, texture(waterReactive, inUV).r);
+    blend = max(blend, reactive);
     outColor = mix(history, current, blend);
     // History remains linear HDR. Encode exactly once, after temporal blending.
     // SRGB attachments perform this conversion in hardware instead.

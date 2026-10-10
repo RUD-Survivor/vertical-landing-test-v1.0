@@ -237,4 +237,9 @@ void main() {
     }
 
     FragColor = vec4(result, 1.0);
+    // Compute window depth directly from camera distance. Mapping clip Z as
+    // (w-2*near)/2+w/2 then dividing by w loses monotonicity at orbit scale.
+    // Match ocean.frag so a shallower surface can tie, never randomly lose.
+    float viewDistance=max(-(mat3(frame.view)*vRelViewPos).z,1e-8);
+    gl_FragDepth=clamp(0.5-0.5*frame.proj[2][2]+0.5*frame.proj[3][2]/viewDistance,0.0,1.0);
 }

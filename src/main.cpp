@@ -239,7 +239,10 @@ static bool initVulkanFlight(bool skipBuilder = false) {
 
 static void renderFlightSceneVulkan(VkCommandBuffer cmd, int frameSlot) {
     g_lastFlightSnap = g_flightScene->extractRenderSnapshot();
-    g_vkTAA.updateMatrices(g_lastFlightSnap.view, g_lastFlightSnap.proj);
+    const CelestialDraw* waterPlanet=nullptr;
+    for(const auto& cd:g_lastFlightSnap.celestials)if(cd.bodyIdx==3){waterPlanet=&cd;break;}
+    g_vkTAA.updateMatrices(g_lastFlightSnap.view, g_lastFlightSnap.proj,
+        g_lastFlightSnap.camPos,waterPlanet?waterPlanet->center:nullptr,waterPlanet?waterPlanet->radius:0.f);
     g_vkTAA.uploadMatrices(g_vkCtx, frameSlot);
     g_vkR3D.render(cmd, frameSlot, g_lastFlightSnap, g_vkCtx.swapExtent);
 }

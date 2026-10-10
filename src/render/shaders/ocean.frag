@@ -3,6 +3,7 @@
 #include "common/shared_cloud_shadow.glsl"
 #include "common/shared_atmosphere.glsl"
 #include "common/ocean_waves.glsl"
+#include "common/water_surface.glsl"
 layout(set=0,binding=0) uniform FrameUBO {
     mat4 view; mat4 proj; vec3 lightDir; float _pad0; vec3 viewPos; float time;
 } frame;
@@ -113,6 +114,16 @@ void main() {
     if(debugView==10){waves.slope=vec3(0);waves.crest=0;}
     vec3 worldSlope=mat3(pc.model)/pc.planetRadius*waves.slope;
     vec3 N=normalize(up-worldSlope), V=normalize(-vRelViewPos), L=normalize(ocean.sunRadius.xyz);
+    bool farWater=length(pc.model[3].xyz-frame.viewPos)-pc.planetRadius>20.0;
+    // Analytic near-sphere depth belongs to the visible hemisphere. Backside
+    // patches must not reuse it and overwrite the front with backside lighting.
+    if(farWater) {
+        // Use the triangle's geometric facing at the limb. Interpolated radial
+        // normals can cross the horizon inside an otherwise visible triangle.
+        vec3 faceNormal=cross(dFdx(vRelViewPos),dFdy(vRelViewPos));
+        faceNormal*=dot(faceNormal,up)<0.0?-1.0:1.0;
+        if(dot(faceNormal,V)<=0.0)discard;
+    }
     // Back-facing underwater path: reciprocal IOR, bounded total internal reflection.
     bool underwater=dot(up,V)<0;
     if(underwater)N=-N;
@@ -149,11 +160,12 @@ void main() {
     // Deep water is optically opaque; skip background reads and refraction work.
     if(pathM<100.0) {
         vec2 refrUV;
-        if(!projectPoint(P+refracted*min(pathM,30.0)*0.001,refrUV))refrUV=uv;
+        if(farWater)refrUV=uv; // orbital depth cannot resolve a meter-scale water column
+        else if(!projectPoint(P+refracted*min(pathM,30.0)*0.001,refrUV))refrUV=uv;
         float depth=textureLod(sceneDepth,refrUV,0).r;
         vec3 bed=reconstruct(refrUV,depth);
         // Never refract foreground geometry into the water.
-        if(depth>=0.999999 || dot(bed-P,up)>0.002)refrUV=uv;
+        if(farWater || depth>=0.999999 || dot(bed-P,up)>0.002)refrUV=uv;
         else pathM=min(pathM,max(0.0,length(bed-P)*1000.0));
         bottom=textureLod(sceneColor,refrUV,0).rgb;
     }
@@ -190,5 +202,19 @@ void main() {
     }
     if(any(isnan(result)) || any(isinf(result)))result=vec3(0);
     FragColor=vec4(max(result,vec3(0)),1);
+    float viewDistance=max(-(mat3(frame.view)*vRelViewPos).z,1e-8);
+    if(farWater) {
+        // Orbital water is a sphere (geometry waves have already faded out).
+        // Its analytic front intersection lies ahead of the triangulated bed,
+        // including shallow columns smaller than one D32 quantization cell.
+        vec3 ray=normalize(vRelViewPos),center=pc.model[3].xyz-frame.viewPos;
+        float along=dot(ray,center);
+        vec3 perpendicular=center-ray*along;
+        float radius=pc.planetRadius+waterBedKm(vElevation,pc.maxElevation)+vWaterDepth*0.001;
+        float discriminant=radius*radius-dot(perpendicular,perpendicular);
+        if(discriminant>=0.0 && along>0.0)
+            viewDistance=max((along-sqrt(discriminant))*(-(mat3(frame.view)*ray).z),1e-8);
+    }
+    gl_FragDepth=clamp(0.5-0.5*frame.proj[2][2]+0.5*frame.proj[3][2]/viewDistance,0.0,1.0);
     Reactive=clamp(0.35+foam*0.3+length(waves.slope)*0.5,0.35,0.85);
 }
