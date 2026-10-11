@@ -107,10 +107,8 @@ void main()
     vec3 airT = texture(sampler2D(inCloudAirTReconstructionTexture, linearClampEdgeSampler), uv).rgb; // 相机→云大气 RGB 透射
     //linearClampEdgeSampler：双线性 + 边缘 clamp
 
-    float cloudDepth = texture(sampler2D(inCloudDepthReconstructionTexture, linearClampEdgeSampler), uv).r;
-    // 标准深度下的云代表深度；没有云时 cloud_raymarching.glsl 现在会把它设成 1.0（远），
-    // 不需要再像原来那样 clamp 到一个"很小的正数"下限（那是 Reversed-Z 时代"防止变成 0"
-    // 的写法，标准深度下语义反过来了，见 cloud_raymarching.glsl 里 depth 初始值的修复）。
+    float cloudDepth = texture(sampler2D(inCloudDepthReconstructionTexture, pointClampEdgeSampler), uv).r;
+    // Representative ray distance in km; no-cloud sentinel = 1e20.
 
     vec3 result = srcColor.rgb;//默认result是HDR场景色
 
@@ -120,14 +118,20 @@ void main()
     // 星球轮廓外的背景星空里。
     //
     // 标准深度下：天空/空白像素的深度是清除值 1.0（最远），"云比场景近"变成
-    // cloudDepth < sceneZ（数值越小离相机越近）。
-    bool bComposite = (sceneZ >= 1.0f) || (cloudDepth < sceneZ);
+    // Convert ray distance to scene device depth before comparing.
+    // Convert the kilometre cloud distance to the same [0,1] convention as
+    // scene depth, without subtracting large clip-space coordinates.
+    float cloudViewDistance = cloudDepth * max(-normalize(viewDir).z, 1e-6);
+    float cloudDeviceDepth = 0.5 - 0.5 * frameData.camProj[2][2]
+        + 0.5 * frameData.camProj[3][2] / max(cloudViewDistance, 1e-6);
+    bool bComposite = sceneZ >= 1.0f
+        || (cloudDepth < 1e19 && cloudDeviceDepth <= sceneZ);
 
     if(bComposite)
     {
-        // Composite：result = src×(T_air×T_cloud) + L'
-        // L' 已含 L_air + T_air×L_cloud；T_cloud = cloudColor.a。
-        result = srcColor.rgb * (airT * cloudColor.a) + cloudColor.rgb;
+        // Composite：result = src×T_cloud + L'
+        // L' 已含 (1-T_cloud)×L_air + T_air×L_cloud；T_cloud = cloudColor.a。
+        result = srcColor.rgb * cloudColor.a + cloudColor.rgb;
 
         if(fogColor.a >= 0.0f)//有雾才叠，当a==-1时表示该像素未算雾
         {

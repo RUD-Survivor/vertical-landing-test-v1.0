@@ -18,12 +18,15 @@
 #include "systems/vk_effects.h"
 #include "vk_cloud_system.h"
 #include "vk_ocean.h"
+#include "vk_camera_bloom.h"
 #include "../../render/scene_snapshot.h"
+#include "../../render/solar_optics.h"
 
 struct VkRenderer3D {
     VkSceneSystem   scene;
     VkSkySystem     sky;
     VkEffectsSystem effects;
+    VkCameraBloom cameraBloom;
     VkCloudSystem   cloudSystem;
     VkOceanSystem   oceanSystem;
     VkCascadeShadowSystem shadowSystem; // SDSM 级联阴影（Phase2 收尾，只投射地形，见 vk_shadow_cascade.h）
@@ -37,6 +40,7 @@ struct VkRenderer3D {
         if (!scene.initCloudTextures(ctx))                 return false;
         if (!sky.init(ctx, desc, colorFmt, depthFmt))     return false;
         if (!effects.init(ctx, desc, colorFmt, depthFmt)) return false;
+        if (!cameraBloom.init(ctx,colorFmt,depthFmt)) return false;
         effects.initRibbonRing(ctx, 524288);  // 环形 VBO (512K verts) 用于丝带渲染，需足够大以容纳高级轨道预测+机动虚线
         // 复用地形管线的纹理 set1Layout（scene.terrainPipe 在 scene.init() 里已经建好），
         // 阴影深度管线只需要那 4 张地形纹理，不需要自己另开一套 texture descriptor set。
@@ -46,12 +50,13 @@ struct VkRenderer3D {
     }
 
     void shutdown(VulkanContext& ctx) {
+        cameraBloom.shutdown(ctx);
         oceanSystem.shutdown(ctx);
         shadowSystem.shutdown(ctx);
         cloudSystem.shutdown(ctx);
         effects.shutdownRibbonRing();
         effects.shutdown(ctx.device);
-        sky.shutdown(ctx.device);
+        sky.shutdown(ctx);
         scene.shutdown(ctx);
     }
 
@@ -299,14 +304,16 @@ struct VkRenderer3D {
     // 天空盒（beginFrame 之后、特效之前调用）
     // 使用稳定投影矩阵 + 零平移视图，匹配 OpenGL drawSkybox 的行为
     void drawSkybox(VkCommandBuffer cmd, float vibrancy = 1.0f, float aspect = 1.0f) {
-        // 稳定投影（FOV 0.8, near 0.1, far 10.0，与 OpenGL 一致）
+        // Match the camera's angular projection, without a large world origin
+        // or an ill-conditioned astronomical far plane in the sky inverse.
         float stableProj[16];
         _buildStableProj(stableProj, aspect);
+        stableProj[0]=_proj[0];stableProj[5]=_proj[5];
         // 零平移视图
         float viewNoTrans[16];
         memcpy(viewNoTrans, _view, 64);
         viewNoTrans[12] = 0.f; viewNoTrans[13] = 0.f; viewNoTrans[14] = 0.f;
-        sky.draw(cmd, _frameIdx, viewNoTrans, stableProj, vibrancy);
+        sky.draw(cmd, _frameIdx, viewNoTrans, stableProj, vibrancy,float(_extent.width),float(_extent.height));
     }
 
     // -----------------------------------------------------------------------
@@ -362,6 +369,100 @@ struct VkRenderer3D {
     // 调用方需已设置好 TAA geometry pass（beginGeometryPass + setViewportScissor）
     // 此方法只负责提交 draw call，不管理 render pass / swapchain
     // ========================================================================
+    // Photosphere first: later opaque geometry, atmosphere and clouds naturally
+    // mask/attenuate it. Radiance stays constant while angular size changes.
+    void drawSolarDisk(VkCommandBuffer cmd,const SceneSnapshot& snap,VkExtent2D extent) {
+        auto sun=SolarOptics::source(snap.sunDistanceKm,snap.sunRadiusKm);
+        if(!sun.valid || !snap.sunInFront || !scene.billboardQuadVbo)return;
+        float fy=std::abs(snap.proj[5]);if(!std::isfinite(fy)||fy<=0||!std::isfinite(snap.sunScreen[0])||!std::isfinite(snap.sunScreen[1]))return;
+        effects.drawLensFlare(cmd,scene.billboardQuadVbo,snap.sunScreen[0],snap.sunScreen[1],
+            float(extent.width)/extent.height,float(sun.radiance),float(extent.width)/extent.height,1,0,0,
+            SolarOptics::sourceSpectrum[0],SolarOptics::sourceSpectrum[1],SolarOptics::sourceSpectrum[2],float(1-SolarOptics::scatteredFraction),4,fy,float(sun.sinRadius));
+    }
+
+    // Camera optics after scene transport, using the existing read-only HDR
+    // snapshot. No depth test: lens ghosts can overlay foreground objects.
+    void renderSolarOpticsAfterGeometry(VulkanContext& ctx,VkCommandBuffer cmd,VkTAA& taa,
+        const SceneSnapshot& snap,int frameSlot,VkExtent2D extent,bool isolateOptics=false,int apertureBlades=SolarOptics::apertureBlades,int cameraStage=3) {
+        auto sun=SolarOptics::source(snap.sunDistanceKm,snap.sunRadiusKm);
+        if(!sun.valid || !snap.sunInFront || !scene.billboardQuadVbo)return;
+        double fy=std::abs(snap.proj[5]),aspect=double(extent.width)/extent.height,fx=fy/aspect;
+        if(!std::isfinite(fy)||fy<=0||!std::isfinite(snap.sunScreen[0])||!std::isfinite(snap.sunScreen[1]))return;
+        double sx=snap.sunScreen[0],sy=snap.sunScreen[1];
+        double cosine=1/std::sqrt(1+(sx/fx)*(sx/fx)+(sy/fy)*(sy/fy));
+        double projectedRadius=fy*std::tan(sun.angularRadius)/(cosine*cosine);
+        double sourceFlux=sun.radiance*sun.solidAngle*fx*fy/(cosine*cosine*cosine);
+        taa.copyAtmosphereInput(cmd,extent);
+        // Source cache observes the transported HDR/depth once, before drawing
+        // optical layers. Explicitly include its compute-read scope.
+        VkMemoryBarrier2 visible{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
+        visible.srcStageMask=VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;visible.srcAccessMask=VK_ACCESS_2_MEMORY_WRITE_BIT;
+        visible.dstStageMask=VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;visible.dstAccessMask=VK_ACCESS_2_SHADER_READ_BIT;
+        VkDependencyInfo dependency{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};dependency.memoryBarrierCount=1;dependency.pMemoryBarriers=&visible;
+        vkCmdPipelineBarrier2(cmd,&dependency);
+        effects.bindSolarInput(ctx,cmd,frameSlot,taa.atmosphereInputView,taa.colorSampler,taa.depthView,taa.depthSampler);
+        effects.prepareSolarSource(cmd,frameSlot,float(sx),float(sy),float(aspect),float(fy),float(sun.sinRadius),
+            float(sourceFlux*(1-SolarOptics::scatteredFraction)),apertureBlades);
+        VkRenderingAttachmentInfo color{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+        color.imageView=taa.colorViews[taa.currentIdx];color.imageLayout=VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        // Diagnostics isolate the optical response without losing its observed
+        // source image. Production preserves the transported scene.
+        color.loadOp=isolateOptics?VK_ATTACHMENT_LOAD_OP_CLEAR:VK_ATTACHMENT_LOAD_OP_LOAD;color.storeOp=VK_ATTACHMENT_STORE_OP_STORE;
+        color.clearValue.color={{0,0,0,1}};
+        VkRenderingInfo ri{VK_STRUCTURE_TYPE_RENDERING_INFO};ri.renderArea={{0,0},extent};ri.layerCount=1;ri.colorAttachmentCount=1;ri.pColorAttachments=&color;
+        vkCmdBeginRendering(cmd,&ri);
+        VkViewport viewport{0,0,float(extent.width),float(extent.height),0,1};VkRect2D scissor{{0,0},extent};
+        vkCmdSetViewport(cmd,0,1,&viewport);vkCmdSetScissor(cmd,0,1,&scissor);
+        for(const auto& kernel:SolarOptics::kernels){
+            double sigmaX=SolarOptics::kernelSigma(projectedRadius,fy*kernel.sigmaX);
+            double sigmaY=SolarOptics::kernelSigma(projectedRadius,fy*kernel.sigmaY);
+            double peak=sourceFlux*kernel.fraction*aspect/(2*Radiometry::pi*sigmaX*sigmaY);
+            effects.drawLensFlare(cmd,scene.billboardQuadVbo,float(sx),float(sy),float(aspect),float(peak),
+                float(4*sigmaX),float(4*sigmaY),float(kernel.axis*sx),float(kernel.axis*sy),cameraStage>=2?kernel.r:1,cameraStage>=2?kernel.g:.98f,cameraStage>=2?kernel.b:.95f,1,0,float(fy),float(sun.sinRadius),
+                float(sourceFlux*(1-SolarOptics::scatteredFraction)));
+        }
+        if(cameraStage>=3)for(const auto& ghost:SolarOptics::ghosts){
+            double stretch=1+.20*(sx*sx+sy*sy);
+            double radius=SolarOptics::kernelSigma(projectedRadius,fy*ghost.radius);
+            double rx=radius*stretch,ry=radius/stretch;
+            double area=.5*7*std::sin(2*Radiometry::pi/7)*rx*ry/aspect;
+            double peak=sourceFlux*ghost.fraction/area;
+            effects.drawLensFlare(cmd,scene.billboardQuadVbo,float(sx),float(sy),float(aspect),float(peak),
+                float(rx*1.2),float(ry*1.2),float(ghost.axis*sx),float(ghost.axis*sy),ghost.r,ghost.g,ghost.b,7,7,
+                float(fy),float(sun.sinRadius),float(sourceFlux*(1-SolarOptics::scatteredFraction)));
+        }
+        if(apertureBlades>=7&&apertureBlades<=9){
+            double blend=std::clamp((projectedRadius/(fy*SolarOptics::responseHalfExtent)-.125)/.125,0.,1.);
+            blend=blend*blend*(3-2*blend);
+            if(blend>0){
+                // Compact quadrature cannot resolve an image much larger than
+                // its PSF. Blend toward the broad-source variance limit rather
+                // than concentrating a huge source into individual samples.
+                double sigma=SolarOptics::kernelSigma(projectedRadius,fy*.00035);
+                double peak=blend*sourceFlux*SolarOptics::starFraction*aspect/(2*Radiometry::pi*sigma*sigma);
+                effects.drawLensFlare(cmd,scene.billboardQuadVbo,float(sx),float(sy),float(aspect),float(peak),
+                    float(4*sigma),float(4*sigma),float(sx),float(sy),1,1,1,1,0,
+                    float(fy),float(sun.sinRadius),float(sourceFlux*(1-SolarOptics::scatteredFraction)));
+            }
+            if(blend<1){
+                // Field response adds at most 1.5*.020*.36+.008*.36 radians
+                // of finite support; keep it inside the optical draw quad.
+                double extent=fy*(SolarOptics::responseHalfExtent+.01368)+2*projectedRadius;
+                // Angular PSF density converted to NDC; convolution retains
+                // the spatial structure of the transported source image.
+                double peak=(1-blend)*sourceFlux*SolarOptics::starFraction*aspect/(fy*fy);
+                // shape 6 uses alpha as the blade count.
+                effects.drawLensFlare(cmd,scene.billboardQuadVbo,float(sx),float(sy),float(aspect),float(peak),
+                    float(extent),float(extent),float(sx),float(sy),1,1,1,float(apertureBlades),6,
+                    float(fy),float(sun.sinRadius),float(sourceFlux*(1-SolarOptics::scatteredFraction)));
+            }
+        }
+        vkCmdEndRendering(cmd);
+        transitionImage(cmd,taa.colorImages[taa.currentIdx],VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+            VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,VK_ACCESS_2_SHADER_READ_BIT);
+    }
+
     void render(VkCommandBuffer cmd, int frameIdx, const SceneSnapshot& snap, VkExtent2D extent = {1920, 1080}) {
         _extent = extent;
 
@@ -373,9 +474,7 @@ struct VkRenderer3D {
         drawSkybox(cmd, snap.skyVibrancy, snap.aspect);
 
         // ---- 2. 太阳 ----
-        if (snap.drawSunBody && hasMesh("earth")) {
-            drawMesh(cmd, "earth", snap.sunBody.model, 1.0f, 0.95f, 0.9f, 1.0f, 20.0f);
-        }
+        drawSolarDisk(cmd,snap,extent);
 
         // ---- 2. 行星表面（不透明，共用 "earth" unit sphere mesh） ----
         // 每颗行星的「→太阳」方向经 push constant 传入；勿改 FrameUBO（录制期改
@@ -518,95 +617,6 @@ struct VkRenderer3D {
 
         // ---- 6. 天空盒（跳过——debug 测试） ----
         // drawSkybox(cmd, snap.skyVibrancy, snap.aspect);
-
-        // ---- 6. 镜头光晕（太阳光晕 + 辉光 + 条纹） ----
-        if (scene.billboardQuadVbo != VK_NULL_HANDLE
-            && snap.sunScreen[0] > -2.0f && snap.sunIntensity > 0.001f) {
-
-            // 软件遮挡检测：匹配 OpenGL drawSunAndFlare 的渐变逻辑
-            float occlusionFade = 1.0f;
-            {
-                float sdx = snap.sunWorldPos[0] - snap.camPos[0];
-                float sdy = snap.sunWorldPos[1] - snap.camPos[1];
-                float sdz = snap.sunWorldPos[2] - snap.camPos[2];
-                float sunDist = sqrtf(sdx*sdx + sdy*sdy + sdz*sdz);
-                float sunDx = sdx / sunDist;
-                float sunDy = sdy / sunDist;
-                float sunDz = sdz / sunDist;
-                for (const auto& oc : snap.occluders) {
-                    float Lx = oc.cx - snap.camPos[0];
-                    float Ly = oc.cy - snap.camPos[1];
-                    float Lz = oc.cz - snap.camPos[2];
-                    float t_ca = Lx*sunDx + Ly*sunDy + Lz*sunDz;
-                    if (t_ca < 0.0f) continue; // 遮挡体在相机后面
-                    float d2 = (Lx*Lx + Ly*Ly + Lz*Lz) - t_ca*t_ca;
-                    float r2 = oc.radius * oc.radius;
-                    float localOccFade = 1.0f;
-                    if (d2 < r2) {
-                        // 射线命中球体 → 太阳在行星后面
-                        float dt = sqrtf(r2 - d2);
-                        float t_hit = t_ca - dt;
-                        if (t_hit > 0.0f && t_hit < sunDist) {
-                            localOccFade = 0.0f; // 完全被遮挡
-                        }
-                    } else {
-                        // 射线擦过：计算距行星边缘的距离，薄上层大气渐变
-                        float passDist = sqrtf(d2); // 射线到球心的最近距离
-                        float distToLimb = passDist - oc.radius;
-                        if (distToLimb >= 0.0f && distToLimb < oc.radius * 0.05f) {
-                            localOccFade *= distToLimb / (oc.radius * 0.05f);
-                        }
-                    }
-                    occlusionFade = fminf(occlusionFade, localOccFade);
-                    if (occlusionFade <= 0.01f) break;
-                }
-            }
-            if (occlusionFade <= 0.01f) goto skip_lens_flare;
-
-            // 动态强度/缩放（匹配 OpenGL 距离衰减）
-            float refDist = 149597.87f; // 1 AU in render units
-            float sunDx = snap.sunWorldPos[0] - snap.camPos[0];
-            float sunDy = snap.sunWorldPos[1] - snap.camPos[1];
-            float sunDz = snap.sunWorldPos[2] - snap.camPos[2];
-            float curDist = sqrtf(sunDx*sunDx + sunDy*sunDy + sunDz*sunDz);
-            float distFactor = refDist / fmaxf(1.0f, curDist);
-            float intensityScale = powf(distFactor, 1.25f) * occlusionFade;
-            intensityScale = fminf(fmaxf(intensityScale, 0.15f), 8.0f);
-            float sizeScale = fminf(fmaxf(distFactor, 0.2f), 10.0f);
-
-            float sx = snap.sunScreen[0], sy = snap.sunScreen[1];
-            float asp = snap.aspect;
-
-            // 热白核心（太阳位置）
-            drawLensFlare(cmd, scene.billboardQuadVbo, sx, sy, asp, 175.f * intensityScale,
-                          0.10f*sizeScale, 0.10f*sizeScale, sx, sy,
-                          1.0f, 0.98f, 0.95f, 1.0f, 0);
-            // 暖色光晕
-            drawLensFlare(cmd, scene.billboardQuadVbo, sx, sy, asp, 60.f * intensityScale,
-                          0.22f*sizeScale, 0.22f*sizeScale, sx, sy,
-                          1.0f, 0.92f, 0.75f, 1.0f, 0);
-            // 淡暖色散开
-            drawLensFlare(cmd, scene.billboardQuadVbo, sx, sy, asp, 18.f * intensityScale,
-                          0.50f*sizeScale, 0.50f*sizeScale, sx, sy,
-                          0.9f, 0.75f, 0.55f, 1.0f, 0);
-            // 蓝色变形条纹（穿过太阳，窄条不长）
-            drawLensFlare(cmd, scene.billboardQuadVbo, sx, sy, asp, 25.f * intensityScale,
-                          0.8f*sizeScale, 0.012f*sizeScale, sx, sy,
-                          0.7f, 0.8f, 1.0f, 1.0f, 1);
-            // 白色核心条纹
-            drawLensFlare(cmd, scene.billboardQuadVbo, sx, sy, asp, 35.f * intensityScale,
-                          0.5f*sizeScale, 0.006f*sizeScale, sx, sy,
-                          1.0f, 0.95f, 0.9f, 1.0f, 1);
-            // 衍射条纹
-            drawLensFlare(cmd, scene.billboardQuadVbo, sx, sy, asp, 12.f * intensityScale,
-                          0.35f*sizeScale, 0.35f*sizeScale, sx, sy,
-                          0.6f, 0.85f, 1.0f, 1.0f, 2);
-            // 星芒
-            drawLensFlare(cmd, scene.billboardQuadVbo, sx, sy, asp, 20.f * intensityScale,
-                          0.40f*sizeScale, 0.40f*sizeScale, sx, sy,
-                          1.0f, 0.97f, 0.9f, 1.0f, 3);
-        }
-        skip_lens_flare:;
 
         // ---- 8. 发射台 (Block C) ----
         if (snap.hasLaunchPad) {

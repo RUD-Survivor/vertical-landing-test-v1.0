@@ -482,16 +482,20 @@ struct VkRingPipeline {
 struct VkSkyboxPipeline {
     VkPipelineLayout layout=VK_NULL_HANDLE; VkPipeline pipeline=VK_NULL_HANDLE;
     bool init(VulkanContext& ctx, VkDescriptorManager& desc,
-              VkFormat colorFmt, VkFormat depthFmt, const char* vertSpv, const char* fragSpv) {
+              VkFormat colorFmt, VkFormat depthFmt, const char* vertSpv, const char* fragSpv,
+              VkDescriptorSetLayout starLayout=VK_NULL_HANDLE,bool additive=false) {
         auto vc=loadSPIRV(vertSpv); auto fc=loadSPIRV(fragSpv);
         if(vc.empty()||fc.empty()) return false;
         VkShaderModule vm=createShaderModule(ctx.device,vc), fm=createShaderModule(ctx.device,fc);
         if(!vm||!fm){if(vm)vkDestroyShaderModule(ctx.device,vm,nullptr);if(fm)vkDestroyShaderModule(ctx.device,fm,nullptr);return false;}
         PipelineInitParams p{}; // No vertex input
-        p.blendEnable=false;
+        p.blendEnable=additive;
+        p.srcColor=VK_BLEND_FACTOR_ONE;p.dstColor=VK_BLEND_FACTOR_ONE;
+        p.srcAlpha=VK_BLEND_FACTOR_ZERO;p.dstAlpha=VK_BLEND_FACTOR_ONE;
         p.depthTest=VK_TRUE; p.depthWrite=VK_FALSE; p.depthOp=VK_COMPARE_OP_LESS_OR_EQUAL;
         p.cullMode=VK_CULL_MODE_NONE;
-        p.pcSize=sizeof(SkyboxPushConstants); p.setLayouts=&desc.set0Layout; p.setCount=1;
+        VkDescriptorSetLayout sets[]={desc.set0Layout,starLayout};
+        p.pcSize=sizeof(SkyboxPushConstants); p.setLayouts=sets; p.setCount=starLayout?2:1;
         p.colorFmt=colorFmt; p.depthFmt=depthFmt; p.name="Skybox";
         bool ok=buildPipeline(ctx.device,vm,fm,p,layout,pipeline);
         vkDestroyShaderModule(ctx.device,vm,nullptr); vkDestroyShaderModule(ctx.device,fm,nullptr); return ok;
@@ -588,11 +592,11 @@ struct VkBillboardPipeline {
 
 // -----------------------------------------------------------------------
 // VkLensFlarePipeline — Additive 2D lens flare (no depth test/write)
-// Vertex: vec2 aPos (stride=8). No descriptor sets. Push: LensFlarePushConstants (64 bytes).
+// Vertex: vec2 aPos (stride=8). Optional HDR/depth input set. Push: 64 bytes.
 // -----------------------------------------------------------------------
 struct VkLensFlarePipeline {
     VkPipelineLayout layout=VK_NULL_HANDLE; VkPipeline pipeline=VK_NULL_HANDLE;
-    bool init(VulkanContext& ctx, VkFormat colorFmt, VkFormat depthFmt, const char* vertSpv, const char* fragSpv) {
+    bool init(VulkanContext& ctx, VkFormat colorFmt, VkFormat depthFmt, const char* vertSpv, const char* fragSpv,VkDescriptorSetLayout inputLayout=VK_NULL_HANDLE) {
         auto vc=loadSPIRV(vertSpv); auto fc=loadSPIRV(fragSpv);
         if(vc.empty()||fc.empty()) return false;
         VkShaderModule vm=createShaderModule(ctx.device,vc), fm=createShaderModule(ctx.device,fc);
@@ -602,9 +606,9 @@ struct VkLensFlarePipeline {
         PipelineInitParams p{}; p.bindings=&bind; p.bindingCount=1; p.attrs=&attr; p.attrCount=1;
         p.blendEnable=true; p.srcColor=VK_BLEND_FACTOR_ONE; p.dstColor=VK_BLEND_FACTOR_ONE; // Additive
         p.srcAlpha=VK_BLEND_FACTOR_ONE; p.dstAlpha=VK_BLEND_FACTOR_ONE;
-        p.depthTest=VK_TRUE; p.depthWrite=VK_FALSE; p.depthOp=VK_COMPARE_OP_LESS_OR_EQUAL; p.cullMode=VK_CULL_MODE_NONE;
+        p.depthTest=VK_FALSE; p.depthWrite=VK_FALSE; p.depthOp=VK_COMPARE_OP_LESS_OR_EQUAL; p.cullMode=VK_CULL_MODE_NONE;
         p.topology=VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
-        p.pcSize=sizeof(LensFlarePushConstants); p.setLayouts=nullptr; p.setCount=0;
+        p.pcSize=sizeof(LensFlarePushConstants); p.setLayouts=inputLayout?&inputLayout:nullptr; p.setCount=inputLayout?1:0;
         p.colorFmt=colorFmt; p.depthFmt=depthFmt; p.name="LensFlare";
         bool ok=buildPipeline(ctx.device,vm,fm,p,layout,pipeline);
         vkDestroyShaderModule(ctx.device,vm,nullptr); vkDestroyShaderModule(ctx.device,fm,nullptr); return ok;

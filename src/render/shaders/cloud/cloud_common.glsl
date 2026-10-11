@@ -33,7 +33,7 @@ layout (set = 0, binding = 11) uniform texture3D inInscatterLut; // Bruneton Ins
 
 layout (set = 0, binding = 12, rgba16f) uniform image2D imageCloudReconstructionTexture; // 全分辨率云重建 RT（可写）；上采样/滤波后输出
 layout (set = 0, binding = 13) uniform texture2D inCloudReconstructionTexture; // 全分辨率云重建 RT（只读）；合成 pass 与 temporal 采样
-layout (set = 0, binding = 14, r32f) uniform image2D imageCloudDepthTexture; // 1/4 分辨率云深度 RT（可写）；记录云平均命中深度
+layout (set = 0, binding = 14, r32f) uniform image2D imageCloudDepthTexture; // 1/4 分辨率云深度 RT（可写）；记录云平均命中距离(km)，无云=1e20
 layout (set = 0, binding = 15) uniform texture2D inCloudDepthTexture; // 1/4 分辨率云深度（只读）；重建与重投影用
 layout (set = 0, binding = 16, r32f) uniform image2D imageCloudDepthReconstructionTexture; // 全分辨率云深度 RT（可写）；上采样后的云深度
 layout (set = 0, binding = 17) uniform texture2D inCloudDepthReconstructionTexture; // 全分辨率云深度（只读）；与场景深度合成、TAA
@@ -607,6 +607,17 @@ float cloudDensityAtRayT(float rayTKm, vec3 worldPos, vec3 worldDir, const in At
 }
 
 //主函数：对一条射线算整朵云，返回RGB散射和A透射
+// Normalized cloud rays: factor the radial difference near tangency instead
+// of subtracting two camera-radius squared values in the quadratic formula.
+bool cloudShellInterval(vec3 origin,vec3 ray,float radius,out vec2 interval) {
+    float impact=length(cross(origin,ray));
+    float h=(radius-impact)*(radius+impact);
+    if(h<0.0)return false;
+    float along=-dot(origin,ray),halfChord=sqrt(max(h,0.0));
+    interval=vec2(along-halfChord,along+halfChord);
+    return interval.x>0.0 && interval.y>0.0;
+}
+
 vec4 cloudColorCompute(const in AtmosphereParameters atmosphere,
 vec2 uv,
 float blueNoise,
@@ -683,7 +694,7 @@ inout vec3 airTransmittance)
         // Eye out of cloud area.
 
         vec2 t0t1 = vec2(0.0);
-        const bool bIntersectionEnd = raySphereIntersectOutSide(worldPos, worldDir, vec3(0.0), radiusCloudEnd, t0t1);
+        const bool bIntersectionEnd = cloudShellInterval(worldPos, worldDir, radiusCloudEnd, t0t1);
         if(!bIntersectionEnd)//射线与云壳没相交
         {
             // No intersection.
@@ -691,7 +702,7 @@ inout vec3 airTransmittance)
         }
 
         vec2 t2t3 = vec2(0.0);
-        const bool bIntersectionStart = raySphereIntersectOutSide(worldPos, worldDir, vec3(0.0), radiusCloudStart, t2t3);
+        const bool bIntersectionStart = cloudShellInterval(worldPos, worldDir, radiusCloudStart, t2t3);
         if(bIntersectionStart)//射线完全穿云顶和云底
         {
             tMin = t0t1.x;
@@ -934,8 +945,6 @@ inout vec3 airTransmittance)
             // stepCloudDensity：该点体积云密度 σ（无量纲标量，近似 σ_t 的密度因子）。
             // >0 才进入光照计算；薄云也完整算光，不跳过 shadow march。
 
-            rayHitPos+=samplePos*transmittance;
-            rayHitPosWeight+=transmittance;
             // 用当前视线透射率 transmittance 加权累加位置：越靠近相机、仍可见的云贡献越大。用当前步的视线透射率 transmittance 当权重，对采样位置做加权平均，得到一个近似亮度贡献中心
             // 用于 march 结束后算 cloudZ 与空气透视（见 637 行后）。
             //cloudZ是该像素云的代表深度，写入云深度RT，与场景inDepth比较，判断云在物体前/后
@@ -958,6 +967,12 @@ inout vec3 airTransmittance)
                 {
                     stepTransmittance=exp(-opticalDepth);
                 }
+                // Empty steps cannot anchor cloud history or air perspective.
+                // T*(1-Tstep) is the visible extinction contribution; its
+                // centroid is independent of how vacuum intervals are stepped.
+                float hitWeight=transmittance*(1.0-stepTransmittance);
+                rayHitPos+=samplePos*hitWeight;
+                rayHitPosWeight+=hitWeight;
 
                 ParticipatingMedia participatingMedia=volumetricShadow(samplePos,sunDirection,atmosphere,-1,frameData.sky.atmosphereConfig.cloudMultiScatterExtinction,true);
                 // participatingMedia：沿太阳方向短 march 得到的云自阴影 + 多散射阶透射率。
@@ -1279,41 +1294,17 @@ inout vec3 airTransmittance)
             // rayHitPos：透射率加权平均云位置 (km，大气空间，行星中心为原点)。= Σ(samplePos×T) / Σ(T)。
             // 代表「这朵云在 3D 里大概在哪」，不是第一个/最后一个采样点。
 
-            // 已修复（第二次，之前那版是错的）：camViewProj（camView/camProj 直接拷贝自
-            // snap.view/proj）期望的是"浮动原点绝对世界坐标"，不是"相对相机"的坐标——
-            // 证据见 terrain.vert：gl_Position = frame.proj*frame.view*vec4(worldPos,1.0)
-            // 直接用绝对世界坐标 worldPos，相机位置是 lookAt() 构建 view 矩阵时内部处理的；
-            // 那边"worldPos-frame.viewPos"（相机相对坐标）只是另外算出来给光照用的衍生量，
-            // 根本不会喂给投影矩阵。上一版我把 rayHitPos 减了一次相机位置再投影，相当于
-            // 手动减一次 + view 矩阵内部又减一次，两次相减在相机远离行星中心时（轨道视角）
-            // 误差正比于相机到行星中心的距离，直接炸掉。
-            //
-            // 正确做法：用 camInvertView 的平移列恢复相机在这套绝对世界坐标系里的位置
-            // （camInvertView*vec4(0,0,0,1) 就是相机世界坐标，标准技巧，不需要额外的 UBO
-            // 字段），再加上"相机到云"这段（数值小、精度安全的）偏移，重建云的绝对世界坐标。
-            // 这套世界坐标是 km 尺度（和 terrain.vert 的 worldPos 一致），不需要
-            // convertToCameraUnit 的 km→米换算——那是当初照抄 flower"渲染空间用米"的
-            // 假设，这里同样是错的，直接删掉。
-            vec3 camWorldKm=(frameData.camInvertView*vec4(0.0,0.0,0.0,1.0)).xyz;
-            vec3 offsetKm=rayHitPos-worldPos; // 相机→云，行星大气空间偏移 (km)，数值小
-            vec3 cloudAbsKm=camWorldKm+offsetKm; // 浮动原点绝对世界坐标 (km)
-
-            vec4 rayInH=frameData.camViewProj*vec4(cloudAbsKm,1.0);
-            // 齐次裁剪空间：把代表点投到屏幕，用于深度缓冲。
-
-            cloudZ =rayInH.z/rayInH.w;
-            // cloudZ：该像素云的「代表深度」(NDC/clip z/w，标准深度)，写入云深度 RT（binding 14/16）。
-            // 用途：与场景 inDepth 比较前后关系、1/4→全分辨率重建、TAA 重投影。
-            // 不是云表面深度，是整段体积的单值近似。
-
+            // Keep representative ray distance in km, independently of D32.
+            // Orbital device-depth inversion loses thin-shell separation and
+            // can produce w=0 with a small near plane.
+            vec3 offsetKm=rayHitPos-worldPos;
+            cloudZ=length(offsetKm);
             rayHitPos=offsetKm;
-            // 后面 792 行 rayHitHeight 需要"相机到命中点"的偏移向量，正好是 offsetKm，
-            // 直接复用（等价于原来晚一点做的 rayHitPos-=worldPos，只是不再影响上面的投影）。
 
             //apply air perspective
             // 物理空气透视（与场景 ToPoint 同构）：
-            //   L' = L_air×L_sun + T_air×L_cloud
-            //   T_air → 独立 RGB RT；composite：src×(T_air×T_cloud)+L'
+            //   L' = (1-T_cloud)×L_air×L_sun + T_air×L_cloud
+            //   T_air → 独立 RGB RT；composite：src×T_cloud+L'
             // AirPerspectiveScale∈[0,1]：整段 AP 强度（0=关，1=全物理）。
             // AirPerspectiveSunScale：只乘 L_air。
             if(frameData.sky.atmosphereConfig.cloudAirPerspectiveEnabled != 0)
@@ -1328,7 +1319,10 @@ inout vec3 airTransmittance)
                 vec3 L_air=ap.scattered*Lsun
                     *frameData.sky.atmosphereConfig.cloudAirPerspectiveSunScale*apScale;
 
-                scatteredLight=L_air+T_air*scatteredLight;
+                // Background already contains foreground air: B=Lf+Tf*Lb.
+                // Inserting clouds gives Tc*B + Tf*Lc + (1-Tc)*Lf.
+                // In particular Tc=1,Lc=0 must leave B exactly unchanged.
+                scatteredLight=L_air*(1.0-transmittance)+T_air*scatteredLight;
                 airTransmittance=T_air;
             }
         }
@@ -1472,7 +1466,7 @@ inout vec3 airTransmittance)
 
     //Dual mix transmittance
     // RGB = L'（含 AP）；A = T_cloud（云本身视线透射，不含 T_air）。
-    // T_air 写入独立 RT；composite：src×(T_air×T_cloud)+L'
+    // T_air 写入独立 RT；composite：src×T_cloud+L'
     vec4 result=vec4(scatteredLight,transmittance);
 
     if(any(isnan(result))||any(isinf(result)))
@@ -1696,9 +1690,9 @@ inout vec3 airTransmittance)
 【cloudColorCompute 阶段 3 — 后处理  L789-853】
 
   rayHitPos /= rayHitPosWeight
-  cloudZ ← (viewProj × rayHitPos).z/w          → 云深度 RT
+  cloudZ ← length(rayHitPos-worldPos), km          → 云深度 RT
   rayHitHeight ← length(rayHitPos - worldPos)
-  airPerspective ← Inscatter ToPoint → L'=L_air+T_air×L，T_eff≈luma(T_air)×T_cloud
+  airPerspective ← Inscatter ToPoint → L'=(1-T_cloud)×L_air+T_air×L，背景已含大气
 
 --------------------------------------------------------------------------------
 【cloudColorCompute 阶段 4 — God Ray / bFog】

@@ -1,0 +1,30 @@
+#version 450
+#extension GL_GOOGLE_include_directive : enable
+#include "common/camera_bloom.glsl"
+layout(local_size_x=8,local_size_y=8) in;
+layout(set=0,binding=0) uniform sampler2D inputImage;
+layout(rgba16f,set=0,binding=1) uniform writeonly image2D outputImage;
+layout(set=0,binding=2) uniform sampler2D depthImage;
+vec3 fetchSource(ivec2 q){
+ ivec2 size=textureSize(inputImage,0);
+ if(any(lessThan(q,ivec2(0)))||any(greaterThanEqual(q,size)))return vec3(0);
+ vec2 uv=(vec2(q)+.5)/vec2(size);
+ if(pc.operation==0&&solarPixel(uv,depthImage))return vec3(0);
+ return max(texelFetch(inputImage,q,0).rgb,vec3(0));
+}
+void main(){
+ ivec2 q=ivec2(gl_GlobalInvocationID.xy),size=imageSize(outputImage);
+ if(any(greaterThanEqual(q,size)))return;
+ vec3 result=vec3(0);
+ if(pc.operation<=1){
+   for(int y=0;y<2;++y)for(int x=0;x<2;++x)result+=fetchSource(q*2+ivec2(x,y))*.25;
+ }else{
+   int radius=min(32,int(ceil(3*pc.sigma)));float weightSum=0;
+   for(int i=-radius;i<=radius;++i){
+     float weight=exp(-.5*float(i*i)/max(pc.sigma*pc.sigma,1e-5));
+     result+=fetchSource(q+pc.axis*i)*weight;weightSum+=weight;
+   }
+   result/=max(weightSum,1e-8);
+ }
+ imageStore(outputImage,q,vec4(result,0));
+}

@@ -14,6 +14,7 @@
 #include "vk_context.h"
 #include "vk_utils.h"
 #include "vk_mesh.h"      // beginSingleTimeCommands / endSingleTimeCommands
+#include "vk_texture.h"
 #include "vk_pipeline.h"  // loadSPIRV, createShaderModule
 
 #include <cstdio>
@@ -42,6 +43,7 @@ static_assert(sizeof(TAAMatrices)==224,"TAA shader matrix layout mismatch");
 // VkTAA — ping-pong TAA render targets + resolve pipeline
 // -----------------------------------------------------------------------
 struct VkTAA {
+    VkTexture2D zeroReactive; // A normalized mask must never fall back to HDR color.
     static constexpr VkFormat kColorFmt = VK_FORMAT_R16G16B16A16_SFLOAT;
     static constexpr VkFormat kDepthFmt = VK_FORMAT_D32_SFLOAT;
 
@@ -102,6 +104,8 @@ struct VkTAA {
               const char*   fragSpv) {
         if (!createImages(ctx, extent))                                    return false;
         if (!createSamplers(ctx))                                          return false;
+        const uint8_t black[4]={0,0,0,0};
+        if(!zeroReactive.upload(ctx,black,1,1))return false;
         // 不再用独立 submit 做初始化——改为在第一帧 cmd buffer 内做，
         // 避免跨 submit 的验证层 layout 追踪失效。
         historyReady = false;
@@ -375,6 +379,7 @@ struct VkTAA {
         for (int i = 0; i < 2; ++i) {
             if (matrixUBO[i] != VK_NULL_HANDLE) { vmaDestroyBuffer(ctx.allocator, matrixUBO[i], matrixAlloc[i]); matrixUBO[i] = VK_NULL_HANDLE; }
         }
+        zeroReactive.destroy(ctx);
         destroyImages(ctx);
     }
 
@@ -695,7 +700,7 @@ private:
             writes[3].descriptorCount = 1;
             writes[3].descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
             writes[3].pBufferInfo     = &bufInfo;
-            VkDescriptorImageInfo fallback{colorSampler, colorViews[i], VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+            VkDescriptorImageInfo fallback{zeroReactive.sampler, zeroReactive.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
             writes[4] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, resolveSets[i], 4, 0, 1,
                 VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, &fallback, nullptr, nullptr};
             vkUpdateDescriptorSets(ctx.device, 5, writes, 0, nullptr);

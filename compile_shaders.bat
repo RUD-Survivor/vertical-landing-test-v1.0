@@ -84,11 +84,15 @@ echo [14/21] ring.frag
 if %ERRORLEVEL% neq 0 goto :fail
 
 echo [15/21] skybox.vert
-%GLSLC% %SHADER_DIR%\skybox.vert -o %OUT_DIR%\skybox.vert.spv
+%GLSLC% -O %SHADER_DIR%\skybox.vert -o %OUT_DIR%\skybox.vert.spv
 if %ERRORLEVEL% neq 0 goto :fail
 
 echo [16/21] skybox.frag
-%GLSLC% %SHADER_DIR%\skybox.frag -o %OUT_DIR%\skybox.frag.spv
+%GLSLC% -O %SHADER_DIR%\skybox.frag -o %OUT_DIR%\skybox.frag.spv
+if %ERRORLEVEL% neq 0 goto :fail
+%GLSLC% -O %SHADER_DIR%\stars.vert -o %OUT_DIR%\stars.vert.spv
+if %ERRORLEVEL% neq 0 goto :fail
+%GLSLC% -O %SHADER_DIR%\stars.frag -o %OUT_DIR%\stars.frag.spv
 if %ERRORLEVEL% neq 0 goto :fail
 
 echo [17/21] exhaust.vert
@@ -115,6 +119,18 @@ if %ERRORLEVEL% neq 0 goto :fail
 %GLSLC% %SHADER_DIR%\lens_flare.vert -o %OUT_DIR%\lens_flare.vert.spv
 if %ERRORLEVEL% neq 0 goto :fail
 %GLSLC% %SHADER_DIR%\lens_flare.frag -o %OUT_DIR%\lens_flare.frag.spv
+if errorlevel 1 goto :fail
+%GLSLC% %SHADER_DIR%\solar_disk.vert -o %OUT_DIR%\solar_disk.vert.spv
+if %ERRORLEVEL% neq 0 goto :fail
+%GLSLC% %SHADER_DIR%\solar_source.comp -o %OUT_DIR%\solar_source.comp.spv
+if %ERRORLEVEL% neq 0 goto :fail
+%GLSLC% %SHADER_DIR%\solar_response.comp -o %OUT_DIR%\solar_response.comp.spv
+if %ERRORLEVEL% neq 0 goto :fail
+%GLSLC% %SHADER_DIR%\camera_bloom.comp -o %OUT_DIR%\camera_bloom.comp.spv
+if %ERRORLEVEL% neq 0 goto :fail
+%GLSLC% %SHADER_DIR%\camera_bloom.vert -o %OUT_DIR%\camera_bloom.vert.spv
+if %ERRORLEVEL% neq 0 goto :fail
+%GLSLC% %SHADER_DIR%\camera_bloom.frag -o %OUT_DIR%\camera_bloom.frag.spv
 if %ERRORLEVEL% neq 0 goto :fail
 
 echo [TAA] taa.vert + taa.frag
@@ -163,11 +179,11 @@ if %ERRORLEVEL% neq 0 goto :fail
 if %ERRORLEVEL% neq 0 goto :fail
 
 echo [Cloud Phase1] real flower cloud compute passes (raymarch/reconstruct/composite)
-%GLSLC% -fshader-stage=compute %SHADER_DIR%\cloud\cloud_raymarching.glsl -o %OUT_DIR%\cloud_raymarching.comp.spv
+%GLSLC% -O -fshader-stage=compute %SHADER_DIR%\cloud\cloud_raymarching.glsl -o %OUT_DIR%\cloud_raymarching.comp.spv
 if %ERRORLEVEL% neq 0 goto :fail
-%GLSLC% -fshader-stage=compute %SHADER_DIR%\cloud\cloud_reconstruct.glsl -o %OUT_DIR%\cloud_reconstruct.comp.spv
+%GLSLC% -O -fshader-stage=compute %SHADER_DIR%\cloud\cloud_reconstruct.glsl -o %OUT_DIR%\cloud_reconstruct.comp.spv
 if %ERRORLEVEL% neq 0 goto :fail
-%GLSLC% -fshader-stage=compute %SHADER_DIR%\cloud\cloud_composite.glsl -o %OUT_DIR%\cloud_composite.comp.spv
+%GLSLC% -O -fshader-stage=compute %SHADER_DIR%\cloud\cloud_composite.glsl -o %OUT_DIR%\cloud_composite.comp.spv
 if %ERRORLEVEL% neq 0 goto :fail
 %GLSLC% -fshader-stage=compute %SHADER_DIR%\cloud\cloud_shadow.glsl -o %OUT_DIR%\cloud_shadow.comp.spv
 if %ERRORLEVEL% neq 0 goto :fail

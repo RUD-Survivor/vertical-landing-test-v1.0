@@ -12,31 +12,31 @@ inline void SkyTunerImGui(bool* p_open, SkyTuneParams& p) {
     if (!*p_open) return;
 
     ImGui::SetNextWindowSize(ImVec2(400, 560), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin("星空调参 (程序化)", p_open, ImGuiWindowFlags_None)) {
+    if (!ImGui::Begin("星空调参", p_open, ImGuiWindowFlags_None)) {
         ImGui::End();
         return;
     }
 
     ImGui::TextColored(ImVec4(0.75f, 0.85f, 1.0f, 1.0f), "曝光 / 背景");
-    ImGui::SliderFloat("Exposure", &p.exposure, 0.1f, 5.0f, "%.2f");
+    ImGui::Checkbox("银河观测（提高相机曝光）", &p.observationMode);
+    ImGui::TextDisabled("观测曝光作用于整个画面，受光地球会更亮。");
+    ImGui::SliderFloat("Radiance scale", &p.exposure, 0.0f, 4.0f, "%.2f");
     ImGui::SliderFloat("BgLevel", &p.bgLevel, 0.0f, 5.0f, "%.2f");
     ImGui::TextDisabled("Vibrancy 由场景昼夜自动控制，不在此调。");
 
     ImGui::Separator();
     ImGui::TextColored(ImVec4(1.0f, 0.95f, 0.7f, 1.0f), "恒星场");
-    ImGui::SliderFloat("StarDensity", &p.starDensity, 0.0f, 3.0f, "%.2f");
+    ImGui::SliderFloat("Catalog fraction", &p.starDensity, 0.0f, 1.0f, "%.2f");
     ImGui::SliderFloat("StarBrightness", &p.starBrightness, 0.0f, 3.0f, "%.2f");
-    ImGui::SliderFloat("StarSize", &p.starSize, 0.25f, 3.0f, "%.2f");
-    ImGui::SliderFloat("GlowStrength", &p.glowStrength, 0.0f, 3.0f, "%.2f");
+    ImGui::SliderFloat("PSF sigma (px)", &p.starSize, 0.4f, 2.0f, "%.2f");
+    ImGui::SliderFloat("Halo flux fraction", &p.glowStrength, 0.0f, 0.15f, "%.3f");
     ImGui::SliderFloat("ColorVariety", &p.colorVariety, 0.0f, 1.0f, "%.2f");
-    ImGui::TextDisabled("Density↑ = 更多暗星；Brightness/Size 管亮星与角径。");
+    ImGui::TextDisabled("HYG stars to magnitude 6.5; PSF size conserves flux.");
 
     ImGui::Separator();
     ImGui::TextColored(ImVec4(0.9f, 0.7f, 1.0f, 1.0f), "银河");
     ImGui::SliderFloat("MW Intensity", &p.milkyWayIntensity, 0.0f, 3.0f, "%.2f");
-    ImGui::SliderFloat("MW Width", &p.milkyWayWidth, 0.25f, 3.0f, "%.2f");
-    ImGui::SliderFloat("DustStrength", &p.dustStrength, 0.0f, 3.0f, "%.2f");
-    ImGui::SliderFloat("CoreBoost", &p.galacticCoreBoost, 0.0f, 4.0f, "%.2f");
+    ImGui::TextDisabled("NASA SVS / Gaia 银河背景；亮星独立渲染。");
     ImGui::SliderFloat("GalaxyYaw (rad)", &p.galaxyYaw, -3.1416f, 3.1416f, "%.2f");
     ImGui::SliderFloat("GalaxyPitch (rad)", &p.galaxyPitch, -1.57f, 1.57f, "%.2f");
     ImGui::TextDisabled("Yaw/Pitch 旋转银道相对世界坐标的取向。");

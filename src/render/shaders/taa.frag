@@ -28,7 +28,18 @@ layout(push_constant) uniform TAAParams {
 } pc;
 
 void main() {
-    vec4 current = texture(currentColor, inUV);
+    // Exact current texel: interpolation rounding can leak a solar HDR pixel
+    // into its dark neighbor even when the nominal UV is at a pixel center.
+    ivec2 currentPixel=ivec2(gl_FragCoord.xy);
+    vec4 current = texelFetch(currentColor, currentPixel, 0);
+    // Current-only really bypasses history and variance arithmetic. A mix with
+    // weight one still evaluates its history operand (0*NaN is not zero).
+    if(pc.blendFactor>=1.0) {
+        outColor=current;
+        if(pc.toneMap!=0)outColor.rgb=radiometryToneMap(outColor.rgb,pc.exposure);
+        if(pc.encodeSrgb!=0)outColor.rgb=radiometrySrgb(outColor.rgb);
+        return;
+    }
     vec2 texelSize = 1.0 / vec2(textureSize(currentColor, 0));
 
     // ============================================================
@@ -52,12 +63,18 @@ void main() {
     // 深度重投影 (Depth-based reprojection)
     // ============================================================
     float depth = texture(depthTex, inUV).r;
-    float reactive=texture(waterReactive,inUV).r;
+    float reactive=clamp(texture(waterReactive,inUV).r,0.0,1.0);
     bool farWater=reactive>0.0 && mats.waterSphere.w>0.0 &&
         length(mats.waterSphere.xyz)-mats.waterSphere.w>20.0;
     // Clear depth is exactly one. Orbit surfaces often exceed 0.9999;
     // water coverage also distinguishes a surface quantized to clear depth.
     bool isSkyPixel = depth >= 1.0 && !farWater;
+    if(isSkyPixel) {
+        outColor=current;
+        if(pc.toneMap!=0)outColor.rgb=radiometryToneMap(outColor.rgb,pc.exposure);
+        if(pc.encodeSrgb!=0)outColor.rgb=radiometrySrgb(outColor.rgb);
+        return;
+    }
 
     float blend     = pc.blendFactor;
     vec2  historyUV = inUV;
@@ -108,8 +125,11 @@ void main() {
             blend = 1.0;  // 无效重投影 → 全用当前帧
         }
     } else {
-        // 天空/大气像素：相机旋转使其快速移动，提高 blend 抑制鬼影
-        blend = max(blend, 0.4);
+        // Catalog PSFs are analytically pixel-integrated and Galactic noise is
+        // footprint-filtered. History resampling and variance clipping would
+        // change point-source flux and leave trails even with correct rotation
+        // reprojection. Clear-depth sky uses its already-filtered current frame.
+        blend=1.0;
     }
 
     // ============================================================

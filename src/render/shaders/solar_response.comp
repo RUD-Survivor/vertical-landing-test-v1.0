@@ -1,0 +1,26 @@
+#version 450
+#extension GL_GOOGLE_include_directive : enable
+#include "common/solar_optics.glsl"
+#include "common/solar_response.glsl"
+layout(local_size_x=8,local_size_y=8) in;
+layout(set=0,binding=2) uniform sampler2D apertureResponse;
+layout(rgba32f,set=0,binding=4) uniform writeonly image2D fieldResponse;
+vec3 pupil(vec2 angle){
+ vec2 uv=angle/.40+.5;
+ if(any(lessThan(uv,vec2(.5/1024.0)))||any(greaterThan(uv,vec2(1.0-.5/1024.0))))return vec3(0);
+ uv.y=(uv.y+pc.color.a-7)/3;
+ return textureLod(apertureResponse,uv,0).rgb;
+}
+void main(){
+ ivec2 pixel=ivec2(gl_GlobalInvocationID.xy),size=imageSize(fieldResponse);
+ if(any(greaterThanEqual(pixel,size)))return;
+ vec2 radial,tangent;float coma,astig;solarField(radial,tangent,coma,astig);
+ float extent=.20+1.5*coma+astig;
+ vec2 angle=((vec2(pixel)+.5)/vec2(size)-.5)*2*extent;
+ vec3 response;
+ if(coma<1e-10)response=pupil(angle);
+ else response=.375*(pupil(angle+radial*.5*coma+tangent*astig)+pupil(angle+radial*.5*coma-tangent*astig))
+              +.125*(pupil(angle-radial*1.5*coma+tangent*astig)+pupil(angle-radial*1.5*coma-tangent*astig));
+ if(any(equal(pixel,ivec2(0)))||any(equal(pixel,size-1)))response=vec3(0);
+ imageStore(fieldResponse,pixel,vec4(response,0));
+}

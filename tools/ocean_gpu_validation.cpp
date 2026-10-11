@@ -160,8 +160,21 @@ static void reportSkyIrradiance(VulkanContext& ctx,VkOceanSystem& ocean,const do
     vmaDestroyBuffer(ctx.allocator,buffer,allocation);
 }
 #include "ocean_orbit_validation.h"
+#include "sky_gpu_validation.h"
+#include "solar_gpu_validation.h"
+#include "camera_bloom_validation.h"
 int main(int argc,char** argv) {
-    bool orbitOnly=argc>1 && (std::string(argv[1])=="--orbit" || std::string(argv[1])=="--orbit-baseline");
+    int skyStage=argc>1 && std::string(argv[1]).find("--sky-stage")==0?std::atoi(argv[1]+11):0;
+    bool cloudResponse=argc>1 && std::string(argv[1])=="--cloud-response";
+    bool cloudDynamic=argc>1 && std::string(argv[1])=="--cloud-dynamic";
+    bool cloudOnly=cloudResponse || cloudDynamic || (argc>1 && (std::string(argv[1])=="--cloud-limb" || std::string(argv[1])=="--cloud-limb-baseline" || std::string(argv[1])=="--cloud-limb-odd"));
+    int solarStage=argc>1&&std::string(argv[1]).find("--solar-stage")==0?std::atoi(argv[1]+13):3;
+    bool solarShape=argc>1&&std::string(argv[1])=="--solar-shape";
+    if(solarShape)solarStage=10;
+    bool solarOnly=solarShape||(argc>1 && (std::string(argv[1])=="--solar-optics"||std::string(argv[1]).find("--solar-stage")==0));
+    bool bloomOnly=argc>1&&std::string(argv[1])=="--camera-bloom";
+    bool cameraChain=argc>1&&(std::string(argv[1])=="--camera-chain"||std::string(argv[1])=="--orbit-camera-chain");
+    bool orbitOnly=bloomOnly || solarOnly || skyStage>0 || cloudOnly || (argc>1 && (std::string(argv[1])=="--orbit" || std::string(argv[1])=="--orbit-camera-chain" || std::string(argv[1])=="--orbit-baseline"));
     if(!glfwInit())return 1;
     glfwWindowHint(GLFW_CLIENT_API,GLFW_NO_API);glfwWindowHint(GLFW_VISIBLE,GLFW_FALSE);
     GLFWwindow* window=glfwCreateWindow(256,144,"Ocean GPU validation",nullptr,nullptr);
@@ -177,7 +190,10 @@ int main(int argc,char** argv) {
         VkQueryPoolCreateInfo qi{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};qi.queryType=VK_QUERY_TYPE_TIMESTAMP;qi.queryCount=2;
         vkRequireSuccess(vkCreateQueryPool(ctx.device,&qi,nullptr,&queries),"query pool");
         AtmoTuneParams tune;
-        if(orbitOnly)validateOrbitOcean(ctx,renderer,taa,window,std::string(argv[1])=="--orbit");
+        if(bloomOnly)validateCameraBloom(ctx,renderer,taa);
+        else if(solarOnly)validateSolar(ctx,renderer,taa,window,solarStage,solarShape);
+        else if(skyStage)validateSky(ctx,renderer,taa,window,skyStage);
+        else if(orbitOnly)validateOrbitOcean(ctx,renderer,taa,window,std::string(argv[1])!="--orbit-baseline" && std::string(argv[1])!="--cloud-limb-baseline",cloudOnly,std::string(argv[1])=="--cloud-limb-odd",cameraChain,cloudResponse,cloudDynamic);
         const char* names[]={"deep-day","deep-night","dry","shallow","orbit","disabled","resize","shifted-origin",
             "shallow-lake","coast","sunset","underwater-surface","720p","full-chain","full-chain-history",
             "full-chain-steady1","full-chain-steady2","zero-scattering","south-pole","long-clock","cloud-resize","cloud-resume",
@@ -286,6 +302,8 @@ int main(int argc,char** argv) {
                 probes[1].capture(ctx,cmd,taa.colorImages[taa.currentIdx],size);
                 if(test==21)renderer.cloudSystem.renderPhase0(ctx,cmd,taa,snap,slot,false);
                 renderer.renderFlowerCloudAfterGeometry(ctx,cmd,taa,snap,slot);
+                if(cameraChain){renderer.cameraBloom.render(ctx,cmd,taa,snap,slot,size,scene.billboardQuadVbo);
+                    renderer.renderSolarOpticsAfterGeometry(ctx,cmd,taa,snap,slot,size);}
                 probes[2].capture(ctx,cmd,taa.colorImages[taa.currentIdx],size);
                 taa.beginResolvePass(cmd,ctx.swapImages[swapIndex],ctx.swapImageViews[swapIndex],size);
                 vkCmdSetViewport(cmd,0,1,&vp);vkCmdSetScissor(cmd,0,1,&rect);
@@ -383,7 +401,9 @@ int main(int argc,char** argv) {
         if(!orbitOnly)reportSkyIrradiance(ctx,ocean,grayReference);
         vkDestroyQueryPool(ctx.device,queries,nullptr);renderer.shutdown(ctx);taa.shutdown(ctx);desc.shutdown(ctx);ctx.shutdown();
         require(g_vkValidationErrorCount==0,"shutdown validation errors");
-        glfwDestroyWindow(window);glfwTerminate();puts("PASS: GPU optical water, masks, HDR, resize, night, poles, orbit, floating origin; zero validation errors");
+        glfwDestroyWindow(window);glfwTerminate();
+        if(cloudResponse)puts("PASS: cloud response assertions and direct empty-medium identity; zero Vulkan errors.");
+        else puts("PASS: GPU optical water, masks, HDR, resize, night, poles, orbit, floating origin; zero validation errors");
         return 0;
     } catch(const std::exception& error) {fprintf(stderr,"FAIL: %s\n",error.what());return 9;}
 }

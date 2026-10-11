@@ -31,8 +31,9 @@ void main()
     {
         uint bayerIndex = frameData.frameIndex.x % 16;
         ivec2 bayerOffset = ivec2(kBayerMatrix16[bayerIndex] % 4, kBayerMatrix16[bayerIndex] / 4);
-        fullResSize = texSize * 4;
-        fullResWorkPos = workPos * 4 + bayerOffset;
+        // The final 4x4 tile may be partial after an arbitrary window resize.
+        fullResSize = imageSize(imageCloudReconstructionTexture);
+        fullResWorkPos = min(workPos * 4 + bayerOffset, fullResSize - 1);
     }
     else
     {
@@ -42,12 +43,11 @@ void main()
 
     const vec2 uv = (vec2(fullResWorkPos) + vec2(0.5)) / vec2(fullResSize);
 
-    uvec2 offset = uvec2(vec2(0.754877669, 0.569840296) * (frameData.frameIndex.x) * uvec2(texSize));
-    uvec2 offsetId = workPos.xy + offset;
-    offsetId.x = offsetId.x % uint(texSize.x);
-    offsetId.y = offsetId.y % uint(texSize.y);
+    // Use the full pixel's spatial stratification in both sparse and fallback
+    // traces. Changing integration noise each frame makes an unchanged volume
+    // flicker and forces temporal reconstruction to hide it with long trails.
     float blueNoise2 = samplerBlueNoiseErrorDistribution_128x128_OptimizedFor_2d2d2d2d(
-        offsetId.x, offsetId.y, frameData.frameIndex.x % 256u, 0u);
+        uint(fullResWorkPos.x), uint(fullResWorkPos.y), 0u, 0u);
 
     vec4 clipSpace = vec4(uv.x * 2.0f - 1.0f, 1.0f - uv.y * 2.0f, 0.0, 1.0);
     vec4 viewPosH = frameData.camInvertProj * clipSpace;
@@ -56,7 +56,7 @@ void main()
 
     AtmosphereParameters atmosphere = getAtmosphereParameters(frameData);
 
-    float depth = 1.0f;
+    float depth = 1e20; // no-cloud sentinel; cloud depths are ray distances in km
     vec4 fogLighting = vec4(0.0);
     vec3 airTransmittance = vec3(1.0);
 

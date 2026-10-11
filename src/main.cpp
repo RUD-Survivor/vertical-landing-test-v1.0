@@ -368,13 +368,19 @@ static void renderVulkanFrame(GLFWwindow* window) {
             g_lastFlightSnap, g_frameSync.currentFrame);
     }
 
+    if(inFlight)g_vkR3D.cameraBloom.render(g_vkCtx,frame.commandBuffer,g_vkTAA,
+        g_lastFlightSnap,g_frameSync.currentFrame,g_vkCtx.swapExtent,g_vkR3D.scene.billboardQuadVbo);
+    if(inFlight)g_vkR3D.renderSolarOpticsAfterGeometry(g_vkCtx,frame.commandBuffer,g_vkTAA,
+        g_lastFlightSnap,g_frameSync.currentFrame,g_vkCtx.swapExtent);
+
     g_vkTAA.beginResolvePass(frame.commandBuffer,
         g_vkCtx.swapImages[imageIdx],
         g_vkCtx.swapImageViews[imageIdx],
         g_vkCtx.swapExtent);
     VkFrameRenderer::setViewportScissor(frame.commandBuffer, g_vkCtx.swapExtent);
-    float taaBlend = (++warmup < 60) ? 1.0f : 0.1f;
-    g_vkTAA.displayExposure = inFlight ? g_vkR3D.atmoTune.displayExposure : 1.f;
+    float taaBlend = (++warmup < 60 || (inFlight && !g_diagnosticNoCloud
+        && g_vkR3D.cloudSystem.enabled && g_vkR3D.cloudSystem.cameraCutThisFrame)) ? 1.0f : 0.1f;
+    g_vkTAA.displayExposure = inFlight ? (g_vkR3D.sky.tune.observationMode ? 128.f : g_vkR3D.atmoTune.displayExposure) : 1.f;
     g_vkTAA.applyToneMap = inFlight;
     g_vkTAA.drawResolve(frame.commandBuffer, taaBlend);
     g_vkTAA.endResolvePass(frame.commandBuffer, g_vkCtx.swapImages[imageIdx]);

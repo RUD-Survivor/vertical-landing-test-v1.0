@@ -854,12 +854,15 @@ else {
         float cz = vp.m[2]*sunWorld.x + vp.m[6]*sunWorld.y + vp.m[10]*sunWorld.z + vp.m[14];
         float cw = vp.m[3]*sunWorld.x + vp.m[7]*sunWorld.y + vp.m[11]*sunWorld.z + vp.m[15];
         if (cw > 0.0f && fabsf(cx/cw) < 3.5f && fabsf(cy/cw) < 3.5f) {
+            snap.sunInFront=true;
             snap.sunScreen[0] =  cx / cw;
             snap.sunScreen[1] = -(cy / cw); // Vulkan NDC Y 向下，取反映射到屏幕 UV
         } else {
             snap.sunScreen[0] = -3.0f; // 哨兵值：太阳在屏幕外/背后，镜头光晕隐藏
         }
-        float sunDist = (sunWorld - ctx.camEye_rel).length();
+        double sunDist = (sunWorld - ctx.camEye_rel).length();
+        snap.sunDistanceKm=sunDist;
+        snap.sunRadiusKm=ctx.sun_radius;
         // 严格物理平方反比，1AU 归一化=1.0：真实 1AU=149597870.7km（render 单位=km，
         // sun_px=sun_body.px*ws_d 已把米转成 km，见 render_context.h）。
         // 原来这里写的是 149597.87f（少了3个0=全局缩小1000倍）且只做线性衰减（没平方），

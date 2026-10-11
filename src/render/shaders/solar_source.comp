@@ -1,0 +1,50 @@
+#version 450
+#extension GL_GOOGLE_include_directive : enable
+#include "common/solar_optics.glsl"
+layout(local_size_x=16,local_size_y=16) in;
+layout(set=0,binding=0) uniform sampler2D solarScene;
+layout(set=0,binding=1) uniform sampler2D solarDepth;
+layout(std430,set=0,binding=3) buffer SourceCache {
+ vec4 bounds;vec4 transmission;vec4 weights[256];
+} cache;
+shared vec3 source16[256];
+shared vec3 source32[256];
+shared uint prefix[256];
+void main(){
+ uint index=gl_LocalInvocationIndex;
+ vec2 focal=vec2(pc.focalY/pc.aspect,pc.focalY);
+ float cosine=inversesqrt(1+dot(pc.sunScreenPos/focal,pc.sunScreenPos/focal));
+ float tangent=pc.sinRadius/sqrt(max(1e-8,1-pc.sinRadius*pc.sinRadius));
+ vec2 size=vec2(textureSize(solarScene,0));
+ vec2 radius=max(vec2(pc.focalY*tangent/(cosine*cosine))/vec2(pc.aspect,1)+1/size,10/size);
+ vec2 lo=max(pc.sunScreenPos-radius,vec2(-1)),hi=min(pc.sunScreenPos+radius,vec2(1));
+ bool valid=all(greaterThan(hi,lo));
+ vec2 cell=vec2(gl_LocalInvocationID.xy);
+ vec2 uv=mix(lo,hi,(cell+.5)/16.0)*.5+.5;
+ source16[index]=valid?solarObserved(solarScene,solarDepth,uv):vec3(0);
+ source32[index]=vec3(0);
+ if(valid)for(int y=0;y<2;++y)for(int x=0;x<2;++x){
+   vec2 sampleUV=mix(lo,hi,(cell*2+vec2(x,y)+.5)/32.0)*.5+.5;
+   source32[index]+=solarObserved(solarScene,solarDepth,sampleUV);
+ }
+ vec3 observed=source16[index];
+ barrier();
+ for(uint step=128;step>0;step>>=1){
+   if(index<step){source16[index]+=source16[index+step];source32[index]+=source32[index+step];}
+   barrier();
+ }
+ vec3 energy=source32[0]*max(hi.x-lo.x,0)*max(hi.y-lo.y,0)/1024.0;
+ // Normalize against the scalar radiometric flux. Keep the transported RGB
+ // spectrum here; removing it would require tinting every optical layer again.
+ vec3 transmission=clamp(energy/max(vec3(pc.sourceFlux),vec3(1e-20)),vec3(0),vec3(1));
+ // Stable row-order compaction removes empty source samples without changing
+ // summation order between frames. No atomics or time-varying sample pattern.
+ bool occupied=any(greaterThan(observed,vec3(0)));
+ prefix[index]=occupied?1:0;barrier();
+ for(uint offset=1;offset<256;offset<<=1){
+   uint previous=index>=offset?prefix[index-offset]:0;
+   barrier();prefix[index]+=previous;barrier();
+ }
+ if(occupied)cache.weights[prefix[index]-1]=vec4(observed/max(source16[0],vec3(1e-20))*transmission,float(index));
+ if(index==0){cache.bounds=vec4(lo,hi);cache.transmission=vec4(transmission,float(prefix[255]));}
+}

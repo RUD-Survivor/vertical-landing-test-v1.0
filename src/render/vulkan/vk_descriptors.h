@@ -133,7 +133,7 @@ struct LensFlarePushConstants {
     float offset[2];       //  8 bytes — offset 24
     float color[4];        // 16 bytes — offset 32
     int   shapeType;       //  4 bytes — offset 48
-    float _pad[3];         // 12 bytes — offset 52
+    float _pad[3];         // 12 bytes — focalY, sin(solar radius), source NDC flux
 };                         //            total: 64 bytes
 
 // -----------------------------------------------------------------------

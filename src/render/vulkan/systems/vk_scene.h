@@ -383,8 +383,11 @@ struct VkSceneSystem {
         auto mit = meshCache.find(meshId);
         if (mit == meshCache.end()) return;
 
-        // planet/mesh 使用相同 set0Layout+set1Layout，管线布局兼容，描述符集保持有效
+        // Descriptor layouts match mesh, but the push constant ranges differ
+        // (planet 120 bytes, mesh 128). Rebind using this pipeline's layout.
         pit->second.bind(cmd);
+        VkDescriptorSet sets[]={desc->set0[_frameIdx],nullTexSet};
+        vkCmdBindDescriptorSets(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,pit->second.layout,0,2,sets,0,nullptr);
         PlanetPushConstants pc{};
         memcpy(pc.model, model, 64);
         pc.baseColor[0]=r; pc.baseColor[1]=g; pc.baseColor[2]=b; pc.baseColor[3]=1.f;

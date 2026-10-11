@@ -8,7 +8,7 @@
 //                                  MultiScatter/SkyView LUT + Sky Irradiance cubemap
 //   1. cloud_raymarching  (comp) — 1/4 分辨率 ray march，输出 L+T / 深度 / 雾 / T_air
 //   2. cloud_reconstruct  (comp) — 时域重建到全分辨率（history ping-pong）
-//   3. cloud_composite    (comp) — 合成回 HDR：src×(T_air×T_cloud)+L'
+//   3. cloud_composite    (comp) — 合成回 HDR：src×T_cloud+L'
 //
 // 对应 shader: src/render/shaders/cloud/{cloud_common,cloud_raymarching,
 // cloud_reconstruct,cloud_composite}.glsl，descriptor 布局逐字段对应
@@ -237,6 +237,7 @@ struct VkCloudSystem {
 
     // ── 全分辨率 RT：颜色/深度/雾/T_air，ping-pong ×2（[frameSlot] 当前写，[1-frameSlot] history）
     VkImage fullColorImg[2]={}, fullDepthImg[2]={}, fullFogImg[2]={}, fullAirTImg[2]={};
+    bool cameraCutThisFrame = false; // also invalidate the final scene resolve
     VmaAllocation fullColorAlloc[2]={}, fullDepthAlloc[2]={}, fullFogAlloc[2]={}, fullAirTAlloc[2]={};
     VkImageView fullColorView[2]={}, fullDepthView[2]={}, fullFogView[2]={}, fullAirTView[2]={};
 
@@ -280,6 +281,10 @@ struct VkCloudSystem {
     // camViewProjPrev 的赋值处）。首帧 hasPrevViewProj=false，退化成"prev=current"。
     float prevCamViewProj[16] = {};
     bool hasPrevViewProj = false;
+    double prevCloudTime = 0;
+    float prevCloudCamera[3] = {}, prevCloudPlanet[3] = {};
+    bool prevCloudQuarterRes = true;
+    float prevCloudWind[4] = {},prevCloudShell[3] = {};
 
     // 上一帧的相机模式（0=Orbit 1=Chase 2=Panorama 3=Free，见 scene_snapshot.h::cameraMode）。
     // 用于探测"切镜头"（C 键切换 Orbit/Chase/Panorama/Free）——这类切换本身就是相机位置
@@ -349,6 +354,7 @@ struct VkCloudSystem {
                       const SceneSnapshot& snap, int frameSlot, bool drawClouds,
                       VkImageView shadowAtlasView = VK_NULL_HANDLE, VkBuffer cascadeInfoBuf = VK_NULL_HANDLE,
                       const GpuCascadeShadowConfig* cascadeCfg = nullptr) {
+        cameraCutThisFrame = false;
         // 任何一条提前返回都要让云影子系统同步失效，否则地形会拿着旧图集按新相机位置
         // 采样，出现错位残留的云影。
         if (!enabled)                        { hasPrevViewProj=false; cloudShadow.markInactive(); return; }
@@ -383,6 +389,7 @@ struct VkCloudSystem {
         int histSlot = 1 - slot;
 
         GpuPerFrameData fd = fillCloudFrameData(snap, *earth, cascadeCfg);
+        cameraCutThisFrame = fd.bCameraCut != 0;
         // 云日照透射实时算（realTimeTransmittance）；空气透视查 bakeFull 的 Inscatter ToPoint，
         // 不必每帧重烤 Transmittance/Inscatter/SkyView。binding 11/27 是活绑定：
         // 11=Inscatter（ToPoint AP），27=云环境 μs LUT（查 Inscatter 烘出）。
@@ -519,7 +526,22 @@ private:
         // 时一帧内相机实际挪动的距离足以让同一世界点在屏幕上明显移位，"假装没动"的
         // 重投影会把 history 采样到错误位置，叠加 16 帧 Bayer 轮转就是稀疏噪点花屏、
         // 高速时永远收敛不了的根因之一。改成真正缓存"上一次调用时的 camViewProj"。
-        const bool historyValid = hasPrevViewProj;
+        double historyDelta = snap.time-prevCloudTime;
+        bool historyValid = hasPrevViewProj && std::isfinite(historyDelta)
+            && historyDelta>=0 && historyDelta<=0.25 && prevCloudQuarterRes==tuneParams.useQuarterRes;
+        // A moved planet or floating-origin discontinuity changes the space in
+        // which the previous view matrix was expressed. Do not advect across it.
+        for(int c=0;c<3;++c){
+            if(earth.center[c]!=prevCloudPlanet[c] || std::abs(snap.camPos[c]-prevCloudCamera[c])>100.f)historyValid=false;
+            fd.cloudHistoryCameraPrev[c]=prevCloudCamera[c];
+            prevCloudCamera[c]=snap.camPos[c];prevCloudPlanet[c]=earth.center[c];
+        }
+        const float windState[4]={tuneParams.windDirX,tuneParams.windDirY,tuneParams.windDirZ,tuneParams.speed};
+        const float shellState[3]={earth.radius,tuneParams.minAltKm,tuneParams.maxAltKm};
+        for(int c=0;c<4;++c){if(windState[c]!=prevCloudWind[c])historyValid=false;prevCloudWind[c]=windState[c];}
+        for(int c=0;c<3;++c){if(shellState[c]!=prevCloudShell[c])historyValid=false;prevCloudShell[c]=shellState[c];}
+        fd.appTime[3]=historyValid?float(historyDelta):0.f;
+        prevCloudTime=snap.time;prevCloudQuarterRes=tuneParams.useQuarterRes;
         if (historyValid) {
             memcpy(fd.camViewProjPrev, prevCamViewProj, 64);
         } else {
@@ -716,7 +738,7 @@ private:
         ici.imageType = VK_IMAGE_TYPE_2D; ici.format = fmt; ici.extent = { ext.width, ext.height, 1 };
         ici.mipLevels = 1; ici.arrayLayers = 1; ici.samples = VK_SAMPLE_COUNT_1_BIT;
         ici.tiling = VK_IMAGE_TILING_OPTIMAL;
-        ici.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        ici.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
         ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         VmaAllocationCreateInfo aci{}; aci.usage = VMA_MEMORY_USAGE_GPU_ONLY;
         if (vmaCreateImage(ctx.allocator, &ici, &aci, &img, &alloc, nullptr) != VK_SUCCESS) return false;

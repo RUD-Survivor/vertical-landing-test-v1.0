@@ -1,0 +1,38 @@
+{
+  "format_version": 2,
+  "size": 1024,
+  "pupil_oversample": 4,
+  "angular_half_extent": 0.2,
+  "focal_mm": 35,
+  "f_number": 22,
+  "cell_quadrature": 16,
+  "tail_window_rad": [
+    0.12,
+    0.2
+  ],
+  "lens_profile_revision": 3,
+  "assumptions": "Fixed convex curved blades, spatial transmission, illustrative higher-order wavefront and 3.5% anisotropic wing mixture; field-dependent positive response integration at runtime. No measured lens prescription.",
+  "apertures": {
+    "7": {
+      "integrals": [
+        1.0000000012688413,
+        0.9999999992348187,
+        1.0000000011165668
+      ]
+    },
+    "8": {
+      "integrals": [
+        0.9999999997254718,
+        0.9999999996747012,
+        0.9999999940913552
+      ]
+    },
+    "9": {
+      "integrals": [
+        0.9999999999185699,
+        0.9999999937737329,
+        0.9999999985667319
+      ]
+    }
+  }
+}

@@ -163,6 +163,9 @@ struct SceneSnapshot {
     // ---- 太阳 ----
     float sunScreen[2];
     float sunIntensity;
+    double sunDistanceKm=0;
+    float sunRadiusKm=0;
+    bool sunInFront=false;
     float sunWorldPos[3];  // 镜头光晕遮挡测试用
     float aspect;
     float dayBlend;         // 大气 sunVisibility（含遮挡）
