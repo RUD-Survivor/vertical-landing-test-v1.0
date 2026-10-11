@@ -9,6 +9,81 @@ def f32(x):
 
 
 class CloudLimbNumerics(unittest.TestCase):
+    def test_mie_segment_cancellation_cannot_amplify_endpoint_energy(self):
+        # Endpoint subtraction is bounded by incoming radiance. Reconstructing
+        # a spectrum from a nearly cancelled red difference violates that bound.
+        endpoint0 = (1., 2., 4.)
+        mie0_red, mie1_red = .1, .0991
+        for epsilon in (1e-2, 1e-4, 1e-6, 1e-8, 1e-10, 1e-12):
+            endpoint1 = (1-epsilon, 1.5, 2.)
+            mie0 = [c*mie0_red/endpoint0[0] for c in endpoint0]
+            mie1 = [c*mie1_red/endpoint1[0] for c in endpoint1]
+            for t in (0., .5, 1.):
+                segment = [max(a-t*b, 0.) for a, b in zip(mie0, mie1)]
+                for a, b in zip(segment, mie0):
+                    self.assertTrue(math.isfinite(a))
+                    self.assertLessEqual(a, b)
+            if epsilon<=1e-6:
+                old_blue = (endpoint0[2]-endpoint1[2])*(mie0_red-mie1_red)/epsilon
+                self.assertGreater(old_blue, 1000.)
+        self.assertEqual([max(a-a, 0.) for a in mie0], [0., 0., 0.])
+
+    def test_continuous_pixel_coverage_reference(self):
+        # CDF of the sum of two independent uniform variables: exact area of
+        # a square cut by a line. A corner crossing must not jump by 1/4.
+        def area(gx, gy, distance):
+            a, b = abs(gx), abs(gy)
+            half = (a+b)/2
+            if distance>=half:
+                return 0.
+            if distance<=-half:
+                return 1.
+            if min(a, b)<1e-12:
+                return .5-distance/max(a, b)
+            s = half-abs(distance)
+            tail = (s*s-max(s-a, 0)**2-max(s-b, 0)**2)/(2*a*b)
+            return tail if distance>=0 else 1-tail
+        self.assertAlmostEqual(area(1, 1, .5), .125)
+        self.assertAlmostEqual(area(1, 1, -.5), .875)
+        self.assertAlmostEqual(area(1, 0, .25), .25)
+        for gx, gy in ((1, 1), (-1, 1), (2, .1), (0, 3)):
+            previous = 1.
+            for i in range(1001):
+                d = (i/1000-.5)*(abs(gx)+abs(gy))
+                current = area(gx, gy, d)
+                self.assertLessEqual(current, previous+1e-12)
+                self.assertLessEqual(abs(current-previous), .021)
+                self.assertAlmostEqual(current+area(gx, gy, -d), 1.)
+                previous = current
+
+    def test_motion_response_limits_spatial_lag(self):
+        # Compare a first-order estimator's measured ramp lag to its analytic
+        # solution. Motion response must stay below a quarter pixel of lag.
+        for motion in (0., 1e-5, .001, .01, .015625, .05, .1, .25, 1., 30.):
+            for noise_floor in (1/16, 1/32):
+                alpha = min(1., max(noise_floor, 4*motion))
+                lag = motion*(1-alpha)/alpha
+                self.assertLess(lag, .25)
+                estimate = 0.
+                for frame in range(1000):
+                    exact = frame*motion
+                    estimate = (1-alpha)*estimate + alpha*exact
+                self.assertAlmostEqual(exact-estimate, lag, places=8)
+
+    def test_factored_shell_intersection_against_double_reference(self):
+        for camera in (6771., 8371., 16371., 106371.):
+            radius = 6391.
+            for radial_offset in (-10., -1., -.1, .1, 1., 10.):
+                impact = radius + radial_offset
+                theta = math.asin(impact/camera)
+                float_impact = f32(camera*f32(math.sin(theta)))
+                h = f32(f32(radius-float_impact)*f32(radius+float_impact))
+                self.assertEqual(h>=0, radial_offset<0)
+                if h>=0:
+                    reference = camera*math.cos(theta)-math.sqrt((radius-impact)*(radius+impact))
+                    root = f32(f32(camera*f32(math.cos(theta)))-f32(math.sqrt(h)))
+                    self.assertLess(abs(root-reference), .1)
+
     def test_extinction_centroid_converges_to_beer_reference(self):
         # Analytic conditional event position for a uniform absorbing slab.
         # Vacuum before/after the slab must not move its optical centroid.

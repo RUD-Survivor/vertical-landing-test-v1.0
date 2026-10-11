@@ -117,9 +117,14 @@ CloudAirPerspective cloudAirPerspectiveToPoint(
         inInscatterLut, linearClampEdgeSampler, atmosphere, r_p, mu_p, mu_s_p, nu, hitGround);
 
     vec3 diffR = max(s0.scattering - T * s1.scattering, vec3(0.0));
-    float diffMieRed = max(s0.mieRed - T.r * s1.mieRed, 0.0);
-    vec3 diffMie = cloudApExtrapolateSingleMie(
-        diffR, diffMieRed, atmosphere.rayleighScattering, atmosphere.mieScattering);
+    // Reconstruct the compressed Mie spectra at each endpoint BEFORE taking
+    // the segment difference. Extrapolating from diffR divides by a red channel
+    // that can cancel almost to zero, amplifying finite G/B into huge fireflies.
+    vec3 mie0=cloudApExtrapolateSingleMie(s0.scattering,s0.mieRed,
+        atmosphere.rayleighScattering,atmosphere.mieScattering);
+    vec3 mie1=cloudApExtrapolateSingleMie(s1.scattering,s1.mieRed,
+        atmosphere.rayleighScattering,atmosphere.mieScattering);
+    vec3 diffMie=max(mie0-T*mie1,vec3(0));
 
     ap.scattered = cloudApApplyPhases(diffR, diffMie, nu, mu_s, atmosphere.miePhaseG);
     ap.transmittance = T;

@@ -167,7 +167,8 @@ int main(int argc,char** argv) {
     int skyStage=argc>1 && std::string(argv[1]).find("--sky-stage")==0?std::atoi(argv[1]+11):0;
     bool cloudResponse=argc>1 && std::string(argv[1])=="--cloud-response";
     bool cloudDynamic=argc>1 && std::string(argv[1])=="--cloud-dynamic";
-    bool cloudOnly=cloudResponse || cloudDynamic || (argc>1 && (std::string(argv[1])=="--cloud-limb" || std::string(argv[1])=="--cloud-limb-baseline" || std::string(argv[1])=="--cloud-limb-odd"));
+    bool cloudDiagnostic=argc>1 && std::string(argv[1])=="--cloud-diagnostic";
+    bool cloudOnly=cloudResponse || cloudDynamic || cloudDiagnostic || (argc>1 && (std::string(argv[1])=="--cloud-limb" || std::string(argv[1])=="--cloud-limb-baseline" || std::string(argv[1])=="--cloud-limb-odd"));
     int solarStage=argc>1&&std::string(argv[1]).find("--solar-stage")==0?std::atoi(argv[1]+13):3;
     bool solarShape=argc>1&&std::string(argv[1])=="--solar-shape";
     if(solarShape)solarStage=10;
@@ -193,7 +194,7 @@ int main(int argc,char** argv) {
         if(bloomOnly)validateCameraBloom(ctx,renderer,taa);
         else if(solarOnly)validateSolar(ctx,renderer,taa,window,solarStage,solarShape);
         else if(skyStage)validateSky(ctx,renderer,taa,window,skyStage);
-        else if(orbitOnly)validateOrbitOcean(ctx,renderer,taa,window,std::string(argv[1])!="--orbit-baseline" && std::string(argv[1])!="--cloud-limb-baseline",cloudOnly,std::string(argv[1])=="--cloud-limb-odd",cameraChain,cloudResponse,cloudDynamic);
+        else if(orbitOnly)validateOrbitOcean(ctx,renderer,taa,window,!cloudDiagnostic && std::string(argv[1])!="--orbit-baseline" && std::string(argv[1])!="--cloud-limb-baseline",cloudOnly,cloudDiagnostic || std::string(argv[1])=="--cloud-limb-odd",cameraChain,cloudResponse,cloudDynamic,cloudDiagnostic);
         const char* names[]={"deep-day","deep-night","dry","shallow","orbit","disabled","resize","shifted-origin",
             "shallow-lake","coast","sunset","underwater-surface","720p","full-chain","full-chain-history",
             "full-chain-steady1","full-chain-steady2","zero-scattering","south-pole","long-clock","cloud-resize","cloud-resume",
@@ -403,6 +404,7 @@ int main(int argc,char** argv) {
         require(g_vkValidationErrorCount==0,"shutdown validation errors");
         glfwDestroyWindow(window);glfwTerminate();
         if(cloudResponse)puts("PASS: cloud response assertions and direct empty-medium identity; zero Vulkan errors.");
+        else if(cloudDiagnostic)puts("DIAGNOSTIC COMPLETE: integration/history readback, not quality acceptance.");
         else puts("PASS: GPU optical water, masks, HDR, resize, night, poles, orbit, floating origin; zero validation errors");
         return 0;
     } catch(const std::exception& error) {fprintf(stderr,"FAIL: %s\n",error.what());return 9;}

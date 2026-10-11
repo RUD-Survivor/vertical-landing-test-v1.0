@@ -285,6 +285,7 @@ struct VkCloudSystem {
     float prevCloudCamera[3] = {}, prevCloudPlanet[3] = {};
     bool prevCloudQuarterRes = true;
     float prevCloudWind[4] = {},prevCloudShell[3] = {};
+    float prevCloudMedium[4] = {};
 
     // 上一帧的相机模式（0=Orbit 1=Chase 2=Panorama 3=Free，见 scene_snapshot.h::cameraMode）。
     // 用于探测"切镜头"（C 键切换 Orbit/Chase/Panorama/Free）——这类切换本身就是相机位置
@@ -540,6 +541,9 @@ private:
         const float shellState[3]={earth.radius,tuneParams.minAltKm,tuneParams.maxAltKm};
         for(int c=0;c<4;++c){if(windState[c]!=prevCloudWind[c])historyValid=false;prevCloudWind[c]=windState[c];}
         for(int c=0;c<3;++c){if(shellState[c]!=prevCloudShell[c])historyValid=false;prevCloudShell[c]=shellState[c];}
+        const float mediumState[4]={tuneParams.density,tuneParams.coverage,
+            tuneParams.hiCloudEnabled?tuneParams.hiCloudCoverage:0.f,tuneParams.hiCloudDensity};
+        for(int c=0;c<4;++c){if(mediumState[c]!=prevCloudMedium[c])historyValid=false;prevCloudMedium[c]=mediumState[c];}
         fd.appTime[3]=historyValid?float(historyDelta):0.f;
         prevCloudTime=snap.time;prevCloudQuarterRes=tuneParams.useQuarterRes;
         if (historyValid) {

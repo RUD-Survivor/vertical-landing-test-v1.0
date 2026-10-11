@@ -4,7 +4,7 @@
 // Multi-frame orbit regression using the production geometry, ocean, atmosphere
 // and TAA passes. Constant synthetic sea isolates depth/BRDF instability from
 // legitimate shoreline motion and weather evolution.
-static void validateOrbitOcean(VulkanContext& ctx,VkRenderer3D& renderer,VkTAA& taa,GLFWwindow* window,bool enforce,bool cloudValidation=false,bool oddSize=false,bool cameraChain=false,bool cloudResponse=false,bool cloudDynamic=false) {
+static void validateOrbitOcean(VulkanContext& ctx,VkRenderer3D& renderer,VkTAA& taa,GLFWwindow* window,bool enforce,bool cloudValidation=false,bool oddSize=false,bool cameraChain=false,bool cloudResponse=false,bool cloudDynamic=false,bool cloudDiagnostic=false) {
     auto& scene=renderer.scene;auto& ocean=renderer.oceanSystem;
     VkExtent2D size=cloudValidation?VkExtent2D{640,360}:VkExtent2D{1280,720};size_t pixels=size_t(size.width)*size.height;
     if(oddSize){size={641,363};pixels=size_t(size.width)*size.height;}
@@ -24,7 +24,9 @@ static void validateOrbitOcean(VulkanContext& ctx,VkRenderer3D& renderer,VkTAA& 
     uint32_t indices[]={0,1,2,0,2,3};
     require(scene.registerMesh(ctx,"orbit-occluder",vertices,sizeof(vertices),indices,6),"orbit foreground mesh");
     struct Rig {const char* name;double altitude,nearPlane;float bed;bool moving;bool occluder=false,glint=false,cloud=false,full=false;double fov=1.;bool wind=false,timeJump=false;};
-    const std::vector<Rig> rigs=cloudDynamic?std::vector<Rig>{
+    const std::vector<Rig> rigs=cloudDiagnostic?std::vector<Rig>{
+        {"cloud-quarter-400km",400,.001,.3f,true,false,false,true,false,2.6}
+    }:cloudDynamic?std::vector<Rig>{
         {"cloud-dynamic-camera-quarter",400,.001,.3f,true,false,false,true,false,2.6},
         {"cloud-dynamic-camera-full",400,.001,.3f,true,false,false,true,true,2.6},
         {"cloud-dynamic-wind-quarter",400,.001,.3f,false,false,false,true,false,2.6,true},
@@ -56,6 +58,7 @@ static void validateOrbitOcean(VulkanContext& ctx,VkRenderer3D& renderer,VkTAA& 
         if(cloudValidation){require(renderer.cloudSystem.recreate(ctx,size),"cloud rig history reset");
             renderer.cloudSystem.tuneParams=FlowerCloudTuneParams{};
             renderer.cloudSystem.tuneParams.speed=rig.wind?.15f:0.f;
+            if(cloudDiagnostic)renderer.cloudSystem.tuneParams.debugMode=99;
             if(cloudResponse)renderer.cloudSystem.tuneParams.hiCloudEnabled=false;
             if(std::string(rig.name)=="cloud-empty"){
                 renderer.cloudSystem.tuneParams.density=0;
@@ -139,12 +142,20 @@ static void validateOrbitOcean(VulkanContext& ctx,VkRenderer3D& renderer,VkTAA& 
             if(enforce && rig.timeJump && (frame==16 || frame==17 || frame==32 || frame==33))
                 require(renderer.cloudSystem.cameraCutThisFrame,"time discontinuity reused cloud history");
             if(cloudValidation)vkCmdWriteTimestamp(cmd,VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,cloudQueries,1);
-            HdrProbe cloudProbe;
+            HdrProbe cloudProbe,coverageProbe,traceProbe;
             if(cloudValidation && rig.cloud){
                 VkImage image=renderer.cloudSystem.fullColorImg[slot];
                 transitionImage(cmd,image,VK_IMAGE_LAYOUT_GENERAL,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
                 cloudProbe.capture(ctx,cmd,image,size);
                 transitionImage(cmd,image,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,VK_IMAGE_LAYOUT_GENERAL);
+                if(!rig.full){VkImage coverageImage=renderer.cloudSystem.fullAirTImg[slot];
+                    transitionImage(cmd,coverageImage,VK_IMAGE_LAYOUT_GENERAL,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                    coverageProbe.capture(ctx,cmd,coverageImage,size);
+                    transitionImage(cmd,coverageImage,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,VK_IMAGE_LAYOUT_GENERAL);}
+                if(cloudDiagnostic){VkImage traceImage=renderer.cloudSystem.fullFogImg[slot];
+                    transitionImage(cmd,traceImage,VK_IMAGE_LAYOUT_GENERAL,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                    traceProbe.capture(ctx,cmd,traceImage,size);
+                    transitionImage(cmd,traceImage,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,VK_IMAGE_LAYOUT_GENERAL);}
             }
             if(cameraChain){renderer.cameraBloom.render(ctx,cmd,taa,snap,slot,size,scene.billboardQuadVbo);
                 renderer.renderSolarOpticsAfterGeometry(ctx,cmd,taa,snap,slot,size);}
@@ -176,6 +187,14 @@ static void validateOrbitOcean(VulkanContext& ctx,VkRenderer3D& renderer,VkTAA& 
             if(cloudValidation){
                 if(rig.cloud)vkRequireSuccess(vmaInvalidateAllocation(ctx.allocator,cloudProbe.allocation,0,VK_WHOLE_SIZE),"cloud invalidate");
                 auto cloud=static_cast<const uint16_t*>(cloudProbe.mapped);
+                if(cloudDiagnostic){vkRequireSuccess(vmaInvalidateAllocation(ctx.allocator,traceProbe.allocation,0,VK_WHOLE_SIZE),"trace invalidate");
+                    auto trace=static_cast<const uint16_t*>(traceProbe.mapped);size_t i=165*size.width+181;
+                    printf("CLOUD_TRACE frame=%d inputL=%.6f historyL=%.6f motion=%.6f outputRGB=(%.6f,%.6f,%.6f) T=%.6f\n",
+                        frame,halfFloat(trace[4*i]),halfFloat(trace[4*i+1]),halfFloat(trace[4*i+2]),halfFloat(cloud[4*i]),halfFloat(cloud[4*i+1]),halfFloat(cloud[4*i+2]),halfFloat(cloud[4*i+3]));
+                    vmaDestroyBuffer(ctx.allocator,traceProbe.buffer,traceProbe.allocation);}
+                const uint16_t* coverage=nullptr;double coverageMaxError=0;
+                if(rig.cloud && !rig.full){vkRequireSuccess(vmaInvalidateAllocation(ctx.allocator,coverageProbe.allocation,0,VK_WHOLE_SIZE),"coverage invalidate");
+                    coverage=static_cast<const uint16_t*>(coverageProbe.mapped);}
                 if(cloudResponse){double opacity=0,maxOpacity=0,maxRadiance=0;size_t retained=0,changed=0;
                     for(size_t i=0;i<pixels;++i){double a=1-halfFloat(cloud[4*i+3]);opacity+=a;maxOpacity=std::max(maxOpacity,a);
                         if(a>.001)++retained;
@@ -203,6 +222,23 @@ static void validateOrbitOcean(VulkanContext& ctx,VkRenderer3D& renderer,VkTAA& 
                     // lookAt(down Y, up Z) has camera-right = negative world X.
                     double norm=std::sqrt(1+rx*rx+rz*rz),along=(camR+x*rx)/norm;
                     double impact=std::sqrt(std::max(0.,camR*camR+x*x-along*along));
+                    if(coverage){
+                        // convertToAtmosphereUnit includes the engine's 0.5 km
+                        // radial atmosphere-camera bias. Reference that same origin.
+                        double radialScale=1+.5/std::sqrt(camR*camR+x*x),oy=camR*radialScale,ox=x*radialScale;
+                        auto impactAt=[&](double a,double b){double z=(oy+ox*a)/std::sqrt(1+a*a+b*b);return std::sqrt(std::max(0.,oy*oy+ox*ox-z*z));};
+                        double referenceImpact=impactAt(rx,rz);
+                        double a=std::abs(impactAt(rx+2*snap.aspect*halfFov/size.width,rz)-referenceImpact);
+                        double b=std::abs(impactAt(rx,rz-2*halfFov/size.height)-referenceImpact);
+                        double h=(a+b)*.5,d=referenceImpact-6391,expected;
+                        if(d>=h)expected=0;else if(d<=-h)expected=1;
+                        else if(std::min(a,b)<1e-9)expected=.5-d/std::max(a,b);
+                        else {double s=h-std::abs(d),sa=std::max(0.,s-a),sb=std::max(0.,s-b);
+                            double tail=(s*s-sa*sa-sb*sb)/(2*a*b);expected=d>=0?tail:1-tail;}
+                        double measured=halfFloat(coverage[4*i+3]);
+                        require(std::isfinite(measured) && measured>=0 && measured<=1,"invalid geometric cloud coverage");
+                        coverageMaxError=std::max(coverageMaxError,std::abs(measured-expected));
+                    }
                     if(cloud){for(int c=0;c<4;++c)require(std::isfinite(halfFloat(cloud[4*i+c])),"nonfinite cloud RT");
                         cloudT[i]=halfFloat(cloud[4*i+3]);require(cloudT[i]>=0 && cloudT[i]<=1,"cloud T outside [0,1]");}
                     if(impact>6391+pixelKm){++outside;if(cloudT[i]<.999)++ghost;}
@@ -221,6 +257,9 @@ static void validateOrbitOcean(VulkanContext& ctx,VkRenderer3D& renderer,VkTAA& 
                     double impact=impactAt(rx,rz),foot=std::abs(impactAt(rx+2*snap.aspect*halfFov/size.width,rz)-impact)+std::abs(impactAt(rx,rz+2*halfFov/size.height)-impact);
                     printf("CLOUD_OUTLIER pixel=(%zu,%zu) impact=%.3f footprint=%.3f limb=%d T=%.6f prevT=%.6f\n",i%size.width,i/size.width,impact,foot,int(std::min(std::abs(impact-6391),std::abs(impact-6372))<4*foot),cloudT[i],previousCloudT[i]);}
                 previousCloudT.swap(cloudT);
+                if(coverage){printf("CLOUD_COVERAGE %s frame=%d maxAreaError=%.8f\n",rig.name,frame,coverageMaxError);
+                    if(enforce)require(coverageMaxError<.01,"GPU cloud coverage differs from analytic area reference");
+                    vmaDestroyBuffer(ctx.allocator,coverageProbe.buffer,coverageProbe.allocation);}
                 if(cloudDynamic && !rig.timeJump){
                     int sample=frame==31?0:frame==32?1:frame==48?2:frame==63?3:-1;
                     if(sample>=0){auto& expected=dynamicReference[rig.wind?1:0][sample];

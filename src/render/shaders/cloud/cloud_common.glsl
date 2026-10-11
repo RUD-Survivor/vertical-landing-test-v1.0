@@ -858,11 +858,11 @@ inout vec3 airTransmittance)
         // Average ray hit pos to evaluate air perspective and height fog.
         vec3 rayHitPos=vec3(0.0);//在这里声明命中位置
         // rayHitPos：沿视线 march 的「透射率加权平均命中位置」(km，大气空间坐标)。
-        // 主循环里每步做 rayHitPos += samplePos * transmittance，越靠前、越亮的采样权重越大。
+        // Weight each nonempty step by its visible extinction T*(1-Tstep).
         // march 结束后除以 rayHitPosWeight，得到云层的代表深度，供 cloudZ 与空气透视(ToPoint)使用。
 
         float rayHitPosWeight=0.0;
-        // rayHitPosWeight：与 rayHitPos 配套的权重累加和（各步 transmittance 之和）。
+        // Sum of visible extinction contributions; vacuum has zero weight.
         // 若全程无云或 transmittance 为 0，则权重为 0，后面跳过空气透视。
 
         //Second evaluate transmittance due to participatingMedia
@@ -1291,7 +1291,7 @@ inout vec3 airTransmittance)
         {
             // Get average hit pos.
             rayHitPos/=rayHitPosWeight;
-            // rayHitPos：透射率加权平均云位置 (km，大气空间，行星中心为原点)。= Σ(samplePos×T) / Σ(T)。
+            // rayHitPos is the visible-extinction centroid in planetary km.
             // 代表「这朵云在 3D 里大概在哪」，不是第一个/最后一个采样点。
 
             // Keep representative ray distance in km, independently of D32.
@@ -1637,8 +1637,9 @@ inout vec3 airTransmittance)
     normalizedHeight ← (sampleHeight - cloudStart) / cloudThickness
     stepCloudDensity ← cloudMap(samplePosMeter, normalizedHeight)
 
-    rayHitPos       += samplePos × transmittance      // 加权命中位置
-    rayHitPosWeight += transmittance
+    hitWeight      ← transmittance × (1-stepTransmittance)
+    rayHitPos       += samplePos × hitWeight         // 可见消光中心
+    rayHitPosWeight += hitWeight
 
     if stepCloudDensity > 0:
       opticalDepth ← density × stepT × 1000

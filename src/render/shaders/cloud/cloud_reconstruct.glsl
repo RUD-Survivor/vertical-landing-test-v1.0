@@ -9,6 +9,33 @@ vec3 cloudViewRay(vec2 uv) {
     vec4 p=frameData.camInvertProj*vec4(uv.x*2.0-1.0,1.0-uv.y*2.0,0.0,1.0);
     return normalize((frameData.camInvertView*vec4(p.xyz,0.0)).xyz);
 }
+// Clip the pixel square against the locally linear shell silhouette. Unlike
+// counting four hit rays, area and centroid vary continuously at a corner.
+float cloudPixelCoverage(vec2 gradient,float distance,out vec2 centerPoint) {
+    centerPoint=vec2(0);
+    float halfSpan=0.5*(abs(gradient.x)+abs(gradient.y));
+    if(distance<=-halfSpan)return 1.0;
+    if(distance>=halfSpan)return 0.0;
+    vec2 corners[4]=vec2[4](vec2(-0.5,-0.5),vec2(0.5,-0.5),vec2(0.5,0.5),vec2(-0.5,0.5));
+    vec2 polygon[8];int count=0;
+    vec2 a=corners[3];float da=dot(gradient,a)+distance;
+    for(int i=0;i<4;++i){
+        vec2 b=corners[i];float db=dot(gradient,b)+distance;
+        if((da<=0.0)!=(db<=0.0))polygon[count++]=mix(a,b,da/(da-db));
+        if(db<=0.0)polygon[count++]=b;
+        a=b;da=db;
+    }
+    if(count<3)return 0.0;
+    float area2=0.0;vec2 moment=vec2(0);
+    for(int i=0;i<count;++i){
+        a=polygon[i];vec2 b=polygon[(i+1)%count];
+        float cross2=a.x*b.y-a.y*b.x;
+        area2+=cross2;moment+=(a+b)*cross2;
+    }
+    if(area2<=1e-6)return 0.0;
+    centerPoint=moment/(3.0*area2);
+    return clamp(area2*0.5,0.0,1.0);
+}
 void main() {
     ivec2 size=imageSize(imageCloudReconstructionTexture);
     ivec2 pixel=ivec2(gl_GlobalInvocationID.xy);
@@ -36,6 +63,8 @@ void main() {
     ivec2 offset=ivec2(kBayerMatrix16[bayer]%4,kBayerMatrix16[bayer]/4);
     bool evaluated=all(equal(pixel%4,offset));
     bool geometricCoverage=true;
+    float pixelCoverage=outside?0.0:1.0;
+    vec3 traceDiagnostic=vec3(0);
     if(!outside) {
         color=texelFetch(inCloudRenderTexture,pixel/4,0);
         fog=texelFetch(inCloudFogRenderTexture,pixel/4,0);
@@ -47,14 +76,18 @@ void main() {
             // the surrounding Bayer-discontinuity band needs one full ray.
             color=vec4(0);fog=vec4(0);airT=vec4(0);
             float distanceSum=0.0,hitCount=0.0;
-            geometricCoverage=false;
+            vec2 coverageCentroid;
+            pixelCoverage=dot(origin,ray)<0.0?cloudPixelCoverage(
+                vec2(impactX-impact,impactY-impact),impact-outer,coverageCentroid):0.0;
+            geometricCoverage=pixelCoverage>0.0;
+            float geometryHits=0.0;
             int samples=min(abs(impact-outer),abs(impact-inner))<footprint?4:1;
             float sampleWeight=1.0/float(samples);
             for(int s=0;s<samples;++s) {
                 vec2 sub=samples==4?(vec2(s%2,s/2)+0.5)*0.5:vec2(0.5);
                 vec2 sampleUv=(vec2(pixel)+sub)/vec2(size);
                 vec3 subRay=cloudViewRay(sampleUv);
-                geometricCoverage=geometricCoverage || (dot(origin,subRay)<0.0 && length(cross(origin,subRay))<=outer);
+                if(dot(origin,subRay)<0.0 && length(cross(origin,subRay))<=outer)geometryHits+=1.0;
                 float sampleDistance=1e20;
                 vec4 sampleFog=vec4(0);vec3 sampleAir=vec3(1);
                 float noise=samplerBlueNoiseErrorDistribution_128x128_OptimizedFor_2d2d2d2d(
@@ -65,9 +98,25 @@ void main() {
                 if(sampleDistance<1e19){distanceSum+=sampleDistance;hitCount+=1.0;}
             }
             distanceKm=hitCount>0.0?distanceSum/hitCount:1e20;
+            if(geometryHits>0.0){
+                float scale=pixelCoverage/(geometryHits*sampleWeight);
+                color.rgb*=scale;color.a=1.0-clamp((1.0-color.a)*scale,0.0,1.0);
+            } else if(pixelCoverage>0.0){
+                // A narrow corner sliver can miss all stratified rays. Trace
+                // its centroid rather than injecting or retaining a whole pixel.
+                vec2 sampleUv=(vec2(pixel)+0.5+coverageCentroid)/vec2(size);
+                vec3 sampleRay=cloudViewRay(sampleUv),currentAir=vec3(1);
+                float noise=samplerBlueNoiseErrorDistribution_128x128_OptimizedFor_2d2d2d2d(
+                    uint(pixel.x),uint(pixel.y),0u,0u);
+                color=cloudColorCompute(atmosphere,sampleUv,noise,distanceKm,pixel,sampleRay,
+                    frameData.sky.atmosphereConfig.cloudGodRay!=0,fog,noise,currentAir);
+                color.rgb*=pixelCoverage;color.a=1.0-(1.0-color.a)*pixelCoverage;
+                airT=vec4(currentAir,1);
+            } else {color=vec4(0,0,0,1);distanceKm=1e20;}
             evaluated=true;
         }
         // Finite shell anchor avoids inversion of quantized far depth (w=0).
+        traceDiagnostic.x=dot(color.rgb,vec3(0.2126,0.7152,0.0722));
         // Depth RTs contain ray distances in km, including a no-hit sentinel.
         float anchor=distanceKm<1e19?distanceKm:max(-dot(origin,ray),0.0);
         vec3 camera=(frameData.camInvertView*vec4(0,0,0,1)).xyz;
@@ -87,6 +136,18 @@ void main() {
             vec4 oldAir=texture(sampler2D(inCloudAirTReconstructionTextureHistory,linearClampEdgeSampler),previousUv);
             float oldDistance=texture(sampler2D(inCloudDepthReconstructionTextureHistory,pointClampEdgeSampler),previousUv).r;
             float motionPixels=length((previousUv-uv)*vec2(size));
+            traceDiagnostic.y=dot(history.rgb,vec3(0.2126,0.7152,0.0722));traceDiagnostic.z=motionPixels;
+            if(limb){
+                if(oldAir.a<=1e-6)valid=false;
+                else {
+                    // History L and extinction are premultiplied by coverage.
+                    // Resize that coverage before accumulation, so a disappearing
+                    // pixel sliver never leaves an old opaque cloud behind.
+                    float coverageScale=pixelCoverage/oldAir.a;
+                    history.rgb*=coverageScale;
+                    history.a=1.0-clamp((1.0-history.a)*coverageScale,0.0,1.0);
+                }
+            }
             float expectedDistance=length(previousPoint-frameData.cloudHistoryCameraPrev.xyz);
             float depthTolerance=max(2.0,2.0*anchor/float(size.y));
             if(evaluated && !limb && ((distanceKm<1e19)!=(oldDistance<1e19)
@@ -108,8 +169,11 @@ void main() {
                     if(sampleDepth<1e19){nearDepth=min(nearDepth,sampleDepth);farDepth=max(farDepth,sampleDepth);}
                 }
                 vec4 tolerance=vec4(max(vec3(0.02),(hi.rgb-lo.rgb)*0.05),0.005);
+                // A sparse pixel can be sixteen frames old. Bound its motion
+                // over the whole refresh period, not just over one frame.
+                float sparseMotionBudget=0.25/float(max(frameData.jitterPeriod,1u));
                 if(any(lessThan(history,lo-tolerance)) || any(greaterThan(history,hi+tolerance))
-                    || motionPixels>0.25)valid=false;
+                    || motionPixels>sparseMotionBudget)valid=false;
                 if(oldDistance<1e19 && (nearDepth>=1e19
                     || oldDistance<nearDepth-depthTolerance || oldDistance>farDepth+depthTolerance))valid=false;
             }
@@ -152,7 +216,12 @@ void main() {
     if(distanceKm>=1e19 && color.a<0.999 && dot(origin,ray)<0.0 && impact<outer)
         distanceKm=max(-dot(origin,ray)-sqrt(max(outer*outer-impact*impact,0.0)),0.0);
     imageStore(imageCloudReconstructionTexture,pixel,color);
+    if(frameData.sky.atmosphereConfig.cloudSunLitMapOctave==99 && frameData.sky.atmosphereConfig.cloudGodRay==0)
+        fog=vec4(traceDiagnostic,-1.0); // developer-only readback, no fog composition
     imageStore(imageCloudFogReconstructionTexture,pixel,fog);
+    // RGB remains atmospheric transmittance; alpha carries analytic geometric
+    // coverage for the next reconstruction, not a temporally averaged value.
+    airT.a=pixelCoverage;
     imageStore(imageCloudAirTReconstructionTexture,pixel,airT);
     imageStore(imageCloudDepthReconstructionTexture,pixel,vec4(distanceKm));
 }
