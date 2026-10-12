@@ -3,6 +3,9 @@
 #include "tectonic_sim.h"
 #include "climate_sim.h"
 #include "hydro_sim.h"
+#include "terrain_height.h"
+#include <cstdio>
+#include <limits>
 #include <vector>
 #include <memory>
 #include <cmath>
@@ -10,695 +13,258 @@
 
 namespace Terrain {
 
-// --- High-Precision Noise matching GLSL Shader ---
-struct Noise {
-    static float fract(float x) { return x - floorf(x); }
-    static Vec3 fract(const Vec3& v) { return Vec3(fract(v.x), fract(v.y), fract(v.z)); }
-    static Vec3 floorVec(const Vec3& v) { return Vec3(floorf(v.x), floorf(v.y), floorf(v.z)); }
-    
-    static float hash(Vec3 p) {
-        p.x = fract(p.x * 443.897f);
-        p.y = fract(p.y * 441.423f);
-        p.z = fract(p.z * 437.195f);
-        float d = (float)(p.x * (p.y + 19.19) + p.y * (p.z + 19.19) + p.z * (p.x + 19.19));
-        p.x += d; p.y += d; p.z += d;
-        return fract((float)((p.x + p.y) * p.z));
-    }
-    
-    static float noise(const Vec3& p) {
-        Vec3 i = floorVec(p);
-        Vec3 f = fract(p);
-        // f = f * f * f * (f * (f * 6.0 - 15.0) + 10.0)
-        Vec3 u(
-            f.x*f.x*f.x*(f.x*(f.x*6.0f - 15.0f) + 10.0f),
-            f.y*f.y*f.y*(f.y*(f.y*6.0f - 15.0f) + 10.0f),
-            f.z*f.z*f.z*(f.z*(f.z*6.0f - 15.0f) + 10.0f)
-        );
-        
-        float n000 = hash(i);
-        float n100 = hash(i + Vec3(1,0,0));
-        float n010 = hash(i + Vec3(0,1,0));
-        float n110 = hash(i + Vec3(1,1,0));
-        float n001 = hash(i + Vec3(0,0,1));
-        float n101 = hash(i + Vec3(1,0,1));
-        float n011 = hash(i + Vec3(0,1,1));
-        float n111 = hash(i + Vec3(1,1,1));
-        
-        return mix(mix(mix(n000, n100, u.x), mix(n010, n110, u.x), u.y),
-                   mix(mix(n001, n101, u.x), mix(n011, n111, u.x), u.y), u.z);
-    }
-    
-    static float mix(float a, float b, float t) { return a + (b - a) * t; }
-
-    static float fbm(Vec3 p, int octaves) {
-        float v = 0.0f, amp = 0.5f;
-        for (int i = 0; i < octaves; i++) {
-            v += noise(p) * amp;
-            p = p * 2.15f + Vec3(0.131f, -0.217f, 0.344f);
-            amp *= 0.47f;
-        }
-        return v;
-    }
-
-    static float ridgedFbm(const Vec3& p, int octaves) {
-        float v = 0.0f, amp = 0.5f, freq = 1.05f;
-        for (int i = 0; i < octaves; i++) {
-            float n = 1.0f - fabsf(noise(p * freq) * 2.0f - 1.0f);
-            v += n * n * amp;
-            freq *= 2.07f;
-            amp *= 0.48f;
-        }
-        return v;
-    }
-
-    static float mountainNoise(Vec3 p) {
-        // Domain Warp: offset sampling pos with another FBM
-        Vec3 offset(
-            fbm(p * 2.0f + Vec3(0.0f, 0.0f, 0.0f), 3),
-            fbm(p * 2.0f + Vec3(5.2f, 1.3f, 0.7f), 3),
-            fbm(p * 2.0f + Vec3(2.7f, 8.4f, 3.1f), 3)
-        );
-        return ridgedFbm(p + offset * 0.15f, 6);
-    }
-    static Vec3 hash33(Vec3 p) {
-        p.x = fract(p.x * 443.897f);
-        p.y = fract(p.y * 441.423f);
-        p.z = fract(p.z * 437.195f);
-        float d = (float)(p.x * (p.y + 19.19) + p.y * (p.z + 19.19) + p.z * (p.x + 19.19));
-        p.x += d; p.y += d; p.z += d;
-        return fract(p);
-    }
-
-    static float worley(Vec3 p) {
-        Vec3 i = floorVec(p);
-        Vec3 f = fract(p);
-        float minDist = 1.0f;
-        for (int z = -1; z <= 1; z++) {
-            for (int y = -1; y <= 1; y++) {
-                for (int x = -1; x <= 1; x++) {
-                    Vec3 neighbor((float)x, (float)y, (float)z);
-                    Vec3 point = hash33(i + neighbor);
-                    Vec3 diff = neighbor + point - f;
-                    minDist = std::min(minDist, (float)diff.length());
-                }
-            }
-        }
-        return minDist;
-    }
-
-    static float gullyNoise(Vec3 p, float angle) {
-        float ca = cosf(angle), sa = sinf(angle);
-        float sU = (float)p.x * ca - (float)p.z * sa;
-        float sV = (float)p.x * sa + (float)p.z * ca;
-        Vec3 pS(sU * 1500000.0f, (float)p.y * 1500000.0f, sV * 40000.0f);
-        return ridgedFbm(pS, 3);
-    }
-
-    static float detail10m(const Vec3& p) {
-        float n = noise(p * 2500000.0f);
-        n += noise(p * 5000000.0f) * 0.5f;
-        return n * 0.0000015f; 
-    }
-};
-
-// --- Terrain Node for Quadtree ---
+// Rendering LOD owns geometry only. Hydrology is planet-fixed, never rebuilt
+// when a leaf splits, merges, or crosses the camera's horizon.
 struct TerrainNode {
-    Vec3 center;  // Center on the unit cube face
-    Vec3 sideA;   // Horizontal vector spanning this node on cube face
-    Vec3 sideB;   // Vertical vector spanning this node on cube face
-    float size;   // Current logical size (1.0 for root)
+    Vec3 center,sideA,sideB;
+    float size;
     int level;
-    bool isLeaf = true;
+    bool isLeaf=true;
+    float morph=1.0f;
+    mutable float cachedSkirt=-1.0f;
+    mutable float cachedCenterHeight=std::numeric_limits<float>::quiet_NaN();
+    mutable float cachedWaterHeight=std::numeric_limits<float>::quiet_NaN();
     std::unique_ptr<TerrainNode> children[4];
-    
-    // localHydroTex removed (Vulkan: hydro data passed via VkTexture)
-    bool hydroGenerated = false;
-    std::vector<float> hydroCache; // 64x64 canonical filledHeight for inheritance
-    bool hasHydroCache = false;
-
-    TerrainNode(Vec3 c, Vec3 sa, Vec3 sb, float s, int l) 
-        : center(c), sideA(sa), sideB(sb), size(s), level(l) {}
-
-    void inheritHydro(const std::vector<float>& parentCache, int quadrant) {
-        hydroCache.assign(64 * 64, 0.0f);
-        // Offsets for the 4 quadrants in a 64x64 parent map
-        int ox = (quadrant == 1 || quadrant == 3) ? 32 : 0;
-        int oy = (quadrant == 2 || quadrant == 3) ? 32 : 0;
-        
-        for (int y = 0; y < 64; y++) {
-            for (int x = 0; x < 64; x++) {
-                // Bilinear upscale from parent's 32x32 quadrant to child's 64x64
-                float fx = (float)x * 0.5f + (float)ox;
-                float fy = (float)y * 0.5f + (float)oy;
-                int ix0 = (int)fx, iy0 = (int)fy;
-                int ix1 = std::min(ix0 + 1, 63);
-                int iy1 = std::min(iy0 + 1, 63);
-                float tx = fx - (float)ix0;
-                float ty = fy - (float)iy0;
-                
-                float v00 = parentCache[iy0 * 64 + ix0];
-                float v10 = parentCache[iy0 * 64 + ix1];
-                float v01 = parentCache[iy1 * 64 + ix0];
-                float v11 = parentCache[iy1 * 64 + ix1];
-                
-                hydroCache[y * 64 + x] = (v00*(1-tx)*(1-ty) + v10*tx*(1-ty) + v01*(1-tx)*ty + v11*tx*ty);
-            }
-        }
-        hasHydroCache = true;
-    }
-
-    ~TerrainNode() {
-        // Vulkan: GPU resources managed by VkTexture / VkDescriptorManager
-    }
-
+    TerrainNode(Vec3 c,Vec3 a,Vec3 b,float s,int l):center(c),sideA(a),sideB(b),size(s),level(l){}
     void subdivide() {
-        if (!isLeaf) return;
-        float s = size * 0.5f;
-        // Correct relative scaling: children are always 50% width/height of parent
-        Vec3 sa = sideA * 0.5f;
-        Vec3 sb = sideB * 0.5f;
-        // Quads: 0=top-left, 1=top-right, 2=bottom-left, 3=bottom-right
-        children[0] = std::make_unique<TerrainNode>(center - sa * 0.5f + sb * 0.5f, sa, sb, s, level + 1);
-        children[1] = std::make_unique<TerrainNode>(center + sa * 0.5f + sb * 0.5f, sa, sb, s, level + 1);
-        children[2] = std::make_unique<TerrainNode>(center - sa * 0.5f - sb * 0.5f, sa, sb, s, level + 1);
-        children[3] = std::make_unique<TerrainNode>(center + sa * 0.5f - sb * 0.5f, sa, sb, s, level + 1);
-        
-        // --- INDUSTRIAL GRADE: Propagate Hierarchical Hydro Data ---
-        for (int i = 0; i < 4; i++) {
-            if (hasHydroCache) {
-                children[i]->inheritHydro(hydroCache, i);
-            }
+        if(!isLeaf)return;
+        Vec3 a=sideA*0.5,b=sideB*0.5;
+        for(int i=0;i<4;++i){
+            children[i]=std::make_unique<TerrainNode>(center+a*((i&1)?0.5:-0.5)+b*((i&2)?-0.5:0.5),a,b,size*0.5f,level+1);
+            children[i]->morph=0.0f;
         }
-        
-        isLeaf = false;
+        isLeaf=false;
     }
-
-    void collapse() {
-        if (isLeaf) return;
-        for(int i=0; i<4; i++) children[i].reset();
-        isLeaf = true;
-    }
+    void collapse(){for(auto& c:children)c.reset();isLeaf=true;}
 };
 
 class QuadtreeTerrain {
 public:
-    float planetRadius;
-    float maxElevation = 25.0f; // 25km max height (Kilometers)
-    Tectonic::TectonicSimulator* sim = nullptr;
-    Climate::ClimateSimulator* climateSim = nullptr;
-    Hydro::HydroSimulator* hydroSim = nullptr;
+    float planetRadius,maxElevation=25.0f;
+    Tectonic::TectonicSimulator* sim=nullptr;
+    Climate::ClimateSimulator* climateSim=nullptr;
+    Hydro::HydroSimulator* hydroSim=nullptr;
     std::unique_ptr<TerrainNode> roots[6];
-    
-    QuadtreeTerrain(float radius) : planetRadius(radius) {
-        fprintf(stderr, "[Terrain] Tectonic 256x128...\n");
-        sim = new Tectonic::TectonicSimulator(256, 128);
-        fprintf(stderr, "[Terrain] Simulating...\n");
-        sim->simulate(40);
-        fprintf(stderr, "[Terrain] Climate...\n");
-        climateSim = new Climate::ClimateSimulator(256, 128);
-        climateSim->simulate(sim->gridHeight);
-        fprintf(stderr, "[Terrain] Hydro...\n");
-        hydroSim = new Hydro::HydroSimulator(256, 128);
-        hydroSim->simulate(sim->gridHeight, climateSim->data.precipitation, climateSim->data.temperature);
-        fprintf(stderr, "[Terrain] Final sync...\n");
-        for (int i = 0; i < 256 * 128; i++) {
-            float s = (float)hydroSim->data.strahler[i];
-            float acc = hydroSim->data.accumulation[i];
-            float logAcc = acc > 0.0f ? std::min(0.95f, log10f(1.0f + acc) / 6.0f) : 0.0f;
-            climateSim->data.moisture[i] = s + logAcc;
-        }
-        climateSim->bake(); 
-        hydroSim->bake();
-        fprintf(stderr, "[Terrain] Cube faces...\n");
-
-        roots[0] = std::make_unique<TerrainNode>(Vec3( 1, 0, 0), Vec3( 0, 0,-2), Vec3( 0, 2, 0), 1.0f, 0);
-        roots[1] = std::make_unique<TerrainNode>(Vec3(-1, 0, 0), Vec3( 0, 0, 2), Vec3( 0, 2, 0), 1.0f, 0);
-        roots[2] = std::make_unique<TerrainNode>(Vec3( 0, 1, 0), Vec3( 2, 0, 0), Vec3( 0, 0,-2), 1.0f, 0);
-        roots[3] = std::make_unique<TerrainNode>(Vec3( 0,-1, 0), Vec3( 2, 0, 0), Vec3( 0, 0, 2), 1.0f, 0);
-        roots[4] = std::make_unique<TerrainNode>(Vec3( 0, 0, 1), Vec3( 2, 0, 0), Vec3( 0, 2, 0), 1.0f, 0);
-        roots[5] = std::make_unique<TerrainNode>(Vec3( 0, 0,-1), Vec3(-2, 0, 0), Vec3( 0, 2, 0), 1.0f, 0);
-        fprintf(stderr, "[Terrain] Done!\n");
+    std::vector<float> hydroSurfaceBed;
+    double plateLongitudeSlope=0,plateLatitudeSlope=0;
+    size_t visitedNodes=0,splits=0,merges=0;
+    // Physics stores meters; all terrain geometry, bounds and heights use km.
+    // Use this factory at the physics/render boundary, including validation.
+    static QuadtreeTerrain fromMeters(double radiusMeters,bool generate=true){
+        return QuadtreeTerrain(float(radiusMeters*0.001),generate);
     }
-
-    // camPosRel: Camera position relative to the planet center (Kilometers)
-    // radius: Planet radius (Kilometers)
-    void updateSubdivision(TerrainNode* node, const Vec3& camPosRel, float radius) {
-        // 1. Calculate distance from camera to the closest point on the node's face
-        // Simple approximation: distance to projected center
-        Vec3 spherePos = node->center.normalized() * radius;
-        float dist = (spherePos - camPosRel).length();
-        
-        // 2. Horizon culling for LOD (Kilometers)
-        float camAlt = camPosRel.length();
-        // Add maxElevation safety to horizon distance to prevent clipping high mountains
-        float horizonDist = sqrtf(fmaxf(0.0f, camAlt * camAlt - radius * radius)) + maxElevation;
-        
-        // 3. Node visual size (Kilometers)
-        float nodeKm = node->size * radius * 2.0f;
-        bool shouldSubdivide = (dist < nodeKm * 3.0f) && (node->level < 20) && (dist < horizonDist + nodeKm * 2.0f);
-        
-        if (shouldSubdivide) {
-            node->subdivide();
-            for(int i=0; i<4; i++) updateSubdivision(node->children[i].get(), camPosRel, radius);
-        } else {
-            node->collapse();
-            if (node->level >= 5) generateLocalHydro(node);
+    // The constructor flag is used by deterministic numerical/GPU fixtures.
+    explicit QuadtreeTerrain(float radiusKm,bool generate=true):planetRadius(radiusKm) {
+        sim=new Tectonic::TectonicSimulator(256,128);
+        climateSim=new Climate::ClimateSimulator(256,128);
+        hydroSim=new Hydro::HydroSimulator(512,256);
+        if(generate){
+            fprintf(stderr,"[Terrain] Tectonic + climate...\n");
+            sim->simulate(40);
+            for(float& height:sim->gridHeight)height=std::clamp(height,0.0f,1.0f);
+            canonicalPoles(sim->gridHeight,sim->width,sim->height);
+            climateSim->simulate(sim->gridHeight);
+            rebuildHydrology();
         }
+        roots[0]=std::make_unique<TerrainNode>(Vec3(1,0,0),Vec3(0,0,-2),Vec3(0,2,0),1.0f,0);
+        roots[1]=std::make_unique<TerrainNode>(Vec3(-1,0,0),Vec3(0,0,2),Vec3(0,2,0),1.0f,0);
+        roots[2]=std::make_unique<TerrainNode>(Vec3(0,1,0),Vec3(2,0,0),Vec3(0,0,-2),1.0f,0);
+        roots[3]=std::make_unique<TerrainNode>(Vec3(0,-1,0),Vec3(2,0,0),Vec3(0,0,2),1.0f,0);
+        roots[4]=std::make_unique<TerrainNode>(Vec3(0,0,1),Vec3(2,0,0),Vec3(0,2,0),1.0f,0);
+        roots[5]=std::make_unique<TerrainNode>(Vec3(0,0,-1),Vec3(-2,0,0),Vec3(0,2,0),1.0f,0);
     }
+    ~QuadtreeTerrain(){delete hydroSim;delete climateSim;delete sim;}
+    QuadtreeTerrain(const QuadtreeTerrain&)=delete;
+    QuadtreeTerrain& operator=(const QuadtreeTerrain&)=delete;
 
-    void generateLocalHydro(TerrainNode* node) {
-        if (node->hydroGenerated || !hydroSim) return;
-        
-        // --- INDUSTRIAL GRADE: 66x66 grid for 1-pixel Overlapping (Ghost Cells) ---
-        // This ensures boundary pixels have context from neighbors, fixing seams.
-        const int simRes = 66; 
-        const int texRes = 64; 
-        std::vector<float> grid(simRes * simRes);
-        std::vector<float> boundaries(simRes * 4);
-
-        // 1. Generate local height field using Refined Height 
-        // We initialize the grid with PURE refined terrain.
-        // DO NOT max with parent cache here, as it would flatten river valleys.
-        for (int y = 0; y < simRes; y++) {
-            for (int x = 0; x < simRes; x++) {
-                float u = (float)(x - 1) / (64.0f - 1.0f);
-                float v = (float)(y - 1) / (64.0f - 1.0f);
-                Vec3 p = node->center + node->sideA * (u - 0.5f) + node->sideB * (v - 0.5f);
-                grid[y * simRes + x] = getRefinedHeight(p.normalized());
-            }
-        }
-
-        // 2. INDUSTRIAL GRADE: Pre-Carve River Skeletons into the Simulation Grid
-        // This ensures the local Priority Flood 'recognizes' the global drainage path.
-        if (hydroSim && !hydroSim->data.skeletons.empty()) {
-            for (const auto& skel : hydroSim->data.skeletons) {
-                // Check if this skeleton intersects this node's bounding region
-                float margin = node->size * 0.2f + 0.005f;
-                if (node->center.x < skel.minPos.x - margin || node->center.x > skel.maxPos.x + margin ||
-                    node->center.y < skel.minPos.y - margin || node->center.y > skel.maxPos.y + margin ||
-                    node->center.z < skel.minPos.z - margin || node->center.z > skel.maxPos.z + margin) continue;
-
-                for (int y = 0; y < simRes; y++) {
-                    for (int x = 0; x < simRes; x++) {
-                        float gu = (float)(x - 1) / (texRes - 1);
-                        float gv = (float)(y - 1) / (texRes - 1);
-                        Vec3 p = (node->center + node->sideA * (gu - 0.5f) + node->sideB * (gv - 0.5f)).normalized();
-                        
-                        // Exact same carving logic as getRefinedHeight to ensure alignment
-                        for (size_t i = 1; i < skel.points.size(); i++) {
-                            const Vec3& p1 = skel.points[i - 1];
-                            const Vec3& p2 = skel.points[i];
-                            Vec3 v = p2 - p1; Vec3 w = p - p1;
-                            float c1 = w.dot(v); float c2 = v.dot(v);
-                            if (c1 <= 0 || c2 <= c1) continue;
-                            float b = c1 / c2;
-                            float distSq = (p - (p1 + v * b)).lengthSq();
-                            float riverWidth = 0.00005f * (float)skel.order;
-                            if (distSq < riverWidth * riverWidth) {
-                                float dist = sqrtf(distSq);
-                                grid[y * simRes + x] -= (1.0f - smoothstep_local(0.0f, riverWidth, dist)) * 0.000004f * (float)skel.order;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // 3. Sample global filledHeights for boundaries with high-precision sphere mapping
-        auto getGlobalFilled = [&](const Vec3& p) {
-            float phi = std::acos(std::clamp((float)p.y, -1.0f, 1.0f));
-            float theta = std::atan2((float)p.z, (float)p.x);
-            float u = theta / (2.0f * 3.14159f) + 0.5f;
-            float v = phi / 3.14159f;
-            // High-precision Bilinear lookup on global hydro map
-            float fx = u * (hydroSim->width - 1);
-            float fy = v * (hydroSim->height - 1);
-            int tx0 = (int)fx, ty0 = (int)fy;
-            int tx1 = (tx0 + 1) % hydroSim->width, ty1 = std::min((int)hydroSim->height - 1, ty0 + 1);
-            float mx = fx - tx0, my = fy - ty0;
-            float h00 = hydroSim->data.filledHeight[ty0 * hydroSim->width + tx0];
-            float h10 = hydroSim->data.filledHeight[ty0 * hydroSim->width + tx1];
-            float h01 = hydroSim->data.filledHeight[ty1 * hydroSim->width + tx0];
-            float h11 = hydroSim->data.filledHeight[ty1 * hydroSim->width + tx1];
-            return (h00*(1-mx)*(1-my) + h10*mx*(1-my) + h01*(1-mx)*my + h11*mx*my);
-        };
-
-        for (int i = 0; i < simRes; i++) {
-            float t = (float)(i - 1) / (texRes - 1);
-            
-            // INDUSTRIAL GRADE: Hierarchical Boundary Consensus
-            // If parent has a cache, sample it for boundaries to ensure brothers match.
-            // Otherwise, fall back to global bilinear map.
-            auto getSyncH = [&](float u, float v, const Vec3& p) {
-                if (node->hasHydroCache) {
-                    // Bilinear sample the pre-inherited 64x64 cache
-                    float fx = u * 63.0f, fy = v * 63.0f;
-                    int ix0 = std::clamp((int)fx, 0, 63), iy0 = std::clamp((int)fy, 0, 63);
-                    int ix1 = std::min(ix0+1, 63), iy1 = std::min(iy0+1, 63);
-                    float tx = fx-ix0, ty = fy-iy0;
-                    float h00 = node->hydroCache[iy0*64+ix0], h10 = node->hydroCache[iy0*64+ix1];
-                    float h01 = node->hydroCache[iy1*64+ix0], h11 = node->hydroCache[iy1*64+ix1];
-                    return (h00*(1-tx)*(1-ty) + h10*tx*(1-ty) + h01*(1-tx)*ty + h11*tx*ty);
-                }
-                return getGlobalFilled(p);
-            };
-
-            boundaries[i] = getSyncH(t, 1.0f, (node->center - node->sideA*0.5f + node->sideB*0.5f + node->sideA*t).normalized());
-            boundaries[simRes + i] = getSyncH(t, 0.0f, (node->center - node->sideA*0.5f - node->sideB*0.5f + node->sideA*t).normalized());
-            boundaries[simRes*2 + i] = getSyncH(0.0f, 1.0f-t, (node->center - node->sideA*0.5f - node->sideB*0.5f + node->sideB*t).normalized());
-            boundaries[simRes*3 + i] = getSyncH(1.0f, 1.0f-t,(node->center + node->sideA*0.5f - node->sideB*0.5f + node->sideB*t).normalized());
-        }
-
-        // 3. Run Local Flood (Industrial: remove epsilon or reduce it significantly elsewhere)
-        Hydro::HydroSimulator::fillDepressionsLocal(simRes, grid, boundaries);
-
-        // 4. Extract 64x64 core and UPDATE CACHE for children
-        std::vector<float> texData(texRes * texRes);
-        node->hydroCache.assign(texRes * texRes, 0.0f);
-        node->hasHydroCache = true;
-
-        for(int y=0; y<texRes; y++) {
-            for(int x=0; x<texRes; x++) {
-                float simVal = grid[(y+1)*simRes + (x+1)];
-                
-                // Soft Blending with parent/global boundary
-                int distToEdge = std::min({x, y, texRes-1-x, texRes-1-y});
-                if (distToEdge < 3) {
-                    float edgeU = (float)x / (texRes - 1);
-                    float edgeV = (float)y / (texRes - 1);
-                    float edgeRef = node->hasHydroCache ? node->hydroCache[y*64+x] : getGlobalFilled((node->center + node->sideA*(edgeU-0.5f) + node->sideB*(edgeV-0.5f)).normalized());
-                    float blend = powf((float)distToEdge / 3.0f, 1.5f); 
-                    simVal = Noise::mix(edgeRef, simVal, blend);
-                }
-                
-                texData[y*texRes + x] = simVal;
-                node->hydroCache[y*texRes + x] = simVal; // Save for next subdivision sweep
-            }
-        }
-
-        // Vulkan: hydro texture managed by VkTexture, not GL
-        node->hydroGenerated = true;
+    TerrainHeight::Model heightModel()const {
+        TerrainHeight::Model m;
+        m.plate=&sim->gridHeight;m.pw=sim->width;m.ph=sim->height;
+        m.filled=&hydroSim->data.filledHeight;m.hydroBed=&hydroSurfaceBed;m.hw=hydroSim->width;m.hh=hydroSim->height;
+        return m;
     }
-
-    float getHeightRaw(const Vec3& normalizedPos) {
-        float phi = std::acos(std::clamp((float)normalizedPos.y, -1.0f, 1.0f));
-        float theta = std::atan2((float)normalizedPos.z, (float)normalizedPos.x);
-        float u = theta / (2.0f * 3.14159f) + 0.5f;
-        float v = phi / 3.14159f;
-
-        float plateBase = sampleTectonic(u, v);
-        float hRefined = plateBase;
-        float mountainMask = smoothstep_local(0.55f, 0.75f, plateBase);
-        float coastalMask = smoothstep_local(0.435f, 0.445f, plateBase) * (1.0f - smoothstep_local(0.455f, 0.465f, plateBase));
-
-        if (mountainMask > 0.01f) {
-            float epsG = 0.005f;
-            float hX = (sampleTectonic(u + epsG, v) - sampleTectonic(u - epsG, v));
-            float hY = (sampleTectonic(u, v + epsG) - sampleTectonic(u, v - epsG));
-            float sAngle = std::atan2(-hX, hY);
-            float ca = std::cos(sAngle), sa = std::sin(sAngle);
-            float strikeU = (float)normalizedPos.x * ca - (float)normalizedPos.z * sa;
-            float strikeV = (float)normalizedPos.x * sa + (float)normalizedPos.z * ca;
-            Vec3 pS(strikeU * 0.72f, (float)normalizedPos.y, strikeV * 1.28f);
-            hRefined += Noise::mountainNoise(pS * 6.5f) * 0.18f * mountainMask;
-        }
-        if (coastalMask > 0.1f) {
-            float cliffNoise = 1.0f - fabsf(Noise::noise(normalizedPos * 180.0f) * 1.5f - 0.5f);
-            hRefined += smoothstep_local(0.6f, 0.9f, cliffNoise) * 0.007f * coastalMask;
-        }
-        return hRefined;
+    static void canonicalPoles(std::vector<float>& grid,int w,int h){
+        for(int y:{0,h-1}){double sum=0;for(int x=0;x<w;++x)sum+=grid[y*w+x];
+            for(int x=0;x<w;++x)grid[y*w+x]=float(sum/w);}
     }
-
-    float smoothstep_local(float edge0, float edge1, float x) {
-        float t = std::clamp((x - edge0) / (edge1 - edge0), 0.0f, 1.0f);
-        return t * t * (3.0f - 2.0f * t);
+    void rebuildHydrology(){
+        refreshBounds();
+        const int w=hydroSim->width,h=hydroSim->height;
+        std::vector<float> bed(w*h),rain(w*h),temp(w*h);
+        auto model=heightModel();
+        for(int y=0;y<h;++y)for(int x=0;x<w;++x){
+            Vec3 p=TerrainHeight::direction(x,y,w,h);
+            auto f=TerrainHeight::normalize(TerrainHeight::vec3(p));
+            bed[y*w+x]=model.thElevation(model.thHeight(f,planetRadius,maxElevation,0),maxElevation);
+            float u=float(x)/w,v=float(y)/(h-1);
+            rain[y*w+x]=TerrainHeight::sample(climateSim->data.precipitation,climateSim->width,climateSim->height,u,v);
+            temp[y*w+x]=TerrainHeight::sample(climateSim->data.temperature,climateSim->width,climateSim->height,u,v);
+        }
+        fprintf(stderr,"[Terrain] Fixed %dx%d refined surface hydrology...\n",w,h);
+        canonicalPoles(bed,w,h);
+        hydroSurfaceBed=bed;
+        hydroSim->simulate(bed,rain,temp,maxElevation);
+        canonicalPoles(hydroSim->data.filledHeight,w,h);
+        // Preserve climate moisture. River order belongs in the hydro texture.
     }
-
-    // Feature-Aware Sharply Interpolated Sampling
-    float sampleTectonic(float u, float v) {
-        if (!sim || sim->gridHeight.empty()) return 0.5f;
-        float fx = u * (sim->width - 1);
-        float fy = v * (sim->height - 1);
-        int x0 = (int)fx, y0 = (int)fy;
-        int x1 = (x0 + 1) % sim->width, y1 = std::min(sim->height - 1, y0 + 1);
-        float tx = fx - x0, ty = fy - y0;
-
-        float h00 = sim->gridHeight[y0 * sim->width + x0] / 255.0f;
-        float h10 = sim->gridHeight[y0 * sim->width + x1] / 255.0f;
-        float h01 = sim->gridHeight[y1 * sim->width + x0] / 255.0f;
-        float h11 = sim->gridHeight[y1 * sim->width + x1] / 255.0f;
-
-        // Bilinear base
-        float base = h00*(1-tx)*(1-ty) + h10*tx*(1-ty) + h01*(1-tx)*ty + h11*tx*ty;
-        
-        // Feature detection: Sharpen ridges/valleys if gradient is high
-        float grad = sqrtf((h10-h00)*(h10-h00) + (h01-h00)*(h01-h00));
-        if (grad > 0.05f) {
-            float fx_sharp = tx * tx * (3.0f - 2.0f * tx);
-            float fy_sharp = ty * ty * (3.0f - 2.0f * ty);
-            float sharp = (h00*(1-fx_sharp)*(1-fy_sharp) + h10*fx_sharp*(1-fy_sharp) + 
-                           h01*(1-fx_sharp)*fy_sharp + h11*fx_sharp*fy_sharp);
-            base = Noise::mix(base, sharp, 0.45f);
+    void refreshBounds(){
+        double dx=0,dy=0;
+        for(int y=0;y<sim->height;++y)for(int x=0;x<sim->width;++x){
+            float h=sim->gridHeight[y*sim->width+x];
+            dx=std::max(dx,double(std::abs(h-sim->gridHeight[y*sim->width+(x+1)%sim->width])));
+            if(y+1<sim->height)dy=std::max(dy,double(std::abs(h-sim->gridHeight[(y+1)*sim->width+x])));
         }
-        return base;
+        plateLongitudeSlope=dx*sim->width;plateLatitudeSlope=dy*(sim->height-1);
     }
-
-    // --- INDUSTRIAL GRADE: Get Normalized Refined Elevation [0, 1] ---
-    // This matches the vertex shader's 'hRefined' perfectly to prevent fake puddles.
-    float getRefinedHeight(const Vec3& normalizedPos) {
-        float phi = std::acos(std::clamp((float)normalizedPos.y, -1.0f, 1.0f));
-        float theta = std::atan2((float)normalizedPos.z, (float)normalizedPos.x);
-        float u = theta / (2.0f * 3.14159f) + 0.5f;
-        float v = phi / 3.14159f;
-
-        float plateBase = sampleTectonic(u, v);
-        float hRefined = plateBase;
-        
-        float mountainMask = smoothstep_local(0.55f, 0.75f, plateBase);
-        float coastalMask = smoothstep_local(0.435f, 0.445f, plateBase) * (1.0f - smoothstep_local(0.455f, 0.465f, plateBase));
-        
-        float temp = 0.5f, precip = 0.5f;
-        if (climateSim) {
-            int tx = std::clamp((int)(u * (climateSim->width - 1)), 0, climateSim->width - 1);
-            int ty = std::clamp((int)(v * (climateSim->height - 1)), 0, climateSim->height - 1);
-            temp = (climateSim->data.temperature[ty * climateSim->width + tx] + 30.0f) / 70.0f;
-            precip = climateSim->data.precipitation[ty * climateSim->width + tx] / 2000.0f;
-        }
-
-        if (mountainMask > 0.01f) {
-            float epsG = 0.005f;
-            float hX = (sampleTectonic(u + epsG, v) - sampleTectonic(u - epsG, v));
-            float hY = (sampleTectonic(u, v + epsG) - sampleTectonic(u, v - epsG));
-            float sAngle = std::atan2(-hX, hY);
-            float ca = std::cos(sAngle), sa = std::sin(sAngle);
-            float strikeU = normalizedPos.x * ca - normalizedPos.z * sa;
-            float strikeV = normalizedPos.x * sa + normalizedPos.z * ca;
-            Vec3 pS(strikeU * 0.72f, normalizedPos.y, strikeV * 1.28f);
-            hRefined += Noise::mountainNoise(pS * 6.5f) * 0.18f * mountainMask;
-            if (hRefined > 0.78f) hRefined -= smoothstep_local(0.78f, 0.96f, hRefined) * 0.045f;
-        }
-        if (coastalMask > 0.1f) {
-            float cliffNoise = 1.0f - fabsf(Noise::noise(normalizedPos * 180.0f) * 1.5f - 0.5f);
-            hRefined += smoothstep_local(0.6f, 0.9f, cliffNoise) * 0.007f * coastalMask;
-        }
-
-        // --- INDUSTRIAL GRADE: Global Skeleton Carving ---
-        // Forces local alignment with global river vectors for continuity.
-        if (hydroSim && !hydroSim->data.skeletons.empty()) {
-            for (const auto& skel : hydroSim->data.skeletons) {
-                // AABB Pruning for fast intersection
-                float margin = 0.005f; 
-                if (normalizedPos.x < skel.minPos.x - margin || normalizedPos.x > skel.maxPos.x + margin ||
-                    normalizedPos.y < skel.minPos.y - margin || normalizedPos.y > skel.maxPos.y + margin ||
-                    normalizedPos.z < skel.minPos.z - margin || normalizedPos.z > skel.maxPos.z + margin) continue;
-
-                // Segment distance check
-                for (size_t i = 1; i < skel.points.size(); i++) {
-                    const Vec3& p1 = skel.points[i - 1];
-                    const Vec3& p2 = skel.points[i];
-                    Vec3 v = p2 - p1; Vec3 w = normalizedPos - p1;
-                    float c1 = w.dot(v); float c2 = v.dot(v);
-                    if (c1 <= 0 || c2 <= c1) continue;
-                    float b = c1 / c2;
-                    float distSq = (normalizedPos - (p1 + v * b)).lengthSq();
-                    
-                float riverWidth = 0.00005f * (float)skel.order; 
-                if (distSq < riverWidth * riverWidth) {
-                    float dist = sqrtf(distSq);
-                    float mask = 1.0f - smoothstep_local(0.0f, riverWidth, dist);
-                    hRefined -= mask * 0.000004f * (float)skel.order; 
-                }
-            }
-        }
+    float sampleTectonic(float u,float v)const{return heightModel().thPlate(u,v);}
+    static float smoothstep_local(float a,float b,float x){return TerrainHeight::Model{}.thSmooth(a,b,x);}
+    float getHeightRaw(const Vec3& p)const{return getRefinedHeight(p);}
+    float getRefinedHeight(const Vec3& p)const{
+        auto m=heightModel();auto f=TerrainHeight::normalize(TerrainHeight::vec3(p));
+        return m.thElevation(m.thHeight(f,planetRadius,maxElevation,0),maxElevation);
     }
-
-        if (hydroSim && !hydroSim->data.strahler.empty()) {
-            int tx = std::clamp((int)(u * (hydroSim->width - 1)), 0, (int)hydroSim->width - 1);
-            int ty = std::clamp((int)(v * (hydroSim->height - 1)), 0, (int)hydroSim->height - 1);
-            float s = (float)hydroSim->data.strahler[ty * hydroSim->width + tx];
-            if (s >= 2.0f && plateBase > 0.445f) {
-                float offset = Noise::noise(normalizedPos * 120.0f) * 0.004f;
-                float vNoise = Noise::noise(normalizedPos * 250.0f + Vec3(offset, offset, offset));
-                float depth = 0.000008f * (s / 7.0f);
-                float isLowland = 1.0f - smoothstep_local(0.45f, 0.55f, plateBase);
-                float profile = Noise::mix(fabsf(vNoise * 2.0f - 1.0f), powf(fabsf(vNoise * 2.0f - 1.0f), 0.4f), isLowland);
-                hRefined -= (1.0f - profile) * depth;
-            }
-        }
-        
-        float seaLevel = 0.45f;
-        if (hRefined < seaLevel && hRefined > 0.38f) {
-            float shelfT = (hRefined - 0.38f) / (seaLevel - 0.38f);
-            hRefined = 0.395f + (seaLevel - 0.001f - 0.395f) * smoothstep_local(0.0f, 1.0f, shelfT);
-        }
-        return hRefined;
+    float getHeight(const Vec3& p)const{
+        return heightModel().thHeight(TerrainHeight::normalize(TerrainHeight::vec3(p)),planetRadius,maxElevation,1);
     }
-
-    float getHeight(const Vec3& normalizedPos) {
-        float phi = std::acos(std::clamp((float)normalizedPos.y, -1.0f, 1.0f));
-        float theta = std::atan2((float)normalizedPos.z, (float)normalizedPos.x);
-        float u = theta / (2.0f * PI) + 0.5f;
-        float v = phi / PI;
-
-        float plateBase = sampleTectonic(u, v);
-        float hRefined = plateBase;
-        
-        // --- PRE-CALCULATE BIOMES ---
-        float mountainMask = smoothstep_local(0.55f, 0.75f, plateBase);
-        float plainsMask = 1.0f - smoothstep_local(0.40f, 0.62f, plateBase);
-        float coastalMask = smoothstep_local(0.435f, 0.445f, plateBase) * (1.0f - smoothstep_local(0.455f, 0.465f, plateBase));
-        
-        // Climate lookup (for dunes/ice)
-        float temp = 0.5f, precip = 0.5f;
-        if (climateSim) {
-            int tx = std::clamp((int)(u * (climateSim->width - 1)), 0, climateSim->width - 1);
-            int ty = std::clamp((int)(v * (climateSim->height - 1)), 0, climateSim->height - 1);
-            temp = (climateSim->data.temperature[ty * climateSim->width + tx] + 30.0f) / 70.0f;
-            precip = climateSim->data.precipitation[ty * climateSim->width + tx] / 2000.0f;
-        }
-
-        // --- LAYER 1: REGIONAL GEOLOGICAL SCULPTING ---
-
-        // 1.1 Mountains: Anisotropic Folding + Thermal Erosion
-        if (mountainMask > 0.01f) {
-            float epsG = 0.005f;
-            float hX = (sampleTectonic(u + epsG, v) - sampleTectonic(u - epsG, v));
-            float hY = (sampleTectonic(u, v + epsG) - sampleTectonic(u, v - epsG));
-            float sAngle = std::atan2(-hX, hY);
-            float ca = std::cos(sAngle), sa = std::sin(sAngle);
-            
-            float strikeU = normalizedPos.x * ca - normalizedPos.z * sa;
-            float strikeV = normalizedPos.x * sa + normalizedPos.z * ca;
-            Vec3 pS(strikeU * 0.72f, normalizedPos.y, strikeV * 1.28f);
-            
-            float ridges = Noise::mountainNoise(pS * 6.5f);
-            hRefined += ridges * 0.18f * mountainMask;
-            
-            // Thermal Erosion: smooth sharp peaks
-            if (hRefined > 0.78f) {
-                float peakD = smoothstep_local(0.78f, 0.96f, hRefined);
-                hRefined -= peakD * 0.045f;
-            }
-        }
-
-        // 1.2 Biome-Specific Layer (Dunes / Glaciers)
-        if (temp > 0.75f && precip < 0.15f && plainsMask > 0.2f) {
-            // Desert Dunes: Stretched along "Wind" (approx longitude)
-            float dune = 1.0f - fabsf(Noise::noise(Vec3(normalizedPos.x * 2.5f, normalizedPos.y, normalizedPos.z * 0.3f) * 150.0f) * 2.0f - 1.0f);
-            hRefined += dune * 0.008f * plainsMask;
-        }
-        
-        // 1.3 Coastal Cliffs
-        if (coastalMask > 0.1f) {
-            float cliffNoise = 1.0f - fabsf(Noise::noise(normalizedPos * 180.0f) * 1.5f - 0.5f);
-            hRefined += smoothstep_local(0.6f, 0.9f, cliffNoise) * 0.007f * coastalMask;
-        }
-
-        // --- LAYER 2: LOCAL GEOLOGICAL SCULPTING (Physics-Ready) ---
-
-        // 2.1 River Valley Carving (V-to-U shaped)
-        if (hydroSim && !hydroSim->data.strahler.empty()) {
-            int tx = std::clamp((int)(u * (hydroSim->width - 1)), 0, (int)hydroSim->width - 1);
-            int ty = std::clamp((int)(v * (hydroSim->height - 1)), 0, (int)hydroSim->height - 1);
-            float s = (float)hydroSim->data.strahler[ty * hydroSim->width + tx];
-            if (s >= 2.0f && plateBase > 0.445f) {
-                float valleyWarp = Noise::noise(normalizedPos * 120.0f) * 0.004f;
-                float vNoise = Noise::noise(normalizedPos * 250.0f + Vec3(valleyWarp, valleyWarp, valleyWarp));
-                float depth = 0.000008f * (s / 7.0f);
-                
-                float isLowland = 1.0f - smoothstep_local(0.45f, 0.55f, plateBase);
-                float vShape = fabsf(vNoise * 2.0f - 1.0f);
-                float uShape = powf(vShape, 0.4f);
-                float valleyProfile = Noise::mix(vShape, uShape, isLowland);
-                
-                hRefined -= (1.0f - valleyProfile) * depth;
-            }
-        }
-
-        // 2.2 Micro-Mounds & Boulders (Local collision)
-        float mounds = Noise::noise(normalizedPos * 1200.0f);
-        hRefined += (mounds - 0.5f) * 0.0008f;
-
-        // --- Hydrology Integration (Global Lakes) ---
-        if (hydroSim && !hydroSim->data.filledHeight.empty()) {
-            int tx = std::clamp((int)(u * (hydroSim->width - 1)), 0, (int)hydroSim->width - 1);
-            int ty = std::clamp((int)(v * (hydroSim->height - 1)), 0, (int)hydroSim->height - 1);
-            float filledH = hydroSim->data.filledHeight[ty * (int)hydroSim->width + tx];
-            float hydroDiff = filledH - plateBase;
-            // High sensitivity: Detect water as shallow as 6-12 meters (0.000001 - 0.000002)
-            float hydroMask = smoothstep_local(0.000001f, 0.00002f, hydroDiff);
-            hRefined = Noise::mix(hRefined, filledH, hydroMask * 1.0f);
-        }
-
-        // Sea Level Normalization
-        float seaLevel = 0.45f;
-        if (hRefined < seaLevel && hRefined > 0.38f) {
-            float shelfT = (hRefined - 0.38f) / (seaLevel - 0.38f);
-            hRefined = 0.395f + (seaLevel - 0.001f - 0.395f) * smoothstep_local(0.0f, 1.0f, shelfT);
-        }
-
-        // Translate normalized height [0,1] to kilometers
-        float finalH = (hRefined < seaLevel) ? 0.0f : (hRefined - seaLevel) / (1.0f - seaLevel) * maxElevation / planetRadius;
-        
-        if (hRefined >= seaLevel) {
-            float epsS = 0.0015f;
-            float hX = (sampleTectonic(u + epsS, v) - sampleTectonic(u - epsS, v));
-            float hY = (sampleTectonic(u, v + epsS) - sampleTectonic(u, v - epsS));
-            float currentSlope = sqrtf(hX*hX + hY*hY) * 100.0f;
-            float sAngle = std::atan2(-hX, hY);
-
-            float sHigh = smoothstep_local(0.12f, 0.25f, currentSlope);
-            float sMid = smoothstep_local(0.04f, 0.12f, currentSlope) * (1.0f - sHigh);
-            float sLow = 1.0f - smoothstep_local(0.04f, 0.12f, currentSlope);
-
-            float rockCracks = (1.0f - Noise::worley(normalizedPos * 1800000.0f)) * 0.000003f;
-            float gullies = Noise::gullyNoise(normalizedPos, sAngle) * 0.000002f;
-            float baseNoise = (Noise::noise(normalizedPos * 4000000.0f) - 0.5f) * 0.0000005f;
-
-            finalH += (rockCracks * sHigh + gullies * sMid + baseNoise * sLow);
-            finalH += Noise::detail10m(normalizedPos);
-        }
-
-        // KSC FLATTENING & LANDIFICATION
-        Vec3 kscPos(0.1436, 0.478, 0.866);
-        float distToKSC = (float)(normalizedPos - kscPos).length();
-        float kscMask = smoothstep_local(0.12f, 0.04f, distToKSC); 
-        
-        // Ensure hRefined is above seaLevel at KSC for land-based coloring
-        hRefined = Noise::mix(hRefined, seaLevel + 0.015f, kscMask);
-        
-        // Final displacement (5m above sea level)
-        finalH = Noise::mix(finalH, 0.005f / planetRadius, smoothstep_local(0.08f, 0.02f, distToKSC));
-
-        return finalH * planetRadius;
+    float getWaterHeight(const Vec3& p)const{
+        auto m=heightModel();auto f=TerrainHeight::normalize(TerrainHeight::vec3(p));
+        return m.thWater(f,planetRadius,maxElevation,m.thHeight(f,planetRadius,maxElevation,1));
     }
+    Vec3 getPosition(const Vec3& p)const{return p.normalized()*(planetRadius+getHeight(p));}
 
-    Vec3 getPosition(const Vec3& normalizedPos) {
-        float h = getHeight(normalizedPos);
-        return normalizedPos * (planetRadius + h);
+    static double angularRadius(const TerrainNode* n){
+        // Cube projection is Lipschitz <=1 on a unit face. Half the diagonal
+        // bounds the geodesic radius, including cube corners.
+        return std::min(TerrainHeight::pi,0.5*std::sqrt(n->sideA.lengthSq()+n->sideB.lengthSq()));
     }
-
-    // Vulkan: texture access via VkDescriptorManager, not GL getters
+    bool horizonVisible(const TerrainNode* n,const Vec3& camera,float radius)const{
+        double d=camera.length();
+        double occluder=radius-6.0;
+        if(d<=occluder)return true;
+        double angle=std::acos(std::clamp(n->center.normalized().dot(camera/d),-1.0,1.0));
+        double horizon=std::acos(std::clamp(occluder/d,0.0,1.0));
+        double relief=std::acos(occluder/(radius+maxElevation));
+        return angle<=horizon+relief+angularRadius(n);
+    }
+    const TerrainNode* leafAt(Vec3 p)const {
+        double ax=std::abs(p.x),ay=std::abs(p.y),az=std::abs(p.z),scale=std::max({ax,ay,az});
+        int face=ax>=ay&&ax>=az?(p.x>=0?0:1):ay>=az?(p.y>=0?2:3):(p.z>=0?4:5);
+        p=p/scale;
+        const TerrainNode* n=roots[face].get();
+        while(!n->isLeaf){
+            Vec3 d=p-n->center;
+            int child=(d.dot(n->sideA)>0?1:0)+(d.dot(n->sideB)<0?2:0);
+            n=n->children[child].get();
+        }
+        return n;
+    }
+    // Bit 30 enables stitching. Four 3-bit neighbour level differences and
+    // four 4-bit morph steps (0..8, exactly 1/8) fit the existing 128-byte PC.
+    uint32_t edgeState(const TerrainNode* n)const {
+        uint32_t state=1u<<30;
+        for(int edge=0;edge<4;++edge){
+            Vec3 axis=edge<2?n->sideA:n->sideB;
+            const TerrainNode* other=leafAt(n->center+axis*((edge&1)?0.500001:-0.500001));
+            if(n->level-other->level>7)return 0; // skirt fallback for transient extreme gaps
+            int difference=std::clamp(n->level-other->level,0,7);
+            float morph=other->level<n->level?other->morph:
+                other->level==n->level?std::min(n->morph,other->morph):n->morph;
+            uint32_t step=uint32_t(std::clamp(int(std::round(morph*8)),0,8));
+            state|=uint32_t(difference)<<(1+edge*3);
+            state|=step<<(13+edge*4);
+        }
+        return state;
+    }
+    struct Bounds{Vec3 center;double radius;};
+    Bounds surfaceBounds(const TerrainNode* n)const {
+        Vec3 dir=n->center.normalized();double angle=angularRadius(n);
+        if(n->level<5)return {dir*planetRadius,planetRadius*angle+maxElevation+6.0};
+        if(!std::isfinite(n->cachedCenterHeight)){
+            n->cachedCenterHeight=getHeight(dir);n->cachedWaterHeight=getWaterHeight(dir);
+        }
+        // Bounds for the analytic field, not an arbitrary 25km allowance on
+        // every meter-sized tile. Bilinear derivatives plus conservative noise
+        // derivative limits bound all vertices, morphs and water in the tile.
+        double phi=std::acos(std::clamp(dir.y,-1.0,1.0));
+        double minSin=std::min(std::sin(std::max(0.0,phi-angle)),std::sin(std::min(TerrainHeight::pi,phi+angle)));
+        double poleBound=sim->width*plateLatitudeSlope/(2*TerrainHeight::pi);
+        double lonBound=minSin>1e-9?std::min(poleBound,plateLongitudeSlope/(2*TerrainHeight::pi*minSin)):poleBound;
+        double plateGradient=lonBound+plateLatitudeSlope/TerrainHeight::pi;
+        // Cubic value noise |gradient|<=1.5*sqrt(3). Six ridge octaves and
+        // domain warp yield <270 + 7*plateGradient after coastal/shelf shaping.
+        double heightGradient=std::max(6.0/.45,double(maxElevation)/.55)*(270+7*plateGradient)+(maxElevation+6)*25;
+        double bed=n->cachedCenterHeight,water=n->cachedWaterHeight;
+        double radius=angle*(planetRadius+maxElevation+6+heightGradient)+std::abs(water-bed)*.5+.075;
+        double middle=(bed+water)*.5;
+        double globalBound=(planetRadius+std::abs(middle))*angle+std::max(std::abs(maxElevation-middle),std::abs(-6.0-middle))+.075;
+        radius=std::min(radius,globalBound);
+        if(n->isLeaf){uint32_t edges=edgeState(n);bool extreme=(edges&(1u<<30))==0;
+            for(int i=0;i<4;++i)extreme=extreme||((edges>>(1+i*3))&7u)>5;
+            if(extreme)radius=std::max(radius,planetRadius*angle+maxElevation+6.0+skirtDepth(n));
+        }
+        return {dir*(planetRadius+(bed+water)*.5),radius};
+    }
+    bool shadowVisible(const TerrainNode* n,const Vec3& camera)const {
+        auto b=surfaceBounds(n);
+        return (b.center-camera).length()<=b.radius+60.0;
+    }
+    // Conservative sphere/frustum test in floating-origin world km.
+    bool frustumVisible(const TerrainNode* n,const float model[16],const float view[16],const float proj[16])const{
+        auto bounds=surfaceBounds(n);Vec3 p=bounds.center;
+        Vec3 x=Vec3(model[0],model[1],model[2]).normalized(),y=Vec3(model[4],model[5],model[6]).normalized(),z=Vec3(model[8],model[9],model[10]).normalized();
+        Vec3 world=Vec3(model[12],model[13],model[14])+x*p.x+y*p.y+z*p.z;
+        double vx=view[0]*world.x+view[4]*world.y+view[8]*world.z+view[12];
+        double vy=view[1]*world.x+view[5]*world.y+view[9]*world.z+view[13];
+        double vz=view[2]*world.x+view[6]*world.y+view[10]*world.z+view[14];
+        double bound=bounds.radius;
+        if(-vz+bound<0)return false;
+        double fx=std::abs(proj[0]),fy=std::abs(proj[5]);
+        return std::abs(vx)*fx+vz<=bound*std::sqrt(fx*fx+1) &&
+               std::abs(vy)*fy+vz<=bound*std::sqrt(fy*fy+1);
+    }
+    // Skirts cover sphere chord error plus bounded regional relief between
+    // coarse/fine tessellation. Fine leaves use measured local height range.
+    float skirtDepth(const TerrainNode* n)const{
+        if(n->cachedSkirt>=0)return n->cachedSkirt;
+        double chord=planetRadius*(1.0-std::cos(angularRadius(n)/16.0));
+        if(n->level<6)return n->cachedSkirt=float(chord+maxElevation+6.0);
+        float lo=1e9f,hi=-1e9f;
+        for(int y=0;y<3;++y)for(int x=0;x<3;++x){
+            float h=getHeight((n->center+n->sideA*(x*0.5-0.5)+n->sideB*(y*0.5-0.5)).normalized());
+            lo=std::min(lo,h);hi=std::max(hi,h);
+        }
+        return n->cachedSkirt=float(chord)+std::max(0.003f,(hi-lo)*2.0f+0.001f);
+    }
+    bool mergeSubtree(TerrainNode* n){
+        if(n->isLeaf){n->morph=std::max(0.0f,n->morph-0.125f);return n->morph==0;}
+        bool ready=true;
+        for(auto& c:n->children){bool r=mergeSubtree(c.get());ready=ready&&r;}
+        if(ready){n->collapse();++merges;}
+        return false;
+    }
+    void updateSubdivision(TerrainNode* n,const Vec3& camera,float radius){
+        ++visitedNodes;
+        bool visible=horizonVisible(n,camera,radius);
+        // Center altitude is part of the distance; a camera standing on a
+        // 5km mountain must refine as much as one standing at sea level.
+        Vec3 dir=n->center.normalized();
+        if(n->level>=5 && !std::isfinite(n->cachedCenterHeight)){n->cachedCenterHeight=getHeight(dir);n->cachedWaterHeight=getWaterHeight(dir);}
+        double elev=n->level>=5?n->cachedCenterHeight:0.0;
+        double dist=(dir*(radius+elev)-camera).length();
+        if(n->level>=5)dist=std::min(dist,(dir*(radius+n->cachedWaterHeight)-camera).length());
+        double span=n->size*radius*2;
+        bool split=visible && dist<span*(n->isLeaf?2.5:3.25) && n->level<18;
+        if(split){
+            n->morph=std::min(1.0f,n->morph+0.125f);
+            // Finish parent morph before subdividing, so nested transitions
+            // cannot lose their parent interpolation surface.
+            if(n->isLeaf && n->morph>=1){n->subdivide();++splits;}
+            if(!n->isLeaf)for(auto& c:n->children)updateSubdivision(c.get(),camera,radius);
+        }else if(!n->isLeaf){
+            bool ready=true;
+            for(auto& c:n->children){bool r=mergeSubtree(c.get());ready=ready&&r;}
+            if(ready){n->collapse();n->morph=1;++merges;}
+        }else n->morph=std::min(1.0f,n->morph+0.125f);
+    }
 };
-
 } // namespace Terrain

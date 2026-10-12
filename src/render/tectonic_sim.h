@@ -81,11 +81,12 @@ public:
     }
 
     float sampleHeight(Vec3 p) {
-        float phi = acosf(std::clamp(p.y, -1.0, 1.0));
-        float theta = atan2f(p.z, p.x);
-        if (theta < 0) theta += 2.0f * 3.14159f;
-        float fx = theta / (2.0f * 3.14159f) * (width - 1);
-        float fy = phi / 3.14159f * (height - 1);
+        float phi = acosf(std::clamp((float)p.y, -1.0f, 1.0f));
+        float theta = atan2f((float)p.z, (float)p.x);
+        float u = theta / (2.0f * 3.141592653589793f) + 0.5f;
+        u -= floorf(u);
+        float fx = u * width;
+        float fy = phi / 3.141592653589793f * (height - 1);
         int x0 = (int)fx, y0 = (int)fy;
         int x1 = (x0 + 1) % width, y1 = std::min(height - 1, y0 + 1);
         float tx = fx - x0, ty = fy - y0;
@@ -116,9 +117,9 @@ public:
             std::vector<Vec3> centroids(plates.size(), Vec3(0, 0, 0));
             std::vector<int> counts(plates.size(), 0);
             for (int y = 0; y < height; y++) {
-                float phi = (float)y / (height - 1) * 3.14159f;
+                float phi = (float)y / (height - 1) * 3.141592653589793f;
                 for (int x = 0; x < width; x++) {
-                    float theta = (float)x / (width - 1) * 2.0f * 3.14159f;
+                    float theta = ((float)x / width - 0.5f) * 2.0f * 3.141592653589793f;
                     Vec3 p(cosf(theta) * sinf(phi), cosf(phi), sinf(theta) * sinf(phi));
                     int bestIdx = 0;
                     float minD = 1e10f;
@@ -312,8 +313,8 @@ public:
     }
 
     Vec3 getSphericalPos(int x, int y) {
-        float phi = (float)y / (height - 1) * 3.14159f;
-        float theta = (float)x / (width - 1) * 2.0f * 3.14159f;
+        float phi = (float)y / (height - 1) * 3.141592653589793f;
+        float theta = ((float)x / width - 0.5f) * 2.0f * 3.141592653589793f;
         return Vec3(cosf(theta) * sinf(phi), cosf(phi), sinf(theta) * sinf(phi));
     }
 

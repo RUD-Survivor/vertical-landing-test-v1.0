@@ -813,13 +813,13 @@ struct TerrainPushConstants {
     float planetRadius;   // offset  64
     float maxElevation;   // offset  68
     int   nodeLevel;      // offset  72
-    int   hasLocalHydro;  // offset  76
+    int   anchorGeometry;  // offset  76
     float nodePos[3];     // offset  80 (vec3, 16-byte aligned in push_constant block)
-    float _pad0;          // offset  92
+    float lodMorph = 1.0f;          // offset  92
     float nodeSide[3];    // offset  96
-    float _pad1;          // offset 108
+    float skirtDepthKm;          // offset 108
     float nodeUp[3];      // offset 112
-    float _pad2;          // offset 124 — total: 128 bytes
+    float detailWeight = 1.0f;          // offset 124 — total: 128 bytes
 };
 struct VkTerrainPipeline {
     VkPipelineLayout layout=VK_NULL_HANDLE; VkPipeline pipeline=VK_NULL_HANDLE;

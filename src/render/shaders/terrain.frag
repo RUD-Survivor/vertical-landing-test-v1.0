@@ -38,13 +38,13 @@ layout(push_constant) uniform PC {
     float planetRadius;
     float maxElevation;
     int   nodeLevel;
-    int   hasLocalHydro;
+    int   anchorGeometry;
     vec3  nodePos;
-    float _pad0;
+    float lodMorph;
     vec3  nodeSide;
-    float _pad1;
+    float skirtDepthKm;
     vec3  nodeUp;
-    float _pad2;
+    float detailWeight;
 } pc;
 
 layout(location = 0) in vec3 vRelViewPos;
@@ -128,7 +128,10 @@ void main() {
     float hRefined = vElevation;
     float mMask = smoothstep(0.55, 0.75, hRefined);
 
-    vec3 N = normalize(vNormal);
+    vec3 radialN=normalize(vNormal);
+    vec3 N=normalize(cross(dFdx(vRelViewPos),dFdy(vRelViewPos)));
+    if(dot(N,radialN)<0.0)N=-N;
+    float actualSlope=length(cross(N,radialN))/max(dot(N,radialN),0.01);
     if (vWaterDepth < 0.02 && distToCam < 8.0) {
         float nScale = 1500.0 * (1.0 + mMask * 2.0);
         float nAmp = 0.05 * (1.0 - smoothstep(1.0, 8.0, distToCam));
@@ -164,7 +167,7 @@ void main() {
         cMid = mix(cMid, forest, smoothstep(0.1, 0.45, landH));
         cMid = mix(cMid, mountainColor, smoothstep(0.45, 0.8, landH));
         float snowMask = smoothstep(0.8, 0.95, landH);
-        snowMask *= (1.0 - smoothstep(0.08, 0.22, vSlope));
+        snowMask *= (1.0 - smoothstep(0.08, 0.22, actualSlope));
         surfColor = mix(cMid, snow, snowMask) * albedoVar;
         vec3 kscPos = vec3(0.1436, 0.478, 0.866);
         float distToKSC = length(fV_normPos - kscPos);
@@ -188,8 +191,8 @@ void main() {
 
     // --- River Overlay (Segment-based Distance Field) ---
     {
-        vec2 res = vec2(512.0, 256.0);
-        vec2 pixelPos = fV_geoUV * res;
+        vec2 res = vec2(textureSize(uHydroMap,0));
+        vec2 pixelPos = vec2(fV_geoUV.x*res.x,fV_geoUV.y*(res.y-1.0));
         vec2 cellCoords = floor(pixelPos);
         vec2 localPos = fract(pixelPos);
 
@@ -206,13 +209,16 @@ void main() {
                 vec2 nCoord = cellCoords + vec2(dx, dy);
                 vec2 nUV = (nCoord + 0.5) / res;
                 nUV.x = fract(nUV.x);
-                vec4 nData = texture(uHydroMap, nUV);
+                ivec2 cell=ivec2(nCoord);
+                cell.x=(cell.x%int(res.x)+int(res.x))%int(res.x);
+                cell.y=clamp(cell.y,0,int(res.y)-1);
+                vec4 nData=texelFetch(uHydroMap,cell,0);
 
                 if (nData.b >= 4.0) {
                     int dir = int(nData.a);
                     if (dir >= 0 && dir < 8) {
-                        vec2 p1 = nCoord + 0.5;
-                        vec2 p2 = nCoord + 0.5 + deltas[dir];
+                        vec2 p1 = nCoord;
+                        vec2 p2 = nCoord + deltas[dir];
                         vec2 pa = pixelPos - p1, ba = p2 - p1;
                         float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
                         float d = length(pa - ba * h);
@@ -225,7 +231,7 @@ void main() {
             }
         }
 
-        if (minDist < 2.0) {
+        if (maxStrahler>=4.0 && minDist < 2.0 && vWaterDepth>0.02) {
             float simPixelScale = length(fwidth(pixelPos));
             float screenRadius = minDist / max(simPixelScale, 0.0001);
             float targetWidth = (maxStrahler >= 5.0) ? 1.5 : 0.8;

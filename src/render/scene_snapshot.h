@@ -122,6 +122,10 @@ struct TerrainPatchDraw {
     float nodeSideB[3];        // node->sideB（垂直跨度向量）
     float planetCenterRel[3];  // 行星中心相对相机位置（world center - cam pos）
     int   nodeLevel;           // LOD 层级
+    float lodMorph = 1.0f;
+    float skirtDepthKm = 0.0f;
+    float detailWeight = 1.0f;
+    uint32_t edgeState = 0;
 };
 
 // ============================================================================
@@ -198,6 +202,7 @@ struct SceneSnapshot {
 
     // ---- 地形补丁 (Block D) ----
     std::vector<TerrainPatchDraw> terrainPatches;
+    std::vector<TerrainPatchDraw> terrainShadowPatches; // includes off-screen nearby casters
 
     // ---- 植被实例计数 (Block D) ----
     uint32_t vegInstanceCount = 0;

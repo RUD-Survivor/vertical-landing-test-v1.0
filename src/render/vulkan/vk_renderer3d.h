@@ -1,4 +1,5 @@
 #pragma once
+#include "../terrain_anchor.h"
 // ==========================================================================
 // vk_renderer3d.h — 薄协调层，持有所有渲染子系统
 //
@@ -527,7 +528,8 @@ struct VkRenderer3D {
                 tpc.planetRadius  = tp.planetRadius;
                 tpc.maxElevation  = tp.maxElev;
                 tpc.nodeLevel     = tp.nodeLevel;
-                tpc.hasLocalHydro = 0;
+                tpc.anchorGeometry = int(1u|tp.edgeState);
+                tpc.lodMorph=tp.lodMorph;tpc.skirtDepthKm=tp.skirtDepthKm;tpc.detailWeight=tp.detailWeight;
                 tpc.nodePos[0]    = tp.nodeCenter[0];
                 tpc.nodePos[1]    = tp.nodeCenter[1];
                 tpc.nodePos[2]    = tp.nodeCenter[2];
@@ -537,6 +539,7 @@ struct VkRenderer3D {
                 tpc.nodeUp[0]     = tp.nodeSideB[0];
                 tpc.nodeUp[1]     = tp.nodeSideB[1];
                 tpc.nodeUp[2]     = tp.nodeSideB[2];
+                packTerrainAnchor(tpc.model,tpc.nodePos,tpc.planetRadius,snap.camPos);
                 drawTerrainPatch(cmd, scene.terrainPatchVbo, scene.terrainPatchIbo,
                     scene.terrainPatchIcount, tpc, planetTd, scene.terrainGlobalTexSet);
             }

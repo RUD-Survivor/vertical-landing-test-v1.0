@@ -197,7 +197,7 @@ static bool initVulkanFlight(bool skipBuilder = false) {
 
     // ---- 地形四叉树 + 纹理上传（只在首次飞行时创建）----
     if (!g_vkTerrain) {
-        g_vkTerrain = new Terrain::QuadtreeTerrain(EARTH_RADIUS);
+        g_vkTerrain = new Terrain::QuadtreeTerrain(Terrain::QuadtreeTerrain::fromMeters(EARTH_RADIUS));
 
         // 打包构造纹理数据
         auto* tecSim = g_vkTerrain->sim;
@@ -218,7 +218,7 @@ static bool initVulkanFlight(bool skipBuilder = false) {
         std::vector<float> hydFloat4(hw * hh * 4);
         for (int i = 0; i < hw * hh; i++) {
             hydFloat4[i * 4 + 0] = hydSim->data.filledHeight[i];
-            hydFloat4[i * 4 + 1] = hydSim->data.accumulation[i];
+            hydFloat4[i * 4 + 1] = g_vkTerrain->hydroSurfaceBed[i];
             hydFloat4[i * 4 + 2] = (float)hydSim->data.strahler[i];
             hydFloat4[i * 4 + 3] = (float)hydSim->data.flowDir[i];
         }

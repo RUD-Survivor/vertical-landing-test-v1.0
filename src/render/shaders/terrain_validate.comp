@@ -1,0 +1,37 @@
+#version 450
+#extension GL_GOOGLE_include_directive : enable
+layout(local_size_x=64) in;
+layout(set=0,binding=0) uniform sampler2D uTectonicMap;
+layout(set=0,binding=1) uniform sampler2D uHydroMap;
+layout(set=0,binding=2,std430) readonly buffer Inputs { vec4 directions[]; } inputData;
+layout(set=0,binding=3,std430) writeonly buffer Outputs { vec4 values[]; } outputData;
+layout(push_constant) uniform Params { float radius;float maxElevation;uint count;float detail; } params;
+#include "common/terrain_sampling.glsl"
+#include "common/terrain_height_shared.glsl"
+struct GeometryPC {float planetRadius;float maxElevation;int nodeLevel;int anchorGeometry;
+    vec3 nodePos;float lodMorph;vec3 nodeSide;float skirtDepthKm;vec3 nodeUp;float detailWeight;};
+GeometryPC pc;
+#include "common/terrain_geometry.glsl"
+void main(){
+    uint i=gl_GlobalInvocationID.x;if(i>=params.count)return;
+    if(inputData.directions[i].w>=10.0) {
+        pc.planetRadius=params.radius;pc.maxElevation=params.maxElevation;pc.nodeLevel=13;pc.anchorGeometry=1;
+        pc.nodePos=vec3(0,1,0);pc.nodeSide=vec3(2.0/8192.0,0,0);pc.nodeUp=vec3(0,0,2.0/8192.0);
+        pc.lodMorph=inputData.directions[i].w-10.0;pc.skirtDepthKm=0.05;pc.detailWeight=1.0;
+        if(inputData.directions[i].w>=20.0){
+            int code=int(inputData.directions[i].w)-20;
+            int edge=code%4,difference=1+(code/4)%4,phase=code/16;
+            pc.anchorGeometry=int(1u|(1u<<30u)|(uint(difference)<<uint(1+edge*3))|(uint(phase*4)<<uint(13+edge*4)));
+            pc.lodMorph=1.0;
+        }
+        vec3 cube=pc.nodePos+pc.nodeSide*inputData.directions[i].x+pc.nodeUp*inputData.directions[i].z;
+        vec3 g=thGeometry(cube,inputData.directions[i].y,thPoint(cube));
+        outputData.values[2*i]=vec4(g,1);outputData.values[2*i+1]=vec4(0);
+        return;
+    }
+    vec3 p=normalize(inputData.directions[i].xyz);
+    float bed=thHeight(p,params.radius,params.maxElevation,params.detail);
+    float water=thWater(p,params.radius,params.maxElevation,bed);
+    outputData.values[2*i]=vec4(bed,water,max(0.0,water-bed)*1000.0,thRegional(p));
+    outputData.values[2*i+1]=vec4(thNormal(p,params.radius,params.maxElevation,0.032),1.0);
+}

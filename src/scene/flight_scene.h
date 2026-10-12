@@ -1146,10 +1146,21 @@ private:
                                 camPosInertialRel.dot(axisY),
                                 camPosInertialRel.dot(axisZ));
 
+            activeTerrain->visitedNodes=activeTerrain->splits=activeTerrain->merges=0;
+            double terrainAltitude=camPosLocalRel.length()-earthCD->radius-activeTerrain->getHeight(camPosLocalRel.normalized());
+            float terrainDetail=1.0f-Terrain::QuadtreeTerrain::smoothstep_local(0.1f,1.5f,float(terrainAltitude));
             for (int i = 0; i < 6; i++) {
                 activeTerrain->updateSubdivision(activeTerrain->roots[i].get(), camPosLocalRel, earthCD->radius);
+            }
+            // Stitching reads adjacent faces: publish only after every face
+            // has reached this frame's LOD state.
+            for (int i = 0; i < 6; i++) {
                 _extractTerrainLeaves(snap.terrainPatches,
-                    activeTerrain->roots[i].get(), earthCD->radius, earthCD->model, snap.time, planetCenterRel);
+                    activeTerrain->roots[i].get(), earthCD->radius, earthCD->model, snap.time, planetCenterRel,
+                    *activeTerrain,camPosLocalRel,snap.view,snap.proj,terrainDetail);
+                _extractTerrainLeaves(snap.terrainShadowPatches,
+                    activeTerrain->roots[i].get(),earthCD->radius,earthCD->model,snap.time,planetCenterRel,
+                    *activeTerrain,camPosLocalRel,snap.view,snap.proj,terrainDetail,true);
             }
 
             // --- Vegetation 实例 ---
@@ -1181,13 +1192,15 @@ private:
     static void _extractTerrainLeaves(std::vector<TerrainPatchDraw>& out,
                                        Terrain::TerrainNode* node, float planetRadius,
                                        const float model[16], float time,
-                                       const Vec3& planetCenterRel) {
-        if (!node) return;
+                                       const Vec3& planetCenterRel, Terrain::QuadtreeTerrain& terrain,
+                                       const Vec3& cameraLocal,const float view[16],const float proj[16],float detailWeight,bool shadow=false) {
+        if (!node || !terrain.horizonVisible(node,cameraLocal,planetRadius) ||
+            (shadow?!terrain.shadowVisible(node,cameraLocal):!terrain.frustumVisible(node,model,view,proj))) return;
         if (node->isLeaf) {
             TerrainPatchDraw tp;
             memcpy(tp.model, model, 64);
             tp.planetRadius = planetRadius;
-            tp.maxElev = 25.f;
+            tp.maxElev = terrain.maxElevation;
             tp.time = time;
             tp.nodeCenter[0] = node->center.x;
             tp.nodeCenter[1] = node->center.y;
@@ -1202,10 +1215,15 @@ private:
             tp.planetCenterRel[1] = planetCenterRel.y;
             tp.planetCenterRel[2] = planetCenterRel.z;
             tp.nodeLevel = node->level;
+            tp.lodMorph=node->morph;
+            tp.edgeState=terrain.edgeState(node);
+            tp.skirtDepthKm=terrain.skirtDepth(node);
+            // One global filter for every patch: shared boundary heights agree.
+            tp.detailWeight=detailWeight;
             out.push_back(tp);
         } else {
             for (int i = 0; i < 4; i++)
-                _extractTerrainLeaves(out, node->children[i].get(), planetRadius, model, time, planetCenterRel);
+                _extractTerrainLeaves(out, node->children[i].get(), planetRadius, model, time, planetCenterRel,terrain,cameraLocal,view,proj,detailWeight,shadow);
         }
     }
 };

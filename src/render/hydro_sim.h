@@ -39,7 +39,7 @@ public:
 
     // Main Entry Point: Disabling coarse global erosion to prevent 78km-wide riverbed artifacts.
     // Carving will now be handled at the high-precision LOD level in the vertex shader.
-    void simulate(const std::vector<float>& heightMap, const std::vector<float>& precipitation, const std::vector<float>& temperature) {
+    void simulate(const std::vector<float>& heightMap, const std::vector<float>& precipitation, const std::vector<float>& temperature, float maxElevationKm=25.0f) {
         fillDepressions(heightMap);
         calculateFlowDirections();
         calculateAccumulation(precipitation, temperature, heightMap);
@@ -71,23 +71,13 @@ public:
                 }
             }
             
-            // INDUSTRIAL GRADE: Clamp Global Lake Depth to prevent 'Resolution Drowning'
-            // Even if the coarse map has a huge pit, we cap the visual/reference water 
-            // at about 60 meters (0.00001 units) relative to planetary radius.
-            float maxGlobalWaterDepth = 0.00001f;
-            if (data.filledHeight[i] > heightMap[i] + maxGlobalWaterDepth) {
-                data.filledHeight[i] = heightMap[i] + maxGlobalWaterThresholdMapping(lakeDepth, maxGlobalWaterDepth);
-            }
+            // Cap lake depth at 60m, expressed in dimensionless land-height units.
+            float maxGlobalWaterDepth=0.06f/maxElevationKm*0.55f;
+            data.filledHeight[i]=std::min(data.filledHeight[i],heightMap[i]+maxGlobalWaterDepth);
         }
-        
+
         calculateStrahlerOrder();
         extractSkeletons();
-    }
-
-private:
-    float maxGlobalWaterThresholdMapping(float actualDepth, float cap) {
-        // Soft-ceiling: allow slightly more depth for major oceans/lakes but prevent 60km pits
-        return cap + (actualDepth * 0.001f); 
     }
 
 private:
@@ -245,7 +235,7 @@ private:
                     onSkeleton[curr] = true;
                     
                     // Convert grid coord to spherical Vec3
-                    float u = (float)(curr % width) / (width - 1);
+                    float u = (float)(curr % width) / width;
                     float v = (float)(curr / width) / (height - 1);
                     float theta = (u - 0.5f) * 2.0f * 3.14159f;
                     float phi = v * 3.14159f;
@@ -358,19 +348,23 @@ public:
         // 1. Seed boundaries from the global map
         for (int i = 0; i < res; i++) {
             // Top (y=0)
-            pq.push({i, 0, boundaries[i]});
+            grid[i]=std::max(grid[i],boundaries[i]);
+            pq.push({i, 0, grid[i]});
             visited[i] = true;
             // Bottom (y=res-1)
-            pq.push({i, res - 1, boundaries[res + i]});
+            grid[(res-1)*res+i]=std::max(grid[(res-1)*res+i],boundaries[res+i]);
+            pq.push({i, res - 1, grid[(res-1)*res+i]});
             visited[(res - 1) * res + i] = true;
             // Left (x=0)
             if (!visited[i * res]) {
-                pq.push({0, i, boundaries[2 * res + i]});
+                grid[i*res]=std::max(grid[i*res],boundaries[2*res+i]);
+                pq.push({0, i, grid[i*res]});
                 visited[i * res] = true;
             }
             // Right (x=res-1)
             if (!visited[i * res + res - 1]) {
-                pq.push({res - 1, i, boundaries[3 * res + i]});
+                grid[i*res+res-1]=std::max(grid[i*res+res-1],boundaries[3*res+i]);
+                pq.push({res - 1, i, grid[i*res+res-1]});
                 visited[i * res + res - 1] = true;
             }
         }

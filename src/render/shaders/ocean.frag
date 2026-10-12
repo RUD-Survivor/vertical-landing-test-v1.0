@@ -10,8 +10,8 @@ layout(set=0,binding=0) uniform FrameUBO {
 layout(set=0,binding=2) uniform sampler2D uCloudShadowAtlas;
 layout(set=0,binding=3,std140) uniform CloudShadowUBO { CloudShadowData data; } uCloudShadow;
 layout(push_constant) uniform PC {
-    mat4 model; float planetRadius; float maxElevation; int nodeLevel; int hasLocalHydro;
-    vec3 nodePos; float _pad0; vec3 nodeSide; float _pad1; vec3 nodeUp; float _pad2;
+    mat4 model; float planetRadius; float maxElevation; int nodeLevel; int anchorGeometry;
+    vec3 nodePos; float lodMorph; vec3 nodeSide; float skirtDepthKm; vec3 nodeUp; float detailWeight;
 } pc;
 layout(set=2,binding=0) uniform sampler2D sceneColor;
 layout(set=2,binding=1) uniform sampler2D sceneDepth; // opaque snapshot, never output depth

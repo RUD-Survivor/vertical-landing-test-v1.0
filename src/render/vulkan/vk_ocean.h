@@ -1,4 +1,5 @@
 #pragma once
+#include "../terrain_anchor.h"
 #include "systems/vk_scene.h"
 #include "vk_taa.h"
 #include "../ocean_model.h"
@@ -262,7 +263,9 @@ struct VkOceanSystem {
         vkCmdBindIndexBuffer(cmd,scene.terrainPatchIbo,0,VK_INDEX_TYPE_UINT32);
         for(const auto& tp:snap.terrainPatches){
             TerrainPushConstants p{};memcpy(p.model,tp.model,64);p.planetRadius=tp.planetRadius;p.maxElevation=tp.maxElev;p.nodeLevel=tp.nodeLevel;
+            p.lodMorph=tp.lodMorph;p.skirtDepthKm=tp.skirtDepthKm;p.detailWeight=tp.detailWeight;
             memcpy(p.nodePos,tp.nodeCenter,12);memcpy(p.nodeSide,tp.nodeSideA,12);memcpy(p.nodeUp,tp.nodeSideB,12);
+            p.anchorGeometry=int(1u|tp.edgeState);packTerrainAnchor(p.model,p.nodePos,p.planetRadius,snap.camPos);
             vkCmdPushConstants(cmd,pipeline.layout,VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT,0,sizeof(p),&p);
             vkCmdDrawIndexed(cmd,scene.terrainPatchIcount,1,0,0,0);
         }

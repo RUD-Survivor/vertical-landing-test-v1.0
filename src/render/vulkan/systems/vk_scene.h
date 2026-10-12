@@ -659,7 +659,7 @@ struct VkSceneSystem {
     // 上传地形纹理并创建 Set1 descriptor set（每次飞行开始时调用一次）
     // tectonicData: float[w*h*4], normalized height in R. Float precision is
     // essential: RGBA8 steps were 52m below sea / 178m on land at maxElev=25km.
-    // hydroData:    float[w*h*4] RGBA32F (R=filledHeight, G=accumulation, B=strahler, A=flowDir)
+    // hydroData:    float[w*h*4] RGBA32F (R=filledHeight, G=refined bed reference, B=strahler, A=flowDir)
     bool uploadTerrainTextures(VulkanContext& ctx,
                                const float*   tectonicFloat4, uint32_t tw, uint32_t th,
                                const float*   hydroFloat4,   uint32_t hw, uint32_t hh) {
@@ -709,7 +709,7 @@ struct VkSceneSystem {
     // 每 leaf patch 调用一次：绑定 terrain 管线 + push constants
     // patchVbo/patchIbo: sharedPatchMesh 的 GPU 缓冲
     // td: TerrainData UBO 内容（planetCenterRel + nodePos/Side/Up）
-    // pc: push constants（model + planetRadius + maxElevation + nodeLevel + hasLocalHydro）
+    // pc: push constants（model + planetRadius + maxElevation + nodeLevel + anchorGeometry）
     // texSets: 4 纹理的 descriptor set（Set 1 = tectonic/hydro/climate/localHydro）
     void drawTerrainPatch(VkCommandBuffer cmd,
                           VkBuffer patchVbo, VkBuffer patchIbo, uint32_t indexCount,
@@ -897,6 +897,19 @@ private:
                 idx.insert(idx.end(), { (uint32_t)i0,(uint32_t)i2,(uint32_t)i1, (uint32_t)i1,(uint32_t)i2,(uint32_t)i3 });
             }
         }
+        auto edge=[&](int first,int stride){
+            uint32_t base=uint32_t(v.size()/12);
+            for(int i=0;i<=U;++i){
+                int src=(first+i*stride)*12;
+                float vertex[12];std::copy_n(v.data()+src,12,vertex);
+                vertex[1]=-1.0f;v.insert(v.end(),vertex,vertex+12);
+            }
+            for(int i=0;i<U;++i){
+                uint32_t a=uint32_t(first+i*stride),b=uint32_t(first+(i+1)*stride);
+                idx.insert(idx.end(),{a,b,base+uint32_t(i),b,base+uint32_t(i+1),base+uint32_t(i)});
+            }
+        };
+        edge(0,1);edge(U*(U+1),1);edge(0,U+1);edge(U,U+1);
         terrainPatchIcount = (uint32_t)idx.size();
         VmaAllocationCreateInfo aci{}; aci.usage=VMA_MEMORY_USAGE_CPU_TO_GPU; /* 中文说明：持久映射写入要求一致缓存。 */ aci.requiredFlags |= VK_MEMORY_PROPERTY_HOST_COHERENT_BIT; aci.flags=VMA_ALLOCATION_CREATE_MAPPED_BIT;
         VmaAllocationInfo info;

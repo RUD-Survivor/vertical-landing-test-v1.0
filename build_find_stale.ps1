@@ -27,7 +27,7 @@ $sources = Get-Content -LiteralPath $SourcesFile |
     ForEach-Object { $_.Trim() } |
     Where-Object { $_ -ne '' }
 
-$headerExt = @{ '.h' = $true; '.hpp' = $true; '.inl' = $true; '.hxx' = $true }
+$headerExt = @{ '.h' = $true; '.hpp' = $true; '.inl' = $true; '.hxx' = $true; '.glsl' = $true }
 $stale = New-Object System.Collections.Generic.List[string]
 
 function Test-AnyHeaderNewer([string[]]$Roots, [datetime]$ObjTime) {
@@ -61,6 +61,9 @@ foreach ($cpp in $sources) {
     $roots = New-Object System.Collections.Generic.List[string]
     $cppDir = Split-Path -Parent $cpp
     if ($cppDir) { [void]$roots.Add($cppDir) }
+    if ($cpp -match "src[\\/]physics[\\/](ground_collision_system|chunk_body_collision)\.cpp$") {
+        [void]$roots.Add("src\render")
+    }
 
     # main.cpp includes the header-only Vulkan stack (vk_cloud_system.h, imgui_*.h, ...)
     if ([IO.Path]::GetFileName($cpp) -ieq 'main.cpp') {

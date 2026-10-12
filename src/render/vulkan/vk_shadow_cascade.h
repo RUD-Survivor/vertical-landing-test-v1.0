@@ -1,4 +1,5 @@
 #pragma once
+#include "../terrain_anchor.h"
 // ==========================================================================
 // vk_shadow_cascade.h — 地形级联阴影贴图（云 Phase2：SDSM + God Ray 的生产端）
 //
@@ -39,13 +40,13 @@ struct TerrainShadowPushConstants {
     float planetRadius;    // offset  64
     float maxElevation;    // offset  68
     int   nodeLevel;       // offset  72
-    int   hasLocalHydro;   // offset  76
+    int   anchorGeometry;   // offset  76
     float nodePos[3];      // offset  80
-    float _pad0;           // offset  92
+    float lodMorph = 1.0f;           // offset  92
     float nodeSide[3];     // offset  96
-    float _pad1;           // offset 108
+    float skirtDepthKm;           // offset 108
     float nodeUp[3];       // offset 112
-    float _pad2;           // offset 124
+    float detailWeight = 1.0f;           // offset 124
     float lightViewProj[16]; // offset 128 — 192 bytes total
 };
 static_assert(sizeof(TerrainShadowPushConstants) == 192, "must match terrain_shadow.vert PC block byte layout");
@@ -158,7 +159,8 @@ struct VkCascadeShadowSystem {
                 GpuCascadeShadowConfig& outConfig) {
         outConfig = GpuCascadeShadowConfig{};
 
-        if (!enabled || shadowPipeline == VK_NULL_HANDLE || snap.terrainPatches.empty() || terrainTexSet == VK_NULL_HANDLE) {
+        const auto& patches=snap.terrainShadowPatches.empty()?snap.terrainPatches:snap.terrainShadowPatches;
+        if (!enabled || shadowPipeline == VK_NULL_HANDLE || patches.empty() || terrainTexSet == VK_NULL_HANDLE) {
             atlasReady = false;
             return;
         }
@@ -209,16 +211,18 @@ struct VkCascadeShadowSystem {
             vkCmdBindVertexBuffers(cmd, 0, 1, &terrainVbo, &off);
             vkCmdBindIndexBuffer(cmd, terrainIbo, 0, VK_INDEX_TYPE_UINT32);
 
-            for (const auto& tp : snap.terrainPatches) {
+            for (const auto& tp : patches) {
                 TerrainShadowPushConstants spc{};
                 memcpy(spc.model, tp.model, 64);
                 spc.planetRadius  = tp.planetRadius;
                 spc.maxElevation  = tp.maxElev;
                 spc.nodeLevel     = tp.nodeLevel;
-                spc.hasLocalHydro = 0;
+                spc.anchorGeometry = int(1u|tp.edgeState);
+                spc.lodMorph=tp.lodMorph;spc.skirtDepthKm=tp.skirtDepthKm;spc.detailWeight=tp.detailWeight;
                 spc.nodePos[0] = tp.nodeCenter[0]; spc.nodePos[1] = tp.nodeCenter[1]; spc.nodePos[2] = tp.nodeCenter[2];
                 spc.nodeSide[0] = tp.nodeSideA[0]; spc.nodeSide[1] = tp.nodeSideA[1]; spc.nodeSide[2] = tp.nodeSideA[2];
                 spc.nodeUp[0]   = tp.nodeSideB[0]; spc.nodeUp[1]   = tp.nodeSideB[1]; spc.nodeUp[2]   = tp.nodeSideB[2];
+                const float origin[3]={0,0,0};packTerrainAnchor(spc.model,spc.nodePos,spc.planetRadius,origin);
                 memcpy(spc.lightViewProj, infos[(size_t)c].viewProj, 64);
 
                 vkCmdPushConstants(cmd, shadowLayout, VK_SHADER_STAGE_VERTEX_BIT,
@@ -258,7 +262,7 @@ private:
         ici.imageType = VK_IMAGE_TYPE_2D; ici.format = kDepthFmt; ici.extent = { w, h, 1 };
         ici.mipLevels = 1; ici.arrayLayers = 1; ici.samples = VK_SAMPLE_COUNT_1_BIT;
         ici.tiling = VK_IMAGE_TILING_OPTIMAL;
-        ici.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        ici.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
         ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         VmaAllocationCreateInfo aci{}; aci.usage = VMA_MEMORY_USAGE_GPU_ONLY;
         if (vmaCreateImage(ctx.allocator, &ici, &aci, &atlasImage, &atlasAlloc, nullptr) != VK_SUCCESS) return false;
